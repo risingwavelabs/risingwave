@@ -422,7 +422,7 @@ impl HummockManager {
                 versioning.time_travel_snapshot_interval_counter = 0;
                 time_travel_version = Some(version.latest_version());
             } else {
-                let _ = versioning
+                versioning.time_travel_snapshot_interval_counter = versioning
                     .time_travel_snapshot_interval_counter
                     .saturating_add(1);
             }
