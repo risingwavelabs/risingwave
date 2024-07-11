@@ -4043,7 +4043,7 @@ impl CatalogManager {
     ) -> MetaResult<HashMap<risingwave_common::catalog::TableId, HashMap<u32, u64>>> {
         let guard = self.core.lock().await;
         let mut map = HashMap::new();
-        for subscription in &guard.database.subscriptions.values() {
+        for subscription in guard.database.subscriptions.values() {
             map.entry(risingwave_common::catalog::TableId::from(
                 subscription.dependent_table_id,
             ))
