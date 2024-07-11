@@ -23,10 +23,11 @@ use super::{
 use crate::error::ConnectorResult;
 use crate::parser::bytes_parser::BytesAccessBuilder;
 use crate::parser::simd_json_parser::DebeziumJsonAccessBuilder;
-use crate::parser::unified::debezium::parse_transaction_meta;
+use crate::parser::unified::debezium::{parse_schema_change, parse_transaction_meta};
 use crate::parser::unified::AccessImpl;
 use crate::parser::upsert_parser::get_key_column_name;
 use crate::parser::{BytesProperties, ParseResult, ParserFormat};
+use crate::source::cdc::CdcMessageType;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceMeta};
 
 /// Parser for `FORMAT PLAIN`, i.e., append-only source.
@@ -38,6 +39,7 @@ pub struct PlainParser {
     pub source_ctx: SourceContextRef,
     // parsing transaction metadata for shared cdc source
     pub transaction_meta_builder: Option<AccessBuilderImpl>,
+    pub schema_change_builder: Option<AccessBuilderImpl>,
 }
 
 impl PlainParser {
@@ -69,12 +71,18 @@ impl PlainParser {
         let transaction_meta_builder = Some(AccessBuilderImpl::DebeziumJson(
             DebeziumJsonAccessBuilder::new(TimestamptzHandling::GuessNumberUnit)?,
         ));
+
+        let schema_change_builder = Some(AccessBuilderImpl::DebeziumJson(
+            DebeziumJsonAccessBuilder::new(TimestamptzHandling::GuessNumberUnit)?,
+        ));
+
         Ok(Self {
             key_builder,
             payload_builder,
             rw_columns,
             source_ctx,
             transaction_meta_builder,
+            schema_change_builder,
         })
     }
 
@@ -82,26 +90,62 @@ impl PlainParser {
         &mut self,
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
-        mut writer: SourceStreamChunkRowWriter<'_>,
+        writer: SourceStreamChunkRowWriter<'_>,
     ) -> ConnectorResult<ParseResult> {
-        // if the message is transaction metadata, parse it and return
+        // plain parser also used in the shared cdc source,
+        // we need to handle transaction metadata and schema change messages here
         if let Some(msg_meta) = writer.row_meta
             && let SourceMeta::DebeziumCdc(cdc_meta) = msg_meta.meta
-            && cdc_meta.is_transaction_meta
             && let Some(data) = payload
         {
-            let accessor = self
-                .transaction_meta_builder
-                .as_mut()
-                .expect("expect transaction metadata access builder")
-                .generate_accessor(data)
-                .await?;
-            return match parse_transaction_meta(&accessor, &self.source_ctx.connector_props) {
-                Ok(transaction_control) => Ok(ParseResult::TransactionControl(transaction_control)),
-                Err(err) => Err(err)?,
-            };
+            match cdc_meta.msg_type {
+                CdcMessageType::Data => {
+                    return self.parse_rows(key, Some(data), writer).await;
+                }
+                CdcMessageType::TransactionMeta => {
+                    let accessor = self
+                        .transaction_meta_builder
+                        .as_mut()
+                        .expect("expect transaction metadata access builder")
+                        .generate_accessor(data)
+                        .await?;
+                    return match parse_transaction_meta(&accessor, &self.source_ctx.connector_props)
+                    {
+                        Ok(transaction_control) => {
+                            Ok(ParseResult::TransactionControl(transaction_control))
+                        }
+                        Err(err) => Err(err)?,
+                    };
+                }
+                CdcMessageType::SchemaChange => {
+                    let accessor = self
+                        .schema_change_builder
+                        .as_mut()
+                        .expect("expect schema change access builder")
+                        .generate_accessor(data)
+                        .await?;
+
+                    return match parse_schema_change(&accessor, &self.source_ctx.connector_props) {
+                        Ok(schema_change) => Ok(ParseResult::SchemaChange(schema_change)),
+                        Err(err) => Err(err)?,
+                    };
+                }
+                CdcMessageType::Unknown => {
+                    unreachable!()
+                }
+            }
         }
 
+        // for non-cdc source messages
+        self.parse_rows(key, payload, writer).await
+    }
+
+    async fn parse_rows(
+        &mut self,
+        key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
+        mut writer: SourceStreamChunkRowWriter<'_>,
+    ) -> ConnectorResult<ParseResult> {
         let mut row_op: KvEvent<AccessImpl<'_>, AccessImpl<'_>> = KvEvent::default();
 
         if let Some(data) = key

@@ -27,7 +27,9 @@ pub use json_parser::*;
 pub use protobuf::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::bail;
-use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
+use risingwave_common::catalog::{
+    ColumnCatalog, KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME,
+};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{Datum, DatumCow, DatumRef, ScalarRefImpl};
@@ -568,6 +570,11 @@ pub enum TransactionControl {
     Commit { id: Box<str> },
 }
 
+#[derive(Debug)]
+pub struct TableSchemaChange {
+    columns: Vec<ColumnCatalog>,
+}
+
 /// The result of parsing a message.
 #[derive(Debug)]
 pub enum ParseResult {
@@ -575,6 +582,9 @@ pub enum ParseResult {
     Rows,
     /// A transaction control message is parsed.
     TransactionControl(TransactionControl),
+
+    /// A schema change message is parsed.
+    SchemaChange(TableSchemaChange),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -825,6 +835,8 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                         }
                     }
                 },
+
+                Ok(ParseResult::SchemaChange(_)) => todo!(),
             }
         }
 

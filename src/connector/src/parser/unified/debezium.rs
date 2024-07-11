@@ -19,7 +19,7 @@ use risingwave_connector_codec::decoder::AccessExt;
 use risingwave_pb::plan_common::additional_column::ColumnType;
 
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
-use crate::parser::TransactionControl;
+use crate::parser::{TableSchemaChange, TransactionControl};
 use crate::source::{ConnectorProperties, SourceColumnDesc};
 
 // Example of Debezium JSON value:
@@ -75,6 +75,8 @@ const OP: &str = "op";
 pub const TRANSACTION_STATUS: &str = "status";
 pub const TRANSACTION_ID: &str = "id";
 
+pub const TABLE_CHANGES: &str = "tableChanges";
+
 pub const DEBEZIUM_READ_OP: &str = "r";
 pub const DEBEZIUM_CREATE_OP: &str = "c";
 pub const DEBEZIUM_UPDATE_OP: &str = "u";
@@ -125,6 +127,23 @@ pub fn parse_transaction_meta(
 
     Err(AccessError::Undefined {
         name: "transaction status".into(),
+        path: TRANSACTION_STATUS.into(),
+    })
+}
+
+pub fn parse_schema_change(
+    accessor: &impl Access,
+    _connector_props: &ConnectorProperties,
+) -> AccessResult<TableSchemaChange> {
+    if let Some(ScalarRefImpl::Jsonb(table_changes)) = accessor
+        .access(&[TABLE_CHANGES], &DataType::Jsonb)?
+        .to_datum_ref()
+    {
+        tracing::info!("table_changes: {:?}", table_changes);
+    }
+
+    Err(AccessError::Undefined {
+        name: "table schema change".into(),
         path: TRANSACTION_STATUS.into(),
     })
 }
