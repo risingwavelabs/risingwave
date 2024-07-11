@@ -72,7 +72,7 @@ pub struct Model {
     pub sink_from_name: String,
     pub sink_format_desc: Option<SinkFormatDesc>,
     pub target_table: Option<TableId>,
-    // `secret_ref` stores a json string, mapping from property name to secret id.
+    // `secret_ref` stores the mapping info mapping from property name to secret id and type.
     pub secret_ref: Option<SecretRef>,
 }
 
@@ -129,7 +129,7 @@ impl From<PbSink> for ActiveModel {
             sink_from_name: Set(pb_sink.sink_from_name),
             sink_format_desc: Set(pb_sink.format_desc.as_ref().map(|x| x.into())),
             target_table: Set(pb_sink.target_table.map(|x| x as _)),
-            secret_ref: Set(Some(SecretRef::from(pb_sink.secret_ref))),
+            secret_ref: Set(Some(SecretRef::from(pb_sink.secret_refs))),
         }
     }
 }

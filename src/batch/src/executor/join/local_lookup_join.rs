@@ -17,7 +17,7 @@ use std::marker::PhantomData;
 
 use anyhow::Context;
 use itertools::Itertools;
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{
@@ -383,7 +383,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
         let worker_slot_mapping: HashMap<WorkerSlotId, WorkerNode> = worker_nodes
             .iter()
             .flat_map(|worker| {
-                (0..(worker.parallel_units.len()))
+                (0..(worker.parallelism()))
                     .map(|i| (WorkerSlotId::new(worker.id, i), worker.clone()))
             })
             .collect();
@@ -487,6 +487,8 @@ impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::HashKeyDispatcher;
@@ -502,6 +504,7 @@ mod tests {
         diff_executor_output, FakeInnerSideExecutorBuilder, MockExecutor,
     };
     use crate::executor::{BoxedExecutor, SortExecutor};
+    use crate::monitor::BatchSpillMetrics;
     use crate::task::ShutdownToken;
 
     const CHUNK_SIZE: usize = 1024;
@@ -594,10 +597,12 @@ mod tests {
 
         Box::new(SortExecutor::new(
             child,
-            column_orders,
+            Arc::new(column_orders),
             "SortExecutor".into(),
             CHUNK_SIZE,
             MemoryContext::none(),
+            None,
+            BatchSpillMetrics::for_test(),
         ))
     }
 

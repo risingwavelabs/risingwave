@@ -162,7 +162,7 @@ impl SplitReader for DatagenSplitReader {
                         .inspect_ok(move |stream_chunk| {
                             metrics
                                 .partition_input_count
-                                .with_label_values(&[
+                                .with_guarded_label_values(&[
                                     &actor_id,
                                     &source_id,
                                     &split_id,
@@ -399,7 +399,6 @@ mod tests {
             state,
             ParserConfig {
                 specific: SpecificParserConfig {
-                    key_encoding_config: None,
                     encoding_config: EncodingProperties::Native,
                     protocol_config: ProtocolProperties::Native,
                 },
@@ -457,7 +456,6 @@ mod tests {
         };
         let parser_config = ParserConfig {
             specific: SpecificParserConfig {
-                key_encoding_config: None,
                 encoding_config: EncodingProperties::Native,
                 protocol_config: ProtocolProperties::Native,
             },

@@ -24,7 +24,7 @@ use await_tree::InstrumentAwait;
 use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
 

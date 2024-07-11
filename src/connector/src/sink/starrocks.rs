@@ -22,7 +22,7 @@ use bytes::Bytes;
 use mysql_async::prelude::Queryable;
 use mysql_async::Opts;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
@@ -168,7 +168,7 @@ impl StarrocksSink {
     ) -> Result<()> {
         let rw_fields_name = self.schema.fields();
         if rw_fields_name.len() > starrocks_columns_desc.len() {
-            return Err(SinkError::Starrocks("The length of the RisingWave column must be equal or less to the length of the starrocks column".to_string()));
+            return Err(SinkError::Starrocks("The columns of the sink must be equal to or a superset of the target table's columns.".to_string()));
         }
 
         for i in rw_fields_name {

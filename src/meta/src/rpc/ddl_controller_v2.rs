@@ -104,7 +104,7 @@ impl DdlController {
                 self.env.event_log_manager_ref().add_event_logs(vec![
                     risingwave_pb::meta::event_log::Event::CreateStreamJobFail(event),
                 ]);
-                let (aborted, _) = mgr
+                let aborted = mgr
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id as _, false)
                     .await?;
@@ -384,6 +384,7 @@ impl DdlController {
             connections,
             source_fragments,
             removed_actors,
+            removed_fragments,
         } = release_ctx;
 
         // delete vpc endpoints.
@@ -423,6 +424,7 @@ impl DdlController {
                 removed_actors.into_iter().map(|id| id as _).collect(),
                 streaming_job_ids,
                 state_table_ids,
+                removed_fragments.iter().map(|id| *id as _).collect(),
             )
             .await;
 

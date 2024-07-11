@@ -142,10 +142,20 @@ impl HeaderBuilder {
         self
     }
 
+    /// Only use in Starrocks
     pub fn set_partial_update(mut self, partial_update: Option<String>) -> Self {
         self.header.insert(
             "partial_update".to_string(),
             partial_update.unwrap_or_else(|| "false".to_string()),
+        );
+        self
+    }
+
+    /// Only use in Doris
+    pub fn set_partial_columns(mut self, partial_columns: Option<String>) -> Self {
+        self.header.insert(
+            "partial_columns".to_string(),
+            partial_columns.unwrap_or_else(|| "false".to_string()),
         );
         self
     }

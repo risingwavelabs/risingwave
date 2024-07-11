@@ -20,7 +20,7 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_common::monitor::rwlock::MonitoredRwLock;
+use risingwave_common::monitor::MonitoredRwLock;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
@@ -72,7 +72,6 @@ pub use compaction::{check_cg_write_limit, WriteLimitType};
 pub(crate) use utils::*;
 
 type Snapshot = ArcSwap<HummockSnapshot>;
-const HISTORY_TABLE_INFO_STATISTIC_TIME: usize = 240;
 
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
@@ -558,6 +557,10 @@ impl HummockManager {
 
     pub fn metadata_manager(&self) -> &MetadataManager {
         &self.metadata_manager
+    }
+
+    pub fn object_store_media_type(&self) -> &'static str {
+        self.object_store.media_type()
     }
 }
 

@@ -16,7 +16,7 @@ use itertools::Itertools;
 use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned, ToTokens};
 use syn::parse::{Parse, ParseStream};
-use syn::{Error, FnArg, Ident, ItemFn, Result, Token, Type, Visibility};
+use syn::{Error, FnArg, Ident, ItemFn, Pat, PatType, Result, ReturnType, Token, Type, Visibility};
 
 use crate::utils::extend_vis_with_super;
 
@@ -138,7 +138,47 @@ pub(super) fn generate_captured_function(
     mut user_fn: ItemFn,
 ) -> Result<TokenStream> {
     let CaptureContextAttr { captures } = attr;
-    let orig_user_fn = user_fn.clone();
+    let is_async = user_fn.sig.asyncness.is_some();
+    let mut orig_user_fn = user_fn.clone();
+    if is_async {
+        // Modify the return type to impl Future<Output = output> + Send + 'static for the original function.
+        let output_type = match &orig_user_fn.sig.output {
+            ReturnType::Type(_, ty) => ty.clone(),
+            ReturnType::Default => Box::new(syn::parse_quote!(())),
+        };
+        orig_user_fn.sig.output = ReturnType::Type(
+            syn::token::RArrow::default(),
+            Box::new(
+                syn::parse_quote!(impl std::future::Future<Output = #output_type> + Send + 'static),
+            ),
+        );
+        orig_user_fn.sig.asyncness = None;
+
+        // Generate clone statements for each input
+        let input_def: Vec<TokenStream> = orig_user_fn
+            .sig
+            .inputs
+            .iter()
+            .map(|arg| {
+                if let FnArg::Typed(PatType { pat, .. }) = arg {
+                    if let Pat::Ident(ident) = pat.as_ref() {
+                        let ident_name = &ident.ident;
+                        return quote! {
+                            let #ident_name = #ident_name.clone();
+                        };
+                    }
+                }
+                quote! {}
+            })
+            .collect();
+
+        // Wrap the original function body in async move { ... }.
+        let orig_body = &orig_user_fn.block;
+        orig_user_fn.block = Box::new(syn::parse_quote!({
+            #(#input_def)*
+            async move { #orig_body }
+        }));
+    }
 
     let sig = &mut user_fn.sig;
 
@@ -149,6 +189,11 @@ pub(super) fn generate_captured_function(
         let new_name = format!("{}_captured", name);
         let new_name = Ident::new(&new_name, sig.ident.span());
         sig.ident = new_name;
+    }
+
+    if is_async {
+        // Ensure the function is async
+        sig.asyncness = Some(syn::token::Async::default());
     }
 
     // Modify the inputs of sig.
@@ -200,21 +245,33 @@ pub(super) fn generate_captured_function(
                 ));
             };
             let name = arg.pat.into_token_stream();
-            scoped = quote_spanned! { context.span()=>
-                // TODO: Can we add an assertion here that `&<<#context::Type> as Deref>::Target` is same as `#arg.ty`?
-                #context::try_with(|#name| {
-                    #scoped
-                }).flatten()
-            }
+            // TODO: Can we add an assertion here that `&<<#context::Type> as Deref>::Target` is same as `#arg.ty`?
+            scoped = if is_async {
+                quote_spanned! { context.span()=>
+                    #context::try_with(|#name| { #scoped })
+                }
+            } else {
+                quote_spanned! { context.span()=>
+                    #context::try_with(|#name| { #scoped }).flatten()
+                }
+            };
         }
         scoped
     };
     let new_user_fn = {
         let vis = user_fn.vis;
         let sig = user_fn.sig;
-        quote! {
-            #vis #sig {
-                {#new_body}.map_err(Into::into)
+        if is_async {
+            quote! {
+                #vis #sig {
+                    {#new_body}?.await
+                }
+            }
+        } else {
+            quote! {
+                #vis #sig {
+                    {#new_body}.map_err(Into::into)
+                }
             }
         }
     };

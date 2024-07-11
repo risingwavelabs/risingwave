@@ -15,7 +15,7 @@
 use std::ops::{Deref, DerefMut};
 
 use risingwave_common::array::Op;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::HashKey;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;

@@ -86,7 +86,7 @@ mod upsert_parser;
 mod util;
 
 pub use debezium::DEBEZIUM_IGNORE_KEY;
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::bitmap::BitmapBuilder;
 pub use unified::{AccessError, AccessResult};
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
@@ -751,7 +751,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                 // report to promethus
                 GLOBAL_SOURCE_METRICS
                     .direct_cdc_event_lag_latency
-                    .with_label_values(&[&msg_meta.full_table_name])
+                    .with_guarded_label_values(&[&msg_meta.full_table_name])
                     .observe(lag_ms as f64);
             }
 
@@ -842,6 +842,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
     }
 }
 
+/// Parses raw bytes into a specific format (avro, json, protobuf, ...), and then builds an [`Access`] from the parsed data.
 pub trait AccessBuilder {
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>>;
 }
@@ -1028,6 +1029,7 @@ pub mod test_utils {
     }
 }
 
+/// Note: this is created in `SourceReader::build_stream`
 #[derive(Debug, Clone, Default)]
 pub struct ParserConfig {
     pub common: CommonParserConfig,
@@ -1042,12 +1044,12 @@ impl ParserConfig {
 
 #[derive(Debug, Clone, Default)]
 pub struct CommonParserConfig {
+    /// Note: this is created by `SourceDescBuilder::builder`
     pub rw_columns: Vec<SourceColumnDesc>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct SpecificParserConfig {
-    pub key_encoding_config: Option<EncodingProperties>,
     pub encoding_config: EncodingProperties,
     pub protocol_config: ProtocolProperties,
 }
@@ -1055,7 +1057,6 @@ pub struct SpecificParserConfig {
 impl SpecificParserConfig {
     // for test only
     pub const DEFAULT_PLAIN_JSON: SpecificParserConfig = SpecificParserConfig {
-        key_encoding_config: None,
         encoding_config: EncodingProperties::Json(JsonProperties {
             use_schema_registry: false,
             timestamptz_handling: None,
@@ -1276,7 +1277,6 @@ impl SpecificParserConfig {
             }
         };
         Ok(Self {
-            key_encoding_config: None,
             encoding_config,
             protocol_config,
         })

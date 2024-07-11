@@ -496,7 +496,9 @@ impl JsonParseOptions {
                     .as_str()
                     .unwrap()
                     .parse::<Timestamp>()
-                    .map(|naive_utc| Timestamptz::from_micros(naive_utc.0.timestamp_micros()))
+                    .map(|naive_utc| {
+                        Timestamptz::from_micros(naive_utc.0.and_utc().timestamp_micros())
+                    })
                     .map_err(|_| create_error())?
                     .into(),
                 // Unless explicitly requested `utc_without_utc`, we parse string with `YYYY-MM-DDTHH:MM:SSZ`.
@@ -532,7 +534,7 @@ impl JsonParseOptions {
             (DataType::Struct(struct_type_info), ValueType::Object) => {
                 // Collecting into a Result<Vec<_>> doesn't reserve the capacity in advance, so we `Vec::with_capacity` instead.
                 // https://github.com/rust-lang/rust/issues/48994
-                let mut fields = Vec::with_capacity(struct_type_info.types().len());
+                let mut fields = Vec::with_capacity(struct_type_info.len());
                 for (field_name, field_type) in struct_type_info
                     .names()
                     .zip_eq_fast(struct_type_info.types())

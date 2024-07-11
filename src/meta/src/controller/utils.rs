@@ -16,7 +16,6 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::fragment::DistributionType;
@@ -43,6 +42,7 @@ use sea_orm::{
     Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
 };
 
+use crate::controller::catalog::CatalogController;
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -852,17 +852,7 @@ where
         .all(db)
         .await?;
 
-    Ok(fragment_mappings
-        .into_iter()
-        .map(|(fragment_id, mapping)| PbFragmentWorkerSlotMapping {
-            fragment_id: fragment_id as _,
-            mapping: Some(
-                ParallelUnitMapping::from_protobuf(&mapping.to_protobuf())
-                    .to_worker_slot(&parallel_unit_to_worker)
-                    .to_protobuf(),
-            ),
-        })
-        .collect())
+    CatalogController::convert_fragment_mappings(fragment_mappings, &parallel_unit_to_worker)
 }
 
 /// `get_fragment_mappings_by_jobs` returns the fragment vnode mappings of the given job list.
@@ -892,6 +882,24 @@ where
             mapping: Some(mapping.to_protobuf()),
         })
         .collect())
+}
+
+pub async fn get_fragment_ids_by_jobs<C>(
+    db: &C,
+    job_ids: Vec<ObjectId>,
+) -> MetaResult<Vec<FragmentId>>
+where
+    C: ConnectionTrait,
+{
+    let fragment_ids: Vec<FragmentId> = Fragment::find()
+        .select_only()
+        .column(fragment::Column::FragmentId)
+        .filter(fragment::Column::JobId.is_in(job_ids))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    Ok(fragment_ids)
 }
 
 /// `get_fragment_actor_ids` returns the fragment actor ids of the given fragments.
@@ -934,15 +942,19 @@ pub fn find_stream_source(stream_node: &PbStreamNode) -> Option<&StreamSource> {
 pub async fn resolve_source_register_info_for_jobs<C>(
     db: &C,
     streaming_jobs: Vec<ObjectId>,
-) -> MetaResult<(HashMap<SourceId, BTreeSet<FragmentId>>, HashSet<ActorId>)>
+) -> MetaResult<(
+    HashMap<SourceId, BTreeSet<FragmentId>>,
+    HashSet<ActorId>,
+    HashSet<FragmentId>,
+)>
 where
     C: ConnectionTrait,
 {
     if streaming_jobs.is_empty() {
-        return Ok((HashMap::default(), HashSet::default()));
+        return Ok((HashMap::default(), HashSet::default(), HashSet::default()));
     }
 
-    let mut fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+    let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
         .select_only()
         .columns([
             fragment::Column::FragmentId,
@@ -963,10 +975,16 @@ where
         .all(db)
         .await?;
 
-    fragments.retain(|(_, mask, _)| *mask & PbFragmentTypeFlag::Source as i32 != 0);
+    let removed_fragments = fragments
+        .iter()
+        .map(|(fragment_id, _, _)| *fragment_id)
+        .collect();
 
     let mut source_fragment_ids = HashMap::new();
-    for (fragment_id, _, stream_node) in fragments {
+    for (fragment_id, mask, stream_node) in fragments {
+        if mask & PbFragmentTypeFlag::Source as i32 == 0 {
+            continue;
+        }
         if let Some(source) = find_stream_source(&stream_node.to_protobuf()) {
             source_fragment_ids
                 .entry(source.source_id as SourceId)
@@ -975,7 +993,11 @@ where
         }
     }
 
-    Ok((source_fragment_ids, actors.into_iter().collect()))
+    Ok((
+        source_fragment_ids,
+        actors.into_iter().collect(),
+        removed_fragments,
+    ))
 }
 
 pub(crate) async fn get_parallel_unit_to_worker_map<C>(db: &C) -> MetaResult<HashMap<u32, u32>>

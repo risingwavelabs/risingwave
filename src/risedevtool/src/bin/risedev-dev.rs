@@ -284,9 +284,15 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = SchemaRegistryService::new(c.clone());
                 service.execute(&mut ctx)?;
-                let mut task =
-                    risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
-                task.execute(&mut ctx)?;
+                if c.user_managed {
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                } else {
+                    let mut task =
+                        risedev::LogReadyCheckTask::new("Server started, listening for requests")?;
+                    task.execute(&mut ctx)?;
+                }
                 ctx.pb
                     .set_message(format!("schema registry http://{}:{}", c.address, c.port));
             }
@@ -323,7 +329,10 @@ fn task_main(
                         risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
                     task.execute(&mut ctx)?;
                 } else {
-                    let mut task = risedev::LogReadyCheckTask::new("Ready for start up.")?;
+                    // When starting a MySQL container, the MySQL process is set as the main process.
+                    // Since the first process in a container always gets PID 1, the MySQL log always shows
+                    // "starting as process 1".
+                    let mut task = risedev::LogReadyCheckTask::new("starting as process 1\n")?;
                     task.execute(&mut ctx)?;
                 }
                 ctx.pb

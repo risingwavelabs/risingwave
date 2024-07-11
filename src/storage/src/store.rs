@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::min;
+use std::collections::HashSet;
 use std::default::Default;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
@@ -24,7 +25,7 @@ use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use futures_async_stream::try_stream;
 use prost::Message;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
@@ -330,7 +331,7 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
         epoch: HummockReadEpoch,
     ) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
-    fn sync(&self, epoch: u64) -> impl SyncFuture;
+    fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture;
 
     /// update max current epoch in storage.
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
@@ -413,21 +414,6 @@ pub trait LocalStateStore: StaticSendSync {
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
     /// the previous write epoch is sealed.
     fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
-
-    /// Check existence of a given `key_range`.
-    /// It is better to provide `prefix_hint` in `read_options`, which will be used
-    /// for checking bloom filter if hummock is used. If `prefix_hint` is not provided,
-    /// the false positive rate can be significantly higher because bloom filter cannot
-    /// be used.
-    ///
-    /// Returns:
-    /// - false: `key_range` is guaranteed to be absent in storage.
-    /// - true: `key_range` may or may not exist in storage.
-    fn may_exist(
-        &self,
-        key_range: TableKeyRange,
-        read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<bool>> + Send + '_;
 
     // Updates the vnode bitmap corresponding to the local state store
     // Returns the previous vnode bitmap

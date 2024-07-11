@@ -35,6 +35,7 @@ use pgwire::pg_server::{
 };
 use pgwire::types::{Format, FormatIterator};
 use rand::RngCore;
+use risingwave_batch::monitor::{BatchSpillMetrics, GLOBAL_BATCH_SPILL_METRICS};
 use risingwave_batch::spill::spill_op::SpillOp;
 use risingwave_batch::task::{ShutdownSender, ShutdownToken};
 use risingwave_batch::worker_manager::worker_node_manager::{
@@ -63,8 +64,7 @@ use risingwave_common::util::resource_util;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
-use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_common_service::MetricsManager;
+use risingwave_common_service::{MetricsManager, ObserverManager};
 use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::health::health_server::HealthServer;
@@ -147,6 +147,9 @@ pub struct FrontendEnv {
 
     source_metrics: Arc<SourceMetrics>,
 
+    /// Batch spill metrics
+    spill_metrics: Arc<BatchSpillMetrics>,
+
     batch_config: BatchConfig,
     meta_config: MetaConfig,
     streaming_config: StreamingConfig,
@@ -226,6 +229,7 @@ impl FrontendEnv {
             meta_config: MetaConfig::default(),
             streaming_config: StreamingConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
+            spill_metrics: BatchSpillMetrics::for_test(),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime,
             mem_context: MemoryContext::none(),
@@ -338,6 +342,7 @@ impl FrontendEnv {
 
         let frontend_metrics = Arc::new(GLOBAL_FRONTEND_METRICS.clone());
         let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
+        let spill_metrics = Arc::new(GLOBAL_BATCH_SPILL_METRICS.clone());
 
         if config.server.metrics_level > MetricLevel::Disabled {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
@@ -435,6 +440,7 @@ impl FrontendEnv {
                 server_addr: frontend_address,
                 client_pool,
                 frontend_metrics,
+                spill_metrics,
                 sessions_map,
                 batch_config,
                 meta_config,
@@ -529,6 +535,10 @@ impl FrontendEnv {
 
     pub fn source_metrics(&self) -> Arc<SourceMetrics> {
         self.source_metrics.clone()
+    }
+
+    pub fn spill_metrics(&self) -> Arc<BatchSpillMetrics> {
+        self.spill_metrics.clone()
     }
 
     pub fn creating_streaming_job_tracker(&self) -> &StreamingJobTrackerRef {
@@ -911,6 +921,27 @@ impl SessionImpl {
         Ok(connection.clone())
     }
 
+    pub fn get_subscription_by_schema_id_name(
+        &self,
+        schema_id: SchemaId,
+        subscription_name: &str,
+    ) -> Result<Arc<SubscriptionCatalog>> {
+        let db_name = self.database();
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
+        let schema = catalog_reader.get_schema_by_id(&db_id, &schema_id)?;
+        let subscription = schema
+            .get_subscription_by_name(subscription_name)
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::ItemNotFound(format!(
+                    "subscription {} not found",
+                    subscription_name
+                )))
+            })?;
+        Ok(subscription.clone())
+    }
+
     pub fn get_subscription_by_name(
         &self,
         schema_name: Option<String>,
@@ -939,7 +970,7 @@ impl SessionImpl {
 
     pub fn get_table_by_id(&self, table_id: &TableId) -> Result<Arc<TableCatalog>> {
         let catalog_reader = self.env().catalog_reader().read_guard();
-        Ok(catalog_reader.get_table_by_id(table_id)?.clone())
+        Ok(catalog_reader.get_any_table_by_id(table_id)?.clone())
     }
 
     pub fn get_table_by_name(
@@ -951,7 +982,7 @@ impl SessionImpl {
         let catalog_reader = self.env().catalog_reader().read_guard();
         let table = catalog_reader
             .get_schema_by_id(&DatabaseId::from(db_id), &SchemaId::from(schema_id))?
-            .get_table_by_name(table_name)
+            .get_created_table_by_name(table_name)
             .ok_or_else(|| {
                 Error::new(
                     ErrorKind::InvalidInput,
@@ -967,10 +998,11 @@ impl SessionImpl {
         min_epoch: u64,
         max_count: u32,
     ) -> Result<Vec<u64>> {
-        self.env
-            .catalog_writer
+        Ok(self
+            .env
+            .meta_client()
             .list_change_log_epochs(table_id, min_epoch, max_count)
-            .await
+            .await?)
     }
 
     pub fn clear_cancel_query_flag(&self) {
@@ -1171,10 +1203,18 @@ impl SessionManager for SessionManagerImpl {
     fn end_session(&self, session: &Self::Session) {
         self.delete_session(&session.session_id());
     }
+
+    async fn shutdown(&self) {
+        // Clean up the session map.
+        self.env.sessions_map().write().clear();
+        // Unregister from the meta service.
+        self.env.meta_client().try_unregister().await;
+    }
 }
 
 impl SessionManagerImpl {
     pub async fn new(opts: FrontendOpts) -> Result<Self> {
+        // TODO(shutdown): only save join handles that **need** to be shutdown
         let (env, join_handles, shutdown_senders) = FrontendEnv::init(opts).await?;
         Ok(Self {
             env,

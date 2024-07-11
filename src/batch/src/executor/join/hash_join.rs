@@ -22,7 +22,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::array::{Array, DataChunk, RowRef};
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
@@ -41,9 +41,11 @@ use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
     WrapStreamExecutor,
 };
+use crate::monitor::BatchSpillMetrics;
 use crate::risingwave_common::hash::NullBitmap;
+use crate::spill::spill_op::SpillBackend::Disk;
 use crate::spill::spill_op::{
-    SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
+    SpillBackend, SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
 };
 use crate::task::{BatchTaskContext, ShutdownToken};
 
@@ -82,7 +84,8 @@ pub struct HashJoinExecutor<K> {
     identity: String,
     chunk_size: usize,
 
-    enable_spill: bool,
+    spill_backend: Option<SpillBackend>,
+    spill_metrics: Arc<BatchSpillMetrics>,
     /// The upper bound of memory usage for this executor.
     memory_upper_bound: Option<u64>,
 
@@ -243,6 +246,7 @@ pub struct JoinSpillManager {
     probe_side_data_types: Vec<DataType>,
     build_side_data_types: Vec<DataType>,
     spill_chunk_size: usize,
+    spill_metrics: Arc<BatchSpillMetrics>,
 }
 
 /// `JoinSpillManager` is used to manage how to write spill data file and read them back.
@@ -261,15 +265,17 @@ pub struct JoinSpillManager {
 /// ```
 impl JoinSpillManager {
     pub fn new(
+        spill_backend: SpillBackend,
         join_identity: &String,
         partition_num: usize,
         probe_side_data_types: Vec<DataType>,
         build_side_data_types: Vec<DataType>,
         spill_chunk_size: usize,
+        spill_metrics: Arc<BatchSpillMetrics>,
     ) -> Result<Self> {
         let suffix_uuid = uuid::Uuid::new_v4();
         let dir = format!("/{}-{}/", join_identity, suffix_uuid);
-        let op = SpillOp::create(dir)?;
+        let op = SpillOp::create(dir, spill_backend)?;
         let probe_side_writers = Vec::with_capacity(partition_num);
         let build_side_writers = Vec::with_capacity(partition_num);
         let probe_side_chunk_builders = Vec::with_capacity(partition_num);
@@ -286,6 +292,7 @@ impl JoinSpillManager {
             probe_side_data_types,
             build_side_data_types,
             spill_chunk_size,
+            spill_metrics,
         })
     }
 
@@ -334,6 +341,9 @@ impl JoinSpillManager {
                 let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
                 let buf = Message::encode_to_vec(&chunk_pb);
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                self.spill_metrics
+                    .batch_spill_write_bytes
+                    .inc_by((buf.len() + len_bytes.len()) as u64);
                 self.probe_side_writers[partition].write(len_bytes).await?;
                 self.probe_side_writers[partition].write(buf).await?;
             }
@@ -359,6 +369,9 @@ impl JoinSpillManager {
                 let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
                 let buf = Message::encode_to_vec(&chunk_pb);
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                self.spill_metrics
+                    .batch_spill_write_bytes
+                    .inc_by((buf.len() + len_bytes.len()) as u64);
                 self.build_side_writers[partition].write(len_bytes).await?;
                 self.build_side_writers[partition].write(buf).await?;
             }
@@ -372,6 +385,9 @@ impl JoinSpillManager {
                 let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
                 let buf = Message::encode_to_vec(&chunk_pb);
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                self.spill_metrics
+                    .batch_spill_write_bytes
+                    .inc_by((buf.len() + len_bytes.len()) as u64);
                 self.probe_side_writers[partition].write(len_bytes).await?;
                 self.probe_side_writers[partition].write(buf).await?;
             }
@@ -380,6 +396,9 @@ impl JoinSpillManager {
                 let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
                 let buf = Message::encode_to_vec(&chunk_pb);
                 let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
+                self.spill_metrics
+                    .batch_spill_write_bytes
+                    .inc_by((buf.len() + len_bytes.len()) as u64);
                 self.build_side_writers[partition].write(len_bytes).await?;
                 self.build_side_writers[partition].write(buf).await?;
             }
@@ -403,7 +422,7 @@ impl JoinSpillManager {
             .op
             .reader_with(&join_probe_side_partition_file_name)
             .await?;
-        Ok(SpillOp::read_stream(r))
+        Ok(SpillOp::read_stream(r, self.spill_metrics.clone()))
     }
 
     async fn read_build_side_partition(
@@ -415,7 +434,7 @@ impl JoinSpillManager {
             .op
             .reader_with(&join_build_side_partition_file_name)
             .await?;
-        Ok(SpillOp::read_stream(r))
+        Ok(SpillOp::read_stream(r, self.spill_metrics.clone()))
     }
 
     pub async fn estimate_partition_size(&self, partition: usize) -> Result<u64> {
@@ -471,7 +490,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 // push build_chunk to build_side before checking memory limit, otherwise we will lose that chunk when spilling.
                 build_side.push(build_chunk);
                 if !self.mem_ctx.add(chunk_estimated_heap_size as i64) && check_memory {
-                    if self.enable_spill {
+                    if self.spill_backend.is_some() {
                         need_to_spill = true;
                         break;
                     } else {
@@ -511,7 +530,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         let build_key_size = build_key.estimated_heap_size() as i64;
                         mem_added_by_hash_table += build_key_size;
                         if !self.mem_ctx.add(build_key_size) && check_memory {
-                            if self.enable_spill {
+                            if self.spill_backend.is_some() {
                                 need_to_spill = true;
                                 break;
                             } else {
@@ -531,12 +550,18 @@ impl<K: HashKey> HashJoinExecutor<K> {
             // Finally, we would get e.g. 20 partitions. Each partition should contain a portion of the original build side input and probr side input data.
             // A sub HashJoinExecutor would be used to consume each partition one by one.
             // If memory is still not enough in the sub HashJoinExecutor, it will spill its inputs recursively.
+            info!(
+                "batch hash join executor {} starts to spill out",
+                &self.identity
+            );
             let mut join_spill_manager = JoinSpillManager::new(
+                self.spill_backend.clone().unwrap(),
                 &self.identity,
                 DEFAULT_SPILL_PARTITION_NUM,
                 probe_data_types.clone(),
                 build_data_types.clone(),
                 self.chunk_size,
+                self.spill_metrics.clone(),
             )?;
             join_spill_manager.init_writers().await?;
 
@@ -627,7 +652,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     self.cond.clone(),
                     format!("{}-sub{}", self.identity.clone(), i),
                     self.chunk_size,
-                    self.enable_spill,
+                    self.spill_backend.clone(),
+                    self.spill_metrics.clone(),
                     Some(partition_size),
                     self.shutdown_rx.clone(),
                     self.mem_ctx.clone(),
@@ -2217,7 +2243,12 @@ impl BoxedExecutorBuilder for HashJoinExecutor<()> {
             identity: identity.clone(),
             right_key_types,
             chunk_size: context.context.get_config().developer.chunk_size,
-            enable_spill: context.context.get_config().enable_spill,
+            spill_backend: if context.context.get_config().enable_spill {
+                Some(Disk)
+            } else {
+                None
+            },
+            spill_metrics: context.context.spill_metrics(),
             shutdown_rx: context.shutdown_rx.clone(),
             mem_ctx: context.context.create_executor_mem_context(&identity),
         }
@@ -2237,7 +2268,8 @@ struct HashJoinExecutorArgs {
     identity: String,
     right_key_types: Vec<DataType>,
     chunk_size: usize,
-    enable_spill: bool,
+    spill_backend: Option<SpillBackend>,
+    spill_metrics: Arc<BatchSpillMetrics>,
     shutdown_rx: ShutdownToken,
     mem_ctx: MemoryContext,
 }
@@ -2257,7 +2289,8 @@ impl HashKeyDispatcher for HashJoinExecutorArgs {
             self.cond.map(Arc::new),
             self.identity,
             self.chunk_size,
-            self.enable_spill,
+            self.spill_backend,
+            self.spill_metrics,
             self.shutdown_rx,
             self.mem_ctx,
         ))
@@ -2281,7 +2314,8 @@ impl<K> HashJoinExecutor<K> {
         cond: Option<Arc<BoxedExpression>>,
         identity: String,
         chunk_size: usize,
-        enable_spill: bool,
+        spill_backend: Option<SpillBackend>,
+        spill_metrics: Arc<BatchSpillMetrics>,
         shutdown_rx: ShutdownToken,
         mem_ctx: MemoryContext,
     ) -> Self {
@@ -2296,7 +2330,8 @@ impl<K> HashJoinExecutor<K> {
             cond,
             identity,
             chunk_size,
-            enable_spill,
+            spill_backend,
+            spill_metrics,
             None,
             shutdown_rx,
             mem_ctx,
@@ -2315,7 +2350,8 @@ impl<K> HashJoinExecutor<K> {
         cond: Option<Arc<BoxedExpression>>,
         identity: String,
         chunk_size: usize,
-        enable_spill: bool,
+        spill_backend: Option<SpillBackend>,
+        spill_metrics: Arc<BatchSpillMetrics>,
         memory_upper_bound: Option<u64>,
         shutdown_rx: ShutdownToken,
         mem_ctx: MemoryContext,
@@ -2353,7 +2389,8 @@ impl<K> HashJoinExecutor<K> {
             identity,
             chunk_size,
             shutdown_rx,
-            enable_spill,
+            spill_backend,
+            spill_metrics,
             memory_upper_bound,
             mem_ctx,
             _phantom: PhantomData,
@@ -2365,6 +2402,7 @@ impl<K> HashJoinExecutor<K> {
 mod tests {
     use futures::StreamExt;
     use futures_async_stream::for_await;
+    use itertools::Itertools;
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::Key32;
@@ -2373,6 +2411,8 @@ mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
+    use risingwave_common::util::memcmp_encoding::encode_chunk;
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_expr::expr::{build_from_pretty, BoxedExpression};
 
     use super::{
@@ -2381,6 +2421,8 @@ mod tests {
     use crate::error::Result;
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::BoxedExecutor;
+    use crate::monitor::BatchSpillMetrics;
+    use crate::spill::spill_op::SpillBackend;
     use crate::task::ShutdownToken;
 
     const CHUNK_SIZE: usize = 1024;
@@ -2424,7 +2466,8 @@ mod tests {
         }
     }
 
-    fn is_data_chunk_eq(left: &DataChunk, right: &DataChunk) -> bool {
+    /// Sort each row in the data chunk and compare with the rows in the data chunk.
+    fn compare_data_chunk_with_rowsort(left: &DataChunk, right: &DataChunk) -> bool {
         assert!(left.is_compacted());
         assert!(right.is_compacted());
 
@@ -2432,8 +2475,30 @@ mod tests {
             return false;
         }
 
-        left.rows()
-            .zip_eq_debug(right.rows())
+        // Sort and compare
+        let column_orders = (0..left.columns().len())
+            .map(|i| ColumnOrder::new(i, OrderType::ascending()))
+            .collect_vec();
+        let left_encoded_chunk = encode_chunk(left, &column_orders).unwrap();
+        let mut sorted_left = left_encoded_chunk
+            .into_iter()
+            .enumerate()
+            .map(|(row_id, row)| (left.row_at_unchecked_vis(row_id), row))
+            .collect_vec();
+        sorted_left.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
+
+        let right_encoded_chunk = encode_chunk(right, &column_orders).unwrap();
+        let mut sorted_right = right_encoded_chunk
+            .into_iter()
+            .enumerate()
+            .map(|(row_id, row)| (right.row_at_unchecked_vis(row_id), row))
+            .collect_vec();
+        sorted_right.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
+
+        sorted_left
+            .into_iter()
+            .map(|(row, _)| row)
+            .zip_eq_debug(sorted_right.into_iter().map(|(row, _)| row))
             .all(|(row1, row2)| row1 == row2)
     }
 
@@ -2566,6 +2631,7 @@ mod tests {
             right_child: BoxedExecutor,
             shutdown_rx: ShutdownToken,
             parent_mem_ctx: Option<MemoryContext>,
+            test_spill: bool,
         ) -> BoxedExecutor {
             let join_type = self.join_type;
 
@@ -2582,8 +2648,15 @@ mod tests {
                 None
             };
 
-            let mem_ctx =
-                MemoryContext::new(parent_mem_ctx, LabelGuardedIntGauge::<4>::test_int_gauge());
+            let mem_ctx = if test_spill {
+                MemoryContext::new_with_mem_limit(
+                    parent_mem_ctx,
+                    LabelGuardedIntGauge::<4>::test_int_gauge(),
+                    0,
+                )
+            } else {
+                MemoryContext::new(parent_mem_ctx, LabelGuardedIntGauge::<4>::test_int_gauge())
+            };
             Box::new(HashJoinExecutor::<Key32>::new(
                 join_type,
                 output_indices,
@@ -2595,7 +2668,12 @@ mod tests {
                 cond,
                 "HashJoinExecutor".to_string(),
                 chunk_size,
-                false,
+                if test_spill {
+                    Some(SpillBackend::Memory)
+                } else {
+                    None
+                },
+                BatchSpillMetrics::for_test(),
                 shutdown_rx,
                 mem_ctx,
             ))
@@ -2605,14 +2683,29 @@ mod tests {
             let left_executor = self.create_left_executor();
             let right_executor = self.create_right_executor();
             self.do_test_with_chunk_size_and_executors(
+                expected.clone(),
+                has_non_equi_cond,
+                null_safe,
+                self::CHUNK_SIZE,
+                left_executor,
+                right_executor,
+                false,
+            )
+            .await;
+
+            // Test spill
+            let left_executor = self.create_left_executor();
+            let right_executor = self.create_right_executor();
+            self.do_test_with_chunk_size_and_executors(
                 expected,
                 has_non_equi_cond,
                 null_safe,
                 self::CHUNK_SIZE,
                 left_executor,
                 right_executor,
+                true,
             )
-            .await
+            .await;
         }
 
         async fn do_test_with_chunk_size_and_executors(
@@ -2623,6 +2716,7 @@ mod tests {
             chunk_size: usize,
             left_executor: BoxedExecutor,
             right_executor: BoxedExecutor,
+            test_spill: bool,
         ) {
             let parent_mem_context =
                 MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge(), u64::MAX);
@@ -2636,6 +2730,7 @@ mod tests {
                     right_executor,
                     ShutdownToken::empty(),
                     Some(parent_mem_context.clone()),
+                    test_spill,
                 );
 
                 let mut data_chunk_merger = DataChunkMerger::new(self.output_data_types()).unwrap();
@@ -2667,7 +2762,7 @@ mod tests {
 
                 // TODO: Replace this with unsorted comparison
                 // assert_eq!(expected, result_chunk);
-                assert!(is_data_chunk_eq(&expected, &result_chunk));
+                assert!(compare_data_chunk_with_rowsort(&expected, &result_chunk));
             }
 
             assert_eq!(0, parent_mem_context.get_bytes_used());
@@ -2686,6 +2781,7 @@ mod tests {
                 right_executor,
                 shutdown_rx,
                 None,
+                false,
             );
             shutdown_tx.cancel();
             #[for_await]
@@ -2706,6 +2802,7 @@ mod tests {
                 right_executor,
                 shutdown_rx,
                 None,
+                false,
             );
             shutdown_tx.abort("test");
             #[for_await]
@@ -3122,6 +3219,7 @@ mod tests {
                 3,
                 Box::new(left_executor),
                 Box::new(right_executor),
+                false,
             )
             .await;
     }
@@ -3234,7 +3332,7 @@ mod tests {
             has_more_output_rows: true,
             found_matched: false,
         };
-        assert!(is_data_chunk_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
@@ -3264,7 +3362,7 @@ mod tests {
         );
         state.first_output_row_id = vec![2, 3];
         state.has_more_output_rows = false;
-        assert!(is_data_chunk_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
@@ -3294,7 +3392,7 @@ mod tests {
         );
         state.first_output_row_id = vec![2, 3];
         state.has_more_output_rows = false;
-        assert!(is_data_chunk_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
@@ -3334,7 +3432,7 @@ mod tests {
             found_matched: false,
             ..Default::default()
         };
-        assert!(is_data_chunk_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<false>(
                 chunk,
                 cond.as_ref(),
@@ -3361,7 +3459,7 @@ mod tests {
              4   1.0 4   2.0",
         );
         state.first_output_row_id = vec![2, 3];
-        assert!(is_data_chunk_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<false>(
                 chunk,
                 cond.as_ref(),
@@ -3388,7 +3486,7 @@ mod tests {
              6   7.0 6   8.0",
         );
         state.first_output_row_id = vec![2, 3];
-        assert!(is_data_chunk_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<false>(
                 chunk,
                 cond.as_ref(),
@@ -3430,7 +3528,7 @@ mod tests {
             has_more_output_rows: true,
             found_matched: false,
         };
-        assert!(is_data_chunk_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<true>(
                 chunk,
                 cond.as_ref(),
@@ -3459,7 +3557,7 @@ mod tests {
         );
         state.first_output_row_id = vec![2, 3];
         state.has_more_output_rows = false;
-        assert!(is_data_chunk_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<true>(
                 chunk,
                 cond.as_ref(),
@@ -3488,7 +3586,7 @@ mod tests {
         );
         state.first_output_row_id = vec![2, 3];
         state.has_more_output_rows = false;
-        assert!(is_data_chunk_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<true>(
                 chunk,
                 cond.as_ref(),
@@ -3552,7 +3650,7 @@ mod tests {
             ],
             build_row_matched,
         };
-        assert!(is_data_chunk_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_right_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
@@ -3593,7 +3691,7 @@ mod tests {
             RowId::new(0, 12),
             RowId::new(0, 13),
         ];
-        assert!(is_data_chunk_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_right_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
@@ -3742,7 +3840,7 @@ mod tests {
             ],
             build_row_matched: ChunkedData::with_chunk_sizes([14].into_iter()).unwrap(),
         };
-        assert!(is_data_chunk_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_full_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),
@@ -3790,7 +3888,7 @@ mod tests {
             RowId::new(0, 12),
             RowId::new(0, 13),
         ];
-        assert!(is_data_chunk_eq(
+        assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_full_outer_join_non_equi_condition(
                 chunk,
                 cond.as_ref(),

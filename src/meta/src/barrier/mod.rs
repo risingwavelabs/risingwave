@@ -31,14 +31,15 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
+use risingwave_hummock_sdk::table_stats::from_prost_table_stats_map;
 use risingwave_hummock_sdk::table_watermark::{
     merge_multiple_new_table_watermarks, TableWatermarks,
 };
-use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
+use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo};
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::PausedReason;
+use risingwave_pb::meta::{PausedReason, PbRecoveryStatus};
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use thiserror_ext::AsReport;
@@ -139,6 +140,19 @@ struct Scheduled {
     span: tracing::Span,
     /// Choose a different barrier(checkpoint == true) according to it
     checkpoint: bool,
+}
+
+impl From<&BarrierManagerStatus> for PbRecoveryStatus {
+    fn from(status: &BarrierManagerStatus) -> Self {
+        match status {
+            BarrierManagerStatus::Starting => Self::StatusStarting,
+            BarrierManagerStatus::Recovering(reason) => match reason {
+                RecoveryReason::Bootstrap => Self::StatusStarting,
+                RecoveryReason::Failover(_) | RecoveryReason::Adhoc => Self::StatusRecovering,
+            },
+            BarrierManagerStatus::Running => Self::StatusRunning,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -900,10 +914,7 @@ impl GlobalBarrierManagerContext {
                     BarrierKind::Initial => {}
                     BarrierKind::Checkpoint(epochs) => {
                         let commit_info = collect_commit_epoch_info(resps, command_ctx, epochs);
-                        new_snapshot = self
-                            .hummock_manager
-                            .commit_epoch(command_ctx.prev_epoch.value().0, commit_info)
-                            .await?;
+                        new_snapshot = self.hummock_manager.commit_epoch(commit_info).await?;
                     }
                     BarrierKind::Barrier => {
                         new_snapshot = Some(self.hummock_manager.update_current_epoch(prev_epoch));
@@ -1072,6 +1083,10 @@ impl GlobalBarrierManagerContext {
         }
     }
 
+    pub fn get_recovery_status(&self) -> PbRecoveryStatus {
+        (&**self.status.load()).into()
+    }
+
     /// Set barrier manager status.
     fn set_status(&self, new_status: BarrierManagerStatus) {
         self.status.store(Arc::new(new_status));
@@ -1153,17 +1168,16 @@ fn collect_commit_epoch_info(
     epochs: &Vec<u64>,
 ) -> CommitEpochInfo {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, WorkerId> = HashMap::new();
-    let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
+    let mut synced_ssts: Vec<LocalSstableInfo> = vec![];
     let mut table_watermarks = Vec::with_capacity(resps.len());
     let mut old_value_ssts = Vec::with_capacity(resps.len());
     for resp in resps {
         let ssts_iter = resp.synced_sstables.into_iter().map(|grouped| {
             let sst_info = grouped.sst.expect("field not None");
             sst_to_worker.insert(sst_info.get_object_id(), resp.worker_id);
-            ExtendedSstableInfo::new(
-                grouped.compaction_group_id,
+            LocalSstableInfo::new(
                 sst_info,
-                grouped.table_stats_map,
+                from_prost_table_stats_map(grouped.table_stats_map),
             )
         });
         synced_ssts.extend(ssts_iter);
@@ -1205,6 +1219,8 @@ fn collect_commit_epoch_info(
             }),
     );
 
+    let epoch = command_ctx.prev_epoch.value().0;
+
     CommitEpochInfo::new(
         synced_ssts,
         merge_multiple_new_table_watermarks(
@@ -1226,5 +1242,7 @@ fn collect_commit_epoch_info(
         sst_to_worker,
         new_table_fragment_info,
         table_new_change_log,
+        BTreeMap::from_iter([(epoch, command_ctx.info.existing_table_ids())]),
+        epoch,
     )
 }

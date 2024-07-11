@@ -16,7 +16,7 @@
     <name>risingwave-sink-iceberg</name>
 
     <properties>
-        <iceberg.version>1.4.1</iceberg.version>
+        <iceberg.version>1.5.2</iceberg.version>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <maven.javadoc.skip>true</maven.javadoc.skip>
@@ -75,6 +75,10 @@
             <artifactId>hive-metastore</artifactId>
         </dependency>
         <dependency>
+            <groupId>org.apache.hive</groupId>
+            <artifactId>hive-exec</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.apache.parquet</groupId>
             <artifactId>parquet-avro</artifactId>
             <version>1.12.3</version>
@@ -107,6 +111,10 @@
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>sts</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>glue</artifactId>
         </dependency>
         <dependency>
             <groupId>org.postgresql</groupId>

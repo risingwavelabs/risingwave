@@ -30,7 +30,7 @@ use governor::{Quota, RateLimiter};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum};

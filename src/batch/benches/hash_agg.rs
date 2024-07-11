@@ -19,6 +19,7 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 use itertools::Itertools;
 use risingwave_batch::executor::aggregation::build as build_agg;
 use risingwave_batch::executor::{BoxedExecutor, HashAggExecutor};
+use risingwave_batch::monitor::BatchSpillMetrics;
 use risingwave_batch::task::ShutdownToken;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::memory::MemoryContext;
@@ -106,7 +107,8 @@ fn create_hash_agg_executor(
         "HashAggExecutor".to_string(),
         CHUNK_SIZE,
         MemoryContext::none(),
-        false,
+        None,
+        BatchSpillMetrics::for_test(),
         ShutdownToken::empty(),
     ))
 }

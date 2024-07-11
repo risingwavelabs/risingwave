@@ -25,7 +25,7 @@ use risingwave_common::util::resource_util::memory::system_memory_available_byte
 use thiserror_ext::AsReport;
 use tracing::error;
 
-use crate::call_method;
+use crate::{call_method, call_static_method};
 
 /// Use 10% of compute total memory by default. Compute node uses 0.7 * system memory by default.
 const DEFAULT_MEMORY_PROPORTION: f64 = 0.07;
@@ -172,21 +172,21 @@ pub fn register_java_binding_native_methods(
 pub fn load_jvm_memory_stats() -> (usize, usize) {
     match JVM.get() {
         Some(jvm) => {
-            let result: Result<(usize, usize), jni::errors::Error> = try {
-                let mut env = jvm.attach_current_thread()?;
+            let result: Result<(usize, usize), anyhow::Error> = try {
+                execute_with_jni_env(jvm, |env| {
+                    let runtime_instance = crate::call_static_method!(
+                        env,
+                        {Runtime},
+                        {Runtime getRuntime()}
+                    )?;
 
-                let runtime_instance = crate::call_static_method!(
-                    env,
-                    {Runtime},
-                    {Runtime getRuntime()}
-                )?;
+                    let total_memory =
+                        call_method!(env, runtime_instance.as_ref(), {long totalMemory()})?;
+                    let free_memory =
+                        call_method!(env, runtime_instance.as_ref(), {long freeMemory()})?;
 
-                let total_memory =
-                    call_method!(env, runtime_instance.as_ref(), {long totalMemory()})?;
-                let free_memory =
-                    call_method!(env, runtime_instance.as_ref(), {long freeMemory()})?;
-
-                (total_memory as usize, (total_memory - free_memory) as usize)
+                    Ok((total_memory as usize, (total_memory - free_memory) as usize))
+                })?
             };
             match result {
                 Ok(ret) => ret,
@@ -204,11 +204,32 @@ pub fn execute_with_jni_env<T>(
     jvm: &JavaVM,
     f: impl FnOnce(&mut JNIEnv<'_>) -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
-    let _guard = jvm
+    let mut env = jvm
         .attach_current_thread()
         .with_context(|| "Failed to attach current rust thread to jvm")?;
 
-    let mut env = jvm.get_env().with_context(|| "Failed to get jni env")?;
+    // set context class loader for the thread
+    // java.lang.Thread.currentThread()
+    //     .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
+
+    let thread = crate::call_static_method!(
+        env,
+        {Thread},
+        {Thread currentThread()}
+    )?;
+
+    let system_class_loader = crate::call_static_method!(
+        env,
+        {ClassLoader},
+        {ClassLoader getSystemClassLoader()}
+    )?;
+
+    crate::call_method!(
+        env,
+        thread,
+        {void setContextClassLoader(ClassLoader)},
+        &system_class_loader
+    )?;
 
     let ret = f(&mut env);
 
@@ -240,4 +261,33 @@ pub fn jobj_to_str(env: &mut JNIEnv<'_>, obj: JObject<'_>) -> anyhow::Result<Str
     let jstr = JString::from(obj);
     let java_str = env.get_string(&jstr)?;
     Ok(java_str.to_str()?.to_string())
+}
+
+/// Dumps the JVM stack traces.
+///
+/// # Returns
+///
+/// - `Ok(None)` if JVM is not initialized.
+/// - `Ok(Some(String))` if JVM is initialized and stack traces are dumped.
+/// - `Err` if failed to dump stack traces.
+pub fn dump_jvm_stack_traces() -> anyhow::Result<Option<String>> {
+    match JVM.get() {
+        None => Ok(None),
+        Some(jvm) => execute_with_jni_env(jvm, |env| {
+            let result = call_static_method!(
+                env,
+                {com.risingwave.connector.api.Monitor},
+                {String dumpStackTrace()}
+            )
+            .with_context(|| "Failed to call Java function")?;
+            let result = JString::from(result);
+            let result = env
+                .get_string(&result)
+                .with_context(|| "Failed to convert JString")?;
+            let result = result
+                .to_str()
+                .with_context(|| "Failed to convert JavaStr")?;
+            Ok(Some(result.to_string()))
+        }),
+    }
 }

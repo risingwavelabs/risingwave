@@ -17,12 +17,12 @@ use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
-use arrow_schema::DataType as ArrowDataType;
+use arrow_schema_iceberg::DataType as ArrowDataType;
 use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
+use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::{ConnectionId, DatabaseId, Schema, SchemaId, TableId, UserId};
 use risingwave_common::types::DataType;
 use risingwave_common::{bail, catalog};
@@ -32,7 +32,7 @@ use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_WITHOUT_BACKFILL,
 };
 use risingwave_pb::catalog::{PbSource, Table};
-use risingwave_pb::ddl_service::ReplaceTablePlan;
+use risingwave_pb::ddl_service::{ReplaceTablePlan, TableJobType};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatcherType, MergeNode, StreamFragmentGraph, StreamNode};
@@ -50,7 +50,7 @@ use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{ExprImpl, InputRef};
+use crate::expr::{rewrite_now_to_proctime, ExprImpl, InputRef};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
 use crate::handler::create_table::{generate_stream_graph_for_table, ColumnIdGenerator};
@@ -390,7 +390,7 @@ async fn get_partition_compute_info_for_iceberg(
     };
 
     Ok(Some(PartitionComputeInfo::Iceberg(IcebergPartitionInfo {
-        partition_type: IcebergArrowConvert.from_fields(&partition_type)?,
+        partition_type: IcebergArrowConvert.struct_from_fields(&partition_type)?,
         partition_fields,
     })))
 }
@@ -466,6 +466,7 @@ pub async fn handle_create_sink(
             table: Some(table),
             fragment_graph: Some(graph),
             table_col_index_mapping: None,
+            job_type: TableJobType::General as _,
         });
     }
 
@@ -561,7 +562,7 @@ fn check_cycle_for_sink(
             path: &mut Vec<String>,
         ) -> Result<()> {
             for table_id in dependent_jobs {
-                if let Ok(table) = self.reader.get_table_by_id(table_id) {
+                if let Ok(table) = self.reader.get_any_table_by_id(table_id) {
                     path.push(table.name.clone());
                     self.visit_table(table.as_ref(), target_table_id, path)?;
                     path.pop();
@@ -634,7 +635,7 @@ pub(crate) async fn reparse_table_for_sink(
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (graph, table, source) = generate_stream_graph_for_table(
+    let (graph, table, source, _) = generate_stream_graph_for_table(
         session,
         table_name,
         table_catalog,
@@ -648,6 +649,7 @@ pub(crate) async fn reparse_table_for_sink(
         append_only,
         on_conflict,
         with_version_column,
+        None,
     )
     .await?;
 
@@ -723,7 +725,10 @@ fn derive_default_column_project_for_sink(
             continue;
         }
 
-        let default_col_expr = || -> ExprImpl { target_table_catalog.default_column_expr(idx) };
+        let default_col_expr = || -> ExprImpl {
+            rewrite_now_to_proctime(target_table_catalog.default_column_expr(idx))
+        };
+
         let sink_col_expr = |sink_col_idx: usize| -> Result<ExprImpl> {
             derive_sink_to_table_expr(sink_schema, sink_col_idx, table_column.data_type())
         };
@@ -816,7 +821,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Json],
                 ),
                 KafkaSink::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Json, Encode::Protobuf],
+                    Format::Plain => vec![Encode::Json, Encode::Avro, Encode::Protobuf],
                     Format::Upsert => vec![Encode::Json, Encode::Avro],
                     Format::Debezium => vec![Encode::Json],
                 ),
@@ -919,7 +924,7 @@ pub mod tests {
 
         // Check table exists.
         let (table, schema_name) = catalog_reader
-            .get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "mv1")
+            .get_created_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "mv1")
             .unwrap();
         assert_eq!(table.name(), "mv1");
 

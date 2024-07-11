@@ -17,7 +17,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_batch::monitor::{
-    GLOBAL_BATCH_EXECUTOR_METRICS, GLOBAL_BATCH_MANAGER_METRICS, GLOBAL_BATCH_TASK_METRICS,
+    GLOBAL_BATCH_EXECUTOR_METRICS, GLOBAL_BATCH_MANAGER_METRICS, GLOBAL_BATCH_SPILL_METRICS,
+    GLOBAL_BATCH_TASK_METRICS,
 };
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::spill::spill_op::SpillOp;
@@ -27,18 +28,17 @@ use risingwave_common::config::{
     MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
 };
 use risingwave_common::lru::init_global_sequencer_args;
-use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
+use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::pretty_bytes::convert;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
-use risingwave_common_service::metrics_manager::MetricsManager;
-use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_common_service::tracing::TracingExtractLayer;
+use risingwave_common_service::{MetricsManager, ObserverManager, TracingExtractLayer};
 use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
 use risingwave_dml::dml_manager::DmlManager;
 use risingwave_pb::common::WorkerType;
@@ -63,7 +63,6 @@ use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
-use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tower::Layer;
@@ -83,14 +82,16 @@ use crate::telemetry::ComputeTelemetryCreator;
 use crate::ComputeNodeOpts;
 
 /// Bootstraps the compute-node.
+///
+/// Returns when the `shutdown` token is triggered.
 pub async fn compute_node_serve(
     listen_addr: SocketAddr,
     advertise_addr: HostAddr,
     opts: ComputeNodeOpts,
-) -> (Vec<JoinHandle<()>>, Sender<()>) {
+    shutdown: CancellationToken,
+) {
     // Load the configuration.
     let config = load_config(&opts.config_path, &opts);
-
     info!("Starting compute node",);
     info!("> config: {:?}", config);
     info!(
@@ -168,6 +169,7 @@ pub async fn compute_node_serve(
     let worker_id = meta_client.worker_id();
     info!("Assigned worker node id {}", worker_id);
 
+    // TODO(shutdown): remove this as there's no need to gracefully shutdown the sub-tasks.
     let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![];
     // Initialize the metrics subsystem.
     let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
@@ -177,6 +179,7 @@ pub async fn compute_node_serve(
     let batch_executor_metrics = Arc::new(GLOBAL_BATCH_EXECUTOR_METRICS.clone());
     let batch_manager_metrics = Arc::new(GLOBAL_BATCH_MANAGER_METRICS.clone());
     let exchange_srv_metrics = Arc::new(GLOBAL_EXCHANGE_SERVICE_METRICS.clone());
+    let batch_spill_metrics = Arc::new(GLOBAL_BATCH_SPILL_METRICS.clone());
 
     // Initialize state store.
     let state_store_metrics = Arc::new(global_hummock_state_store_metrics(
@@ -189,8 +192,6 @@ pub async fn compute_node_serve(
         meta_client.clone(),
         hummock_metrics.clone(),
     ));
-
-    let mut join_handle_vec = vec![];
 
     let await_tree_config = match &config.streaming.async_stack_trace {
         AsyncStackTraceOption::Off => None,
@@ -209,6 +210,7 @@ pub async fn compute_node_serve(
         storage_metrics.clone(),
         compactor_metrics.clone(),
         await_tree_config.clone(),
+        system_params.use_new_object_prefix_strategy(),
     )
     .await
     .unwrap();
@@ -348,6 +350,7 @@ pub async fn compute_node_serve(
         client_pool,
         dml_mgr.clone(),
         source_metrics.clone(),
+        batch_spill_metrics.clone(),
         config.server.metrics_level,
     );
 
@@ -356,7 +359,7 @@ pub async fn compute_node_serve(
         advertise_addr.clone(),
         stream_config,
         worker_id,
-        state_store,
+        state_store.clone(),
         dml_mgr,
         system_params_manager.clone(),
         source_metrics,
@@ -375,7 +378,20 @@ pub async fn compute_node_serve(
     let exchange_srv =
         ExchangeServiceImpl::new(batch_mgr.clone(), stream_mgr.clone(), exchange_srv_metrics);
     let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env.clone());
-    let monitor_srv = MonitorServiceImpl::new(stream_mgr.clone(), config.server.clone());
+    let (meta_cache, block_cache) = if let Some(hummock) = state_store.as_hummock() {
+        (
+            Some(hummock.sstable_store().meta_cache().clone()),
+            Some(hummock.sstable_store().block_cache().clone()),
+        )
+    } else {
+        (None, None)
+    };
+    let monitor_srv = MonitorServiceImpl::new(
+        stream_mgr.clone(),
+        config.server.clone(),
+        meta_cache,
+        block_cache,
+    );
     let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr);
     let health_srv = HealthServiceImpl::new();
 
@@ -396,63 +412,39 @@ pub async fn compute_node_serve(
     #[cfg(not(madsim))]
     SpillOp::clean_spill_directory().await.unwrap();
 
-    let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
-    let join_handle = tokio::spawn(async move {
-        tonic::transport::Server::builder()
-            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
-            .initial_stream_window_size(STREAM_WINDOW_SIZE)
-            .http2_max_pending_accept_reset_streams(Some(
-                config.server.grpc_max_reset_stream as usize,
-            ))
-            .layer(TracingExtractLayer::new())
-            // XXX: unlimit the max message size to allow arbitrary large SQL input.
-            .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
-            .add_service(
-                ExchangeServiceServer::new(exchange_srv).max_decoding_message_size(usize::MAX),
-            )
-            .add_service({
-                let await_tree_reg = stream_srv.mgr.await_tree_reg().cloned();
-                let srv =
-                    StreamServiceServer::new(stream_srv).max_decoding_message_size(usize::MAX);
-                #[cfg(madsim)]
-                {
-                    srv
-                }
-                #[cfg(not(madsim))]
-                {
-                    AwaitTreeMiddlewareLayer::new_optional(await_tree_reg).layer(srv)
-                }
-            })
-            .add_service(MonitorServiceServer::new(monitor_srv))
-            .add_service(ConfigServiceServer::new(config_srv))
-            .add_service(HealthServer::new(health_srv))
-            .monitored_serve_with_shutdown(
-                listen_addr,
-                "grpc-compute-node-service",
-                TcpConfig {
-                    tcp_nodelay: true,
-                    keepalive_duration: None,
-                },
-                async move {
-                    tokio::select! {
-                        _ = tokio::signal::ctrl_c() => {},
-                        _ = &mut shutdown_recv => {
-                            for (join_handle, shutdown_sender) in sub_tasks {
-                                if let Err(_err) = shutdown_sender.send(()) {
-                                    tracing::warn!("Failed to send shutdown");
-                                    continue;
-                                }
-                                if let Err(err) = join_handle.await {
-                                    tracing::warn!(error = %err.as_report(), "Failed to join shutdown");
-                                }
-                            }
-                        },
-                    }
-                },
-            )
-            .await;
-    });
-    join_handle_vec.push(join_handle);
+    let server = tonic::transport::Server::builder()
+        .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
+        .initial_stream_window_size(STREAM_WINDOW_SIZE)
+        .http2_max_pending_accept_reset_streams(Some(config.server.grpc_max_reset_stream as usize))
+        .layer(TracingExtractLayer::new())
+        // XXX: unlimit the max message size to allow arbitrary large SQL input.
+        .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
+        .add_service(ExchangeServiceServer::new(exchange_srv).max_decoding_message_size(usize::MAX))
+        .add_service({
+            let await_tree_reg = stream_srv.mgr.await_tree_reg().cloned();
+            let srv = StreamServiceServer::new(stream_srv).max_decoding_message_size(usize::MAX);
+            #[cfg(madsim)]
+            {
+                srv
+            }
+            #[cfg(not(madsim))]
+            {
+                AwaitTreeMiddlewareLayer::new_optional(await_tree_reg).layer(srv)
+            }
+        })
+        .add_service(MonitorServiceServer::new(monitor_srv))
+        .add_service(ConfigServiceServer::new(config_srv))
+        .add_service(HealthServer::new(health_srv))
+        .monitored_serve_with_shutdown(
+            listen_addr,
+            "grpc-compute-node-service",
+            TcpConfig {
+                tcp_nodelay: true,
+                keepalive_duration: None,
+            },
+            shutdown.clone().cancelled_owned(),
+        );
+    let _server_handle = tokio::spawn(server);
 
     // Boot metrics service.
     if config.server.metrics_level > MetricLevel::Disabled {
@@ -461,8 +453,16 @@ pub async fn compute_node_serve(
 
     // All set, let the meta service know we're ready.
     meta_client.activate(&advertise_addr).await.unwrap();
+    // Wait for the shutdown signal.
+    shutdown.cancelled().await;
 
-    (join_handle_vec, shutdown_send)
+    // TODO(shutdown): gracefully unregister from the meta service (need to cautious since it may
+    // trigger auto-scaling)
+
+    // NOTE(shutdown): We can't simply join the tonic server here because it only returns when all
+    // existing connections are closed, while we have long-running streaming calls that never
+    // close. From the other side, there's also no need to gracefully shutdown them if we have
+    // unregistered from the meta service.
 }
 
 /// Check whether the compute node has enough memory to perform computing tasks. Apart from storage,

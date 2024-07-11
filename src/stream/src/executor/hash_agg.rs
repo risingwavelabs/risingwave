@@ -17,7 +17,7 @@ use std::marker::PhantomData;
 
 use futures::stream;
 use itertools::Itertools;
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;

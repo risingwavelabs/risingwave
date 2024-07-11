@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
-use std::ops::Index;
+use std::ops::{Index, Sub};
 
 use educe::Educe;
 use itertools::Itertools;
@@ -26,14 +26,14 @@ use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
 
 use super::bitmap::VnodeBitmapExt;
 use super::vnode::{ParallelUnitId, VirtualNode};
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::util::compress::compress_data;
 use crate::util::iter_util::ZipEqDebug;
 
 // TODO: find a better place for this.
 pub type ActorId = u32;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct WorkerSlotId(u64);
 
 impl WorkerSlotId {
@@ -63,6 +63,12 @@ impl From<u64> for WorkerSlotId {
 }
 
 impl Display for WorkerSlotId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("[{}:{}]", self.worker_id(), self.slot_idx()))
+    }
+}
+
+impl Debug for WorkerSlotId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("[{}:{}]", self.worker_id(), self.slot_idx()))
     }
@@ -341,6 +347,12 @@ impl ActorMapping {
     }
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum ParallelUnitError {
+    #[error("parallel units {0:?} are not covered by the worker slot mapping")]
+    NotCovered(HashSet<ParallelUnitId>),
+}
+
 impl WorkerSlotMapping {
     /// Create a uniform worker mapping from the given worker ids
     pub fn build_from_ids(worker_slot_ids: &[WorkerSlotId]) -> Self {
@@ -382,8 +394,11 @@ impl ParallelUnitMapping {
         self.transform(to_map)
     }
 
-    /// Transform this parallel unit mapping to an worker mapping, essentially `transform`.
-    pub fn to_worker_slot(&self, to_map: &HashMap<ParallelUnitId, u32>) -> WorkerSlotMapping {
+    /// Transform this parallel unit mapping to a worker slot mapping, essentially `transform`.
+    pub fn to_worker_slot(
+        &self,
+        to_map: &HashMap<ParallelUnitId, u32>,
+    ) -> Result<WorkerSlotMapping, ParallelUnitError> {
         let mut worker_to_parallel_units = HashMap::<_, BTreeSet<_>>::new();
         for (parallel_unit_id, worker_id) in to_map {
             worker_to_parallel_units
@@ -401,7 +416,17 @@ impl ParallelUnitMapping {
             }
         }
 
-        self.transform(&parallel_unit_to_worker_slot)
+        let available_parallel_unit_ids: HashSet<_> =
+            parallel_unit_to_worker_slot.keys().copied().collect();
+
+        let parallel_unit_ids: HashSet<_> = self.data.iter().copied().collect();
+
+        let sub_set = parallel_unit_ids.sub(&available_parallel_unit_ids);
+        if sub_set.is_empty() {
+            Ok(self.transform(&parallel_unit_to_worker_slot))
+        } else {
+            Err(ParallelUnitError::NotCovered(sub_set))
+        }
     }
 
     /// Create a parallel unit mapping from the protobuf representation.

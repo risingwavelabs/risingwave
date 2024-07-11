@@ -210,7 +210,7 @@ impl TableType {
     }
 }
 
-/// The version of a table, used by schema change. See [`PbTableVersion`].
+/// The version of a table, used by schema change. See [`PbTableVersion`] for more details.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TableVersion {
     pub version_id: TableVersionId,
@@ -492,6 +492,10 @@ impl TableCatalog {
                 .map(|c| Field::from(&c.column_desc))
                 .collect(),
         )
+    }
+
+    pub fn is_created(&self) -> bool {
+        self.stream_job_status == StreamJobStatus::Created
     }
 }
 

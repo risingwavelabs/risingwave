@@ -567,8 +567,8 @@ impl HashKeyDe for Date {
 
 impl HashKeySer<'_> for Timestamp {
     fn serialize_into(self, mut buf: impl BufMut) {
-        buf.put_i64_ne(self.0.timestamp());
-        buf.put_u32_ne(self.0.timestamp_subsec_nanos());
+        buf.put_i64_ne(self.0.and_utc().timestamp());
+        buf.put_u32_ne(self.0.and_utc().timestamp_subsec_nanos());
     }
 
     fn exact_size() -> Option<usize> {

@@ -22,11 +22,16 @@ use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
 use super::{EngineType, OpendalObjectStore};
+use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
     /// create opendal s3 engine.
-    pub fn new_s3_engine(bucket: String, config: Arc<ObjectStoreConfig>) -> ObjectResult<Self> {
+    pub fn new_s3_engine(
+        bucket: String,
+        config: Arc<ObjectStoreConfig>,
+        metrics: Arc<ObjectStoreMetrics>,
+    ) -> ObjectResult<Self> {
         // Create s3 builder.
         let mut builder = S3::default();
         builder.bucket(&bucket);
@@ -50,11 +55,16 @@ impl OpendalObjectStore {
             op,
             engine_type: EngineType::S3,
             config,
+            metrics,
         })
     }
 
     /// Creates a minio client. The server should be like `minio://key:secret@address:port/bucket`.
-    pub fn new_minio_engine(server: &str, config: Arc<ObjectStoreConfig>) -> ObjectResult<Self> {
+    pub fn new_minio_engine(
+        server: &str,
+        config: Arc<ObjectStoreConfig>,
+        metrics: Arc<ObjectStoreMetrics>,
+    ) -> ObjectResult<Self> {
         let server = server.strip_prefix("minio://").unwrap();
         let (access_key_id, rest) = server.split_once(':').unwrap();
         let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
@@ -89,17 +99,18 @@ impl OpendalObjectStore {
             op,
             engine_type: EngineType::Minio,
             config,
+            metrics,
         })
     }
 
     pub fn new_http_client(config: &ObjectStoreConfig) -> ObjectResult<HttpClient> {
         let mut client_builder = reqwest::ClientBuilder::new();
 
-        if let Some(keepalive_ms) = config.s3.object_store_keepalive_ms.as_ref() {
+        if let Some(keepalive_ms) = config.s3.keepalive_ms.as_ref() {
             client_builder = client_builder.tcp_keepalive(Duration::from_millis(*keepalive_ms));
         }
 
-        if let Some(nodelay) = config.s3.object_store_nodelay.as_ref() {
+        if let Some(nodelay) = config.s3.nodelay.as_ref() {
             client_builder = client_builder.tcp_nodelay(*nodelay);
         }
 
@@ -111,6 +122,7 @@ impl OpendalObjectStore {
     pub fn new_s3_engine_with_credentials(
         bucket: &str,
         config: Arc<ObjectStoreConfig>,
+        metrics: Arc<ObjectStoreMetrics>,
         aws_access_key_id: &str,
         aws_secret_access_key: &str,
         aws_region: &str,
@@ -123,6 +135,7 @@ impl OpendalObjectStore {
         builder.access_key_id(aws_access_key_id);
         builder.secret_access_key(aws_secret_access_key);
         builder.region(aws_region);
+        builder.disable_config_load();
 
         let http_client = Self::new_http_client(config.as_ref())?;
         builder.http_client(http_client);
@@ -135,6 +148,7 @@ impl OpendalObjectStore {
             op,
             engine_type: EngineType::S3,
             config,
+            metrics,
         })
     }
 }

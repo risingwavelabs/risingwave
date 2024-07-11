@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
 use itertools::Itertools;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
@@ -288,11 +288,17 @@ impl CatalogController {
             }
         }
 
+        // get dependent secret ref.
+        let dependent_secret_refs = streaming_job.dependent_secret_refs()?;
+
+        let dependent_objs = dependent_relations
+            .iter()
+            .chain(dependent_secret_refs.iter());
         // record object dependency.
-        if !dependent_relations.is_empty() {
-            ObjectDependency::insert_many(dependent_relations.into_iter().map(|id| {
+        if !dependent_secret_refs.is_empty() || !dependent_relations.is_empty() {
+            ObjectDependency::insert_many(dependent_objs.map(|id| {
                 object_dependency::ActiveModel {
-                    oid: Set(id as _),
+                    oid: Set(*id as _),
                     used_by: Set(streaming_job.id() as _),
                     ..Default::default()
                 }
@@ -411,7 +417,7 @@ impl CatalogController {
         &self,
         job_id: ObjectId,
         is_cancelled: bool,
-    ) -> MetaResult<(bool, Vec<TableId>)> {
+    ) -> MetaResult<bool> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -421,7 +427,7 @@ impl CatalogController {
                 id = job_id,
                 "streaming job not found when aborting creating, might be cleaned by recovery"
             );
-            return Ok((true, Vec::new()));
+            return Ok(true);
         }
 
         if !is_cancelled {
@@ -436,7 +442,7 @@ impl CatalogController {
                         id = job_id,
                         "streaming job is created in background and still in creating status"
                     );
-                    return Ok((false, Vec::new()));
+                    return Ok(false);
                 }
             }
         }
@@ -447,13 +453,6 @@ impl CatalogController {
             .filter(table::Column::BelongsToJobId.eq(job_id))
             .into_tuple()
             .all(&txn)
-            .await?;
-
-        let mv_table_id: Option<TableId> = Table::find_by_id(job_id)
-            .select_only()
-            .column(table::Column::TableId)
-            .into_tuple()
-            .one(&txn)
             .await?;
 
         let associated_source_id: Option<SourceId> = Table::find_by_id(job_id)
@@ -476,11 +475,7 @@ impl CatalogController {
         }
         txn.commit().await?;
 
-        let mut state_table_ids = internal_table_ids;
-
-        state_table_ids.extend(mv_table_id.into_iter());
-
-        Ok((true, state_table_ids))
+        Ok(true)
     }
 
     pub async fn post_collect_table_fragments(
@@ -1454,7 +1449,7 @@ impl CatalogController {
             fragment.update(&txn).await?;
 
             let worker_slot_mapping = ParallelUnitMapping::from_protobuf(&vnode_mapping)
-                .to_worker_slot(&parallel_unit_to_worker)
+                .to_worker_slot(&parallel_unit_to_worker)?
                 .to_protobuf();
 
             fragment_mapping_to_notify.push(FragmentWorkerSlotMapping {
