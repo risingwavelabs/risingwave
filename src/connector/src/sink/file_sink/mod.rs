@@ -85,9 +85,6 @@ impl SinkWriter for OpenDalSinkWriter {
         Ok(())
     }
 
-    async fn abort(&mut self) -> Result<()> {
-        Ok(())
-    }
 
     /// For the file sink, currently, the sink decoupling feature is not enabled.
     /// When a checkpoint arrives, the force commit is performed to write the data to the file.
@@ -104,9 +101,7 @@ impl SinkWriter for OpenDalSinkWriter {
         Ok(())
     }
 
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
-        Ok(())
-    }
+
 }
 
 impl OpenDalSinkWriter {
