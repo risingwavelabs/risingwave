@@ -138,8 +138,13 @@ pub struct ComputeNodeOpts {
     pub connector_rpc_endpoint: Option<String>,
 
     /// The path of the temp secret file directory.
-    #[clap(long, hide = true, env = "RW_TEMP_SECRET_FILE_DIR")]
-    pub temp_secret_file_dir: Option<String>,
+    #[clap(
+        long,
+        hide = true,
+        env = "RW_TEMP_SECRET_FILE_DIR",
+        default_value = "./secrets"
+    )]
+    pub temp_secret_file_dir: String,
 }
 
 impl risingwave_common::opts::Opts for ComputeNodeOpts {

@@ -219,6 +219,7 @@ pub async fn compute_node_serve(
     LocalSecretManager::init(
         opts.temp_secret_file_dir,
         meta_client.cluster_id().to_string(),
+        worker_id,
     );
 
     // Initialize observer manager.

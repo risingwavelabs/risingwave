@@ -322,6 +322,7 @@ impl FrontendEnv {
         LocalSecretManager::init(
             opts.temp_secret_file_dir,
             meta_client.cluster_id().to_string(),
+            worker_id,
         );
 
         // This `session_params` should be initialized during the initial notification in `observer_manager`

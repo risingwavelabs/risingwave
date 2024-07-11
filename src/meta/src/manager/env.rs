@@ -285,7 +285,7 @@ pub struct MetaOpts {
     // The private key for the secret store, used when the secret is stored in the meta.
     pub secret_store_private_key: Option<Vec<u8>>,
     /// The path of the temp secret file directory.
-    pub temp_secret_file_dir: Option<String>,
+    pub temp_secret_file_dir: String,
 
     pub table_info_statistic_history_times: usize,
 }
@@ -349,7 +349,7 @@ impl MetaOpts {
             max_trivial_move_task_count_per_loop: 256,
             max_get_task_probe_times: 5,
             secret_store_private_key: Some("0123456789abcdef".as_bytes().to_vec()),
-            temp_secret_file_dir: None,
+            temp_secret_file_dir: "./secrets".to_string(),
             table_info_statistic_history_times: 240,
         }
     }

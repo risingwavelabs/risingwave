@@ -30,7 +30,9 @@ use risingwave_common_service::{MetricsManager, TracingExtractLayer};
 use risingwave_meta::barrier::StreamRpcManager;
 use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::cluster::ClusterController;
-use risingwave_meta::manager::{MetaStoreImpl, MetadataManager, SystemParamsManagerImpl};
+use risingwave_meta::manager::{
+    MetaStoreImpl, MetadataManager, SystemParamsManagerImpl, META_NODE_ID,
+};
 use risingwave_meta::rpc::election::dummy::DummyElectionClient;
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
 use risingwave_meta::rpc::ElectionClientRef;
@@ -519,7 +521,11 @@ pub async fn start_service_as_election_leader(
     )
     .await?;
 
-    LocalSecretManager::init(opts.temp_secret_file_dir, env.cluster_id().to_string());
+    LocalSecretManager::init(
+        opts.temp_secret_file_dir,
+        env.cluster_id().to_string(),
+        META_NODE_ID,
+    );
 
     let notification_srv = NotificationServiceImpl::new(
         env.clone(),
