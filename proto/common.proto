@@ -76,9 +76,6 @@ message WorkerNode {
   // It's not persistent in meta store.
   optional uint64 started_at = 9;
 
- 
-  optional string label = 10;
-
   // Meta may assign labels to worker nodes to partition workload by label.
   // This is used for serverless backfilling of MVs. 
   // If a WorkerNode has labels set it indicates that this node only accepts certain work.
