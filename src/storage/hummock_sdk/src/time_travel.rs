@@ -298,7 +298,7 @@ impl From<(&HummockVersionDelta, &HashSet<CompactionGroupId>)> for IncompleteHum
                 })
                 .collect(),
             max_committed_epoch: delta.max_committed_epoch,
-            safe_epoch: delta.safe_epoch,
+            safe_epoch: delta.visible_table_safe_epoch(),
             trivial_move: delta.trivial_move,
             new_table_watermarks: delta.new_table_watermarks.clone(),
             removed_table_ids: delta.removed_table_ids.clone(),
