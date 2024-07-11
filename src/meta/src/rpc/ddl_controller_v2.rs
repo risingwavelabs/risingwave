@@ -94,7 +94,7 @@ impl DdlController {
         {
             Ok(version) => Ok(version),
             Err(err) => {
-                tracing::error!(id = job_id, error = %err.as_report(), "failed to create streaming job");
+                tracing::error!(id = job_id, error = ?err.as_report(), "failed to create streaming job");
                 let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
                     id: streaming_job.id(),
                     name: streaming_job.name(),

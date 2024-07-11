@@ -208,7 +208,7 @@ impl Drop for LocalInstanceGuard {
                     instance_id: self.instance_id,
                 })
                 .unwrap_or_else(|err| {
-                    tracing::debug!(
+                    tracing::error!(
                         error = %err.as_report(),
                         table_id = %self.table_id,
                         instance_id = self.instance_id,
