@@ -400,6 +400,12 @@ impl HummockVersion {
     pub fn build_sst_delta_infos(&self, version_delta: &HummockVersionDelta) -> Vec<SstDeltaInfo> {
         let mut infos = vec![];
 
+        // Skip trivial move delta for refiller
+        // The trivial move task only changes the position of the sst in the lsm, it does not modify the object information corresponding to the sst, and does not need to re-execute the refill.
+        if version_delta.trivial_move {
+            return infos;
+        }
+
         for (group_id, group_deltas) in &version_delta.group_deltas {
             let mut info = SstDeltaInfo::default();
 
@@ -622,7 +628,7 @@ impl HummockVersion {
         }
         self.id = version_delta.id;
         self.max_committed_epoch = version_delta.max_committed_epoch;
-        self.set_safe_epoch(version_delta.safe_epoch);
+        self.set_safe_epoch(version_delta.visible_table_safe_epoch());
 
         // apply to table watermark
 
@@ -645,20 +651,22 @@ impl HummockVersion {
             }
         }
         for (table_id, table_watermarks) in &self.table_watermarks {
-            if let Some(table_delta) = version_delta.state_table_info_delta.get(table_id)
-                && let Some(Some(prev_table)) = changed_table_info.get(table_id)
-                && table_delta.safe_epoch > prev_table.safe_epoch
+            let safe_epoch = if let Some(state_table_info) =
+                self.state_table_info.info().get(table_id)
+                && let Some((oldest_epoch, _)) = table_watermarks.watermarks.first()
+                && state_table_info.safe_epoch > *oldest_epoch
             {
                 // safe epoch has progressed, need further clear.
+                state_table_info.safe_epoch
             } else {
-                // safe epoch not progressed. No need to truncate
+                // safe epoch not progressed or the table has been removed. No need to truncate
                 continue;
-            }
+            };
             let table_watermarks = modified_table_watermarks
                 .entry(*table_id)
                 .or_insert_with(|| Some((**table_watermarks).clone()));
             if let Some(table_watermarks) = table_watermarks {
-                table_watermarks.clear_stale_epoch_watermark(version_delta.safe_epoch);
+                table_watermarks.clear_stale_epoch_watermark(safe_epoch);
             }
         }
         // apply the staging table watermark to hummock version
@@ -1396,50 +1404,50 @@ mod tests {
                 ),
             ),
         ]);
-        let version_delta = HummockVersionDelta {
-            id: 1,
-            group_deltas: HashMap::from_iter([
-                (
-                    2,
-                    GroupDeltas {
-                        group_deltas: vec![GroupDelta {
-                            delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
-                                group_config: Some(CompactionConfig {
-                                    max_level: 6,
-                                    ..Default::default()
-                                }),
+        let mut version_delta = HummockVersionDelta::default();
+        version_delta.id = 1;
+        version_delta.group_deltas = HashMap::from_iter([
+            (
+                2,
+                GroupDeltas {
+                    group_deltas: vec![GroupDelta {
+                        delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
+                            group_config: Some(CompactionConfig {
+                                max_level: 6,
                                 ..Default::default()
-                            })),
-                        }],
-                    },
-                ),
-                (
-                    0,
-                    GroupDeltas {
-                        group_deltas: vec![GroupDelta {
-                            delta_type: Some(DeltaType::GroupDestroy(GroupDestroy {})),
-                        }],
-                    },
-                ),
-                (
-                    1,
-                    GroupDeltas {
-                        group_deltas: vec![GroupDelta {
-                            delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                                level_idx: 1,
-                                inserted_table_infos: vec![SstableInfo {
-                                    object_id: 1,
-                                    sst_id: 1,
-                                    ..Default::default()
-                                }],
+                            }),
+                            ..Default::default()
+                        })),
+                    }],
+                },
+            ),
+            (
+                0,
+                GroupDeltas {
+                    group_deltas: vec![GroupDelta {
+                        delta_type: Some(DeltaType::GroupDestroy(GroupDestroy {})),
+                    }],
+                },
+            ),
+            (
+                1,
+                GroupDeltas {
+                    group_deltas: vec![GroupDelta {
+                        delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
+                            level_idx: 1,
+                            inserted_table_infos: vec![SstableInfo {
+                                object_id: 1,
+                                sst_id: 1,
                                 ..Default::default()
-                            })),
-                        }],
-                    },
-                ),
-            ]),
-            ..Default::default()
-        };
+                            }],
+                            ..Default::default()
+                        })),
+                    }],
+                },
+            ),
+        ]);
+        let version_delta = version_delta;
+
         version.apply_version_delta(&version_delta);
         let mut cg1 = build_initial_compaction_group_levels(
             1,

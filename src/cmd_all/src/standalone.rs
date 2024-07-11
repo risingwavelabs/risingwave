@@ -194,9 +194,10 @@ pub async fn standalone(
         is_in_memory = matches!(opts.backend, Some(MetaBackend::Mem));
         tracing::info!("starting meta-node thread with cli args: {:?}", opts);
 
+        let shutdown = shutdown.clone();
         let _meta_handle = tokio::spawn(async move {
             let dangerous_max_idle_secs = opts.dangerous_max_idle_secs;
-            risingwave_meta_node::start(opts).await;
+            risingwave_meta_node::start(opts, shutdown).await;
             tracing::warn!("meta is stopped, shutdown all nodes");
             if let Some(idle_exit_secs) = dangerous_max_idle_secs {
                 eprintln!("{}",
