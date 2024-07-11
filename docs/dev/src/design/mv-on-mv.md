@@ -1,4 +1,4 @@
-# Create MView on Top of MView
+# MView on Top of MView
 
 ## Background
 
@@ -19,7 +19,7 @@ create materialized view mv3 as select count(v1) as count_v1 from mv1;
 
 In physical representation, we introduce a dispatcher operator type, *Broadcast*. Broadcast dispatcher, as its name indicates, will dispatch every message to multiple downstreams. To simplify our design, we can assume that every MViewOperator has a `Broadcast` output, with zero or more downstreams.
 
-![fig1](../docs/images/mv-on-mv/mv-on-mv-01.svg)
+![fig1](../images/mv-on-mv/mv-on-mv-01.svg)
 
 ### Create new mview online
 
@@ -27,7 +27,7 @@ Assume that we already have a materialized view mv1, and we want to create a new
 
 The Chain operator has two inputs. The first one will be a batch query, denoted by the blue patterns in the figure below, which is a finite append-only stream (the snapshot of historical data in the base mview). The second one is its original input, an infinite stream, denoted by the red patterns.
 
-![fig2](../docs/images/mv-on-mv/mv-on-mv-02.svg)
+![fig2](../images/mv-on-mv/mv-on-mv-02.svg)
 
 The full process of creation is:
 
