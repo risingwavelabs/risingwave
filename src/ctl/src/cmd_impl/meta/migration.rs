@@ -722,7 +722,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                     id: Set(vd.id as _),
                     prev_id: Set(vd.prev_id as _),
                     max_committed_epoch: Set(vd.max_committed_epoch as _),
-                    safe_epoch: Set(vd.safe_epoch as _),
+                    safe_epoch: Set(vd.visible_table_safe_epoch() as _),
                     trivial_move: Set(vd.trivial_move),
                     full_version_delta: Set((&vd.to_protobuf()).into()),
                 })
