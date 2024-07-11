@@ -108,6 +108,7 @@ impl<'a> HummockVersionTransaction<'a> {
         deltas.push(delta);
     }
 
+    /// Returns a duplicate delta, used by time travel.
     pub(super) fn pre_commit_epoch(
         &mut self,
         epoch: HummockEpoch,
@@ -115,7 +116,7 @@ impl<'a> HummockVersionTransaction<'a> {
         new_table_ids: HashMap<TableId, CompactionGroupId>,
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         change_log_delta: HashMap<TableId, ChangeLogDelta>,
-    ) {
+    ) -> HummockVersionDelta {
         let mut new_version_delta = self.new_delta();
         new_version_delta.max_committed_epoch = epoch;
         new_version_delta.new_table_watermarks = new_table_watermarks;
@@ -172,7 +173,9 @@ impl<'a> HummockVersionTransaction<'a> {
             }
         });
 
+        let time_travel_delta = (*new_version_delta).clone();
         new_version_delta.pre_apply();
+        time_travel_delta
     }
 }
 

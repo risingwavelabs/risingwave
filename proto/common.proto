@@ -103,6 +103,7 @@ message BatchQueryEpoch {
     uint64 committed = 1;
     uint64 current = 2;
     uint64 backup = 3;
+    uint64 time_travel = 4;
   }
 }
 

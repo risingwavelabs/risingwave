@@ -216,23 +216,33 @@ impl HummockManager {
         let watermark =
             collect_global_gc_watermark(self.metadata_manager().clone(), spin_interval).await?;
         metrics.full_gc_last_object_id_watermark.set(watermark as _);
-        let candidate_sst_number = object_ids.len();
+        let candidate_object_number = object_ids.len();
         metrics
             .full_gc_candidate_object_count
-            .observe(candidate_sst_number as _);
+            .observe(candidate_object_number as _);
+        let pinned_object_ids = self
+            .all_object_ids_in_time_travel()
+            .await?
+            .collect::<HashSet<_>>();
         // 1. filter by watermark
         let object_ids = object_ids
             .into_iter()
             .filter(|s| *s < watermark)
             .collect_vec();
-        // 2. filter by version
-        let selected_sst_number = self.extend_objects_to_delete_from_scan(&object_ids).await;
+        let after_watermark = object_ids.len();
+        // 2. filter by time travel archive
+        let object_ids = object_ids
+            .into_iter()
+            .filter(|s| !pinned_object_ids.contains(s))
+            .collect_vec();
+        let after_time_travel = object_ids.len();
+        // 3. filter by version
+        let selected_object_number = self.extend_objects_to_delete_from_scan(&object_ids).await;
         metrics
             .full_gc_selected_object_count
-            .observe(selected_sst_number as _);
-        tracing::info!("GC watermark is {}. SST full scan returns {} SSTs. {} remains after filtered by GC watermark. {} remains after filtered by hummock version.",
-            watermark, candidate_sst_number, object_ids.len(), selected_sst_number);
-        Ok(selected_sst_number)
+            .observe(selected_object_number as _);
+        tracing::info!("GC watermark is {watermark}. Object full scan returns {candidate_object_number} objects. {after_watermark} remains after filtered by GC watermark. {after_time_travel} remains after filtered by time travel archives. {selected_object_number} remains after filtered by hummock version.");
+        Ok(selected_object_number)
     }
 }
 

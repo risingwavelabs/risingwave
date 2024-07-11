@@ -19,7 +19,8 @@ use risingwave_hummock_sdk::{
     HummockEpoch, HummockSstableObjectId, HummockVersionId, SstObjectIdRange, SyncResult,
 };
 use risingwave_pb::hummock::{
-    HummockSnapshot, SubscribeCompactionEventRequest, SubscribeCompactionEventResponse, VacuumTask,
+    HummockSnapshot, PbHummockVersion, SubscribeCompactionEventRequest,
+    SubscribeCompactionEventResponse, VacuumTask,
 };
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -61,4 +62,6 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         UnboundedSender<SubscribeCompactionEventRequest>,
         BoxStream<'static, CompactionEventItem>,
     )>;
+
+    async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion>;
 }
