@@ -653,7 +653,7 @@ impl HummockVersion {
                 // safe epoch has progressed, need further clear.
                 state_table_info.safe_epoch
             } else {
-                // safe epoch not progressed or the table has been remoted. No need to truncate
+                // safe epoch not progressed or the table has been removed. No need to truncate
                 continue;
             };
             let table_watermarks = modified_table_watermarks
