@@ -488,7 +488,7 @@ service NotificationService {
 message BackfillResponse {
    // holds all MVs which have completed their backfill operations
    // contains IDs from catalog.Table.id
-   repeated uint32 mv_backfills_completed = 30;
+   repeated uint32 mv_backfills_completed = 1;
 }
 
 message BackfillRequest {
