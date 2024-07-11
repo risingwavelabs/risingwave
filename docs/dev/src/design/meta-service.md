@@ -1,14 +1,6 @@
 # Meta Service
 
-- [Meta Service](#meta-service)
-  - [Background](#background)
-  - [Meta Store](#meta-store)
-  - [Types of Metadata](#types-of-metadata)
-    - [Catalog](#catalog)
-    - [Storage](#storage)
-  - [Push on Updates](#push-on-updates)
-
-<!-- Created by https://github.com/ekalinin/github-markdown-toc -->
+<!-- toc -->
 
 ## Background
 

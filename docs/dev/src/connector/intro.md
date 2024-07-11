@@ -1,5 +1,8 @@
 # Develop Connectors
 
+This page describes the development workflow to develop connectors. For design docs, see
+- [Source](./source.md)
+
 RisingWave supports a lot of connectors (sources and sinks).
 However, developing connectors is tricky because it involves external systems:
 
