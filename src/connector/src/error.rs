@@ -42,14 +42,13 @@ def_anyhow_newtype! {
     url::ParseError => "failed to parse url",
     serde_json::Error => "failed to parse json",
     csv::Error => "failed to parse csv",
-    ArrayError => transparent,
 
     uuid::Error => transparent, // believed to be self-explanatory
 
     // Connector errors
     opendal::Error => transparent, // believed to be self-explanatory
     parquet::errors::ParquetError => transparent,
-
+    ArrayError => "Array error",
     sqlx::Error => transparent, // believed to be self-explanatory
     mysql_async::Error => "MySQL error",
     tokio_postgres::Error => "Postgres error",
