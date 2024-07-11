@@ -124,18 +124,18 @@ async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
     // Prepare the barrier
     let curr_epoch = test_epoch(2);
     let barrier = Barrier::new_test_barrier(curr_epoch).with_stop();
-    let epoch = barrier.epoch.prev;
+
+    let mut mutation_subscriber =
+        manager.subscribe_barrier_mutation(extra_actor_id, &barrier.clone().into_dispatcher());
 
     // Read the mutation after receiving the barrier from remote input.
-    let mut mutation_reader = pin!(manager.read_barrier_mutation(DispatcherMessage::Barrier(
-        barrier.clone().into_dispatcher()
-    )));
+    let mut mutation_reader = pin!(mutation_subscriber.recv());
     assert!(poll_fn(|cx| Poll::Ready(mutation_reader.as_mut().poll(cx).is_pending())).await);
 
     test_env.inject_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect);
 
-    let msg = mutation_reader.await.unwrap();
-    assert_eq!(msg, Message::Barrier(barrier.clone()));
+    let (epoch, mutation) = mutation_reader.await.unwrap();
+    assert_eq!((epoch, &mutation), (barrier.epoch.prev, &barrier.mutation));
 
     // Collect a barrier before sending
     manager.collect(extra_actor_id, &barrier);

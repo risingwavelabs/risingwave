@@ -83,7 +83,8 @@ impl ReceiverExecutor {
             ActorContext::for_test(114),
             514,
             1919,
-            LocalInput::new(input, 0, shared_context.local_barrier_manager.clone()).boxed_input(),
+            LocalInput::new(input, 0, 114, shared_context.local_barrier_manager.clone())
+                .boxed_input(),
             shared_context,
             810,
             StreamingMetrics::unused().into(),

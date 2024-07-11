@@ -38,7 +38,7 @@ use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
-    ExchangeInfo, ExchangeSource, LocalExecutePlan, PbTaskId, PlanFragment, PlanNode as PlanNodePb,
+    ExchangeInfo, ExchangeSource, LocalExecutePlan, PbTaskId, PlanFragment, PlanNode as PbPlanNode,
     TaskOutputId,
 };
 use risingwave_pb::common::WorkerNode;
@@ -150,6 +150,7 @@ impl LocalQueryExecution {
         let search_path = self.session.config().search_path();
         let time_zone = self.session.config().timezone();
         let timeout = self.timeout;
+        let meta_client = self.front_env.meta_client_ref();
 
         let sender1 = sender.clone();
         let exec = async move {
@@ -171,7 +172,7 @@ impl LocalQueryExecution {
         use risingwave_expr::expr_context::TIME_ZONE;
 
         use crate::expr::function_impl::context::{
-            AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH, USER_INFO_READER,
+            AUTH_CONTEXT, CATALOG_READER, DB_NAME, META_CLIENT, SEARCH_PATH, USER_INFO_READER,
         };
 
         // box is necessary, otherwise the size of `exec` will double each time it is nested.
@@ -181,6 +182,7 @@ impl LocalQueryExecution {
         let exec = async move { SEARCH_PATH::scope(search_path, exec).await }.boxed();
         let exec = async move { AUTH_CONTEXT::scope(auth_context, exec).await }.boxed();
         let exec = async move { TIME_ZONE::scope(time_zone, exec).await }.boxed();
+        let exec = async move { META_CLIENT::scope(meta_client, exec).await }.boxed();
 
         if let Some(timeout) = timeout {
             let exec = async move {
@@ -274,7 +276,7 @@ impl LocalQueryExecution {
         second_stages: &mut Option<HashMap<StageId, QueryStageRef>>,
         partition: Option<PartitionInfo>,
         next_executor_id: Arc<AtomicU32>,
-    ) -> SchedulerResult<PlanNodePb> {
+    ) -> SchedulerResult<PbPlanNode> {
         let identity = format!(
             "{:?}-{}",
             execution_plan_node.plan_node_type,
@@ -443,7 +445,7 @@ impl LocalQueryExecution {
                         .collect();
                 }
 
-                Ok(PlanNodePb {
+                Ok(PbPlanNode {
                     // Since all the rest plan is embedded into the exchange node,
                     // there is no children any more.
                     children: vec![],
@@ -467,7 +469,7 @@ impl LocalQueryExecution {
                     _ => unreachable!(),
                 }
 
-                Ok(PlanNodePb {
+                Ok(PbPlanNode {
                     children: vec![],
                     identity,
                     node_body: Some(node_body),
@@ -487,7 +489,7 @@ impl LocalQueryExecution {
                     _ => unreachable!(),
                 }
 
-                Ok(PlanNodePb {
+                Ok(PbPlanNode {
                     children: vec![],
                     identity,
                     node_body: Some(node_body),
@@ -512,7 +514,7 @@ impl LocalQueryExecution {
                     _ => unreachable!(),
                 }
 
-                Ok(PlanNodePb {
+                Ok(PbPlanNode {
                     children: vec![],
                     identity,
                     node_body: Some(node_body),
@@ -545,7 +547,7 @@ impl LocalQueryExecution {
                     next_executor_id,
                 )?;
 
-                Ok(PlanNodePb {
+                Ok(PbPlanNode {
                     children: vec![left_child],
                     identity,
                     node_body: Some(node_body),
@@ -563,9 +565,9 @@ impl LocalQueryExecution {
                             next_executor_id.clone(),
                         )
                     })
-                    .collect::<SchedulerResult<Vec<PlanNodePb>>>()?;
+                    .collect::<SchedulerResult<Vec<PbPlanNode>>>()?;
 
-                Ok(PlanNodePb {
+                Ok(PbPlanNode {
                     children,
                     identity,
                     node_body: Some(execution_plan_node.node.clone()),
@@ -578,7 +580,7 @@ impl LocalQueryExecution {
     fn get_fragment_id(&self, table_id: &TableId) -> SchedulerResult<FragmentId> {
         let reader = self.front_env.catalog_reader().read_guard();
         reader
-            .get_table_by_id(table_id)
+            .get_any_table_by_id(table_id)
             .map(|table| table.fragment_id)
             .map_err(|e| SchedulerError::Internal(anyhow!(e)))
     }
@@ -591,7 +593,7 @@ impl LocalQueryExecution {
         let guard = self.front_env.catalog_reader().read_guard();
 
         let table = guard
-            .get_table_by_id(table_id)
+            .get_any_table_by_id(table_id)
             .map_err(|e| SchedulerError::Internal(anyhow!(e)))?;
 
         let fragment_id = match table.dml_fragment_id.as_ref() {

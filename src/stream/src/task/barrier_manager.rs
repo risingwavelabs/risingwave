@@ -31,7 +31,7 @@ use rw_futures_util::{pending_on_none, AttachedFuture};
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tonic::{Code, Status};
 
@@ -64,8 +64,8 @@ use risingwave_pb::stream_service::{
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    Actor, Barrier, BarrierInner, DispatchExecutor, DispatcherBarrier, DispatcherMessage, Message,
-    Mutation, StreamExecutorError,
+    Actor, Barrier, BarrierInner, DispatchExecutor, DispatcherBarrier, Mutation,
+    StreamExecutorError,
 };
 use crate::task::barrier_manager::managed_state::ManagedBarrierStateDebugInfo;
 use crate::task::barrier_manager::progress::BackfillState;
@@ -191,6 +191,8 @@ impl CreateActorContext {
     }
 }
 
+pub(crate) type SubscribeMutationItem = (u64, Option<Arc<Mutation>>);
+
 pub(super) enum LocalBarrierEvent {
     ReportActorCollected {
         actor_id: ActorId,
@@ -201,9 +203,10 @@ pub(super) enum LocalBarrierEvent {
         actor: ActorId,
         state: BackfillState,
     },
-    ReadBarrierMutation {
-        barrier: DispatcherBarrier,
-        mutation_sender: oneshot::Sender<Option<Arc<Mutation>>>,
+    SubscribeBarrierMutation {
+        actor_id: ActorId,
+        epoch: EpochPair,
+        mutation_sender: mpsc::UnboundedSender<SubscribeMutationItem>,
     },
     #[cfg(test)]
     Flush(oneshot::Sender<()>),
@@ -519,11 +522,13 @@ impl LocalBarrierWorker {
             } => {
                 self.update_create_mview_progress(current_epoch, actor, state);
             }
-            LocalBarrierEvent::ReadBarrierMutation {
-                barrier,
+            LocalBarrierEvent::SubscribeBarrierMutation {
+                actor_id,
+                epoch,
                 mutation_sender,
             } => {
-                self.read_barrier_mutation(barrier, mutation_sender);
+                self.state
+                    .subscribe_actor_mutation(actor_id, epoch.prev, mutation_sender);
             }
             #[cfg(test)]
             LocalBarrierEvent::Flush(sender) => sender.send(()).unwrap(),
@@ -644,15 +649,6 @@ impl LocalBarrierWorker {
 
         self.control_stream_handle.send_response(result);
         Ok(())
-    }
-
-    /// Read mutation from barrier state.
-    fn read_barrier_mutation(
-        &mut self,
-        barrier: DispatcherBarrier,
-        sender: oneshot::Sender<Option<Arc<Mutation>>>,
-    ) {
-        self.state.read_barrier_mutation(barrier, sender);
     }
 
     /// Register sender for source actors, used to send barriers.
@@ -911,33 +907,18 @@ impl LocalBarrierManager {
     }
 
     /// When a `RemoteInput` get a barrier, it should wait and read the barrier mutation from the barrier manager.
-    pub async fn read_barrier_mutation(&self, msg: DispatcherMessage) -> StreamResult<Message> {
-        let barrier = match msg {
-            DispatcherMessage::Barrier(barrier) => barrier,
-            DispatcherMessage::Chunk(chunk) => {
-                return Ok(Message::Chunk(chunk));
-            }
-            DispatcherMessage::Watermark(watermark) => {
-                return Ok(Message::Watermark(watermark));
-            }
-        };
-
-        let (tx, rx) = oneshot::channel();
-        let mut ret = Barrier {
-            epoch: barrier.epoch,
-            mutation: None,
-            kind: barrier.kind,
-            tracing_context: barrier.tracing_context.clone(),
-            passed_actors: barrier.passed_actors.clone(),
-        };
-        self.send_event(LocalBarrierEvent::ReadBarrierMutation {
-            barrier,
+    pub fn subscribe_barrier_mutation(
+        &self,
+        actor_id: ActorId,
+        first_barrier: &DispatcherBarrier,
+    ) -> mpsc::UnboundedReceiver<SubscribeMutationItem> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.send_event(LocalBarrierEvent::SubscribeBarrierMutation {
+            actor_id,
+            epoch: first_barrier.epoch,
             mutation_sender: tx,
         });
-        ret.mutation = rx
-            .await
-            .map_err(|_| anyhow!("barrier manager maybe reset"))?;
-        Ok(Message::Barrier(ret))
+        rx
     }
 }
 

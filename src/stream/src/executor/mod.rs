@@ -24,7 +24,7 @@ use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl};

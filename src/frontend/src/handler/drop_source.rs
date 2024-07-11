@@ -38,7 +38,8 @@ pub async fn handle_drop_source(
     let (source, schema_name) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
 
-        if let Ok((table, _)) = catalog_reader.get_table_by_name(db_name, schema_path, &source_name)
+        if let Ok((table, _)) =
+            catalog_reader.get_created_table_by_name(db_name, schema_path, &source_name)
         {
             return Err(table.bad_drop_error());
         }

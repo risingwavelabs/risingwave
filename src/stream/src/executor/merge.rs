@@ -92,6 +92,7 @@ impl MergeExecutor {
                     LocalInput::new(
                         input,
                         idx as ActorId,
+                        114,
                         shared_context.local_barrier_manager.clone(),
                     )
                     .boxed_input()
