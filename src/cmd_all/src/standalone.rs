@@ -293,17 +293,17 @@ mod test {
     fn test_parse_opt_args() {
         // Test parsing into standalone-level opts.
         let raw_opts = "
---compute-opts=--listen-addr 127.0.0.1:8000 --total-memory-bytes 34359738368 --parallelism 10
---meta-opts=--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001 --etcd-password 1234
---frontend-opts=--config-path=src/config/original.toml
+--compute-opts=--listen-addr 127.0.0.1:8000 --total-memory-bytes 34359738368 --parallelism 10 --temp-secret-file-dir ./compute/secrets/
+--meta-opts=--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001 --etcd-password 1234 --temp-secret-file-dir ./meta/secrets/
+--frontend-opts=--config-path=src/config/original.toml --temp-secret-file-dir ./frontend/secrets/
 --prometheus-listener-addr=127.0.0.1:1234
 --config-path=src/config/test.toml
 ";
         let actual = StandaloneOpts::parse_from(raw_opts.lines());
         let opts = StandaloneOpts {
-            compute_opts: Some("--listen-addr 127.0.0.1:8000 --total-memory-bytes 34359738368 --parallelism 10".into()),
-            meta_opts: Some("--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001 --etcd-password 1234".into()),
-            frontend_opts: Some("--config-path=src/config/original.toml".into()),
+            compute_opts: Some("--listen-addr 127.0.0.1:8000 --total-memory-bytes 34359738368 --parallelism 10 --temp-secret-file-dir ./compute/secrets/".into()),
+            meta_opts: Some("--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001 --etcd-password 1234 --temp-secret-file-dir ./meta/secrets/".into()),
+            frontend_opts: Some("--config-path=src/config/original.toml --temp-secret-file-dir ./frontend/secrets/".into()),
             compactor_opts: None,
             prometheus_listener_addr: Some("127.0.0.1:1234".into()),
             config_path: Some("src/config/test.toml".into()),
@@ -354,7 +354,7 @@ mod test {
                             heap_profiling_dir: None,
                             dangerous_max_idle_secs: None,
                             connector_rpc_endpoint: None,
-                            temp_secret_file_dir: None,
+                            temp_secret_file_dir: "./meta/secrets/",
                         },
                     ),
                     compute_opts: Some(
@@ -378,7 +378,7 @@ mod test {
                             async_stack_trace: None,
                             heap_profiling_dir: None,
                             connector_rpc_endpoint: None,
-                            temp_secret_file_dir: None,
+                            temp_secret_file_dir: "./compute/secrets/",
                         },
                     ),
                     frontend_opts: Some(
@@ -395,7 +395,7 @@ mod test {
                             config_path: "src/config/test.toml",
                             metrics_level: None,
                             enable_barrier_read: None,
-                            temp_secret_file_dir: None,
+                            temp_secret_file_dir: "./frontend/secrets/",
                         },
                     ),
                     compactor_opts: None,
