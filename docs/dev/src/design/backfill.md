@@ -221,7 +221,7 @@ Notice how `mv2` only needs the `id` column from `mv1`, and not the full `pk` wi
 
 #### Overview
 
-![backfill sides](./images/backfill/backfill-sides.png)
+![backfill sides](../images/backfill/backfill-sides.png)
 
 For `ArrangementBackfill`, we have 2 streams which we merge:
 upstream and historical streams.
@@ -230,7 +230,7 @@ to make sure `Barriers` can flow through the stream graph.
 Additionally, every epoch, we will refresh the historical stream, as upstream data gets checkpointed
 so our snapshot is stale.
 
-![polling](./images/backfill/polling.png)
+![polling](../images/backfill/polling.png)
 
 We will poll from this stream in backfill to get upstream and historical data chunks for processing,
 as well as barriers to checkpoint to backfill state.
@@ -239,7 +239,7 @@ For each chunk (DataChunk / StreamChunk), we may also need to do some further pr
 
 #### Schemas
 
-![schema](./images/backfill/schema.png)
+![schema](../images/backfill/schema.png)
 
 There are 3 schemas to consider when processing the backfill data:
 1. The state table schema of upstream.
@@ -258,7 +258,7 @@ to ensure the historical side and the upstream side have a consistent schema.
 
 #### Polling loop
 
-![handle_poll](./images/backfill/handle-poll.png)
+![handle_poll](../images/backfill/handle-poll.png)
 
 If we poll a chunk from the historical side, we will yield it to the downstream,
 and update the primary key (pk) we have backfilled to in the backfill state.
@@ -278,7 +278,7 @@ Then the polling loop will continue.
 
 ### Replication
 
-![replication_simple](./images/backfill/replication-simple.png)
+![replication_simple](../images/backfill/replication-simple.png)
 
 Previously, when doing snapshot reads to read **Historical Data**, backfill executor is able to read
 from the shared buffer for the previous epoch.
@@ -288,7 +288,7 @@ However, with `ArrangementBackfill`,
 we can't rely on the shared buffer of upstream,
 since it can be on a different parallel unit.
 
-![replication_replicated](./images/backfill/replication-replicated.png)
+![replication_replicated](../images/backfill/replication-replicated.png)
 
 So we need to make sure for the previous epoch, we buffer
 its updates somewhere to replicate the shared buffer.
@@ -314,7 +314,7 @@ to ensure the historical side and the upstream side have a consistent schema.
 Where (1) refers to the state table schema of upstream,
 and (2) refers to the output schema from upstream to arrangement backfill.
 
-![replication_example](./images/backfill/replication-example.png)
+![replication_example](../images/backfill/replication-example.png)
 
 Now let's consider an instance where (1) has the schema:
 

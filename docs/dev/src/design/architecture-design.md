@@ -19,7 +19,7 @@ There are currently 4 types of nodes in the cluster:
    * **HummockManager**: Manages the SST file manifest and meta-info of Hummock storage.
    * **CompactionManager**: Manages the compaction status and task assignment of Hummock storage.
 
-![Architecture](./images/architecture-design/architecture.svg)
+![Architecture](../images/architecture-design/architecture.svg)
 
 The topmost component is the Postgres client. It issues queries through [TCP-based Postgres wire protocol](https://www.postgresql.org/docs/current/protocol.html).
 
@@ -41,13 +41,13 @@ Let's begin with a simple SELECT and see how it is executed.
 SELECT SUM(t.quantity) FROM t group by t.company;
 ```
 
-![Batch-Query](./images/architecture-design/batch-query.svg)
+![Batch-Query](../images/architecture-design/batch-query.svg)
 
 The query will be sliced into multiple *plan fragments*, each being an independent scheduling unit and probably with different parallelism. For simplicity, parallelism is usually set to the number of CPU cores in the cluster. For example, if there are 3 compute-nodes in the cluster, each with 4 CPU cores, then the parallelism will be set to 12 by default.
 
 Each parallel unit is called a *task*. Specifically, PlanFragment 2 will be distributed as 4 tasks to 4 CPU cores.
 
-![Plan-Fragments](./images/architecture-design/plan-fragments.svg)
+![Plan-Fragments](../images/architecture-design/plan-fragments.svg)
 
 Behind the TableScan operator, there's a storage engine called Hummock that stores the internal states, materialized views, and the tables. Note that only the materialized views and tables are queryable. The internal states are invisible to users.
 
@@ -62,7 +62,7 @@ For example:
 CREATE MATERIALIZED VIEW mv1 AS SELECT SUM(t.quantity) as q FROM t group by t.company;
 ```
 
-![Stream-Pipeline](./images/architecture-design/stream-pipeline.png)
+![Stream-Pipeline](../images/architecture-design/stream-pipeline.png)
 
 When the data source (Kafka, e.g.) propagates a bunch of records into the system, the materialized view will refresh automatically.
 
