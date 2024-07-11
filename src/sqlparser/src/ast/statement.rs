@@ -212,7 +212,7 @@ impl Encode {
             "NONE" => Encode::None,
             "PARQUET" => Encode::Parquet,
             _ => parser_err!(
-                "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE |PARQUET| NONE after Encode"
+                "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE | PARQUET | NONE after Encode"
             ),
         })
     }

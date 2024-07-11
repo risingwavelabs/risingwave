@@ -92,10 +92,11 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                     .reader_with(&object_name)
                     .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
                     .await?
-                    .into_futures_async_read(split.offset as u64..)
+                    .into_futures_async_read(..)
                     .await?
                     .compat();
-
+                // For the Parquet format, we directly convert from a record batch to a stream chunk.
+                // Therefore, the offset of the Parquet file represents the current position in terms of the number of rows read from the file.
                 let record_batch_stream = ParquetRecordBatchStreamBuilder::new(reader)
                     .await?
                     .with_batch_size(self.source_ctx.source_ctrl_opts.chunk_size)
@@ -145,7 +146,6 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         let max_chunk_size = source_ctx.source_ctrl_opts.chunk_size;
         let split_id = split.id();
         let object_name = split.name.clone();
-
         let reader = op
             .read_with(&object_name)
             .range(split.offset as u64..)
