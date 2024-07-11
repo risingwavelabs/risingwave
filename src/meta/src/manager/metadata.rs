@@ -317,6 +317,7 @@ impl MetadataManager {
         }
     }
 
+    /// Wait until all worker nodes (except meta nodes) exit. Used for graceful shutdown.
     pub async fn wait_till_all_worker_nodes_exit(&self) -> MetaResult<()> {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         let mut last_remaining = 0;
@@ -328,12 +329,7 @@ impl MetadataManager {
                 .list_worker_node(None, Some(State::Running))
                 .await?
                 .into_iter()
-                .filter(|w| {
-                    matches!(
-                        w.r#type(),
-                        WorkerType::Frontend | WorkerType::ComputeNode | WorkerType::Compactor
-                    )
-                })
+                .filter(|w| !matches!(w.r#type(), WorkerType::Meta)) // filter out meta node
                 .count();
 
             if remaining == 0 {
@@ -343,7 +339,7 @@ impl MetadataManager {
 
             if remaining != last_remaining {
                 last_remaining = remaining;
-                warn!(remaining, "waiting for all worker nodes to exit");
+                warn!(remaining, "waiting for all worker nodes to exit...");
             }
         }
     }
