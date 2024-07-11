@@ -17,5 +17,5 @@ mod glue_resolver;
 mod parser;
 
 pub use confluent_resolver::ConfluentSchemaCache;
-pub use glue_resolver::GlueSchemaCache;
+pub use glue_resolver::{GlueSchemaCache, GlueSchemaCacheImpl};
 pub use parser::{AvroAccessBuilder, AvroParserConfig};

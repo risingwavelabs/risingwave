@@ -24,7 +24,7 @@ use risingwave_connector_codec::decoder::avro::{
 };
 use risingwave_pb::plan_common::ColumnDesc;
 
-use super::{ConfluentSchemaCache, GlueSchemaCache};
+use super::{ConfluentSchemaCache, GlueSchemaCache as _, GlueSchemaCacheImpl};
 use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
 use crate::parser::util::bytes_from_url;
@@ -159,7 +159,7 @@ pub struct AvroParserConfig {
 #[derive(Debug, Clone)]
 enum WriterSchemaCache {
     Confluent(Arc<ConfluentSchemaCache>),
-    Glue(Arc<GlueSchemaCache>),
+    Glue(Arc<GlueSchemaCacheImpl>),
     File,
 }
 
@@ -241,9 +241,10 @@ impl AvroParserConfig {
             SchemaLocation::Glue {
                 schema_arn,
                 aws_auth_props,
+                mock_config,
             } => {
-                let client = aws_sdk_glue::Client::new(&aws_auth_props.build_config().await?);
-                let resolver = GlueSchemaCache::new(client);
+                let resolver =
+                    GlueSchemaCacheImpl::new(&aws_auth_props, mock_config.as_deref()).await?;
                 let schema = resolver.get_by_name(&schema_arn).await?;
                 Ok(Self {
                     schema: Arc::new(ResolvedAvroSchema::create(schema)?),

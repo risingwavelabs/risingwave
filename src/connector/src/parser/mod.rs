@@ -1094,6 +1094,8 @@ pub enum SchemaLocation {
     Glue {
         schema_arn: String,
         aws_auth_props: AwsAuthProps,
+        // When `Some(_)`, ignore AWS and load schemas from provided config
+        mock_config: Option<String>,
     },
 }
 
@@ -1223,6 +1225,11 @@ impl SpecificParserConfig {
                             serde_json::to_value(info.format_encode_options.clone()).unwrap(),
                         )
                         .map_err(|e| anyhow::anyhow!(e))?,
+                        // The option `mock_config` is not public and we can break compatibility.
+                        mock_config: info
+                            .format_encode_options
+                            .get("aws.glue.mock_config")
+                            .cloned(),
                     }
                 } else if info.use_schema_registry {
                     SchemaLocation::Confluent {
