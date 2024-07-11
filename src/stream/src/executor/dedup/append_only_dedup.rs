@@ -15,7 +15,7 @@
 use futures::stream;
 use itertools::Itertools;
 use risingwave_common::array::Op;
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::row::RowExt;
 
 use super::cache::DedupCache;

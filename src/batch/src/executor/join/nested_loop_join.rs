@@ -15,7 +15,7 @@
 use futures_async_stream::try_stream;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{Array, DataChunk};
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::{repeat_n, RowExt};

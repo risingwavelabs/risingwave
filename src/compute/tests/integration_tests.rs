@@ -28,7 +28,7 @@ use risingwave_batch::executor::{
     RowSeqScanExecutor, ScanRange,
 };
 use risingwave_common::array::{Array, DataChunk, F64Array, SerialArray};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
 };

@@ -28,3 +28,7 @@ including the `<!-- toc -->` marker at the place where you want the TOC.
 
 We use `mdbook-linkcheck` to validate URLs included in our documentation.
 `linkcheck` will be run automatically when you build with the instructions in the section above.
+
+## Images
+
+We recommend that you use [draw.io](https://app.diagrams.net/) to draw illustrations and export as SVG images, with "include a copy of my diagram" selected for further editing.
