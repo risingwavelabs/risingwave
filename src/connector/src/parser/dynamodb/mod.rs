@@ -16,8 +16,6 @@ mod json_parser;
 pub use json_parser::*;
 mod cdc_json_parser;
 pub use cdc_json_parser::*;
-mod change_event;
-pub use change_event::*;
 use risingwave_common::bail;
 use risingwave_common::types::DataType;
 use risingwave_connector_codec::decoder::AccessError;

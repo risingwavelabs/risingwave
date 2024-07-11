@@ -1250,6 +1250,26 @@ pub(super) fn check_nexmark_schema(
     Ok(())
 }
 
+/// TODO: perhaps put the hint in notice is better. The error message format might be not that reliable.
+fn hint_dynamodb(format: &str) -> String {
+    format!(
+        r#"Hint: For FORMAT {format:} ENCODE JSON, single_blob_column MUST be JSONB type and the only column not be part of primary key.
+example:
+    CREATE TABLE <table_name> (
+        <key_name_1> <key_type_1>,
+        <key_name_2> <key_type_2>,
+        ...
+        <single_blob_column_name> JSONB
+        PRIMARY KEY (<key_name_1>, <key_name_2>, ...)
+    )
+    WITH (...)
+    FORMAT {format:} ENCODE JSON (
+        single_blob_column = '<single_blob_column_name>'
+    )
+"#
+    )
+}
+
 fn validate_dynamodb_source(
     source_info: &StreamSourceInfo,
     columns: &mut [ColumnCatalog],
@@ -1259,25 +1279,13 @@ fn validate_dynamodb_source(
     if sql_defined_pk_names.is_empty() {
         return Err(RwError::from(ProtocolError(format!(
             "Primary key must be specified when creating source with FORMAT {}.",
-            format_string
+            hint_dynamodb(format_string),
         ))));
     }
     let single_blob_column = source_info
         .format_encode_options
         .get(JSON_SINGLE_BLOB_COLUMN_KEY)
         .cloned();
-    if single_blob_column.is_none() {
-        return Err(RwError::from(ProtocolError(format!(
-            "Single blob column must be specified when creating source with FORMAT {}.",
-            format_string
-        ))));
-    }
-    if sql_defined_pk_names.len() + 1 != columns.len() {
-        return Err(RwError::from(ProtocolError(
-            format!("Primary key must include all columns except single blob column when creating source with FORMAT {}.", format_string
-                ),
-        )));
-    }
     let single_blob_columns = columns
         .iter()
         .filter_map(|col| {
@@ -1288,14 +1296,16 @@ fn validate_dynamodb_source(
             }
         })
         .collect_vec();
-    if single_blob_columns.len() != 1
-        || single_blob_columns[0].0 != single_blob_column.unwrap()
+    if single_blob_column.is_none() // must have single blob column
+        || sql_defined_pk_names.len() + 1 != columns.len() // must be the only column not included in the primary keys
+        || single_blob_columns.len() != 1 // ensure single blob column is not one of the primary key columns
+        || single_blob_columns[0].0 != single_blob_column.unwrap() // match names
         || single_blob_columns[0].1 != DataType::Jsonb
     {
-        return Err(RwError::from(ProtocolError(
-            format!("Single blob column must be a jsonb column and not a part of primary keys when creating source with FORMAT {}.", format_string
-                ),
-        )));
+        return Err(RwError::from(ProtocolError(format!(
+            "The Single blob column, which must be specified as a jsonb column, should also be the only column not included in the primary keys.\n\n{}",
+            hint_dynamodb(format_string),
+        ))));
     }
     Ok(())
 }
