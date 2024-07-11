@@ -30,6 +30,7 @@ use risingwave_common::config::{
 };
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
@@ -153,7 +154,7 @@ pub async fn start_meta_node(listen_addr: String, state_store: String, config_pa
         "enable_compaction_deterministic should be set"
     );
 
-    risingwave_meta_node::start(meta_opts).await
+    risingwave_meta_node::start(meta_opts, CancellationToken::new() /* dummy */).await
 }
 
 async fn start_compactor_node(
@@ -172,7 +173,7 @@ async fn start_compactor_node(
         "--config-path",
         &config_path,
     ]);
-    risingwave_compactor::start(opts).await
+    risingwave_compactor::start(opts, CancellationToken::new() /* dummy */).await
 }
 
 pub fn start_compactor_thread(

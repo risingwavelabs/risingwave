@@ -170,6 +170,9 @@ pub struct MetaOpts {
     /// Interval of hummock version checkpoint.
     pub hummock_version_checkpoint_interval_sec: u64,
     pub enable_hummock_data_archive: bool,
+    pub enable_hummock_time_travel: bool,
+    pub hummock_time_travel_retention_ms: u64,
+    pub hummock_time_travel_snapshot_interval: u64,
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected. Greater value reduces object store IO, meanwhile it results in
     /// more loss of in memory `HummockVersionCheckpoint::stale_objects` state when meta node is
@@ -305,6 +308,9 @@ impl MetaOpts {
             vacuum_spin_interval_ms: 0,
             hummock_version_checkpoint_interval_sec: 30,
             enable_hummock_data_archive: false,
+            enable_hummock_time_travel: false,
+            hummock_time_travel_retention_ms: 0,
+            hummock_time_travel_snapshot_interval: 0,
             min_delta_log_num_for_hummock_version_checkpoint: 1,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             full_gc_interval_sec: 3600 * 24 * 7,

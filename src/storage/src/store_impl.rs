@@ -22,7 +22,7 @@ use foyer::{
     DirectFsDeviceOptionsBuilder, HybridCacheBuilder, RateLimitPicker, RuntimeConfigBuilder,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
-use risingwave_common_service::observer_manager::RpcNotificationClient;
+use risingwave_common_service::RpcNotificationClient;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::build_remote_object_store;
 
@@ -281,7 +281,7 @@ pub mod verify {
 
         // TODO: may avoid manual async fn when the bug of rust compiler is fixed. Currently it will
         // fail to compile.
-        #[allow(clippy::manual_async_fn)]
+        #[expect(clippy::manual_async_fn)]
         fn iter(
             &self,
             key_range: TableKeyRange,
@@ -303,7 +303,7 @@ pub mod verify {
             }
         }
 
-        #[allow(clippy::manual_async_fn)]
+        #[expect(clippy::manual_async_fn)]
         fn rev_iter(
             &self,
             key_range: TableKeyRange,
@@ -421,7 +421,7 @@ pub mod verify {
             actual
         }
 
-        #[allow(clippy::manual_async_fn)]
+        #[expect(clippy::manual_async_fn)]
         fn iter(
             &self,
             key_range: TableKeyRange,
@@ -442,7 +442,7 @@ pub mod verify {
             }
         }
 
-        #[allow(clippy::manual_async_fn)]
+        #[expect(clippy::manual_async_fn)]
         fn rev_iter(
             &self,
             key_range: TableKeyRange,
@@ -644,6 +644,7 @@ impl StateStoreImpl {
                     .with_indexer_shards(opts.meta_file_cache_indexer_shards)
                     .with_flushers(opts.meta_file_cache_flushers)
                     .with_reclaimers(opts.meta_file_cache_reclaimers)
+                    .with_buffer_threshold(opts.meta_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
                     .with_clean_region_threshold(
                         opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
                     )
@@ -696,6 +697,7 @@ impl StateStoreImpl {
                     .with_indexer_shards(opts.data_file_cache_indexer_shards)
                     .with_flushers(opts.data_file_cache_flushers)
                     .with_reclaimers(opts.data_file_cache_reclaimers)
+                    .with_buffer_threshold(opts.data_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
                     .with_clean_region_threshold(
                         opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
                     )

@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio::sync::oneshot::Sender;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 use tokio::task::JoinHandle;
 
 /// `IdleManager` keeps track of latest activity and report whether the meta service has been
@@ -77,24 +77,17 @@ impl IdleManager {
     pub fn start_idle_checker(
         idle_manager: IdleManagerRef,
         check_interval: Duration,
-        idle_send: tokio::sync::oneshot::Sender<()>,
-    ) -> (JoinHandle<()>, Sender<()>) {
+        shutdown: CancellationToken,
+    ) -> JoinHandle<()> {
         let dur = idle_manager.get_config_max_idle();
         if !dur.is_zero() {
             tracing::warn!("--dangerous-max-idle-secs is set. The meta server will be automatically stopped after idle for {:?}.", dur)
         }
 
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-        let join_handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             let mut min_interval = tokio::time::interval(check_interval);
             loop {
-                tokio::select! {
-                    _ = min_interval.tick() => {},
-                    _ = &mut shutdown_rx => {
-                        tracing::info!("Idle checker is stopped");
-                        return;
-                    }
-                }
+                min_interval.tick().await;
                 if idle_manager.is_exceeding_max_idle() {
                     break;
                 }
@@ -104,9 +97,9 @@ impl IdleManager {
                 idle_manager.get_config_max_idle()
             );
             tracing::warn!("Idle checker is shutting down the server");
-            let _ = idle_send.send(());
-        });
-        (join_handle, shutdown_tx)
+
+            shutdown.cancel();
+        })
     }
 }
 
