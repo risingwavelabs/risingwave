@@ -22,7 +22,7 @@ done
 shift $((OPTIND -1))
 
 sudo apt install sqlite3 -y
-download_and_prepare_rw "$profile" source
+download_and_prepare_rw "$profile" common
 
 echo "--- starting risingwave cluster"
 risedev ci-start ci-time-travel
