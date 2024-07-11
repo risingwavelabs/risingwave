@@ -35,9 +35,13 @@ pub mod connection;
 pub mod database;
 pub mod fragment;
 pub mod function;
+pub mod hummock_epoch_to_version;
 pub mod hummock_pinned_snapshot;
 pub mod hummock_pinned_version;
 pub mod hummock_sequence;
+pub mod hummock_sstable_info;
+pub mod hummock_time_travel_delta;
+pub mod hummock_time_travel_version;
 pub mod hummock_version_delta;
 pub mod hummock_version_stats;
 pub mod index;
@@ -391,6 +395,12 @@ derive_from_blob!(ExprContext, risingwave_pb::plan_common::PbExprContext);
 derive_from_blob!(
     FragmentVnodeMapping,
     risingwave_pb::common::ParallelUnitMapping
+);
+
+derive_array_from_blob!(
+    HummockVersionDeltaArray,
+    risingwave_pb::hummock::PbHummockVersionDelta,
+    PbHummockVersionDeltaArray
 );
 
 #[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize)]
