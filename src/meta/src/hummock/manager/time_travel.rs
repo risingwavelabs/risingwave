@@ -55,7 +55,9 @@ impl HummockManager {
         if self.env.opts.enable_hummock_time_travel && self.sql_store().is_none() {
             return Err(require_sql_meta_store_err());
         }
-        let sql_store = self.sql_store().unwrap();
+        let Some(sql_store) = self.sql_store() else {
+            return Ok(());
+        };
         let mut gurad = self.versioning.write().await;
         gurad.mark_next_time_travel_version_snapshot();
 
