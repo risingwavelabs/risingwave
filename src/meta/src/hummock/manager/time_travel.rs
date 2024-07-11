@@ -52,13 +52,14 @@ impl HummockManager {
     }
 
     pub(crate) async fn init_time_travel_state(&self) -> Result<()> {
+        if self.env.opts.enable_hummock_time_travel && self.sql_store().is_none() {
+            return Err(require_sql_meta_store_err());
+        }
+        let sql_store = self.sql_store().unwrap();
         let mut gurad = self.versioning.write().await;
         gurad.mark_next_time_travel_version_snapshot();
 
         gurad.last_time_travel_snapshot_sst_ids = HashSet::new();
-        let Some(sql_store) = self.sql_store() else {
-            return Ok(());
-        };
         let Some(version) = hummock_time_travel_version::Entity::find()
             .order_by_desc(hummock_time_travel_version::Column::VersionId)
             .one(&sql_store.conn)
@@ -92,6 +93,7 @@ impl HummockManager {
             .one(&txn)
             .await?;
         let Some(version_watermark) = version_watermark else {
+            txn.commit().await?;
             return Ok(());
         };
         let res = hummock_epoch_to_version::Entity::delete_many()
@@ -107,21 +109,37 @@ impl HummockManager {
             res.rows_affected
         );
 
-        let earliest_valid_version_id: Option<risingwave_meta_model_v2::HummockVersionId> =
-            hummock_time_travel_version::Entity::find()
-                .select_only()
-                .column(hummock_time_travel_version::Column::VersionId)
-                .filter(
-                    hummock_time_travel_version::Column::VersionId
-                        .lte(version_watermark.version_id),
-                )
-                .order_by_desc(hummock_time_travel_version::Column::VersionId)
-                .into_tuple()
-                .one(&txn)
-                .await?;
-        let Some(earliest_valid_version_id) = earliest_valid_version_id else {
+        // let earliest_valid_version_id: Option<risingwave_meta_model_v2::HummockVersionId> =
+        //     hummock_time_travel_version::Entity::find()
+        //         .select_only()
+        //         .column(hummock_time_travel_version::Column::VersionId)
+        //         .filter(
+        //             hummock_time_travel_version::Column::VersionId
+        //                 .lte(version_watermark.version_id),
+        //         )
+        //         .order_by_desc(hummock_time_travel_version::Column::VersionId)
+        //         .into_tuple()
+        //         .one(&txn)
+        //         .await?;
+        let earliest_valid_version = hummock_time_travel_version::Entity::find()
+            .select_only()
+            .column(hummock_time_travel_version::Column::VersionId)
+            .filter(
+                hummock_time_travel_version::Column::VersionId.lte(version_watermark.version_id),
+            )
+            .order_by_desc(hummock_time_travel_version::Column::VersionId)
+            .one(&txn)
+            .await?
+            .map(|m| HummockVersion::from_persisted_protobuf(&m.version.to_protobuf()));
+        let Some(earliest_valid_version) = earliest_valid_version else {
             txn.commit().await?;
             return Ok(());
+        };
+        let (earliest_valid_version_id, earliest_valid_version_sst_ids) = {
+            (
+                earliest_valid_version.id,
+                earliest_valid_version.get_sst_ids(),
+            )
         };
         let version_ids_to_delete: Vec<risingwave_meta_model_v2::HummockVersionId> =
             hummock_time_travel_version::Entity::find()
@@ -142,22 +160,6 @@ impl HummockManager {
                 .into_tuple()
                 .all(&txn)
                 .await?;
-
-        let earliest_valid_version_sst_ids = {
-            let earliest_valid_version =
-                hummock_time_travel_version::Entity::find_by_id(earliest_valid_version_id)
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| {
-                        Error::TimeTravel(anyhow!(format!(
-                            "version {} not found",
-                            earliest_valid_version_id
-                        )))
-                    })?;
-            HummockVersion::from_persisted_protobuf(&earliest_valid_version.version.to_protobuf())
-                .get_sst_ids()
-        };
-
         for delta_id_to_delete in delta_ids_to_delete {
             let delta_to_delete = hummock_time_travel_delta::Entity::find_by_id(delta_id_to_delete)
                 .one(&txn)
@@ -184,7 +186,6 @@ impl HummockManager {
                 res.rows_affected
             );
         }
-
         let mut next_version_sst_ids = earliest_valid_version_sst_ids;
         for prev_version_id in version_ids_to_delete {
             let sst_ids = {

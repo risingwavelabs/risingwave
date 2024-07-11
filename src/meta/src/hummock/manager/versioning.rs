@@ -58,6 +58,7 @@ pub struct Versioning {
     pub current_version: HummockVersion,
     pub local_metrics: HashMap<u32, LocalTableMetrics>,
     pub time_travel_snapshot_interval_counter: u64,
+    /// Used to avoid the attempts to rewrite the same SST to meta store
     pub last_time_travel_snapshot_sst_ids: HashSet<HummockSstableId>,
 
     // Persistent states below

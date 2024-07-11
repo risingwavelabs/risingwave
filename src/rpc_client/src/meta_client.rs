@@ -1548,11 +1548,7 @@ impl HummockMetaClient for MetaClient {
     }
 
     async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion> {
-        let resp = self
-            .inner
-            .get_version_by_epoch(GetVersionByEpochRequest { epoch })
-            .await?;
-        Ok(resp.version.unwrap())
+        self.get_version_by_epoch(epoch).await
     }
 }
 

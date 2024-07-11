@@ -205,6 +205,7 @@ impl HummockManager {
                     .collect(),
             });
         }
+        // Whenever data archive or time travel is enabled, we can directly discard reference to stale objects that will no longer be used.
         if self.env.opts.enable_hummock_data_archive || self.env.opts.enable_hummock_time_travel {
             let context_info = self.context_info.read().await;
             let min_pinned_version_id = context_info.min_pinned_version_id();
