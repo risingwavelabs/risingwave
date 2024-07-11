@@ -829,14 +829,16 @@ impl UnsyncData {
         // When drop/cancel a streaming job, for the barrier to stop actor, the
         // local instance will call `local_seal_epoch`, but the `next_epoch` won't be
         // called `start_epoch` because we have stopped writing on it.
-        if let Some(stopped_next_epoch) = table_data.stopped_next_epoch {
-            assert_eq!(stopped_next_epoch, next_epoch);
-        } else if !table_data.unsync_epochs.contains_key(&next_epoch) {
-            if let Some(max_epoch) = table_data.max_epoch() {
-                assert_gt!(next_epoch, max_epoch);
+        if !table_data.unsync_epochs.contains_key(&next_epoch) {
+            if let Some(stopped_next_epoch) = table_data.stopped_next_epoch {
+                assert_eq!(stopped_next_epoch, next_epoch);
+            } else {
+                if let Some(max_epoch) = table_data.max_epoch() {
+                    assert_gt!(next_epoch, max_epoch);
+                }
+                debug!(?table_id, epoch, next_epoch, "table data has stopped");
+                table_data.stopped_next_epoch = Some(next_epoch);
             }
-            debug!(?table_id, epoch, next_epoch, "table data has stopped");
-            table_data.stopped_next_epoch = Some(next_epoch);
         }
         if let Some((direction, table_watermarks)) = opts.table_watermarks {
             table_data.add_table_watermarks(epoch, table_watermarks, direction);
