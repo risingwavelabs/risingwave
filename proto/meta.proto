@@ -560,7 +560,6 @@ message UpdateStreamingJobRequest {
 }
 
 // We do not need to add an explicit status field here, we can just use the RPC status
-// TODO: This has to include the labels that we need to apply to the CN. Controller needs to pass these labels to CN
 message UpdateStreamingJobResponse {}
 
 message ListStreamingJobsRequest {}
