@@ -150,8 +150,14 @@ impl CompactionPicker for MinOverlappingPicker {
             return None;
         }
         Some(CompactionInput {
-            select_input_size: select_input_ssts.iter().map(|sst| sst.file_size).sum(),
-            target_input_size: target_input_ssts.iter().map(|sst| sst.file_size).sum(),
+            select_input_size: select_input_ssts
+                .iter()
+                .map(|sst| sst.get_estimated_sst_size())
+                .sum(),
+            target_input_size: target_input_ssts
+                .iter()
+                .map(|sst| sst.get_estimated_sst_size())
+                .sum(),
             total_file_count: (select_input_ssts.len() + target_input_ssts.len()) as u64,
             input_levels: vec![
                 InputLevel {
@@ -339,7 +345,7 @@ impl NonOverlapSubLevelPicker {
                 ret.total_file_count += ret.sstable_infos[reverse_index].len();
                 ret.total_file_size += ret.sstable_infos[reverse_index]
                     .iter()
-                    .map(|sst| sst.file_size)
+                    .map(|sst| sst.get_estimated_sst_size())
                     .sum::<u64>();
             }
 
@@ -353,7 +359,7 @@ impl NonOverlapSubLevelPicker {
             });
         } else {
             ret.total_file_count = 1;
-            ret.total_file_size = sst.file_size;
+            ret.total_file_size = sst.get_estimated_sst_size();
             ret.sstable_infos[0].extend(vec![sst.clone()]);
         }
 
@@ -374,7 +380,10 @@ impl NonOverlapSubLevelPicker {
             let mut total_level_count = 0;
             for (index, sstables) in ret.sstable_infos.iter().enumerate() {
                 total_file_count += sstables.len();
-                total_file_size += sstables.iter().map(|sst| sst.file_size).sum::<u64>();
+                total_file_size += sstables
+                    .iter()
+                    .map(|sst| sst.get_estimated_sst_size())
+                    .sum::<u64>();
                 total_level_count += 1;
 
                 // Atleast `min_expected_level_count`` level should be selected

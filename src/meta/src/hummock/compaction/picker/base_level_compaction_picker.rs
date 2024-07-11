@@ -207,7 +207,7 @@ impl LevelCompactionPicker {
                     break;
                 }
 
-                target_level_size += sst.file_size;
+                target_level_size += sst.get_estimated_sst_size();
             }
 
             if pending_compact {

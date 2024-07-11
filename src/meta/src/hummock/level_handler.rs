@@ -91,7 +91,7 @@ impl LevelHandler {
         let mut total_file_size = 0;
         for sst in ssts {
             self.compacting_files.insert(sst.get_sst_id(), task_id);
-            total_file_size += sst.file_size;
+            total_file_size += sst.get_estimated_sst_size();
             table_ids.push(sst.get_sst_id());
         }
 

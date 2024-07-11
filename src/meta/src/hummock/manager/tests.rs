@@ -2217,6 +2217,7 @@ async fn test_partition_level() {
     for epoch in 31..100 {
         let mut sst = gen_local_sstable_info(global_sst_id, 10, vec![100]);
         sst.sst_info.file_size = 10 * MB;
+        sst.sst_info.estimated_sst_size = sst.sst_info.file_size;
         sst.sst_info.uncompressed_file_size = 10 * MB;
         hummock_manager
             .commit_epoch_for_test(
@@ -2240,7 +2241,7 @@ async fn test_partition_level() {
                     level
                         .table_infos
                         .iter()
-                        .map(|sst| sst.file_size)
+                        .map(|sst| sst.get_estimated_sst_size())
                         .sum::<u64>()
                 })
                 .sum::<u64>();

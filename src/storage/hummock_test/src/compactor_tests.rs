@@ -1522,7 +1522,7 @@ pub(crate) mod tests {
                 sstable_store.clone(),
             )
             .await;
-            println!("generate ssts size: {}", sst.file_size);
+            println!("generate ssts size: {}", sst.get_estimated_sst_size());
             ssts.push(sst);
         }
         let select_file_count = ssts.len() / 2;
@@ -1871,7 +1871,10 @@ pub(crate) mod tests {
         }
         println!(
             "input data: {}",
-            sst_infos.iter().map(|sst| sst.file_size).sum::<u64>(),
+            sst_infos
+                .iter()
+                .map(|sst| sst.get_estimated_sst_size())
+                .sum::<u64>(),
         );
 
         let target_file_size = max_sst_file_size / 4;
@@ -1929,8 +1932,13 @@ pub(crate) mod tests {
         let (ret, fast_ret) = run_fast_and_normal_runner(compact_ctx.clone(), task).await;
         println!(
             "normal compact result data: {}, fast compact result data: {}",
-            ret.iter().map(|sst| sst.file_size).sum::<u64>(),
-            fast_ret.iter().map(|sst| sst.file_size).sum::<u64>(),
+            ret.iter()
+                .map(|sst| sst.get_estimated_sst_size())
+                .sum::<u64>(),
+            fast_ret
+                .iter()
+                .map(|sst| sst.get_estimated_sst_size())
+                .sum::<u64>(),
         );
         // check_compaction_result(compact_ctx.sstable_store, ret.clone(), fast_ret, target_file_size).await;
         let mut fast_tables = Vec::with_capacity(fast_ret.len());
