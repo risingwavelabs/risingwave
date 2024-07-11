@@ -552,13 +552,14 @@ impl ManagedBarrierState {
                 None
             }
             BarrierKind::Barrier => {
-                let (prev_epoch, prev_table_ids) = self
-                    .prev_barrier_table_ids
-                    .as_mut()
-                    .expect("the first barrier should either be Initial or Checkpoint");
-                assert_eq!(prev_epoch.curr, barrier.epoch.prev);
-                assert_eq!(prev_table_ids, &table_ids);
-                *prev_epoch = barrier.epoch;
+                if let Some((prev_epoch, prev_table_ids)) = self.prev_barrier_table_ids.as_mut() {
+                    assert_eq!(prev_epoch.curr, barrier.epoch.prev);
+                    assert_eq!(prev_table_ids, &table_ids);
+                    *prev_epoch = barrier.epoch;
+                } else {
+                    info!(epoch = ?barrier.epoch, "initialize at non-checkpoint barrier");
+                    self.prev_barrier_table_ids = Some((barrier.epoch, table_ids));
+                }
                 None
             }
             BarrierKind::Checkpoint => Some(
