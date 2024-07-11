@@ -132,6 +132,13 @@ impl TableFunction {
                 .into());
             }
 
+            #[cfg(madsim)]
+            return Err(crate::error::ErrorCode::BindError(
+                "file_scan can't be used in the madsim mode".to_string(),
+            )
+            .into());
+
+            #[cfg(not(madsim))]
             tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(async {
                     let parquet_stream_builder = create_parquet_stream_builder(
