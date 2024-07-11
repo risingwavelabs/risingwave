@@ -534,7 +534,7 @@ impl JsonParseOptions {
             (DataType::Struct(struct_type_info), ValueType::Object) => {
                 // Collecting into a Result<Vec<_>> doesn't reserve the capacity in advance, so we `Vec::with_capacity` instead.
                 // https://github.com/rust-lang/rust/issues/48994
-                let mut fields = Vec::with_capacity(struct_type_info.types().len());
+                let mut fields = Vec::with_capacity(struct_type_info.len());
                 for (field_name, field_type) in struct_type_info
                     .names()
                     .zip_eq_fast(struct_type_info.types())

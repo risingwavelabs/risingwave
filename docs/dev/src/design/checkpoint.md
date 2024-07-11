@@ -20,7 +20,7 @@ The consistent checkpoints play 2 roles in our system.
 
 RisingWave makes checkpointing via [Chandy–Lamport algorithm](https://en.wikipedia.org/wiki/Chandy%E2%80%93Lamport_algorithm). A special kind of message, checkpoint barriers, is generated on streaming source and propagates across the streaming graph to the materialized views (or sink).
 
-![](./images/checkpoint/checkpoint.svg)
+![](../images/checkpoint/checkpoint.svg)
 
 To guarantee consistency, RisingWave introduces Chandy-Lamport algorithm as its checkpoint scheme.
 In particular, RisingWave periodically (every `barrier_interval_ms`) repeats the following procedure:
@@ -39,6 +39,6 @@ As is mentioned before, during checkpointing, every operator writes their change
 
 A local shared buffer is introduced to stage these uncommitted write batches. Once the checkpoint barriers have pass through all actors, the storage manager can notify all compute nodes to 'commit' their buffered write batches into the shared storage.
 
-![shared buffer](./images/checkpoint/shared-buffer.svg)
+![shared buffer](../images/checkpoint/shared-buffer.svg)
 
 Another benefit of shared buffer is that the write batches in a compute node can be compacted into a single SSTable file before uploading, which significantly reduces the number of SSTable files in Layer 0.

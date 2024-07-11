@@ -154,7 +154,7 @@ pub async fn start_meta_node(listen_addr: String, state_store: String, config_pa
         "enable_compaction_deterministic should be set"
     );
 
-    risingwave_meta_node::start(meta_opts).await
+    risingwave_meta_node::start(meta_opts, CancellationToken::new() /* dummy */).await
 }
 
 async fn start_compactor_node(

@@ -1,7 +1,6 @@
 # Build RisingWave with Multiple Object Storage Backends
 
-
-<!-- Created by https://github.com/ekalinin/github-markdown-toc -->
+<!-- toc -->
 
 ## Overview
 As a cloud-neutral database, RisingWave supports running on different (object) storage backends. Currently, these storage products include

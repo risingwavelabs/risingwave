@@ -38,7 +38,7 @@ use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::PausedReason;
+use risingwave_pb::meta::{PausedReason, PbRecoveryStatus};
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use thiserror_ext::AsReport;
@@ -139,6 +139,19 @@ struct Scheduled {
     span: tracing::Span,
     /// Choose a different barrier(checkpoint == true) according to it
     checkpoint: bool,
+}
+
+impl From<&BarrierManagerStatus> for PbRecoveryStatus {
+    fn from(status: &BarrierManagerStatus) -> Self {
+        match status {
+            BarrierManagerStatus::Starting => Self::StatusStarting,
+            BarrierManagerStatus::Recovering(reason) => match reason {
+                RecoveryReason::Bootstrap => Self::StatusStarting,
+                RecoveryReason::Failover(_) | RecoveryReason::Adhoc => Self::StatusRecovering,
+            },
+            BarrierManagerStatus::Running => Self::StatusRunning,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -1067,6 +1080,10 @@ impl GlobalBarrierManagerContext {
             }
             BarrierManagerStatus::Running => Ok(()),
         }
+    }
+
+    pub fn get_recovery_status(&self) -> PbRecoveryStatus {
+        (&**self.status.load()).into()
     }
 
     /// Set barrier manager status.

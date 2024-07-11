@@ -1,20 +1,16 @@
-# Data Source
-
-- [Data Source](#data-source)
-  - [Components](#components)
-    - [Connectors](#connectors)
-    - [Enumerators](#enumerators)
-    - [ConnectorSource](#connectorsource)
-    - [SourceExecutor](#sourceexecutor)
-  - [How It Works](#how-it-works)
+# Source
 
 This page describes RisingWave's Data Source API and the architecture behind it. This may help if you are interested in how data sources work, or if you want to implement a new Data Source.
+
+For the workflow of developing connectors, see [Develop Connectors](../connector/intro.md).
+
+<!-- toc -->
 
 ## Components
 
 RisingWave's data source covers four parts: connectors, enumerators, ConnectorSource and SourceExecutor.
 
-![data source arch](../docs/images/data-source/data-source-arch.svg)
+![data source arch](../images/data-source/data-source-arch.svg)
 
 ### Connectors
 
@@ -41,7 +37,7 @@ pub trait SplitReader: Sized {
 
 ### Enumerators
 
-`Enumerator` periodically requests upstream to discover changes in splits, and in most cases the number of splits only increases. The enumerator is a separate task that runs on the [meta](./meta-service.md). If the upstream split changes, the enumerator notifies the connector by means of config change to change the subscription relationship.
+`Enumerator` periodically requests upstream to discover changes in splits, and in most cases the number of splits only increases. The enumerator is a separate task that runs on the [meta](../design/meta-service.md). If the upstream split changes, the enumerator notifies the connector by means of config change to change the subscription relationship.
 
 All enumerators need to implement the following trait.
 

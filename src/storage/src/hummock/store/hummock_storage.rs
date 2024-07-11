@@ -25,7 +25,7 @@ use itertools::Itertools;
 use more_asserts::assert_gt;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::is_max_epoch;
-use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
+use risingwave_common_service::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::key::{
     is_empty_key_range, vnode, vnode_range, TableKey, TableKeyRange,
 };

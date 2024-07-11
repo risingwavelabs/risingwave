@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
@@ -34,10 +33,10 @@ use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgres
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
-use tokio::sync::oneshot;
+use tokio::sync::mpsc;
 
 use super::progress::BackfillState;
-use super::BarrierCompleteResult;
+use super::{BarrierCompleteResult, SubscribeMutationItem};
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, Mutation};
@@ -70,13 +69,6 @@ impl Debug for IssuedState {
 /// The state machine of local barrier manager.
 #[derive(Debug)]
 enum ManagedBarrierStateInner {
-    /// Received barrier from actors in other compute nodes in remote input, however no `send_barrier`
-    /// request from the meta service is issued.
-    Stashed {
-        /// Senders registered by the remote input.
-        mutation_senders: Vec<oneshot::Sender<Option<Arc<Mutation>>>>,
-    },
-
     /// Meta service has issued a `send_barrier` request. We're collecting barriers now.
     Issued(IssuedState),
 
@@ -134,9 +126,6 @@ impl Display for ManagedBarrierStateDebugInfo<'_> {
         for (epoch, barrier_state) in self.epoch_barrier_state_map {
             write!(f, "> Epoch {}: ", epoch)?;
             match &barrier_state.inner {
-                ManagedBarrierStateInner::Stashed { .. } => {
-                    write!(f, "Stashed")?;
-                }
                 ManagedBarrierStateInner::Issued(state) => {
                     write!(f, "Issued [{:?}]. Remaining actors: [", state.kind)?;
                     let mut is_prev_epoch_issued = false;
@@ -194,11 +183,25 @@ impl Display for ManagedBarrierStateDebugInfo<'_> {
     }
 }
 
+#[derive(Default)]
+struct ActorMutationSubscribers {
+    pending_subscribers: BTreeMap<u64, Vec<mpsc::UnboundedSender<SubscribeMutationItem>>>,
+    started_subscribers: Vec<mpsc::UnboundedSender<SubscribeMutationItem>>,
+}
+
+impl ActorMutationSubscribers {
+    fn is_empty(&self) -> bool {
+        self.pending_subscribers.is_empty() && self.started_subscribers.is_empty()
+    }
+}
+
 pub(super) struct ManagedBarrierState {
     /// Record barrier state for each epoch of concurrent checkpoints.
     ///
     /// The key is `prev_epoch`, and the first value is `curr_epoch`
     epoch_barrier_state_map: BTreeMap<u64, BarrierState>,
+
+    mutation_subscribers: HashMap<ActorId, ActorMutationSubscribers>,
 
     prev_barrier_table_ids: HashSet<TableId>,
 
@@ -234,6 +237,7 @@ impl ManagedBarrierState {
     ) -> Self {
         Self {
             epoch_barrier_state_map: BTreeMap::default(),
+            mutation_subscribers: Default::default(),
             prev_barrier_table_ids: HashSet::new(),
             create_mview_progress: Default::default(),
             state_store,
@@ -250,39 +254,69 @@ impl ManagedBarrierState {
         }
     }
 
-    pub fn read_barrier_mutation(
+    pub(super) fn subscribe_actor_mutation(
         &mut self,
-        barrier: &Barrier,
-        sender: oneshot::Sender<Option<Arc<Mutation>>>,
+        actor_id: ActorId,
+        start_prev_epoch: u64,
+        tx: mpsc::UnboundedSender<SubscribeMutationItem>,
     ) {
-        match self.epoch_barrier_state_map.entry(barrier.epoch.prev) {
-            Entry::Vacant(v) => {
-                v.insert(BarrierState {
-                    curr_epoch: barrier.epoch.curr,
-                    inner: ManagedBarrierStateInner::Stashed {
-                        mutation_senders: vec![sender],
-                    },
-                });
-            }
-            Entry::Occupied(mut o) => {
-                let state = o.get_mut();
-                match &mut state.inner {
-                    ManagedBarrierStateInner::Stashed {
-                        ref mut mutation_senders,
-                    } => {
-                        mutation_senders.push(sender);
+        let subscribers = self.mutation_subscribers.entry(actor_id).or_default();
+        if let Some(state) = self.epoch_barrier_state_map.get(&start_prev_epoch) {
+            match &state.inner {
+                ManagedBarrierStateInner::Issued(issued_state) => {
+                    assert!(issued_state.remaining_actors.contains(&actor_id));
+                    for (prev_epoch, state) in
+                        self.epoch_barrier_state_map.range(start_prev_epoch..)
+                    {
+                        match &state.inner {
+                            ManagedBarrierStateInner::Issued(issued_state) => {
+                                if issued_state.remaining_actors.contains(&actor_id) {
+                                    if tx
+                                        .send((*prev_epoch, issued_state.mutation.clone()))
+                                        .is_err()
+                                    {
+                                        // No more subscribe on the mutation. Simply return.
+                                        return;
+                                    }
+                                } else {
+                                    // The barrier no more collect from such actor. End subscribe on mutation.
+                                    return;
+                                }
+                            }
+                            state @ ManagedBarrierStateInner::AllCollected
+                            | state @ ManagedBarrierStateInner::Completed(_) => {
+                                unreachable!(
+                                    "should be Issued when having new subscriber, but current state: {:?}",
+                                    state
+                                )
+                            }
+                        }
                     }
-                    ManagedBarrierStateInner::Issued(IssuedState { mutation, .. }) => {
-                        let _ = sender.send(mutation.clone());
-                    }
-                    _ => {
-                        panic!(
-                            "cannot read barrier mutation {:?} at current state: {:?}",
-                            barrier.epoch, state.inner
-                        )
-                    }
+                    subscribers.started_subscribers.push(tx);
+                }
+                state @ ManagedBarrierStateInner::AllCollected
+                | state @ ManagedBarrierStateInner::Completed(_) => {
+                    unreachable!(
+                        "should be Issued when having new subscriber, but current state: {:?}",
+                        state
+                    )
                 }
             }
+        } else {
+            // Barrier has not issued yet. Store the pending tx
+            if let Some((last_epoch, _)) = self.epoch_barrier_state_map.last_key_value() {
+                assert!(
+                    *last_epoch < start_prev_epoch,
+                    "later barrier {} has been issued, but skip the start epoch {:?}",
+                    last_epoch,
+                    start_prev_epoch
+                );
+            }
+            subscribers
+                .pending_subscribers
+                .entry(start_prev_epoch)
+                .or_default()
+                .push(tx);
         }
     }
 
@@ -304,7 +338,7 @@ impl ManagedBarrierState {
                 ManagedBarrierStateInner::AllCollected | ManagedBarrierStateInner::Completed(_) => {
                     continue;
                 }
-                ManagedBarrierStateInner::Stashed { .. } | ManagedBarrierStateInner::Issued(_) => {
+                ManagedBarrierStateInner::Issued(_) => {
                     break;
                 }
             }
@@ -449,16 +483,12 @@ impl ManagedBarrierState {
         );
 
         match self.epoch_barrier_state_map.get_mut(&barrier.epoch.prev) {
-            Some(&mut BarrierState {
-                inner: ManagedBarrierStateInner::Stashed { .. },
-                ..
-            })
-            | None => {
+            None => {
                 // If the barrier's state is stashed, this occurs exclusively in scenarios where the barrier has not been
                 // injected by the barrier manager, or the barrier message is blocked at the `RemoteInput` side waiting for injection.
                 // Given these conditions, it's inconceivable for an actor to attempt collect at this point.
                 panic!(
-                    "cannot collect new actor barrier {:?} at current state: Stashed or None",
+                    "cannot collect new actor barrier {:?} at current state: None",
                     barrier.epoch,
                 )
             }
@@ -501,6 +531,7 @@ impl ManagedBarrierState {
             .streaming_metrics
             .barrier_inflight_latency
             .start_timer();
+
         if let Some(hummock) = self.state_store.as_hummock() {
             hummock.start_epoch(barrier.epoch.curr, table_ids.clone());
         }
@@ -524,26 +555,56 @@ impl ManagedBarrierState {
             BarrierKind::Checkpoint => Some(replace(&mut self.prev_barrier_table_ids, table_ids)),
         };
 
-        match self.epoch_barrier_state_map.get_mut(&barrier.epoch.prev) {
-            Some(&mut BarrierState {
-                inner:
-                    ManagedBarrierStateInner::Stashed {
-                        ref mut mutation_senders,
-                    },
-                ..
-            }) => {
-                for sender in mutation_senders.drain(..) {
-                    let _ = sender.send(barrier.mutation.clone());
-                }
-            }
-            Some(BarrierState { ref inner, .. }) => {
+        if let Some(BarrierState { ref inner, .. }) =
+            self.epoch_barrier_state_map.get_mut(&barrier.epoch.prev)
+        {
+            {
                 panic!(
                     "barrier epochs{:?} state has already been `Issued`. Current state: {:?}",
                     barrier.epoch, inner
                 );
             }
-            None => {}
         };
+
+        for (actor_id, subscribers) in &mut self.mutation_subscribers {
+            if actor_ids_to_collect.contains(actor_id) {
+                if let Some((first_epoch, _)) = subscribers.pending_subscribers.first_key_value() {
+                    assert!(
+                        *first_epoch >= barrier.epoch.prev,
+                        "barrier epoch {:?} skip subscribed epoch {}",
+                        barrier.epoch,
+                        first_epoch
+                    );
+                    if *first_epoch == barrier.epoch.prev {
+                        subscribers.started_subscribers.extend(
+                            subscribers
+                                .pending_subscribers
+                                .pop_first()
+                                .expect("should exist")
+                                .1,
+                        );
+                    }
+                }
+                subscribers.started_subscribers.retain(|tx| {
+                    tx.send((barrier.epoch.prev, barrier.mutation.clone()))
+                        .is_ok()
+                });
+            } else {
+                subscribers.started_subscribers.clear();
+                if let Some((first_epoch, _)) = subscribers.pending_subscribers.first_key_value() {
+                    assert!(
+                        *first_epoch > barrier.epoch.prev,
+                        "barrier epoch {:?} skip subscribed epoch {}",
+                        barrier.epoch,
+                        first_epoch
+                    );
+                }
+            }
+        }
+
+        self.mutation_subscribers
+            .retain(|_, subscribers| !subscribers.is_empty());
+
         self.epoch_barrier_state_map.insert(
             barrier.epoch.prev,
             BarrierState {

@@ -1423,7 +1423,8 @@ impl Binder {
                 ("col_description", raw_call(ExprType::ColDescription)),
                 ("obj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("shobj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
-                ("pg_is_in_recovery", raw_literal(ExprImpl::literal_bool(false))),
+                ("pg_is_in_recovery", raw_call(ExprType::PgIsInRecovery)),
+                ("rw_recovery_status", raw_call(ExprType::RwRecoveryStatus)),
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 ("rw_test_paid_tier", raw_call(ExprType::TestPaidTier)), // for testing purposes
