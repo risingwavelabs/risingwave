@@ -91,6 +91,7 @@ crepe::crepe! {
     struct Requirement(Id, DistId);
 
     @output
+    #[derive(Debug)]
     struct Success(Id, Result);
     @output
     #[derive(Debug)]
@@ -269,6 +270,9 @@ impl Scheduler {
             .map(|(i, m)| (m.clone(), i))
             .collect();
 
+        println!("all hash mapping {:#?}", all_hash_mappings);
+        println!("hash mapping id {:#?}", hash_mapping_id);
+
         let mut facts = Vec::new();
 
         // Building fragments and Singletons
@@ -297,8 +301,13 @@ impl Scheduler {
 
         // Run the algorithm.
         let mut crepe = Crepe::new();
+        for x in &facts {
+            println!("fact {:?}", x);
+        }
         crepe.extend(facts.into_iter().map(Input));
         let (success, failed) = crepe.run();
+        println!("success {:?}", success);
+
         if !failed.is_empty() {
             bail!("Failed to schedule: {:?}", failed);
         }
