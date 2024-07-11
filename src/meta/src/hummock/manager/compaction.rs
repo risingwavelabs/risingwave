@@ -183,20 +183,22 @@ impl<'a> HummockVersionTransaction<'a> {
             })),
         };
         group_deltas.push(group_delta);
-        version_delta.safe_epoch = std::cmp::max(
+        let new_visible_table_safe_epoch = std::cmp::max(
             version_delta.latest_version().visible_table_safe_epoch(),
             compact_task.watermark,
         );
-        if version_delta.latest_version().visible_table_safe_epoch() < version_delta.safe_epoch {
+        version_delta.set_safe_epoch(new_visible_table_safe_epoch);
+        if version_delta.latest_version().visible_table_safe_epoch() < new_visible_table_safe_epoch
+        {
             version_delta.with_latest_version(|version, version_delta| {
                 for (table_id, info) in version.state_table_info.info() {
-                    let new_safe_epoch = min(version_delta.safe_epoch, info.committed_epoch);
+                    let new_safe_epoch = min(new_visible_table_safe_epoch, info.committed_epoch);
                     if new_safe_epoch > info.safe_epoch {
-                        if new_safe_epoch != version_delta.safe_epoch {
+                        if new_safe_epoch != version_delta.visible_table_safe_epoch() {
                             warn!(
                                 new_safe_epoch,
                                 committed_epoch = info.committed_epoch,
-                                global_safe_epoch = version_delta.safe_epoch,
+                                global_safe_epoch = new_visible_table_safe_epoch,
                                 table_id = table_id.table_id,
                                 "table has different safe epoch to global"
                             );
