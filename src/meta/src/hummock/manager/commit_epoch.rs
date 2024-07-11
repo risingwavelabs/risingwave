@@ -43,6 +43,7 @@ use crate::hummock::{
     commit_multi_var, commit_multi_var_with_provided_txn, start_measure_real_process_timer,
     HummockManager,
 };
+use crate::hummock::manager::time_travel::require_sql_meta_store_err;
 
 #[derive(Debug, Clone)]
 pub struct NewTableFragmentInfo {
@@ -432,7 +433,9 @@ impl HummockManager {
                 .values()
                 .map(|g| (g.group_id, g.parent_group_id))
                 .collect();
-            let sql_store = self.sql_store()?;
+            let sql_store = self
+                .sql_store()
+                .ok_or_else(require_sql_meta_store_err)?;
             let mut txn = sql_store.conn.begin().await?;
             let version_snapshot_sst_ids = self
                 .write_time_travel_metadata(

@@ -159,46 +159,30 @@ impl HummockVersion {
     }
 
     pub fn get_object_ids(&self) -> HashSet<HummockSstableObjectId> {
-        self.get_combined_levels()
-            .flat_map(|level| {
-                level
-                    .table_infos
-                    .iter()
-                    .map(|table_info| table_info.get_object_id())
-            })
-            .chain(self.table_change_log.values().flat_map(|change_log| {
-                change_log.0.iter().flat_map(|epoch_change_log| {
-                    epoch_change_log
-                        .old_value
-                        .iter()
-                        .map(|sst| sst.object_id)
-                        .chain(epoch_change_log.new_value.iter().map(|sst| sst.object_id))
-                })
-            }))
-            .collect()
+        self.get_sst_infos().map(|s| s.object_id).collect()
     }
 
     pub fn get_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
+        self.get_sst_infos().map(|s| s.sst_id).collect()
+    }
+
+    pub fn get_sst_infos(&self) -> impl Iterator<Item = &SstableInfo> {
         self.get_combined_levels()
-            .flat_map(|level| {
-                level
-                    .table_infos
-                    .iter()
-                    .map(|table_info| table_info.get_sst_id())
-            })
+            .flat_map(|level| level.table_infos.iter())
             .chain(self.table_change_log.values().flat_map(|change_log| {
                 change_log.0.iter().flat_map(|epoch_change_log| {
                     epoch_change_log
                         .old_value
                         .iter()
-                        .map(|sst| sst.sst_id)
-                        .chain(epoch_change_log.new_value.iter().map(|sst| sst.sst_id))
+                        .chain(epoch_change_log.new_value.iter())
                 })
             }))
-            .collect()
     }
 
-    pub fn get_sst_infos<'a>(
+    /// `get_sst_infos_from_groups` doesn't guarantee that all returned sst info belongs to `select_group`.
+    /// i.e. `select_group` is just a hint.
+    /// We separate `get_sst_infos_from_groups` and `get_sst_infos` because `get_sst_infos_from_groups` may be further customized in the future.
+    pub fn get_sst_infos_from_groups<'a>(
         &'a self,
         select_group: &'a HashSet<CompactionGroupId>,
     ) -> impl Iterator<Item = &SstableInfo> + 'a {

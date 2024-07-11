@@ -44,12 +44,10 @@ use crate::manager::MetaStoreImpl;
 
 /// Time travel.
 impl HummockManager {
-    pub(crate) fn sql_store(&self) -> Result<SqlMetaStore> {
+    pub(crate) fn sql_store(&self) -> Option<SqlMetaStore> {
         match self.env.meta_store() {
-            MetaStoreImpl::Sql(sql_store) => Ok(sql_store),
-            _ => Err(Error::TimeTravel(anyhow!(
-                "time travel requires SQL meta store"
-            ))),
+            MetaStoreImpl::Sql(sql_store) => Some(sql_store),
+            _ => None,
         }
     }
 
@@ -57,9 +55,8 @@ impl HummockManager {
         let mut gurad = self.versioning.write().await;
         gurad.mark_next_time_travel_version_snapshot();
 
-        // It's OK to leave last_time_travel_snapshot_sst_ids just empty.
         gurad.last_time_travel_snapshot_sst_ids = HashSet::new();
-        let Ok(sql_store) = self.sql_store() else {
+        let Some(sql_store) = self.sql_store() else {
             return Ok(());
         };
         let Some(version) = hummock_time_travel_version::Entity::find()
@@ -79,11 +76,8 @@ impl HummockManager {
         epoch_watermark: HummockEpoch,
     ) -> Result<()> {
         let sql_store = match self.sql_store() {
-            Ok(sql_store) => sql_store,
-            Err(e) => {
-                if !matches!(e, Error::TimeTravel(_)) {
-                    return Err(e);
-                }
+            Some(sql_store) => sql_store,
+            None => {
                 return Ok(());
             }
         };
@@ -251,7 +245,7 @@ impl HummockManager {
     ) -> Result<impl Iterator<Item = HummockSstableId>> {
         let object_ids: Vec<risingwave_meta_model_v2::HummockSstableObjectId> =
             match self.sql_store() {
-                Ok(sql_store) => {
+                Some(sql_store) => {
                     hummock_sstable_info::Entity::find()
                         .select_only()
                         .column(hummock_sstable_info::Column::ObjectId)
@@ -259,10 +253,7 @@ impl HummockManager {
                         .all(&sql_store.conn)
                         .await?
                 }
-                Err(e) => {
-                    if !matches!(e, Error::TimeTravel(_)) {
-                        return Err(e);
-                    }
+                None => {
                     vec![]
                 }
             };
@@ -279,7 +270,7 @@ impl HummockManager {
     ///
     /// The resulted version is complete, i.e. with correct `SstableInfo`.
     pub async fn epoch_to_version(&self, query_epoch: HummockEpoch) -> Result<HummockVersion> {
-        let sql_store = self.sql_store()?;
+        let sql_store = self.sql_store().ok_or_else(require_sql_meta_store_err)?;
         let epoch_to_version = hummock_epoch_to_version::Entity::find()
             .filter(
                 hummock_epoch_to_version::Column::Epoch
@@ -415,13 +406,13 @@ impl HummockManager {
         if let Some(version) = version {
             version_sst_ids = Some(
                 version
-                    .get_sst_infos(&select_groups)
+                    .get_sst_infos_from_groups(&select_groups)
                     .map(|s| s.sst_id)
                     .collect(),
             );
             write_sstable_infos(
                 version
-                    .get_sst_infos(&select_groups)
+                    .get_sst_infos_from_groups(&select_groups)
                     .filter(|s| !skip_sst_ids.contains(&s.sst_id)),
                 txn,
             )
@@ -520,4 +511,8 @@ fn should_ignore_group(root_group_id: CompactionGroupId) -> bool {
     // so it's impossible to tell whether the root group is MaterializedView or not.
     // Just treat them as MaterializedView for correctness.
     root_group_id == StaticCompactionGroupId::StateDefault as CompactionGroupId
+}
+
+pub(crate) fn require_sql_meta_store_err() -> Error {
+    Error::TimeTravel(anyhow!("time travel requires SQL meta store"))
 }
