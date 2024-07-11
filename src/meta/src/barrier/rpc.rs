@@ -268,6 +268,10 @@ impl ControlStreamManager {
                 }
                 {
                     let Some(node) = self.nodes.get_mut(node_id) else {
+                        if actor_ids_to_collect.is_empty() {
+                            // Worker node get disconnected but has no actor to collect. Simply skip it.
+                            return Ok(());
+                        }
                         return Err(
                             anyhow!("unconnected worker node: {:?}", worker_node.host).into()
                         );
