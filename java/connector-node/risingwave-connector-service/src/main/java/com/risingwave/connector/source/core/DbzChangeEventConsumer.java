@@ -180,7 +180,7 @@ public class DbzChangeEventConsumer
                                         record.topic(), record.valueSchema(), record.value());
                         var message =
                                 msgBuilder
-                                        .setIsTransactionMeta(true)
+                                        .setMsgType(CdcMessage.CdcMessageType.TRANSACTION_META)
                                         .setPayload(new String(payload, StandardCharsets.UTF_8))
                                         .setSourceTsMs(trxTs)
                                         .build();
@@ -218,6 +218,7 @@ public class DbzChangeEventConsumer
 
                         var message =
                                 msgBuilder
+                                        .setMsgType(CdcMessage.CdcMessageType.SCHEMA_CHANGE)
                                         .setFullTableName(fullTableName)
                                         .setPayload(new String(payload, StandardCharsets.UTF_8))
                                         .setSourceTsMs(sourceTsMs)
@@ -272,6 +273,7 @@ public class DbzChangeEventConsumer
                         String msgKey = key == null ? "" : new String(key, StandardCharsets.UTF_8);
                         var message =
                                 msgBuilder
+                                        .setMsgType(CdcMessage.CdcMessageType.DATA)
                                         .setFullTableName(fullTableName)
                                         .setPayload(msgPayload)
                                         .setKey(msgKey)
