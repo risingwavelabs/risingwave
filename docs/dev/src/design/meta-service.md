@@ -1,14 +1,6 @@
 # Meta Service
 
-- [Meta Service](#meta-service)
-  - [Background](#background)
-  - [Meta Store](#meta-store)
-  - [Types of Metadata](#types-of-metadata)
-    - [Catalog](#catalog)
-    - [Storage](#storage)
-  - [Push on Updates](#push-on-updates)
-
-<!-- Created by https://github.com/ekalinin/github-markdown-toc -->
+<!-- toc -->
 
 ## Background
 
@@ -16,7 +8,7 @@ RisingWave provides both real-time analytical query as well as high-concurrent a
 
 Meanwhile, components such as metadata provider, scheduler, monitoring are more suitable for a centralized design. For example, a typical on-premise deployment may look like below, where the dotted boxes represent minimal unit of deployment (VM or container).
 
-![Cluster Deployment](./images/meta-service/cluster-deployment.svg)
+![Cluster Deployment](../images/meta-service/cluster-deployment.svg)
 
 ## Meta Store
 
@@ -50,7 +42,6 @@ There are 2 choices on how to distribute information across multiple nodes.
 
 Currently, for simplicity, we choose the push-style approach for all kinds of metadata. This is implemented as `NotificationService` on meta service and `ObserverManager` on frontend and compute nodes.
 
-![Notification](./images/meta-service/notification.svg)
+![Notification](../images/meta-service/notification.svg)
 
 `ObserverManager` will register itself to meta service on bootstrap and subscribe metadata it needs. Afterwards, once metadata changed, the meta node streams the changes to it, expecting all subscribers to acknowledge.
-

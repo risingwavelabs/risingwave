@@ -1,14 +1,6 @@
 # The Hummock Shared Buffer
 
-Table of contents:
-
-- [Introduction](#introduction)
-- [Part 1: Async Checkpoint](#part-1-async-checkpoint)
-  - [Write Path](#write-path)
-  - [Read Path](#read-path)
-- [Part 2: Write Anytime / Async Flush](#part-2-write-anytime--async-flush)
-  - [A New Merge Iterator](#a-new-merge-iterator)
-    - [Considerations](#considerations)
+<!-- toc -->
 
 ## Introduction
 

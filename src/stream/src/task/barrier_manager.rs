@@ -31,7 +31,7 @@ use rw_futures_util::{pending_on_none, AttachedFuture};
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tonic::{Code, Status};
 
@@ -48,6 +48,7 @@ mod tests;
 
 pub use progress::CreateMviewProgress;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
@@ -187,6 +188,8 @@ impl CreateActorContext {
     }
 }
 
+pub(super) type SubscribeMutationItem = (u64, Option<Arc<Mutation>>);
+
 pub(super) enum LocalBarrierEvent {
     ReportActorCollected {
         actor_id: ActorId,
@@ -197,9 +200,10 @@ pub(super) enum LocalBarrierEvent {
         actor: ActorId,
         state: BackfillState,
     },
-    ReadBarrierMutation {
-        barrier: Barrier,
-        mutation_sender: oneshot::Sender<Option<Arc<Mutation>>>,
+    SubscribeBarrierMutation {
+        actor_id: ActorId,
+        epoch: EpochPair,
+        mutation_sender: mpsc::UnboundedSender<SubscribeMutationItem>,
     },
     #[cfg(test)]
     Flush(oneshot::Sender<()>),
@@ -515,11 +519,13 @@ impl LocalBarrierWorker {
             } => {
                 self.update_create_mview_progress(current_epoch, actor, state);
             }
-            LocalBarrierEvent::ReadBarrierMutation {
-                barrier,
+            LocalBarrierEvent::SubscribeBarrierMutation {
+                actor_id,
+                epoch,
                 mutation_sender,
             } => {
-                self.read_barrier_mutation(barrier, mutation_sender);
+                self.state
+                    .subscribe_actor_mutation(actor_id, epoch.prev, mutation_sender);
             }
             #[cfg(test)]
             LocalBarrierEvent::Flush(sender) => sender.send(()).unwrap(),
@@ -640,15 +646,6 @@ impl LocalBarrierWorker {
 
         self.control_stream_handle.send_response(result);
         Ok(())
-    }
-
-    /// Read mutation from barrier state.
-    fn read_barrier_mutation(
-        &mut self,
-        barrier: Barrier,
-        sender: oneshot::Sender<Option<Arc<Mutation>>>,
-    ) {
-        self.state.read_barrier_mutation(&barrier, sender);
     }
 
     /// Register sender for source actors, used to send barriers.
@@ -907,17 +904,18 @@ impl LocalBarrierManager {
     }
 
     /// When a `RemoteInput` get a barrier, it should wait and read the barrier mutation from the barrier manager.
-    pub async fn read_barrier_mutation(
+    pub fn subscribe_barrier_mutation(
         &self,
-        barrier: &Barrier,
-    ) -> StreamResult<Option<Arc<Mutation>>> {
-        let (tx, rx) = oneshot::channel();
-        self.send_event(LocalBarrierEvent::ReadBarrierMutation {
-            barrier: barrier.clone(),
+        actor_id: ActorId,
+        first_barrier: &Barrier,
+    ) -> mpsc::UnboundedReceiver<SubscribeMutationItem> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.send_event(LocalBarrierEvent::SubscribeBarrierMutation {
+            actor_id,
+            epoch: first_barrier.epoch,
             mutation_sender: tx,
         });
-        rx.await
-            .map_err(|_| anyhow!("barrier manager maybe reset").into())
+        rx
     }
 }
 

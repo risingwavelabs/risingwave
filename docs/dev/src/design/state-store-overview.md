@@ -1,18 +1,6 @@
 # An Overview of RisingWave State Store
 
-- [An Overview of RisingWave State Store](#an-overview-of-risingwave-state-store)
-  - [Overview](#overview)
-  - [Architecture](#architecture)
-  - [The Hummock User API](#the-hummock-user-api)
-  - [Hummock Internals](#hummock-internals)
-    - [Storage Format](#storage-format)
-    - [Write Path](#write-path)
-    - [Read Path](#read-path)
-    - [Compaction](#compaction)
-    - [Transaction Management with Hummock Manager](#transaction-management-with-hummock-manager)
-    - [Checkpointing in Streaming](#checkpointing-in-streaming)
-
-<!-- Created by https://github.com/ekalinin/github-markdown-toc -->
+<!-- toc -->
 
 ## Overview
 
@@ -22,7 +10,7 @@ In RisingWave, all streaming executors store their data into a state store. This
 
 Reading this document requires prior knowledge of LSM-Tree-based KV storage engines, like RocksDB, LevelDB, etc.
 
-![Overview of Architecture](images/state-store-overview/state-store-overview-01.svg)
+![Overview of Architecture](../images/state-store-overview/state-store-overview-01.svg)
 
 Hummock consists of a manager service on the meta node, clients on worker nodes (including compute nodes, frontend nodes, and compactor nodes), and a shared storage to store files (SSTs). Every time a new write batch is produced, the Hummock client will upload those files to shared storage, and notify the Hummock manager of the new data. With compaction going on, new files will be added and unused files will be vacuumed. The Hummock manager will take care of the lifecycle of a file — is a file being used? can we delete a file? etc.
 
@@ -104,7 +92,7 @@ The Hummock client will batch writes and generate SSTs to sync to the underlying
 After the SST is uploaded to an S3-compatible service, the Hummock client will let the Hummock manager know there's a new table.
 The list of all SSTs along with some metadata forms a ***version***. When the Hummock client adds new SSTs to the Hummock manager, a new version will be generated with the new set of SST files.
 
-![Write Path](images/state-store-overview/state-store-overview-02.svg)
+![Write Path](../images/state-store-overview/state-store-overview-02.svg)
 
 ### Read Path
 
@@ -114,7 +102,7 @@ For every read operation (`scan`, `get`), we will first select SSTs that might c
 
 For `scan`, we simply select by overlapping key range. For point get, we will filter SSTs further by Bloom filter. After that, we will compose a single `MergeIterator` over all SSTs. The `MergeIterator` will return all keys in range along with their epochs. Then, we will create `UserIterator` over `MergeIterator`, and for all user keys, the user iterator will pick the first full key whose epoch <= read epoch. Therefore, users can perform a snapshot read from Hummock based on the given epoch. The snapshot should be acquired beforehand and released afterwards.
 
-![Read Path](images/state-store-overview/state-store-overview-03.svg)
+![Read Path](../images/state-store-overview/state-store-overview-03.svg)
 
 Hummock implements the following iterators:
 - `BlockIterator`: iterates a block of an SSTable.
@@ -148,7 +136,7 @@ As mentioned in [Read Path](#read-path), reads are performed on a ***version*** 
 
 The SQL frontend will get the latest epoch from the meta service. Then, it will embed the epoch number into SQL plans, so that all compute nodes will read from that epoch. In theory, both SQL frontend and compute nodes will ***pin the snapshot***, to handle the case that frontend goes down and the compute nodes are still reading from Hummock (#622). However, to simplify the process, currently we ***only pin on the frontend side***.
 
-![Hummock Service](images/state-store-overview/state-store-overview-04.svg)
+![Hummock Service](../images/state-store-overview/state-store-overview-04.svg)
 
 Hummock only guarantees that writes on one node can be immediately read from the same node. However, the worker nodes running batch queries might have a slightly outdated version when a batch query plan is received (due to the local version caching). Therefore, we have a `wait_epoch` interface to wait until the local cached version contains full data of one epoch.
 
@@ -164,7 +152,7 @@ From the perspective of the streaming executors, when they receive a barrier, th
 
 Here we have two cases: Agg executors always persist and produce new write batches when receiving a barrier; Join executors (in the future when async flush gets implemented) will produce write batches within an epoch.
 
-![Checkpoint in Streaming](images/state-store-overview/state-store-overview-05.svg)
+![Checkpoint in Streaming](../images/state-store-overview/state-store-overview-05.svg)
 
 Streaming executors cannot control when data will be persisted — they can only write to Hummock's `shared buffer`. When a barrier flows across the system and is collected by the meta service, we can ensure that all executors have written their states of ***the previous epoch*** to the shared buffer, so we can initiate checkpoint process on all worker nodes, and upload SSTs to persistent remote storage.
 
