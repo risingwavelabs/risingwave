@@ -6,14 +6,16 @@ echo "${@:3}"
 echo "logging to $1, and status to $2"
 
 # Strip ANSI color codes to make the log file readable.
-# trap '' INT: ignore interrupts in sed
+# - trap '' INT: ignore interrupts in sed
+# -      sed -u: unbuffered output
 strip_ansi() {
-  (trap '' INT; sed -e 's/\x1b\[[0-9;]*m//g')
+  (trap '' INT; sed -u -e 's/\x1b\[[0-9;]*m//g')
 }
 
 # Run the command and log the output to both the terminal and the log file.
-# tee -i: ignore interrupts in tee
-RW_LOG_FORCE_COLORFUL=1 "${@:3}" 2>&1 | tee -i >(strip_ansi > "$1")
+# - CLICOLOR_FORCE=1: force color output, see https://bixense.com/clicolors/
+# -           tee -i: ignore interrupts in tee
+CLICOLOR_FORCE=1 "${@:3}" 2>&1 | tee -i >(strip_ansi > "$1")
 
 # Retrieve the return status.
 RET_STATUS="${PIPESTATUS[0]}"
