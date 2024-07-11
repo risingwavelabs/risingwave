@@ -53,6 +53,27 @@ impl HummockManager {
         }
     }
 
+    pub(crate) async fn init_time_travel_state(&self) -> Result<()> {
+        let mut gurad = self.versioning.write().await;
+        gurad.mark_next_time_travel_version_snapshot();
+
+        // It's OK to leave last_time_travel_snapshot_sst_ids just empty.
+        gurad.last_time_travel_snapshot_sst_ids = HashSet::new();
+        let Ok(sql_store) = self.sql_store() else {
+            return Ok(());
+        };
+        let Some(version) = hummock_time_travel_version::Entity::find()
+            .order_by_desc(hummock_time_travel_version::Column::VersionId)
+            .one(&sql_store.conn)
+            .await?
+            .map(|v| HummockVersion::from_persisted_protobuf(&v.version.to_protobuf()))
+        else {
+            return Ok(());
+        };
+        gurad.last_time_travel_snapshot_sst_ids = version.get_sst_ids();
+        Ok(())
+    }
+
     pub(crate) async fn truncate_time_travel_metadata(
         &self,
         epoch_watermark: HummockEpoch,
@@ -343,7 +364,8 @@ impl HummockManager {
         version: Option<&HummockVersion>,
         delta: HummockVersionDelta,
         group_parents: &HashMap<CompactionGroupId, CompactionGroupId>,
-    ) -> Result<()> {
+        skip_sst_ids: &HashSet<HummockSstableId>,
+    ) -> Result<Option<HashSet<HummockSstableId>>> {
         async fn write_sstable_infos(
             sst_infos: impl Iterator<Item = &PbSstableInfo>,
             txn: &DatabaseTransaction,
@@ -379,6 +401,7 @@ impl HummockManager {
             .exec(txn)
             .await?;
 
+        let mut version_sst_ids = None;
         let select_groups = group_parents
             .iter()
             .filter_map(|(cg_id, _)| {
@@ -390,7 +413,19 @@ impl HummockManager {
             })
             .collect::<HashSet<_>>();
         if let Some(version) = version {
-            write_sstable_infos(version.get_sst_infos(&select_groups), txn).await?;
+            version_sst_ids = Some(
+                version
+                    .get_sst_infos(&select_groups)
+                    .map(|s| s.sst_id)
+                    .collect(),
+            );
+            write_sstable_infos(
+                version
+                    .get_sst_infos(&select_groups)
+                    .filter(|s| !skip_sst_ids.contains(&s.sst_id)),
+                txn,
+            )
+            .await?;
             let m = hummock_time_travel_version::ActiveModel {
                 version_id: Set(
                     risingwave_meta_model_v2::HummockVersionId::try_from(version.id).unwrap(),
@@ -409,7 +444,13 @@ impl HummockManager {
                 .exec(txn)
                 .await?;
         }
-        let written = write_sstable_infos(delta.newly_added_sst_infos(&select_groups), txn).await?;
+        let written = write_sstable_infos(
+            delta
+                .newly_added_sst_infos(&select_groups)
+                .filter(|s| !skip_sst_ids.contains(&s.sst_id)),
+            txn,
+        )
+        .await?;
         // Ignore delta which adds no data.
         if written > 0 {
             let m = hummock_time_travel_delta::ActiveModel {
@@ -434,7 +475,7 @@ impl HummockManager {
                 .await?;
         }
 
-        Ok(())
+        Ok(version_sst_ids)
     }
 }
 

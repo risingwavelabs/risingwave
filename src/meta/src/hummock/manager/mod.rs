@@ -289,11 +289,7 @@ impl HummockManager {
             compaction_state: CompactionState::new(),
         };
         let instance = Arc::new(instance);
-        instance
-            .versioning
-            .write()
-            .await
-            .mark_next_time_travel_version_snapshot();
+        instance.init_time_travel_state().await?;
         instance.start_worker(rx).await;
         instance.load_meta_store_state().await?;
         instance.release_invalid_contexts().await?;

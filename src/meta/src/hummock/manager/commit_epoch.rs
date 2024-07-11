@@ -434,14 +434,19 @@ impl HummockManager {
                 .collect();
             let sql_store = self.sql_store()?;
             let mut txn = sql_store.conn.begin().await?;
-            self.write_time_travel_metadata(
-                &txn,
-                time_travel_version,
-                time_travel_delta,
-                &group_parents,
-            )
-            .await?;
+            let version_snapshot_sst_ids = self
+                .write_time_travel_metadata(
+                    &txn,
+                    time_travel_version,
+                    time_travel_delta,
+                    &group_parents,
+                    &versioning.last_time_travel_snapshot_sst_ids,
+                )
+                .await?;
             commit_multi_var_with_provided_txn!(txn, version, version_stats)?;
+            if let Some(version_snapshot_sst_ids) = version_snapshot_sst_ids {
+                versioning.last_time_travel_snapshot_sst_ids = version_snapshot_sst_ids;
+            }
         } else {
             commit_multi_var!(self.meta_store_ref(), version, version_stats)?;
         }
