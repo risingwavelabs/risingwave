@@ -4038,6 +4038,22 @@ impl CatalogManager {
         Ok(subscription.clone())
     }
 
+    pub async fn get_mv_depended_subscriptions(
+        &self,
+    ) -> MetaResult<HashMap<risingwave_common::catalog::TableId, HashMap<u32, u64>>> {
+        let guard = self.core.lock().await;
+        let mut map = HashMap::new();
+        for subscription in &guard.database.subscriptions.values() {
+            map.entry(risingwave_common::catalog::TableId::from(
+                subscription.dependent_table_id,
+            ))
+            .or_insert(HashMap::new())
+            .insert(subscription.id, subscription.retention_seconds);
+        }
+
+        Ok(map)
+    }
+
     pub async fn get_created_table_ids(&self) -> Vec<u32> {
         let guard = self.core.lock().await;
         guard
