@@ -867,7 +867,6 @@ impl UploaderData {
         table_ids: HashSet<TableId>,
         sync_result_sender: oneshot::Sender<HummockResult<SyncedData>>,
     ) {
-        error!(epoch, table_ids = ?table_ids.iter().map(|table_id| table_id.table_id).sorted().collect_vec(), "sync epoch");
         // clean old epochs
         let epochs = take_before_epoch(&mut self.unsync_data.epochs, epoch);
         if cfg!(debug_assertions) {
@@ -1133,7 +1132,6 @@ impl HummockUploader {
         let UploaderState::Working(data) = &mut self.state else {
             return;
         };
-        error!(epoch, table_ids = ?table_ids.iter().map(|table_id| table_id.table_id).sorted().collect_vec(), "start epoch");
         for table_id in &table_ids {
             let table_data = data
                 .unsync_data

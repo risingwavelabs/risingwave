@@ -265,8 +265,8 @@ impl ControlStreamManager {
                 if actor_ids_to_collect.is_empty() {
                     // No need to send or collect barrier for this node.
                     assert!(actor_ids_to_send.is_empty());
-                    Ok(())
-                } else {
+                }
+                {
                     let Some(node) = self.nodes.get_mut(node_id) else {
                         return Err(
                             anyhow!("unconnected worker node: {:?}", worker_node.host).into()
