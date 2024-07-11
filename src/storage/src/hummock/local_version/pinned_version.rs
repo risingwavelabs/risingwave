@@ -83,7 +83,7 @@ impl PinnedVersion {
         pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
     ) -> Self {
         let version_id = version.id;
-        let compaction_group_index = version.build_compaction_group_info();
+        let compaction_group_index = version.state_table_info.build_table_compaction_group_id();
 
         PinnedVersion {
             version: Arc::new(version),
@@ -107,7 +107,7 @@ impl PinnedVersion {
             self.version.id
         );
         let version_id = version.id;
-        let compaction_group_index = version.build_compaction_group_info();
+        let compaction_group_index = version.state_table_info.build_table_compaction_group_id();
 
         PinnedVersion {
             version: Arc::new(version),
@@ -133,9 +133,10 @@ impl PinnedVersion {
 
     pub fn levels(&self, table_id: TableId) -> impl Iterator<Item = &Level> {
         #[auto_enum(Iterator)]
-        match self.compaction_group_index.get(&table_id) {
-            Some(compaction_group_id) => {
-                let levels = self.levels_by_compaction_groups_id(*compaction_group_id);
+        match self.version.state_table_info.info().get(&table_id) {
+            Some(info) => {
+                let compaction_group_id = info.compaction_group_id;
+                let levels = self.levels_by_compaction_groups_id(compaction_group_id);
                 levels
                     .l0
                     .as_ref()
@@ -151,10 +152,6 @@ impl PinnedVersion {
 
     pub fn max_committed_epoch(&self) -> u64 {
         self.version.max_committed_epoch
-    }
-
-    pub fn safe_epoch(&self) -> u64 {
-        self.version.safe_epoch
     }
 
     /// ret value can't be used as `HummockVersion`. it must be modified with delta

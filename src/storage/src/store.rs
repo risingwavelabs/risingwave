@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::min;
+use std::collections::HashSet;
 use std::default::Default;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
@@ -24,7 +25,7 @@ use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use futures_async_stream::try_stream;
 use prost::Message;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
@@ -45,7 +46,7 @@ use crate::storage_value::StorageValue;
 pub trait StaticSendSync = Send + Sync + 'static;
 
 pub trait IterItem: Send + 'static {
-    type ItemRef<'a>: Send + 'a;
+    type ItemRef<'a>: Send + Copy + 'a;
 }
 
 impl IterItem for StateStoreIterItem {
@@ -67,7 +68,8 @@ pub fn to_owned_item((key, value): StateStoreIterItemRef<'_>) -> StorageResult<S
 }
 
 pub trait StateStoreIterExt<T: IterItem = StateStoreIterItem>: StateStoreIter<T> + Sized {
-    type ItemStream<O: Send, F: Send>: Stream<Item = StorageResult<O>> + Send;
+    type ItemStream<O: Send, F: Send + for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O>>: Stream<Item = StorageResult<O>>
+        + Send;
 
     fn into_stream<O: Send, F: for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O> + Send>(
         self,
@@ -152,7 +154,8 @@ impl<T: IterItem, I: StateStoreIter<T>> FusedStateStoreIter<I, T> {
 }
 
 impl<T: IterItem, I: StateStoreIter<T>> StateStoreIterExt<T> for I {
-    type ItemStream<O: Send, F: Send> = impl Stream<Item = StorageResult<O>> + Send;
+    type ItemStream<O: Send, F: Send + for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O>> =
+        impl Stream<Item = StorageResult<O>> + Send;
 
     fn into_stream<O: Send, F: for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O> + Send>(
         self,
@@ -216,6 +219,7 @@ pub trait StateStoreReadChangeLogIter = StateStoreIter<StateStoreReadLogItem> + 
 
 pub trait StateStoreRead: StaticSendSync {
     type Iter: StateStoreReadIter;
+    type RevIter: StateStoreReadIter;
     type ChangeLogIter: StateStoreReadChangeLogIter;
 
     /// Point gets a value from the state store.
@@ -238,6 +242,13 @@ pub trait StateStoreRead: StaticSendSync {
         epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::Iter>> + Send + '_;
+
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter>> + Send + '_;
 
     fn iter_log(
         &self,
@@ -309,6 +320,8 @@ pub trait StateStoreWrite: StaticSendSync {
     ) -> StorageResult<usize>;
 }
 
+pub trait SyncFuture = Future<Output = StorageResult<SyncResult>> + Send + 'static;
+
 pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     type Local: LocalStateStore;
 
@@ -319,7 +332,7 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
         epoch: HummockReadEpoch,
     ) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
-    fn sync(&self, epoch: u64) -> impl Future<Output = StorageResult<SyncResult>> + Send + '_;
+    fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture;
 
     /// update max current epoch in storage.
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
@@ -344,6 +357,7 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
 /// table.
 pub trait LocalStateStore: StaticSendSync {
     type Iter<'a>: StateStoreIter + 'a;
+    type RevIter<'a>: StateStoreIter + 'a;
 
     /// Point gets a value from the state store.
     /// The result is based on the latest written snapshot.
@@ -363,6 +377,12 @@ pub trait LocalStateStore: StaticSendSync {
         key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_;
+
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_;
 
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
     fn insert(
@@ -395,21 +415,6 @@ pub trait LocalStateStore: StaticSendSync {
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
     /// the previous write epoch is sealed.
     fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
-
-    /// Check existence of a given `key_range`.
-    /// It is better to provide `prefix_hint` in `read_options`, which will be used
-    /// for checking bloom filter if hummock is used. If `prefix_hint` is not provided,
-    /// the false positive rate can be significantly higher because bloom filter cannot
-    /// be used.
-    ///
-    /// Returns:
-    /// - false: `key_range` is guaranteed to be absent in storage.
-    /// - true: `key_range` may or may not exist in storage.
-    fn may_exist(
-        &self,
-        key_range: TableKeyRange,
-        read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<bool>> + Send + '_;
 
     // Updates the vnode bitmap corresponding to the local state store
     // Returns the previous vnode bitmap
@@ -612,10 +617,10 @@ pub struct NewLocalOptions {
     /// Whether the operation is consistent. The term `consistent` requires the following:
     ///
     /// 1. A key cannot be inserted or deleted for more than once, i.e. inserting to an existing
-    /// key or deleting an non-existing key is not allowed.
+    ///    key or deleting an non-existing key is not allowed.
     ///
     /// 2. The old value passed from
-    /// `update` and `delete` should match the original stored value.
+    ///    `update` and `delete` should match the original stored value.
     pub op_consistency_level: OpConsistencyLevel,
     pub table_option: TableOption,
 

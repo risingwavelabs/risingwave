@@ -16,7 +16,7 @@ use std::future::Future;
 
 use itertools::Itertools;
 use risingwave_common::array::Op;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
@@ -49,7 +49,6 @@ pub trait TopNExecutorBase: Send + 'static {
     }
 
     fn evict(&mut self) {}
-    fn update_epoch(&mut self, _epoch: u64) {}
 
     fn init(&mut self, epoch: EpochPair) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 
@@ -114,7 +113,6 @@ where
                         self.inner.update_vnode_bitmap(vnode_bitmap);
                     }
 
-                    self.inner.update_epoch(barrier.epoch.curr);
                     yield Message::Barrier(barrier)
                 }
             };

@@ -17,9 +17,10 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::NestedLoopJoinNode;
 
 use super::batch::prelude::*;
-use super::generic::{self, GenericPlanRef};
 use super::utils::{childless_record, Distill};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb, ToDistributedBatch};
+use super::{
+    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb, ToDistributedBatch,
+};
 use crate::error::Result;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;

@@ -315,14 +315,9 @@ impl DynamicLevelSelectorCore {
             if level_idx < ctx.base_level || level_idx >= self.config.max_level as usize {
                 continue;
             }
-            let upper_level = if level_idx == ctx.base_level {
-                0
-            } else {
-                level_idx - 1
-            };
-            let total_size = level.total_file_size
-                + handlers[upper_level].get_pending_output_file_size(level.level_idx)
-                - handlers[level_idx].get_pending_output_file_size(level.level_idx + 1);
+            let output_file_size =
+                handlers[level_idx].get_pending_output_file_size(level.level_idx + 1);
+            let total_size = level.total_file_size.saturating_sub(output_file_size);
             if total_size == 0 {
                 continue;
             }
@@ -428,6 +423,7 @@ impl CompactionSelector for DynamicLevelSelector {
         task_id: HummockCompactionTaskId,
         compaction_group: &CompactionGroup,
         levels: &Levels,
+        _member_table_ids: &std::collections::BTreeSet<risingwave_common::catalog::TableId>,
         level_handlers: &mut [LevelHandler],
         selector_stats: &mut LocalSelectorStatistic,
         _table_id_to_options: HashMap<u32, TableOption>,
@@ -484,7 +480,7 @@ impl CompactionSelector for DynamicLevelSelector {
 
 #[cfg(test)]
 pub mod tests {
-    use std::collections::HashMap;
+    use std::collections::{BTreeSet, HashMap};
     use std::sync::Arc;
 
     use itertools::Itertools;
@@ -606,7 +602,6 @@ pub mod tests {
                 3,
                 10,
             ))),
-            member_table_ids: vec![1],
             ..Default::default()
         };
 
@@ -618,6 +613,7 @@ pub mod tests {
                 1,
                 &group_config,
                 &levels,
+                &BTreeSet::new(),
                 &mut levels_handlers,
                 &mut local_stats,
                 HashMap::default(),
@@ -645,6 +641,7 @@ pub mod tests {
                 1,
                 &group_config,
                 &levels,
+                &BTreeSet::new(),
                 &mut levels_handlers,
                 &mut local_stats,
                 HashMap::default(),
@@ -664,6 +661,7 @@ pub mod tests {
                 2,
                 &group_config,
                 &levels,
+                &BTreeSet::new(),
                 &mut levels_handlers,
                 &mut local_stats,
                 HashMap::default(),
@@ -700,6 +698,7 @@ pub mod tests {
             2,
             &group_config,
             &levels,
+            &BTreeSet::new(),
             &mut levels_handlers,
             &mut local_stats,
             HashMap::default(),

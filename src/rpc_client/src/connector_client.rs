@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context};
 use futures::TryStreamExt;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
-use risingwave_common::monitor::connection::{EndpointExt, TcpConfig};
+use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
 use risingwave_pb::connector_service::sink_coordinator_stream_request::{
     CommitMetadata, StartCoordinator,
@@ -202,7 +202,7 @@ impl ConnectorClient {
         source_id: u64,
         source_type: SourceType,
         start_offset: Option<String>,
-        properties: HashMap<String, String>,
+        properties: BTreeMap<String, String>,
         snapshot_done: bool,
         is_source_job: bool,
     ) -> Result<Streaming<GetEventStreamResponse>> {
@@ -234,7 +234,7 @@ impl ConnectorClient {
         &self,
         source_id: u64,
         source_type: SourceType,
-        properties: HashMap<String, String>,
+        properties: BTreeMap<String, String>,
         table_schema: Option<TableSchema>,
         is_source_job: bool,
         is_backfill_table: bool,
@@ -278,7 +278,6 @@ impl ConnectorClient {
         &self,
         payload_schema: Option<TableSchema>,
         sink_proto: PbSinkParam,
-        sink_payload_format: SinkPayloadFormat,
     ) -> Result<SinkWriterStreamHandle> {
         let mut rpc_client = self.rpc_client.clone();
         let (handle, first_rsp) = SinkWriterStreamHandle::initialize(
@@ -286,7 +285,6 @@ impl ConnectorClient {
                 request: Some(SinkRequest::Start(StartSink {
                     payload_schema,
                     sink_param: Some(sink_proto),
-                    format: sink_payload_format as i32,
                 })),
             },
             |rx| async move {

@@ -21,7 +21,7 @@ use risingwave_pb::plan_common::StorageTableDesc;
 use tracing::warn;
 
 use crate::array::{Array, DataChunk, PrimitiveArray};
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::hash::VirtualNode;
 use crate::row::Row;
 use crate::util::iter_util::ZipEqFast;
@@ -37,7 +37,7 @@ enum ComputeVnode {
         dist_key_in_pk_indices: Vec<usize>,
     },
     VnodeColumnIndex {
-        /// Indices of vnode columns.
+        /// Index of vnode column.
         vnode_col_idx_in_pk: usize,
     },
 }

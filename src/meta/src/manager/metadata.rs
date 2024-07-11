@@ -64,6 +64,7 @@ pub struct MetadataManagerV2 {
 #[derive(Debug)]
 pub(crate) enum ActiveStreamingWorkerChange {
     Add(WorkerNode),
+    #[expect(dead_code)]
     Remove(WorkerNode),
     Update(WorkerNode),
 }

@@ -183,12 +183,16 @@ export function Relations<R extends Relation>(
                 {extraColumns.map((c) => (
                   <Td key={c.name}>{c.content(r)}</Td>
                 ))}
-                <Td overflowWrap="normal">
-                  {r.columns
-                    .filter((col) => ("isHidden" in col ? !col.isHidden : true))
-                    .map((col) => extractColumnInfo(col))
-                    .join(", ")}
-                </Td>
+                {r.columns && r.columns.length > 0 && (
+                  <Td overflowWrap="normal">
+                    {r.columns
+                      .filter((col) =>
+                        "isHidden" in col ? !col.isHidden : true
+                      )
+                      .map((col) => extractColumnInfo(col))
+                      .join(", ")}
+                  </Td>
+                )}
               </Tr>
             ))}
           </Tbody>

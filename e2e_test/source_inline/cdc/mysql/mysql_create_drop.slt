@@ -7,6 +7,11 @@ ALTER SYSTEM SET max_concurrent_creating_streaming_jobs TO 1;
 
 system ok
 mysql -e "
+    SET GLOBAL time_zone = '+01:00';
+"
+
+system ok
+mysql -e "
     DROP DATABASE IF EXISTS testdb1; CREATE DATABASE testdb1;
     USE testdb1;
     CREATE TABLE tt1 (v1 int primary key, v2 timestamp);
@@ -159,53 +164,53 @@ sleep 5s
 query IT
 select * from tt1;
 ----
-1 2023-10-23 10:00:00+00:00
+1 2023-10-23 09:00:00+00:00
 
 query IT
 select * from tt2;
 ----
-2 2023-10-23 11:00:00+00:00
+2 2023-10-23 10:00:00+00:00
 
 query IT
 select * from tt3;
 ----
-3 2023-10-23 12:00:00+00:00
+3 2023-10-23 11:00:00+00:00
 
 query IT
 select * from tt4;
 ----
-4 2023-10-23 13:00:00+00:00
+4 2023-10-23 12:00:00+00:00
 
 query IT
 select * from tt5;
 ----
-5 2023-10-23 14:00:00+00:00
+5 2023-10-23 13:00:00+00:00
 
 
 query IT
 select * from tt1_shared;
 ----
-1 2023-10-23 10:00:00+00:00
+1 2023-10-23 09:00:00+00:00
 
 query IT
 select * from tt2_shared;
 ----
-2 2023-10-23 11:00:00+00:00
+2 2023-10-23 10:00:00+00:00
 
 query IT
 select * from tt3_shared;
 ----
-3 2023-10-23 12:00:00+00:00
+3 2023-10-23 11:00:00+00:00
 
 query IT
 select * from tt4_shared;
 ----
-4 2023-10-23 13:00:00+00:00
+4 2023-10-23 12:00:00+00:00
 
 query IT
 select * from tt5_shared;
 ----
-5 2023-10-23 14:00:00+00:00
+5 2023-10-23 13:00:00+00:00
 
 statement ok
 drop table tt1;
@@ -224,3 +229,8 @@ drop table tt5;
 
 statement ok
 drop source s cascade;
+
+system ok
+mysql -e "
+    SET GLOBAL time_zone = '+00:00';
+"

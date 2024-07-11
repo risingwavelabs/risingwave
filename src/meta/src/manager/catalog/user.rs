@@ -155,7 +155,7 @@ mod tests {
 
     use super::*;
     use crate::manager::{commit_meta, CatalogManager};
-    use crate::model::{BTreeMapTransaction, ValTransaction};
+    use crate::model::BTreeMapTransaction;
     use crate::storage::Transaction;
 
     fn make_test_user(id: u32, name: &str) -> UserInfo {
@@ -216,14 +216,12 @@ mod tests {
             owner: DEFAULT_SUPER_USER_ID,
             ..Default::default()
         };
-        catalog_manager
-            .start_create_table_procedure(&table, vec![])
-            .await?;
+        catalog_manager.start_create_table_procedure(&table).await?;
         catalog_manager
             .finish_create_table_procedure(vec![], table)
             .await?;
         catalog_manager
-            .start_create_table_procedure(&other_table, vec![])
+            .start_create_table_procedure(&other_table)
             .await?;
         catalog_manager
             .finish_create_table_procedure(vec![], other_table)

@@ -53,7 +53,6 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             source.row_id_index.map(|x| x as _),
             source.with_properties.clone(),
             source_info.clone(),
-            params.env.connector_params(),
             params.env.config().developer.connector_message_buffer_size,
             params.info.pk_indices.clone(),
         );

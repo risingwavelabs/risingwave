@@ -14,7 +14,7 @@
 
 use std::ops::RangeInclusive;
 
-use crate::buffer::Bitmap;
+use crate::bitmap::Bitmap;
 use crate::hash::VirtualNode;
 
 /// An extension trait for `Bitmap` to support virtual node operations.

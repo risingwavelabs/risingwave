@@ -24,8 +24,8 @@ select * from t1;
 
 job_id=$(backup)
 echo "${job_id}"
-backup_mce=$(get_max_committed_epoch_in_backup "${job_id}")
-backup_safe_epoch=$(get_safe_epoch_in_backup "${job_id}")
+backup_mce=$(get_max_committed_epoch_in_backup)
+backup_safe_epoch=$(get_safe_epoch_in_backup)
 echo "backup MCE: ${backup_mce}"
 echo "backup safe_epoch: ${backup_safe_epoch}"
 
@@ -55,10 +55,10 @@ do
   sleep 5
   min_pinned_snapshot=$(get_min_pinned_snapshot)
 done
-# safe epoch equals to 0 because no compaction has been done
+# safe epoch equals to backup_safe_epoch because no compaction has been done
 safe_epoch=$(get_safe_epoch)
 echo "safe epoch after unpin: ${safe_epoch}"
-[ "${safe_epoch}" -eq 0 ]
+[ "${safe_epoch}" -eq "${backup_safe_epoch}" ]
 # trigger a compaction to increase safe_epoch
 manual_compaction -c 3 -l 0
 # wait until compaction is done
@@ -68,6 +68,7 @@ do
   sleep 5
 done
 echo "safe epoch after compaction: ${safe_epoch}"
+[ "${safe_epoch}" -gt "${backup_safe_epoch}" ]
 
 echo "QUERY_EPOCH=safe_epoch. It should fail because it's not covered by any backup"
 execute_sql_and_expect \
@@ -83,7 +84,6 @@ select * from t1;" \
 
 echo "QUERY_EPOCH=backup_safe_epoch + 1<<16 + 1, it's < safe_epoch but covered by backup"
 epoch=$((backup_safe_epoch + (1<<16) + 1))
-[ ${epoch} -eq 65537 ]
 execute_sql_and_expect \
 "SET QUERY_EPOCH TO ${epoch};
 select * from t1;" \

@@ -16,7 +16,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;

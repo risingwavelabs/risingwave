@@ -33,15 +33,15 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use downcast_rs::{impl_downcast, Downcast};
-use dyn_clone::{self, DynClone};
+use dyn_clone::DynClone;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use paste::paste;
 use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::recursive::{self, Recurse};
-use risingwave_pb::batch_plan::PlanNode as BatchPlanPb;
-use risingwave_pb::stream_plan::StreamNode as StreamPlanPb;
+use risingwave_pb::batch_plan::PlanNode as PbBatchPlan;
+use risingwave_pb::stream_plan::StreamNode as PbStreamPlan;
 use serde::Serialize;
 use smallvec::SmallVec;
 
@@ -696,8 +696,10 @@ impl dyn PlanNode {
     }
 }
 
-const PLAN_DEPTH_THRESHOLD: usize = 30;
-const PLAN_TOO_DEEP_NOTICE: &str = "The plan is too deep. \
+/// Recursion depth threshold for plan node visitor to send notice to user.
+pub const PLAN_DEPTH_THRESHOLD: usize = 30;
+/// Notice message for plan node visitor to send to user when the depth threshold is reached.
+pub const PLAN_TOO_DEEP_NOTICE: &str = "The plan is too deep. \
 Consider simplifying or splitting the query if you encounter any issues.";
 
 impl dyn PlanNode {
@@ -708,7 +710,7 @@ impl dyn PlanNode {
     pub fn to_stream_prost(
         &self,
         state: &mut BuildFragmentGraphState,
-    ) -> SchedulerResult<StreamPlanPb> {
+    ) -> SchedulerResult<PbStreamPlan> {
         recursive::tracker!().recurse(|t| {
             if t.depth_reaches(PLAN_DEPTH_THRESHOLD) {
                 notice_to_user(PLAN_TOO_DEEP_NOTICE);
@@ -736,7 +738,7 @@ impl dyn PlanNode {
                 .map(|plan| plan.to_stream_prost(state))
                 .try_collect()?;
             // TODO: support pk_indices and operator_id
-            Ok(StreamPlanPb {
+            Ok(PbStreamPlan {
                 input,
                 identity: self.explain_myself_to_string(),
                 node_body: node,
@@ -754,13 +756,13 @@ impl dyn PlanNode {
     }
 
     /// Serialize the plan node and its children to a batch plan proto.
-    pub fn to_batch_prost(&self) -> SchedulerResult<BatchPlanPb> {
+    pub fn to_batch_prost(&self) -> SchedulerResult<PbBatchPlan> {
         self.to_batch_prost_identity(true)
     }
 
     /// Serialize the plan node and its children to a batch plan proto without the identity field
     /// (for testing).
-    pub fn to_batch_prost_identity(&self, identity: bool) -> SchedulerResult<BatchPlanPb> {
+    pub fn to_batch_prost_identity(&self, identity: bool) -> SchedulerResult<PbBatchPlan> {
         recursive::tracker!().recurse(|t| {
             if t.depth_reaches(PLAN_DEPTH_THRESHOLD) {
                 notice_to_user(PLAN_TOO_DEEP_NOTICE);
@@ -772,7 +774,7 @@ impl dyn PlanNode {
                 .into_iter()
                 .map(|plan| plan.to_batch_prost_identity(identity))
                 .try_collect()?;
-            Ok(BatchPlanPb {
+            Ok(PbBatchPlan {
                 children,
                 identity: if identity {
                     self.explain_myself_to_string()
@@ -848,6 +850,8 @@ mod batch_values;
 mod logical_agg;
 mod logical_apply;
 mod logical_cdc_scan;
+mod logical_changelog;
+mod logical_cte_ref;
 mod logical_dedup;
 mod logical_delete;
 mod logical_except;
@@ -865,6 +869,7 @@ mod logical_now;
 mod logical_over_window;
 mod logical_project;
 mod logical_project_set;
+mod logical_recursive_union;
 mod logical_scan;
 mod logical_share;
 mod logical_source;
@@ -874,6 +879,7 @@ mod logical_topn;
 mod logical_union;
 mod logical_update;
 mod logical_values;
+mod stream_changelog;
 mod stream_dedup;
 mod stream_delta_join;
 mod stream_dml;
@@ -947,6 +953,8 @@ pub use batch_values::BatchValues;
 pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
 pub use logical_cdc_scan::LogicalCdcScan;
+pub use logical_changelog::LogicalChangeLog;
+pub use logical_cte_ref::LogicalCteRef;
 pub use logical_dedup::LogicalDedup;
 pub use logical_delete::LogicalDelete;
 pub use logical_except::LogicalExcept;
@@ -965,6 +973,7 @@ pub use logical_now::LogicalNow;
 pub use logical_over_window::LogicalOverWindow;
 pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
+pub use logical_recursive_union::LogicalRecursiveUnion;
 pub use logical_scan::LogicalScan;
 pub use logical_share::LogicalShare;
 pub use logical_source::LogicalSource;
@@ -975,6 +984,7 @@ pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
 pub use stream_cdc_table_scan::StreamCdcTableScan;
+pub use stream_changelog::StreamChangeLog;
 pub use stream_dedup::StreamDedup;
 pub use stream_delta_join::StreamDeltaJoin;
 pub use stream_dml::StreamDml;
@@ -1063,6 +1073,9 @@ macro_rules! for_all_plan_nodes {
             , { Logical, MaxOneRow }
             , { Logical, KafkaScan }
             , { Logical, IcebergScan }
+            , { Logical, RecursiveUnion }
+            , { Logical, CteRef }
+            , { Logical, ChangeLog }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1126,6 +1139,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, EowcSort }
             , { Stream, OverWindow }
             , { Stream, FsFetch }
+            , { Stream, ChangeLog }
         }
     };
 }
@@ -1165,6 +1179,9 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, MaxOneRow }
             , { Logical, KafkaScan }
             , { Logical, IcebergScan }
+            , { Logical, RecursiveUnion }
+            , { Logical, CteRef }
+            , { Logical, ChangeLog }
         }
     };
 }
@@ -1246,6 +1263,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, EowcSort }
             , { Stream, OverWindow }
             , { Stream, FsFetch }
+            , { Stream, ChangeLog }
         }
     };
 }

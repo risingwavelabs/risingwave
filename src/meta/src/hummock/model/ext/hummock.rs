@@ -218,7 +218,7 @@ impl Transactional<Transaction> for HummockVersionDelta {
             id: Set(self.id as _),
             prev_id: Set(self.prev_id as _),
             max_committed_epoch: Set(self.max_committed_epoch as _),
-            safe_epoch: Set(self.safe_epoch as _),
+            safe_epoch: Set(self.visible_table_safe_epoch() as _),
             trivial_move: Set(self.trivial_move),
             full_version_delta: Set(FullVersionDelta::from(&self.into())),
         };

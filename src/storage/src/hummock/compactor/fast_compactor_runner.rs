@@ -316,6 +316,9 @@ impl CompactorRunner {
             context.compactor_metrics.clone(),
             Some(task_progress.clone()),
             task_config.table_vnode_partition.clone(),
+            context
+                .storage_opts
+                .compactor_concurrent_uploading_sst_count,
         );
         assert_eq!(
             task.input_ssts.len(),
@@ -505,17 +508,19 @@ impl CompactorRunner {
         );
 
         let statistic = self.executor.take_statistics();
-        let outputs = self.executor.builder.finish().await?;
-        let ssts = Compactor::report_progress(
+        let output_ssts = self.executor.builder.finish().await?;
+        Compactor::report_progress(
             self.metrics.clone(),
             Some(self.executor.task_progress.clone()),
-            outputs,
+            &output_ssts,
             false,
-        )
-        .await?;
-        let sst_infos = ssts.iter().map(|sst| sst.sst_info.clone()).collect_vec();
-        assert!(can_concat(sst_infos.as_slice()));
-        Ok((ssts, statistic))
+        );
+        let sst_infos = output_ssts
+            .iter()
+            .map(|sst| sst.sst_info.clone())
+            .collect_vec();
+        assert!(can_concat(&sst_infos));
+        Ok((output_ssts, statistic))
     }
 }
 

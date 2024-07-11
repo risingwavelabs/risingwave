@@ -1,0 +1,46 @@
+---
+services:
+  sqlserver-server:
+    container_name: sqlserver-server
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    hostname: sqlserver-server
+    ports:
+      - 1433:1433
+    environment:
+      ACCEPT_EULA: 'Y'
+      SA_PASSWORD: 'SomeTestOnly@SA'
+  risingwave-standalone:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: risingwave-standalone
+  postgres-0:
+    container_name: postgres-0
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: postgres-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+volumes:
+  risingwave-standalone:
+    external: false
+  postgres-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+  message_queue:
+    external: false
+name: risingwave-compose

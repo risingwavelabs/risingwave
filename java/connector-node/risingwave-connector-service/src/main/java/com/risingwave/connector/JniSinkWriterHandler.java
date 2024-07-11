@@ -23,9 +23,6 @@ public class JniSinkWriterHandler {
     private static final Logger LOG = LoggerFactory.getLogger(JniSinkWriterHandler.class);
 
     public static void runJniSinkWriterThread(long requestRxPtr, long responseTxPtr) {
-        // For jni.rs
-        java.lang.Thread.currentThread()
-                .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
         JniSinkWriterResponseObserver responseObserver =
                 new JniSinkWriterResponseObserver(responseTxPtr);
         SinkWriterStreamObserver sinkWriterStreamObserver =

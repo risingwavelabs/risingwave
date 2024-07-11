@@ -12,29 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::mem::size_of;
-use std::sync::Arc;
+use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::mem::{replace, size_of};
+use std::ops::Deref;
+use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_pb::hummock::compact_task::{PbTaskStatus, PbTaskType, TaskStatus, TaskType};
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::PbLevels;
 use risingwave_pb::hummock::hummock_version_delta::{ChangeLogDelta, PbGroupDeltas};
 use risingwave_pb::hummock::subscribe_compaction_event_request::PbReportTask;
 use risingwave_pb::hummock::{
-    BloomFilterType, LevelType, PbCompactTask, PbHummockVersion, PbHummockVersionDelta,
-    PbInputLevel, PbKeyRange, PbLevel, PbLevelType, PbOverlappingLevel, PbSstableInfo,
-    PbTableStats, PbValidationTask, TableOption, TableSchema,
+    BloomFilterType, CompactionConfig, LevelType, PbCompactTask, PbHummockVersion,
+    PbHummockVersionDelta, PbInputLevel, PbKeyRange, PbLevel, PbLevelType, PbOverlappingLevel,
+    PbSstableInfo, PbStateTableInfo, PbTableStats, PbValidationTask, StateTableInfo,
+    StateTableInfoDelta, TableOption, TableSchema,
 };
 use serde::Serialize;
+use tracing::warn;
 
 use crate::change_log::TableChangeLog;
+use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
+use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRange;
 use crate::table_watermark::TableWatermarks;
-use crate::{CompactionGroupId, HummockSstableObjectId, ProtoSerializeSizeEstimatedExt};
+use crate::{CompactionGroupId, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID};
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct OverlappingLevel {
@@ -99,8 +106,8 @@ impl From<PbOverlappingLevel> for OverlappingLevel {
     }
 }
 
-impl ProtoSerializeSizeEstimatedExt for OverlappingLevel {
-    fn estimated_encode_len(&self) -> usize {
+impl OverlappingLevel {
+    pub fn estimated_encode_len(&self) -> usize {
         self.sub_levels
             .iter()
             .map(|level| level.estimated_encode_len())
@@ -199,8 +206,8 @@ impl From<PbLevel> for Level {
     }
 }
 
-impl ProtoSerializeSizeEstimatedExt for Level {
-    fn estimated_encode_len(&self) -> usize {
+impl Level {
+    pub fn estimated_encode_len(&self) -> usize {
         size_of::<u32>()
             + size_of::<u32>()
             + self
@@ -256,8 +263,8 @@ impl Levels {
     }
 }
 
-impl ProtoSerializeSizeEstimatedExt for Levels {
-    fn estimated_encode_len(&self) -> usize {
+impl Levels {
+    pub fn estimated_encode_len(&self) -> usize {
         let mut basic = self
             .levels
             .iter()
@@ -285,7 +292,8 @@ impl From<&PbLevels> for Levels {
             levels: pb_levels.levels.iter().map(Level::from).collect_vec(),
             group_id: pb_levels.group_id,
             parent_group_id: pb_levels.parent_group_id,
-            member_table_ids: pb_levels.member_table_ids.clone(),
+
+            member_table_ids: Default::default(),
         }
     }
 }
@@ -301,7 +309,8 @@ impl From<&Levels> for PbLevels {
             levels: levels.levels.iter().map(PbLevel::from).collect_vec(),
             group_id: levels.group_id,
             parent_group_id: levels.parent_group_id,
-            member_table_ids: levels.member_table_ids.clone(),
+            #[expect(deprecated)]
+            member_table_ids: Default::default(),
         }
     }
 }
@@ -333,8 +342,173 @@ impl From<Levels> for PbLevels {
             levels: levels.levels.into_iter().map(PbLevel::from).collect_vec(),
             group_id: levels.group_id,
             parent_group_id: levels.parent_group_id,
-            member_table_ids: levels.member_table_ids,
+            ..Default::default()
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HummockVersionStateTableInfo {
+    state_table_info: HashMap<TableId, PbStateTableInfo>,
+
+    // in memory index
+    compaction_group_member_tables: HashMap<CompactionGroupId, BTreeSet<TableId>>,
+}
+
+impl HummockVersionStateTableInfo {
+    pub fn empty() -> Self {
+        Self {
+            state_table_info: HashMap::new(),
+            compaction_group_member_tables: HashMap::new(),
+        }
+    }
+
+    fn build_compaction_group_member_tables(
+        state_table_info: &HashMap<TableId, PbStateTableInfo>,
+    ) -> HashMap<CompactionGroupId, BTreeSet<TableId>> {
+        let mut ret: HashMap<_, BTreeSet<_>> = HashMap::new();
+        for (table_id, info) in state_table_info {
+            assert!(ret
+                .entry(info.compaction_group_id)
+                .or_default()
+                .insert(*table_id));
+        }
+        ret
+    }
+
+    pub fn build_table_compaction_group_id(&self) -> HashMap<TableId, CompactionGroupId> {
+        self.state_table_info
+            .iter()
+            .map(|(table_id, info)| (*table_id, info.compaction_group_id))
+            .collect()
+    }
+
+    pub fn from_protobuf(state_table_info: &HashMap<u32, PbStateTableInfo>) -> Self {
+        let state_table_info = state_table_info
+            .iter()
+            .map(|(table_id, info)| (TableId::new(*table_id), info.clone()))
+            .collect();
+        let compaction_group_member_tables =
+            Self::build_compaction_group_member_tables(&state_table_info);
+        Self {
+            state_table_info,
+            compaction_group_member_tables,
+        }
+    }
+
+    pub fn to_protobuf(&self) -> HashMap<u32, PbStateTableInfo> {
+        self.state_table_info
+            .iter()
+            .map(|(table_id, info)| (table_id.table_id, info.clone()))
+            .collect()
+    }
+
+    pub fn apply_delta(
+        &mut self,
+        delta: &HashMap<TableId, StateTableInfoDelta>,
+        removed_table_id: &HashSet<TableId>,
+    ) -> HashMap<TableId, Option<StateTableInfo>> {
+        let mut changed_table = HashMap::new();
+        fn remove_table_from_compaction_group(
+            compaction_group_member_tables: &mut HashMap<CompactionGroupId, BTreeSet<TableId>>,
+            compaction_group_id: CompactionGroupId,
+            table_id: TableId,
+        ) {
+            let member_tables = compaction_group_member_tables
+                .get_mut(&compaction_group_id)
+                .expect("should exist");
+            assert!(member_tables.remove(&table_id));
+            if member_tables.is_empty() {
+                assert!(compaction_group_member_tables
+                    .remove(&compaction_group_id)
+                    .is_some());
+            }
+        }
+        for table_id in removed_table_id {
+            if let Some(prev_info) = self.state_table_info.remove(table_id) {
+                remove_table_from_compaction_group(
+                    &mut self.compaction_group_member_tables,
+                    prev_info.compaction_group_id,
+                    *table_id,
+                );
+                assert!(changed_table.insert(*table_id, Some(prev_info)).is_none());
+            } else {
+                warn!(
+                    table_id = table_id.table_id,
+                    "table to remove does not exist"
+                );
+            }
+        }
+        for (table_id, delta) in delta {
+            if removed_table_id.contains(table_id) {
+                continue;
+            }
+            let new_info = StateTableInfo {
+                committed_epoch: delta.committed_epoch,
+                safe_epoch: delta.safe_epoch,
+                compaction_group_id: delta.compaction_group_id,
+            };
+            match self.state_table_info.entry(*table_id) {
+                Entry::Occupied(mut entry) => {
+                    let prev_info = entry.get_mut();
+                    assert!(
+                        new_info.safe_epoch >= prev_info.safe_epoch
+                            && new_info.committed_epoch >= prev_info.committed_epoch,
+                        "state table info regress. table id: {}, prev_info: {:?}, new_info: {:?}",
+                        table_id.table_id,
+                        prev_info,
+                        new_info
+                    );
+                    if prev_info.compaction_group_id != new_info.compaction_group_id {
+                        // table moved to another compaction group
+                        remove_table_from_compaction_group(
+                            &mut self.compaction_group_member_tables,
+                            prev_info.compaction_group_id,
+                            *table_id,
+                        );
+                        assert!(self
+                            .compaction_group_member_tables
+                            .entry(new_info.compaction_group_id)
+                            .or_default()
+                            .insert(*table_id));
+                    }
+                    let prev_info = replace(prev_info, new_info);
+                    changed_table.insert(*table_id, Some(prev_info));
+                }
+                Entry::Vacant(entry) => {
+                    assert!(self
+                        .compaction_group_member_tables
+                        .entry(new_info.compaction_group_id)
+                        .or_default()
+                        .insert(*table_id));
+                    entry.insert(new_info);
+                    changed_table.insert(*table_id, None);
+                }
+            }
+        }
+        debug_assert_eq!(
+            self.compaction_group_member_tables,
+            Self::build_compaction_group_member_tables(&self.state_table_info)
+        );
+        changed_table
+    }
+
+    pub fn info(&self) -> &HashMap<TableId, StateTableInfo> {
+        &self.state_table_info
+    }
+
+    pub fn compaction_group_member_table_ids(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> &BTreeSet<TableId> {
+        static EMPTY_SET: LazyLock<BTreeSet<TableId>> = LazyLock::new(BTreeSet::new);
+        self.compaction_group_member_tables
+            .get(&compaction_group_id)
+            .unwrap_or_else(|| EMPTY_SET.deref())
+    }
+
+    pub fn compaction_group_member_tables(&self) -> &HashMap<CompactionGroupId, BTreeSet<TableId>> {
+        &self.compaction_group_member_tables
     }
 }
 
@@ -343,9 +517,10 @@ pub struct HummockVersion {
     pub id: u64,
     pub levels: HashMap<CompactionGroupId, Levels>,
     pub max_committed_epoch: u64,
-    pub safe_epoch: u64,
+    safe_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
     pub table_change_log: HashMap<TableId, TableChangeLog>,
+    pub state_table_info: HummockVersionStateTableInfo,
 }
 
 impl Default for HummockVersion {
@@ -366,10 +541,14 @@ impl HummockVersion {
     pub fn from_persisted_protobuf(pb_version: &PbHummockVersion) -> Self {
         HummockVersion::from(pb_version)
     }
+
+    pub fn to_protobuf(&self) -> PbHummockVersion {
+        self.into()
+    }
 }
 
-impl ProtoSerializeSizeEstimatedExt for HummockVersion {
-    fn estimated_encode_len(&self) -> usize {
+impl HummockVersion {
+    pub fn estimated_encode_len(&self) -> usize {
         self.levels.len() * size_of::<CompactionGroupId>()
             + self
                 .levels
@@ -416,6 +595,9 @@ impl From<&PbHummockVersion> for HummockVersion {
                     )
                 })
                 .collect(),
+            state_table_info: HummockVersionStateTableInfo::from_protobuf(
+                &pb_version.state_table_info,
+            ),
         }
     }
 }
@@ -441,6 +623,7 @@ impl From<&HummockVersion> for PbHummockVersion {
                 .iter()
                 .map(|(table_id, change_log)| (table_id.table_id, change_log.to_protobuf()))
                 .collect(),
+            state_table_info: version.state_table_info.to_protobuf(),
         }
     }
 }
@@ -461,12 +644,101 @@ impl From<HummockVersion> for PbHummockVersion {
                 .into_iter()
                 .map(|(table_id, watermark)| (table_id.table_id, watermark.as_ref().into()))
                 .collect(),
-
             table_change_logs: version
                 .table_change_log
                 .into_iter()
                 .map(|(table_id, change_log)| (table_id.table_id, change_log.to_protobuf()))
                 .collect(),
+            state_table_info: version.state_table_info.to_protobuf(),
+        }
+    }
+}
+
+impl HummockVersion {
+    pub fn next_version_id(&self) -> HummockVersionId {
+        self.id + 1
+    }
+
+    pub fn need_fill_backward_compatible_state_table_info_delta(&self) -> bool {
+        // for backward-compatibility of previous hummock version delta
+        self.state_table_info.state_table_info.is_empty()
+            && self.levels.values().any(|group| {
+                // state_table_info is not previously filled, but there previously exists some tables
+                #[expect(deprecated)]
+                !group.member_table_ids.is_empty()
+            })
+    }
+
+    pub fn may_fill_backward_compatible_state_table_info_delta(
+        &self,
+        delta: &mut HummockVersionDelta,
+    ) {
+        #[expect(deprecated)]
+        // for backward-compatibility of previous hummock version delta
+        for (cg_id, group) in &self.levels {
+            for table_id in &group.member_table_ids {
+                assert!(
+                    delta
+                        .state_table_info_delta
+                        .insert(
+                            TableId::new(*table_id),
+                            StateTableInfoDelta {
+                                committed_epoch: self.max_committed_epoch,
+                                safe_epoch: self.safe_epoch,
+                                compaction_group_id: *cg_id,
+                            }
+                        )
+                        .is_none(),
+                    "duplicate table id {} in cg {}",
+                    table_id,
+                    cg_id
+                );
+            }
+        }
+    }
+
+    pub(crate) fn set_safe_epoch(&mut self, safe_epoch: u64) {
+        self.safe_epoch = safe_epoch;
+    }
+
+    pub fn visible_table_safe_epoch(&self) -> u64 {
+        self.safe_epoch
+    }
+
+    pub fn create_init_version(default_compaction_config: Arc<CompactionConfig>) -> HummockVersion {
+        let mut init_version = HummockVersion {
+            id: FIRST_VERSION_ID,
+            levels: Default::default(),
+            max_committed_epoch: INVALID_EPOCH,
+            safe_epoch: INVALID_EPOCH,
+            table_watermarks: HashMap::new(),
+            table_change_log: HashMap::new(),
+            state_table_info: HummockVersionStateTableInfo::empty(),
+        };
+        for group_id in [
+            StaticCompactionGroupId::StateDefault as CompactionGroupId,
+            StaticCompactionGroupId::MaterializedView as CompactionGroupId,
+        ] {
+            init_version.levels.insert(
+                group_id,
+                build_initial_compaction_group_levels(group_id, default_compaction_config.as_ref()),
+            );
+        }
+        init_version
+    }
+
+    pub fn version_delta_after(&self) -> HummockVersionDelta {
+        HummockVersionDelta {
+            id: self.next_version_id(),
+            prev_id: self.id,
+            safe_epoch: self.safe_epoch,
+            trivial_move: false,
+            max_committed_epoch: self.max_committed_epoch,
+            group_deltas: Default::default(),
+            new_table_watermarks: HashMap::new(),
+            removed_table_ids: HashSet::new(),
+            change_log_delta: HashMap::new(),
+            state_table_info_delta: Default::default(),
         }
     }
 }
@@ -477,11 +749,12 @@ pub struct HummockVersionDelta {
     pub prev_id: u64,
     pub group_deltas: HashMap<CompactionGroupId, PbGroupDeltas>,
     pub max_committed_epoch: u64,
-    pub safe_epoch: u64,
+    safe_epoch: u64,
     pub trivial_move: bool,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
-    pub removed_table_ids: Vec<TableId>,
+    pub removed_table_ids: HashSet<TableId>,
     pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
+    pub state_table_info_delta: HashMap<TableId, StateTableInfoDelta>,
 }
 
 impl Default for HummockVersionDelta {
@@ -501,6 +774,10 @@ impl HummockVersionDelta {
     /// maintain backward compatibility.
     pub fn from_rpc_protobuf(delta: &PbHummockVersionDelta) -> Self {
         Self::from(delta)
+    }
+
+    pub fn to_protobuf(&self) -> PbHummockVersionDelta {
+        self.into()
     }
 }
 
@@ -536,6 +813,14 @@ impl HummockVersionDelta {
                     .chain(new_log.old_value.iter().map(|sst| sst.object_id))
             }))
             .collect()
+    }
+
+    pub fn visible_table_safe_epoch(&self) -> u64 {
+        self.safe_epoch
+    }
+
+    pub fn set_safe_epoch(&mut self, safe_epoch: u64) {
+        self.safe_epoch = safe_epoch;
     }
 }
 
@@ -573,6 +858,12 @@ impl From<&PbHummockVersionDelta> for HummockVersionDelta {
                     )
                 })
                 .collect(),
+
+            state_table_info_delta: pb_version_delta
+                .state_table_info_delta
+                .iter()
+                .map(|(table_id, delta)| (TableId::new(*table_id), delta.clone()))
+                .collect(),
         }
     }
 }
@@ -601,6 +892,11 @@ impl From<&HummockVersionDelta> for PbHummockVersionDelta {
                 .iter()
                 .map(|(table_id, log_delta)| (table_id.table_id, log_delta.clone()))
                 .collect(),
+            state_table_info_delta: version_delta
+                .state_table_info_delta
+                .iter()
+                .map(|(table_id, delta)| (table_id.table_id, delta.clone()))
+                .collect(),
         }
     }
 }
@@ -624,11 +920,15 @@ impl From<HummockVersionDelta> for PbHummockVersionDelta {
                 .into_iter()
                 .map(|table_id| table_id.table_id)
                 .collect(),
-
             change_log_delta: version_delta
                 .change_log_delta
                 .into_iter()
                 .map(|(table_id, log_delta)| (table_id.table_id, log_delta))
+                .collect(),
+            state_table_info_delta: version_delta
+                .state_table_info_delta
+                .into_iter()
+                .map(|(table_id, delta)| (table_id.table_id, delta.clone()))
                 .collect(),
         }
     }
@@ -666,6 +966,11 @@ impl From<PbHummockVersionDelta> for HummockVersionDelta {
                     )
                 })
                 .collect(),
+            state_table_info_delta: pb_version_delta
+                .state_table_info_delta
+                .iter()
+                .map(|(table_id, delta)| (TableId::new(*table_id), delta.clone()))
+                .collect(),
         }
     }
 }
@@ -687,8 +992,8 @@ pub struct SstableInfo {
     pub bloom_filter_kind: BloomFilterType,
 }
 
-impl ProtoSerializeSizeEstimatedExt for SstableInfo {
-    fn estimated_encode_len(&self) -> usize {
+impl SstableInfo {
+    pub fn estimated_encode_len(&self) -> usize {
         let mut basic = size_of::<u64>() // object_id
             + size_of::<u64>() // sstable_id
             + size_of::<u64>() // file_size
@@ -852,6 +1157,10 @@ impl SstableInfo {
     pub fn get_table_ids(&self) -> &Vec<u32> {
         &self.table_ids
     }
+
+    pub fn get_bloom_filter_kind(&self) -> BloomFilterType {
+        self.bloom_filter_kind
+    }
 }
 
 #[derive(Clone, PartialEq, Default, Debug, Serialize)]
@@ -861,8 +1170,8 @@ pub struct InputLevel {
     pub table_infos: Vec<SstableInfo>,
 }
 
-impl ProtoSerializeSizeEstimatedExt for InputLevel {
-    fn estimated_encode_len(&self) -> usize {
+impl InputLevel {
+    pub fn estimated_encode_len(&self) -> usize {
         size_of::<u32>()
             + size_of::<i32>()
             + self
@@ -947,16 +1256,16 @@ impl InputLevel {
 pub struct CompactTask {
     /// SSTs to be compacted, which will be removed from LSM after compaction
     pub input_ssts: Vec<InputLevel>,
-    /// In ideal case, the compaction will generate splits.len() tables which have key range
-    /// corresponding to that in \[splits\], respectively
+    /// In ideal case, the compaction will generate `splits.len()` tables which have key range
+    /// corresponding to that in `splits`, respectively
     pub splits: Vec<KeyRange>,
     /// low watermark in 'ts-aware compaction'
     pub watermark: u64,
-    /// compaction output, which will be added to \[target_level\] of LSM after compaction
+    /// compaction output, which will be added to `target_level` of LSM after compaction
     pub sorted_output_ssts: Vec<SstableInfo>,
     /// task id assigned by hummock storage service
     pub task_id: u64,
-    /// compaction output will be added to \[target_level\] of LSM after compaction
+    /// compaction output will be added to `target_level`` of LSM after compaction
     pub target_level: u32,
     pub gc_delete_keys: bool,
     /// Lbase in LSM
@@ -964,7 +1273,7 @@ pub struct CompactTask {
     pub task_status: TaskStatus,
     /// compaction group the task belongs to
     pub compaction_group_id: u64,
-    /// existing_table_ids for compaction drop key
+    /// `existing_table_ids` for compaction drop key
     pub existing_table_ids: Vec<u32>,
     pub compression_algorithm: u32,
     pub target_file_size: u64,
@@ -972,12 +1281,12 @@ pub struct CompactTask {
     pub table_options: BTreeMap<u32, TableOption>,
     pub current_epoch_time: u64,
     pub target_sub_level_id: u64,
-    /// Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
+    /// Identifies whether the task is `space_reclaim`, if the `compact_task_type` increases, it will be refactored to enum
     pub task_type: TaskType,
     /// Deprecated. use table_vnode_partition instead;
     pub split_by_state_table: bool,
     /// Compaction needs to cut the state table every time 1/weight of vnodes in the table have been processed.
-    /// Deprecated. use table_vnode_partition instead;
+    /// Deprecated. use `table_vnode_partition` instead;
     pub split_weight_by_vnode: u32,
     pub table_vnode_partition: BTreeMap<u32, u32>,
     /// The table watermark of any table id. In compaction we only use the table watermarks on safe epoch,
@@ -985,10 +1294,12 @@ pub struct CompactTask {
     pub table_watermarks: BTreeMap<u32, TableWatermarks>,
 
     pub table_schemas: BTreeMap<u32, TableSchema>,
+
+    pub max_sub_compaction: u32,
 }
 
-impl ProtoSerializeSizeEstimatedExt for CompactTask {
-    fn estimated_encode_len(&self) -> usize {
+impl CompactTask {
+    pub fn estimated_encode_len(&self) -> usize {
         self.input_ssts
             .iter()
             .map(|input_level| input_level.estimated_encode_len())
@@ -1078,6 +1389,7 @@ impl From<PbCompactTask> for CompactTask {
                 })
                 .collect(),
             table_schemas: pb_compact_task.table_schemas,
+            max_sub_compaction: pb_compact_task.max_sub_compaction,
         }
     }
 }
@@ -1131,6 +1443,7 @@ impl From<&PbCompactTask> for CompactTask {
                 })
                 .collect(),
             table_schemas: pb_compact_task.table_schemas.clone(),
+            max_sub_compaction: pb_compact_task.max_sub_compaction,
         }
     }
 }
@@ -1255,6 +1568,10 @@ impl CompactTask {
     pub fn get_task_id(&self) -> u64 {
         self.task_id
     }
+
+    pub fn get_max_sub_compaction(&self) -> u32 {
+        self.max_sub_compaction
+    }
 }
 
 #[derive(Clone, PartialEq, Default, Serialize)]
@@ -1292,8 +1609,8 @@ impl From<ValidationTask> for PbValidationTask {
     }
 }
 
-impl ProtoSerializeSizeEstimatedExt for ValidationTask {
-    fn estimated_encode_len(&self) -> usize {
+impl ValidationTask {
+    pub fn estimated_encode_len(&self) -> usize {
         self.sst_infos
             .iter()
             .map(|sst| sst.estimated_encode_len())

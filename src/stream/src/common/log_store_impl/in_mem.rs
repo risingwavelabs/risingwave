@@ -15,8 +15,9 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
+use await_tree::InstrumentAwait;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::util::epoch::{EpochExt, EpochPair, INVALID_EPOCH};
 use risingwave_connector::sink::log_store::{
     LogReader, LogStoreFactory, LogStoreReadItem, LogStoreResult, LogWriter, TruncateOffset,
@@ -260,6 +261,7 @@ impl LogWriter for BoundedInMemLogStoreWriter {
     async fn write_chunk(&mut self, chunk: StreamChunk) -> LogStoreResult<()> {
         self.item_tx
             .send(InMemLogStoreItem::StreamChunk(chunk))
+            .instrument_await("in_mem_send_item_chunk")
             .await
             .map_err(|_| anyhow!("unable to send stream chunk"))?;
         Ok(())
@@ -275,6 +277,7 @@ impl LogWriter for BoundedInMemLogStoreWriter {
                 next_epoch,
                 is_checkpoint,
             })
+            .instrument_await("in_mem_send_item_barrier")
             .await
             .map_err(|_| anyhow!("unable to send barrier"))?;
 
@@ -287,6 +290,7 @@ impl LogWriter for BoundedInMemLogStoreWriter {
             let truncated_epoch = self
                 .truncated_epoch_rx
                 .recv()
+                .instrument_await("in_mem_recv_truncated_epoch")
                 .await
                 .ok_or_else(|| anyhow!("cannot get truncated epoch"))?;
             assert_eq!(truncated_epoch, prev_epoch);
@@ -298,6 +302,7 @@ impl LogWriter for BoundedInMemLogStoreWriter {
     async fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> LogStoreResult<()> {
         self.item_tx
             .send(InMemLogStoreItem::UpdateVnodeBitmap(new_vnodes))
+            .instrument_await("in_mem_send_item_vnode_bitmap")
             .await
             .map_err(|_| anyhow!("unable to send vnode bitmap"))
     }

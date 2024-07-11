@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, DatumCow, ScalarRefImpl, ToDatumRef};
 
 use super::{Access, ChangeEvent};
 use crate::parser::unified::ChangeEventOperation;
@@ -36,8 +36,10 @@ where
 {
     fn op(&self) -> std::result::Result<super::ChangeEventOperation, super::AccessError> {
         const OP: &str = "type";
-        if let Some(ScalarImpl::Utf8(op)) = self.0.access(&[OP], Some(&DataType::Varchar))? {
-            match op.as_ref() {
+        if let Some(ScalarRefImpl::Utf8(op)) =
+            self.0.access(&[OP], &DataType::Varchar)?.to_datum_ref()
+        {
+            match op {
                 MAXWELL_INSERT_OP | MAXWELL_UPDATE_OP => return Ok(ChangeEventOperation::Upsert),
                 MAXWELL_DELETE_OP => return Ok(ChangeEventOperation::Delete),
                 _ => (),
@@ -49,8 +51,8 @@ where
         })
     }
 
-    fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult {
+    fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult<DatumCow<'_>> {
         const DATA: &str = "data";
-        self.0.access(&[DATA, &desc.name], Some(&desc.data_type))
+        self.0.access(&[DATA, &desc.name], &desc.data_type)
     }
 }

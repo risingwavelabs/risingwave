@@ -26,6 +26,7 @@ use redact::Secret;
 use risingwave_common::config::OverrideConfig;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_meta::*;
@@ -76,7 +77,19 @@ pub struct MetaNodeOpts {
 
     /// Endpoint of the SQL service, make it non-option when SQL service is required.
     #[clap(long, hide = true, env = "RW_SQL_ENDPOINT")]
-    pub sql_endpoint: Option<String>,
+    pub sql_endpoint: Option<Secret<String>>,
+
+    /// Username of sql backend, required when meta backend set to MySQL or PostgreSQL.
+    #[clap(long, hide = true, env = "RW_SQL_USERNAME", default_value = "")]
+    pub sql_username: String,
+
+    /// Password of sql backend, required when meta backend set to MySQL or PostgreSQL.
+    #[clap(long, hide = true, env = "RW_SQL_PASSWORD", default_value = "")]
+    pub sql_password: Secret<String>,
+
+    /// Database of sql backend, required when meta backend set to MySQL or PostgreSQL.
+    #[clap(long, hide = true, env = "RW_SQL_DATABASE", default_value = "")]
+    pub sql_database: String,
 
     /// The HTTP REST-API address of the Prometheus instance associated to this cluster.
     /// This address is used to serve `PromQL` queries to Prometheus.
@@ -192,7 +205,10 @@ use risingwave_common::config::{load_config, MetaBackend, RwConfig};
 use tracing::info;
 
 /// Start meta node
-pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+pub fn start(
+    opts: MetaNodeOpts,
+    shutdown: CancellationToken,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
@@ -221,7 +237,41 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             },
             MetaBackend::Mem => MetaStoreBackend::Mem,
             MetaBackend::Sql => MetaStoreBackend::Sql {
-                endpoint: opts.sql_endpoint.expect("sql endpoint is required"),
+                endpoint: opts
+                    .sql_endpoint
+                    .expect("sql endpoint is required")
+                    .expose_secret()
+                    .to_string(),
+            },
+            MetaBackend::Sqlite => MetaStoreBackend::Sql {
+                endpoint: format!(
+                    "sqlite://{}?mode=rwc",
+                    opts.sql_endpoint
+                        .expect("sql endpoint is required")
+                        .expose_secret()
+                ),
+            },
+            MetaBackend::Postgres => MetaStoreBackend::Sql {
+                endpoint: format!(
+                    "postgres://{}:{}@{}/{}",
+                    opts.sql_username,
+                    opts.sql_password.expose_secret(),
+                    opts.sql_endpoint
+                        .expect("sql endpoint is required")
+                        .expose_secret(),
+                    opts.sql_database
+                ),
+            },
+            MetaBackend::Mysql => MetaStoreBackend::Sql {
+                endpoint: format!(
+                    "mysql://{}:{}@{}/{}",
+                    opts.sql_username,
+                    opts.sql_password.expose_secret(),
+                    opts.sql_endpoint
+                        .expect("sql endpoint is required")
+                        .expose_secret(),
+                    opts.sql_database
+                ),
             },
         };
 
@@ -278,7 +328,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             max_timeout_ms / 1000
         } + MIN_TIMEOUT_INTERVAL_SEC;
 
-        let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
+        rpc_serve(
             add_info,
             backend,
             max_heartbeat_interval,
@@ -339,6 +389,12 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 table_write_throughput_threshold: config.meta.table_write_throughput_threshold,
                 min_table_split_write_throughput: config.meta.min_table_split_write_throughput,
                 partition_vnode_count: config.meta.partition_vnode_count,
+                compact_task_table_size_partition_threshold_low: config
+                    .meta
+                    .compact_task_table_size_partition_threshold_low,
+                compact_task_table_size_partition_threshold_high: config
+                    .meta
+                    .compact_task_table_size_partition_threshold_high,
                 do_not_config_object_storage_lifecycle: config
                     .meta
                     .do_not_config_object_storage_lifecycle,
@@ -348,7 +404,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 compaction_task_max_progress_interval_secs,
                 compaction_config: Some(config.meta.compaction_config),
                 cut_table_size_limit: config.meta.cut_table_size_limit,
-                hybird_partition_vnode_count: config.meta.hybird_partition_vnode_count,
+                hybrid_partition_node_count: config.meta.hybrid_partition_vnode_count,
                 event_log_enabled: config.meta.event_log_enabled,
                 event_log_channel_max_size: config.meta.event_log_channel_max_size,
                 advertise_addr: opts.advertise_addr,
@@ -369,45 +425,17 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .developer
                     .max_trivial_move_task_count_per_loop,
                 max_get_task_probe_times: config.meta.developer.max_get_task_probe_times,
+                secret_store_private_key: config.meta.secret_store_private_key,
+                table_info_statistic_history_times: config
+                    .storage
+                    .table_info_statistic_history_times,
             },
             config.system.into_init_system_params(),
             Default::default(),
+            shutdown,
         )
         .await
         .unwrap();
-
-        tracing::info!("Meta server listening at {}", listen_addr);
-
-        match leader_lost_handle {
-            None => {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {
-                        tracing::info!("receive ctrl+c");
-                        shutdown_send.send(()).unwrap();
-                        join_handle.await.unwrap()
-                    }
-                    res = &mut join_handle => res.unwrap(),
-                };
-            }
-            Some(mut handle) => {
-                tokio::select! {
-                    _ = &mut handle => {
-                        tracing::info!("receive leader lost signal");
-                        // When we lose leadership, we will exit as soon as possible.
-                    }
-                    _ = tokio::signal::ctrl_c() => {
-                        tracing::info!("receive ctrl+c");
-                        shutdown_send.send(()).unwrap();
-                        join_handle.await.unwrap();
-                        handle.abort();
-                    }
-                    res = &mut join_handle => {
-                        res.unwrap();
-                        handle.abort();
-                    },
-                };
-            }
-        };
     })
 }
 

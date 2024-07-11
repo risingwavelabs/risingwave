@@ -45,6 +45,10 @@ app.get("/indexes", (req, res, next) => {
   res.json(require("./mock/indexes.json"))
 })
 
+app.get("/indexes", (req, res, next) => {
+  res.json(require("./mock/indexes.json"))
+})
+
 app.get("/internal_tables", (req, res, next) => {
   res.json(require("./mock/internal_tables.json"))
 })

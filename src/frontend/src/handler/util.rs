@@ -151,6 +151,15 @@ fn to_pg_rows(
     session_data: &StaticSessionData,
 ) -> RwResult<Vec<Row>> {
     assert_eq!(chunk.dimension(), column_types.len());
+    if cfg!(debug_assertions) {
+        let chunk_data_types = chunk.data_types();
+        for (ty1, ty2) in chunk_data_types.iter().zip_eq_fast(column_types) {
+            debug_assert!(
+                ty1.equals_datatype(ty2),
+                "chunk_data_types: {chunk_data_types:?}, column_types: {column_types:?}"
+            )
+        }
+    }
 
     chunk
         .rows()
@@ -231,10 +240,8 @@ pub fn convert_logstore_u64_to_unix_millis(logstore_u64: u64) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use bytes::BytesMut;
     use postgres_types::{ToSql, Type};
     use risingwave_common::array::*;
-    use risingwave_common::types::Timestamptz;
 
     use super::*;
 

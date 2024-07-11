@@ -106,7 +106,7 @@ fn version_to_compaction_group_rows(version: &HummockVersion) -> Vec<RwHummockVe
         .map(|cg| RwHummockVersion {
             version_id: version.id as _,
             max_committed_epoch: version.max_committed_epoch as _,
-            safe_epoch: version.safe_epoch as _,
+            safe_epoch: version.visible_table_safe_epoch() as _,
             compaction_group: json!(cg).into(),
         })
         .collect()
@@ -201,6 +201,31 @@ async fn read_hummock_table_watermarks(
                     watermark,
                     direction: table_watermarks.direction.to_string(),
                 })
+        })
+        .collect())
+}
+
+#[derive(Fields)]
+struct RwHummockSnapshot {
+    #[primary_key]
+    table_id: i32,
+    safe_epoch: i64,
+    committed_epoch: i64,
+}
+
+#[system_catalog(table, "rw_catalog.rw_hummock_snapshot")]
+async fn read_hummock_snapshot_groups(
+    reader: &SysCatalogReaderImpl,
+) -> Result<Vec<RwHummockSnapshot>> {
+    let version = reader.meta_client.get_hummock_current_version().await?;
+    Ok(version
+        .state_table_info
+        .info()
+        .iter()
+        .map(|(table_id, info)| RwHummockSnapshot {
+            table_id: table_id.table_id as _,
+            committed_epoch: info.committed_epoch as _,
+            safe_epoch: info.safe_epoch as _,
         })
         .collect())
 }

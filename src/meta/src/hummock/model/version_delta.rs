@@ -32,12 +32,6 @@ impl MetadataModel for HummockVersionDelta {
         self.into()
     }
 
-    fn to_protobuf_encoded_vec(&self) -> Vec<u8> {
-        use prost::Message;
-        let pb = PbHummockVersionDelta::from(self);
-        pb.encode_to_vec()
-    }
-
     fn from_protobuf(prost: Self::PbType) -> Self {
         Self::from_persisted_protobuf(&prost)
     }

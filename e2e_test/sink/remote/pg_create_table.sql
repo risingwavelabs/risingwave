@@ -84,4 +84,4 @@ CREATE TABLE biz.t2 (
     "aBc" INTEGER PRIMARY KEY
 );
 
-CREATE TABLE sk_t1_uuid (id uuid, primary key(id));
+CREATE TABLE sk_t1_uuid (id uuid, v1 int, v2 varchar, primary key(id, v2));

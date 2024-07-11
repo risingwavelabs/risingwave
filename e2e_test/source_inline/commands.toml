@@ -20,11 +20,6 @@ script = '''
 #!/usr/bin/env sh
 set -e
 
-if [ ! -d "${PREFIX_BIN}/kafka" ]; then
-    echo "Kafka is not installed in ${PREFIX_BIN}/kafka. Did you enable Kafka using $(tput setaf 4)\`./risedev configure\`$(tput sgr0)?"
-    exit 1
-fi
-
 if [ -z "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" ]; then
     echo "RISEDEV_KAFKA_BOOTSTRAP_SERVERS is not set in risedev-env file. Did you start Kafka using $(tput setaf 4)\`./risedev d\`$(tput sgr0)?"
     exit 1
@@ -42,46 +37,16 @@ set -e
 if [ -n "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" ]; then
     echo "Deleting all Kafka topics..."
     rpk topic delete -r "*"
+    echo "Deleting all schema registry subjects"
+    rpk sr subject list | while read -r subject; do
+        echo "Deleting schema registry subject: $subject"
+        rpk sr subject delete "$subject"
+        rpk sr subject delete "$subject" --permanent
+    done
 else
     echo "No Kafka to clean."
 fi
 '''
-
-[tasks.kafka-topics]
-category = "RiseDev - Test - Source Test - Kafka"
-dependencies = ["check-kafka"]
-script = """
-#!/usr/bin/env sh
-set -e
-${PREFIX_BIN}/kafka/bin/kafka-topics.sh --bootstrap-server ${RISEDEV_KAFKA_BOOTSTRAP_SERVERS} "$@"
-"""
-
-[tasks.kafka-produce]
-category = "RiseDev - Test - Source Test - Kafka"
-dependencies = ["check-kafka"]
-script = """
-#!/usr/bin/env sh
-set -e
-${PREFIX_BIN}/kafka/bin/kafka-console-producer.sh --bootstrap-server ${RISEDEV_KAFKA_BOOTSTRAP_SERVERS} "$@"
-"""
-
-[tasks.kafka-consume]
-category = "RiseDev - Test - Source Test - Kafka"
-dependencies = ["check-kafka"]
-script = """
-#!/usr/bin/env sh
-set -e
-${PREFIX_BIN}/kafka/bin/kafka-console-consumer.sh --bootstrap-server ${RISEDEV_KAFKA_BOOTSTRAP_SERVERS} "$@"
-"""
-
-[tasks.kafka-consumer-groups]
-category = "RiseDev - Test - Source Test - Kafka"
-dependencies = ["check-kafka"]
-script = """
-#!/usr/bin/env sh
-set -e
-${PREFIX_BIN}/kafka/bin/kafka-consumer-groups.sh --bootstrap-server ${RISEDEV_KAFKA_BOOTSTRAP_SERVERS} "$@"
-"""
 
 # rpk tools
 [tasks.rpk]

@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::fmt::Display;
 use std::mem::size_of;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common_estimate_size::EstimateSize;
@@ -30,7 +30,7 @@ use risingwave_pb::hummock::{PbVnodeWatermark, TableWatermarks as PbTableWaterma
 use tracing::{debug, warn};
 
 use crate::key::{prefix_slice_with_vnode, vnode, TableKey, TableKeyRange};
-use crate::{HummockEpoch, ProtoSerializeSizeEstimatedExt};
+use crate::HummockEpoch;
 
 #[derive(Clone)]
 pub struct ReadTableWatermark {
@@ -259,11 +259,11 @@ pub enum WatermarkDirection {
     Descending,
 }
 
-impl ToString for WatermarkDirection {
-    fn to_string(&self) -> String {
+impl Display for WatermarkDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WatermarkDirection::Ascending => "Ascending".to_string(),
-            WatermarkDirection::Descending => "Descending".to_string(),
+            WatermarkDirection::Ascending => write!(f, "Ascending"),
+            WatermarkDirection::Descending => write!(f, "Descending"),
         }
     }
 }
@@ -541,13 +541,8 @@ impl TableWatermarks {
         // epoch watermark are added from later epoch to earlier epoch.
         // reverse to ensure that earlier epochs are at the front
         result_epoch_watermark.reverse();
-        assert!(
-            result_epoch_watermark.is_sorted_by(|(first_epoch, _), (second_epoch, _)| {
-                let ret = first_epoch.cmp(second_epoch);
-                assert_ne!(ret, Ordering::Equal);
-                Some(ret)
-            })
-        );
+        assert!(result_epoch_watermark
+            .is_sorted_by(|(first_epoch, _), (second_epoch, _)| { first_epoch < second_epoch }));
         *self = TableWatermarks {
             watermarks: result_epoch_watermark,
             direction: self.direction,
@@ -555,8 +550,8 @@ impl TableWatermarks {
     }
 }
 
-impl ProtoSerializeSizeEstimatedExt for TableWatermarks {
-    fn estimated_encode_len(&self) -> usize {
+impl TableWatermarks {
+    pub fn estimated_encode_len(&self) -> usize {
         self.watermarks.len() * size_of::<HummockEpoch>()
             + self
                 .watermarks
@@ -670,7 +665,7 @@ mod tests {
 
     use bytes::Bytes;
     use itertools::Itertools;
-    use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+    use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{test_epoch, EpochExt};
@@ -1131,11 +1126,8 @@ mod tests {
             watermark3.clone(),
         );
 
-        let mut version = HummockVersion {
-            max_committed_epoch: EPOCH1,
-            safe_epoch: EPOCH1,
-            ..Default::default()
-        };
+        let mut version = HummockVersion::default();
+        version.max_committed_epoch = EPOCH1;
         let test_table_id = TableId::from(233);
         version.table_watermarks.insert(
             test_table_id,

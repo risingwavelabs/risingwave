@@ -20,10 +20,11 @@ use std::sync::Arc;
 use std::task::Poll;
 use std::time::Instant;
 
+use await_tree::InstrumentAwait;
 use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
 
@@ -282,21 +283,25 @@ impl<R: LogReader> MonitoredLogReader<R> {
 
 impl<R: LogReader> LogReader for MonitoredLogReader<R> {
     async fn init(&mut self) -> LogStoreResult<()> {
-        self.inner.init().await
+        self.inner.init().instrument_await("log_reader_init").await
     }
 
     async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
-        self.inner.next_item().await.inspect(|(epoch, item)| {
-            if self.read_epoch != *epoch {
-                self.read_epoch = *epoch;
-                self.metrics.log_store_latest_read_epoch.set(*epoch as _);
-            }
-            if let LogStoreReadItem::StreamChunk { chunk, .. } = item {
-                self.metrics
-                    .log_store_read_rows
-                    .inc_by(chunk.cardinality() as _);
-            }
-        })
+        self.inner
+            .next_item()
+            .instrument_await("log_reader_next_item")
+            .await
+            .inspect(|(epoch, item)| {
+                if self.read_epoch != *epoch {
+                    self.read_epoch = *epoch;
+                    self.metrics.log_store_latest_read_epoch.set(*epoch as _);
+                }
+                if let LogStoreReadItem::StreamChunk { chunk, .. } = item {
+                    self.metrics
+                        .log_store_read_rows
+                        .inc_by(chunk.cardinality() as _);
+                }
+            })
     }
 
     fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
@@ -306,7 +311,7 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
     fn rewind(
         &mut self,
     ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
-        self.inner.rewind()
+        self.inner.rewind().instrument_await("log_reader_rewind")
     }
 }
 

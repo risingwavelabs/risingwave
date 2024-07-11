@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::fmt::Display;
 use std::future::pending;
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,7 +31,7 @@ use rw_futures_util::{pending_on_none, AttachedFuture};
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tonic::{Code, Status};
 
@@ -46,6 +47,8 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
+use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
@@ -185,6 +188,8 @@ impl CreateActorContext {
     }
 }
 
+pub(super) type SubscribeMutationItem = (u64, Option<Arc<Mutation>>);
+
 pub(super) enum LocalBarrierEvent {
     ReportActorCollected {
         actor_id: ActorId,
@@ -195,9 +200,10 @@ pub(super) enum LocalBarrierEvent {
         actor: ActorId,
         state: BackfillState,
     },
-    ReadBarrierMutation {
-        barrier: Barrier,
-        mutation_sender: oneshot::Sender<Option<Arc<Mutation>>>,
+    SubscribeBarrierMutation {
+        actor_id: ActorId,
+        epoch: EpochPair,
+        mutation_sender: mpsc::UnboundedSender<SubscribeMutationItem>,
     },
     #[cfg(test)]
     Flush(oneshot::Sender<()>),
@@ -305,14 +311,42 @@ pub(crate) struct StreamActorManager {
     pub(super) runtime: BackgroundShutdownRuntime,
 }
 
-#[derive(Debug)]
-#[expect(dead_code)]
 pub(super) struct LocalBarrierWorkerDebugInfo<'a> {
     actor_to_send: BTreeSet<ActorId>,
     running_actors: BTreeSet<ActorId>,
     creating_actors: Vec<BTreeSet<ActorId>>,
     managed_barrier_state: ManagedBarrierStateDebugInfo<'a>,
     has_control_stream_connected: bool,
+}
+
+impl Display for LocalBarrierWorkerDebugInfo<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "running_actors: ")?;
+        for actor_id in &self.running_actors {
+            write!(f, "{}, ", actor_id)?;
+        }
+
+        write!(f, "\nactor_to_send: ")?;
+        for actor_id in &self.actor_to_send {
+            write!(f, "{}, ", actor_id)?;
+        }
+
+        write!(f, "\ncreating_actors: ")?;
+        for actors in &self.creating_actors {
+            for actor_id in actors {
+                write!(f, "{}, ", actor_id)?;
+            }
+        }
+
+        writeln!(
+            f,
+            "\nhas_control_stream_connected: {}",
+            self.has_control_stream_connected
+        )?;
+
+        writeln!(f, "managed_barrier_state:\n{}", self.managed_barrier_state)?;
+        Ok(())
+    }
 }
 
 /// [`LocalBarrierWorker`] manages barrier control flow, used by local stream manager.
@@ -460,6 +494,10 @@ impl LocalBarrierWorker {
                     &barrier,
                     req.actor_ids_to_send.into_iter().collect(),
                     req.actor_ids_to_collect.into_iter().collect(),
+                    req.table_ids_to_sync
+                        .into_iter()
+                        .map(TableId::new)
+                        .collect(),
                 )?;
                 Ok(())
             }
@@ -481,11 +519,13 @@ impl LocalBarrierWorker {
             } => {
                 self.update_create_mview_progress(current_epoch, actor, state);
             }
-            LocalBarrierEvent::ReadBarrierMutation {
-                barrier,
+            LocalBarrierEvent::SubscribeBarrierMutation {
+                actor_id,
+                epoch,
                 mutation_sender,
             } => {
-                self.read_barrier_mutation(barrier, mutation_sender);
+                self.state
+                    .subscribe_actor_mutation(actor_id, epoch.prev, mutation_sender);
             }
             #[cfg(test)]
             LocalBarrierEvent::Flush(sender) => sender.send(()).unwrap(),
@@ -538,7 +578,8 @@ impl LocalBarrierWorker {
                 let _ = result_sender.send(());
             }
             LocalActorOperation::InspectState { result_sender } => {
-                let _ = result_sender.send(format!("{:#?}", self.to_debug_info()));
+                let debug_info = self.to_debug_info();
+                let _ = result_sender.send(debug_info.to_string());
             }
         }
     }
@@ -579,11 +620,9 @@ impl LocalBarrierWorker {
                             .into_iter()
                             .map(
                                 |LocalSstableInfo {
-                                     compaction_group_id,
                                      sst_info,
                                      table_stats,
                                  }| GroupedSstableInfo {
-                                    compaction_group_id,
                                     sst: Some(sst_info.into()),
                                     table_stats_map: to_prost_table_stats_map(table_stats),
                                 },
@@ -607,15 +646,6 @@ impl LocalBarrierWorker {
         Ok(())
     }
 
-    /// Read mutation from barrier state.
-    fn read_barrier_mutation(
-        &mut self,
-        barrier: Barrier,
-        sender: oneshot::Sender<Option<Arc<Mutation>>>,
-    ) {
-        self.state.read_barrier_mutation(&barrier, sender);
-    }
-
     /// Register sender for source actors, used to send barriers.
     fn register_sender(&mut self, actor_id: ActorId, senders: Vec<UnboundedSender<Barrier>>) {
         tracing::debug!(
@@ -636,6 +666,7 @@ impl LocalBarrierWorker {
         barrier: &Barrier,
         to_send: HashSet<ActorId>,
         to_collect: HashSet<ActorId>,
+        table_ids: HashSet<TableId>,
     ) -> StreamResult<()> {
         #[cfg(not(test))]
         {
@@ -683,7 +714,8 @@ impl LocalBarrierWorker {
             }
         }
 
-        self.state.transform_to_issued(barrier, to_collect);
+        self.state
+            .transform_to_issued(barrier, to_collect, table_ids);
 
         for actor_id in to_send {
             match self.barrier_senders.get(&actor_id) {
@@ -870,17 +902,18 @@ impl LocalBarrierManager {
     }
 
     /// When a `RemoteInput` get a barrier, it should wait and read the barrier mutation from the barrier manager.
-    pub async fn read_barrier_mutation(
+    pub fn subscribe_barrier_mutation(
         &self,
-        barrier: &Barrier,
-    ) -> StreamResult<Option<Arc<Mutation>>> {
-        let (tx, rx) = oneshot::channel();
-        self.send_event(LocalBarrierEvent::ReadBarrierMutation {
-            barrier: barrier.clone(),
+        actor_id: ActorId,
+        first_barrier: &Barrier,
+    ) -> mpsc::UnboundedReceiver<SubscribeMutationItem> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.send_event(LocalBarrierEvent::SubscribeBarrierMutation {
+            actor_id,
+            epoch: first_barrier.epoch,
             mutation_sender: tx,
         });
-        rx.await
-            .map_err(|_| anyhow!("barrier manager maybe reset").into())
+        rx
     }
 }
 
@@ -888,12 +921,28 @@ impl LocalBarrierManager {
 pub fn try_find_root_actor_failure<'a>(
     actor_errors: impl IntoIterator<Item = &'a StreamError>,
 ) -> Option<StreamError> {
+    // Explicitly list all error kinds here to notice developers to update this function when
+    // there are changes in error kinds.
+
     fn stream_executor_error_score(e: &StreamExecutorError) -> i32 {
         use crate::executor::error::ErrorKind;
         match e.inner() {
-            ErrorKind::ChannelClosed(_) | ErrorKind::ExchangeChannelClosed(_) => 0,
-            ErrorKind::Internal(_) => 1,
-            _ => 999,
+            // `ChannelClosed` or `ExchangeChannelClosed` is likely to be caused by actor exit
+            // and not the root cause.
+            ErrorKind::ChannelClosed(_) | ErrorKind::ExchangeChannelClosed(_) => 1,
+
+            // Normal errors.
+            ErrorKind::Uncategorized(_)
+            | ErrorKind::Storage(_)
+            | ErrorKind::ArrayError(_)
+            | ErrorKind::ExprError(_)
+            | ErrorKind::SerdeError(_)
+            | ErrorKind::SinkError(_)
+            | ErrorKind::RpcError(_)
+            | ErrorKind::AlignBarrier(_, _)
+            | ErrorKind::ConnectorError(_)
+            | ErrorKind::DmlError(_)
+            | ErrorKind::NotImplemented(_) => 999,
         }
     }
 
@@ -903,9 +952,18 @@ pub fn try_find_root_actor_failure<'a>(
             // `UnexpectedExit` wraps the original error. Score on the inner error.
             ErrorKind::UnexpectedExit { source, .. } => stream_error_score(source),
 
-            ErrorKind::Internal(_) => 1000,
+            // `BarrierSend` is likely to be caused by actor exit and not the root cause.
+            ErrorKind::BarrierSend { .. } => 1,
+
+            // Executor errors first.
             ErrorKind::Executor(ee) => 2000 + stream_executor_error_score(ee),
-            _ => 3000,
+
+            // Then other errors.
+            ErrorKind::Uncategorized(_)
+            | ErrorKind::Storage(_)
+            | ErrorKind::Expression(_)
+            | ErrorKind::Array(_)
+            | ErrorKind::Sink(_) => 1000,
         }
     }
 

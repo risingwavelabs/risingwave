@@ -28,7 +28,7 @@ use std::ops::{Bound, Deref};
 use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{JsonbVal, ScalarImpl, ScalarRef, ScalarRefImpl};
@@ -257,11 +257,9 @@ pub fn default_source_internal_table(id: u32) -> PbTable {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::sync::Arc;
 
-    use risingwave_common::row::OwnedRow;
-    use risingwave_common::types::{Datum, ScalarImpl};
-    use risingwave_common::util::epoch::{test_epoch, EpochPair};
+    use risingwave_common::types::Datum;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_connector::source::kafka::KafkaSplit;
     use risingwave_storage::memory::MemoryStateStore;
     use serde_json::Value;

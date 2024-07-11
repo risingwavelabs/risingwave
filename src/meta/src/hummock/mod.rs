@@ -23,7 +23,6 @@ mod metrics_utils;
 #[cfg(any(test, feature = "test"))]
 pub mod mock_hummock_meta_client;
 pub mod model;
-#[cfg(any(test, feature = "test"))]
 pub mod test_utils;
 mod utils;
 mod vacuum;

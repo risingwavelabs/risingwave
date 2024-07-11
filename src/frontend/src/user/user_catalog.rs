@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use risingwave_common::acl::{AclMode, AclModeSet};
-use risingwave_pb::user::grant_privilege::{Object as GrantObject, Object};
+use risingwave_pb::user::grant_privilege::{Action, Object as GrantObject, Object};
 use risingwave_pb::user::{PbAuthInfo, PbGrantPrivilege, PbUserInfo};
 
 use crate::catalog::{DatabaseId, SchemaId};
@@ -167,5 +167,34 @@ impl UserCatalog {
     pub fn check_privilege(&self, object: &GrantObject, mode: AclMode) -> bool {
         self.get_acl(object)
             .map_or(false, |acl_set| acl_set.has_mode(mode))
+    }
+
+    pub fn check_privilege_with_grant_option(
+        &self,
+        object: &GrantObject,
+        actions: &Vec<(Action, bool)>,
+    ) -> bool {
+        if self.is_super {
+            return true;
+        }
+        let mut action_map: HashMap<_, _> = actions.iter().map(|action| (action, false)).collect();
+
+        for privilege in &self.grant_privileges {
+            if privilege.get_object().unwrap() != object {
+                continue;
+            }
+            for awo in &privilege.action_with_opts {
+                let action = awo.get_action().unwrap();
+                let with_grant_option = awo.with_grant_option;
+
+                for (&key, found) in &mut action_map {
+                    let (required_action, required_grant_option) = *key;
+                    if action == required_action && (!required_grant_option | with_grant_option) {
+                        *found = true;
+                    }
+                }
+            }
+        }
+        action_map.values().all(|&found| found)
     }
 }

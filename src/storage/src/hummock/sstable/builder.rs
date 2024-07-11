@@ -529,7 +529,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         let writer_output = self.writer.finish(meta).await?;
         Ok(SstableBuilderOutput::<W::Output> {
-            sst_info: LocalSstableInfo::with_stats(sst_info, self.table_stats),
+            sst_info: LocalSstableInfo::new(sst_info, self.table_stats),
             bloom_filter_size,
             writer_output,
             avg_key_size,
@@ -628,9 +628,7 @@ pub(super) mod tests {
         default_builder_opt_for_test, gen_test_sstable_impl, mock_sst_writer, test_key_of,
         test_value_of, TEST_KEYS_COUNT,
     };
-    use crate::hummock::{
-        CachePolicy, Sstable, SstableWriterOptions, Xor16FilterBuilder, Xor8FilterBuilder,
-    };
+    use crate::hummock::{CachePolicy, Sstable, SstableWriterOptions, Xor8FilterBuilder};
     use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]
@@ -692,7 +690,7 @@ pub(super) mod tests {
         };
 
         // build remote table
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         let sst_info = gen_test_sstable_impl::<Vec<u8>, F>(
             opts,
             0,
@@ -736,7 +734,7 @@ pub(super) mod tests {
     async fn test_no_bloom_filter_block() {
         let opts = SstableBuilderOptions::default();
         // build remote table
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         let writer_opts = SstableWriterOptions::default();
         let object_id = 1;
         let writer = sstable_store

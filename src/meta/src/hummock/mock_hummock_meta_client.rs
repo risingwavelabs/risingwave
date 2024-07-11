@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -173,25 +174,24 @@ impl HummockMetaClient for MockHummockMetaClient {
             sync_result.uncommitted_ssts.iter().map(|sst| &sst.sst_info),
             &vec![epoch],
             version
-                .levels
-                .values()
-                .flat_map(|group| group.member_table_ids.iter().map(|table_id| (*table_id, 0))),
+                .state_table_info
+                .info()
+                .keys()
+                .map(|table_id| (table_id.table_id, 0)),
         );
         self.hummock_manager
-            .commit_epoch(
+            .commit_epoch(CommitEpochInfo::new(
+                sync_result.uncommitted_ssts,
+                new_table_watermark,
+                sst_to_worker,
+                None,
+                table_change_log,
+                BTreeMap::from_iter([(
+                    epoch,
+                    version.state_table_info.info().keys().cloned().collect(),
+                )]),
                 epoch,
-                CommitEpochInfo::new(
-                    sync_result
-                        .uncommitted_ssts
-                        .into_iter()
-                        .map(|sst| sst.into())
-                        .collect(),
-                    new_table_watermark,
-                    sst_to_worker,
-                    None,
-                    table_change_log,
-                ),
-            )
+            ))
             .await
             .map_err(mock_err)?;
         Ok(())

@@ -57,7 +57,8 @@
 RisingWave is a Postgres-compatible streaming database engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b>, <b>analyzing</b>, and <b>managing</b> real-time event streaming data.
 
 
-![RisingWave](https://github.com/risingwavelabs/risingwave-docs/blob/main/docs/images/new_archi_grey.png)
+![RisingWave](https://github.com/risingwavelabs/risingwave/assets/41638002/10c44404-f78b-43ce-bbd9-3646690acc59)
+
 
 ## Try it out in 60 seconds
 
@@ -69,6 +70,9 @@ curl https://risingwave.com/sh | sh
 Then follow the prompts to start and connect to RisingWave.
 
 To learn about other installation options, such as using a Docker image, see [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
+
+> Please note: RisingWave uses [Scarf](https://scarf.sh/) to collect anonymized installation analytics. These analytics help support us understand and improve the distribution of our package.
+> The privacy policy of Scarf is available at [https://about.scarf.sh/privacy-policy](https://about.scarf.sh/privacy-policy).
 
 ## Production deployments
 
@@ -146,4 +150,4 @@ RisingWave is distributed under the Apache License (Version 2.0). Please refer t
 
 ## Contributing
 
-Thanks for your interest in contributing to the project! Please refer to [contribution guidelines](CONTRIBUTING.md) for more information.
+Thanks for your interest in contributing to the project! Please refer to [RisingWave Developer Guide](https://risingwavelabs.github.io/risingwave/)for more information.

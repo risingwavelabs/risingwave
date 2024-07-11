@@ -15,7 +15,6 @@
 use std::marker::PhantomData;
 use std::mem::swap;
 use std::sync::Arc;
-use std::vec::Vec;
 
 use futures_async_stream::try_stream;
 use hashbrown::HashMap;
@@ -240,11 +239,9 @@ impl<K: HashKey> GroupTopNExecutor<K> {
 #[cfg(test)]
 mod tests {
     use futures::stream::StreamExt;
-    use risingwave_common::array::DataChunk;
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::catalog::Field;
     use risingwave_common::metrics::LabelGuardedIntGauge;
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;

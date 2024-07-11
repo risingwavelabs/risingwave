@@ -17,12 +17,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common_service::observer_manager::ObserverManager;
+use risingwave_common_service::ObserverManager;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
 pub use risingwave_hummock_sdk::key::{gen_key_from_bytes, gen_key_from_str};
-#[cfg(test)]
-use risingwave_hummock_sdk::SyncResult;
 use risingwave_meta::hummock::test_utils::{
     register_table_ids_to_compaction_group, setup_compute_env,
 };
@@ -81,7 +79,7 @@ pub async fn prepare_first_valid_version(
     };
 
     (
-        PinnedVersion::new(hummock_version, unbounded_channel().0),
+        PinnedVersion::new(*hummock_version, unbounded_channel().0),
         tx,
         rx,
     )
@@ -114,27 +112,10 @@ impl<S: LocalStateStore> TestIngestBatch for S {
     }
 }
 
-#[cfg(test)]
-#[async_trait::async_trait]
-pub(crate) trait HummockStateStoreTestTrait: StateStore {
-    fn get_pinned_version(&self) -> PinnedVersion;
-    async fn seal_and_sync_epoch(&self, epoch: u64) -> StorageResult<SyncResult> {
-        self.seal_epoch(epoch, true);
-        self.sync(epoch).await
-    }
-}
-
-#[cfg(test)]
-impl HummockStateStoreTestTrait for HummockStorage {
-    fn get_pinned_version(&self) -> PinnedVersion {
-        self.get_pinned_version()
-    }
-}
-
 pub async fn with_hummock_storage_v2(
     table_id: TableId,
 ) -> (HummockStorage, Arc<MockHummockMetaClient>) {
-    let sstable_store = mock_sstable_store();
+    let sstable_store = mock_sstable_store().await;
     let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
@@ -233,6 +214,12 @@ pub struct HummockTestEnv {
 }
 
 impl HummockTestEnv {
+    async fn wait_version_sync(&self) {
+        self.storage
+            .wait_version(self.manager.get_current_version().await)
+            .await
+    }
+
     pub async fn register_table_id(&self, table_id: TableId) {
         register_tables_with_id_for_test(
             self.storage.filter_key_extractor_manager(),
@@ -240,6 +227,7 @@ impl HummockTestEnv {
             &[table_id.table_id()],
         )
         .await;
+        self.wait_version_sync().await;
     }
 
     pub async fn register_table(&self, table: PbTable) {
@@ -249,6 +237,7 @@ impl HummockTestEnv {
             &[table],
         )
         .await;
+        self.wait_version_sync().await;
     }
 
     // Seal, sync and commit a epoch.
@@ -262,7 +251,7 @@ impl HummockTestEnv {
 }
 
 pub async fn prepare_hummock_test_env() -> HummockTestEnv {
-    let sstable_store = mock_sstable_store();
+    let sstable_store = mock_sstable_store().await;
     let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;

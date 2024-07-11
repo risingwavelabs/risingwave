@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::ColumnId;
+use risingwave_common::catalog::max_column_id;
 use risingwave_connector::source::{extract_source_struct, SourceEncode, SourceStruct};
 use risingwave_sqlparser::ast::{
     AlterSourceOperation, ColumnDef, CreateSourceStatement, ObjectName, Statement,
@@ -106,10 +106,7 @@ pub async fn handle_alter_source_column(
             catalog.definition =
                 alter_definition_add_column(&catalog.definition, column_def.clone())?;
             let mut bound_column = bind_sql_columns(&[column_def])?.remove(0);
-            bound_column.column_desc.column_id = columns
-                .iter()
-                .fold(ColumnId::new(i32::MIN), |a, b| a.max(b.column_id()))
-                .next();
+            bound_column.column_desc.column_id = max_column_id(columns).next();
             columns.push(bound_column);
         }
         _ => unreachable!(),

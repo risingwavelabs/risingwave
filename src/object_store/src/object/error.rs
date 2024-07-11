@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::io;
-use std::marker::{Send, Sync};
 
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::head_object::HeadObjectError;

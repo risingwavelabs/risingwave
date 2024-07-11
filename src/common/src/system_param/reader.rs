@@ -137,6 +137,14 @@ where
         self.inner().data_directory.as_ref().unwrap()
     }
 
+    fn use_new_object_prefix_strategy(&self) -> bool {
+        *self
+            .inner()
+            .use_new_object_prefix_strategy
+            .as_ref()
+            .unwrap()
+    }
+
     fn backup_storage_url(&self) -> &str {
         self.inner().backup_storage_url.as_ref().unwrap()
     }
@@ -159,5 +167,9 @@ where
         self.inner()
             .enable_tracing
             .unwrap_or_else(default::enable_tracing)
+    }
+
+    fn license_key(&self) -> &str {
+        self.inner().license_key.as_deref().unwrap_or_default()
     }
 }

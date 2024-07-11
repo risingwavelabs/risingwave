@@ -23,9 +23,9 @@ use async_trait::async_trait;
 use either::Either;
 use futures::stream::BoxStream;
 use lru::LruCache;
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
+use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, SecretId, TableId};
 use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
-use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
@@ -65,7 +65,6 @@ use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
-use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -172,6 +171,25 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn create_secret(
+        &self,
+        secret_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        value: Vec<u8>,
+    ) -> Result<CatalogVersion> {
+        let request = CreateSecretRequest {
+            name: secret_name,
+            database_id,
+            schema_id,
+            owner_id,
+            value,
+        };
+        let resp = self.inner.create_secret(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn list_connections(&self, _name: Option<&str>) -> Result<Vec<Connection>> {
         let request = ListConnectionsRequest {};
         let resp = self.inner.list_connections(request).await?;
@@ -181,6 +199,14 @@ impl MetaClient {
     pub async fn drop_connection(&self, connection_id: ConnectionId) -> Result<CatalogVersion> {
         let request = DropConnectionRequest { connection_id };
         let resp = self.inner.drop_connection(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn drop_secret(&self, secret_id: SecretId) -> Result<CatalogVersion> {
+        let request = DropSecretRequest {
+            secret_id: secret_id.into(),
+        };
+        let resp = self.inner.drop_secret(request).await?;
         Ok(resp.version)
     }
 
@@ -501,6 +527,7 @@ impl MetaClient {
         table: PbTable,
         graph: StreamFragmentGraph,
         table_col_index_mapping: ColIndexMapping,
+        job_type: PbTableJobType,
     ) -> Result<CatalogVersion> {
         let request = ReplaceTablePlanRequest {
             plan: Some(ReplaceTablePlan {
@@ -508,6 +535,7 @@ impl MetaClient {
                 table: Some(table),
                 fragment_graph: Some(graph),
                 table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
+                job_type: job_type as _,
             }),
         };
         let resp = self.inner.replace_table_plan(request).await?;
@@ -705,13 +733,32 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    /// Unregister the current node to the cluster.
-    pub async fn unregister(&self, addr: HostAddr) -> Result<()> {
+    /// Unregister the current node from the cluster.
+    pub async fn unregister(&self) -> Result<()> {
         let request = DeleteWorkerNodeRequest {
-            host: Some(addr.to_protobuf()),
+            host: Some(self.host_addr.to_protobuf()),
         };
         self.inner.delete_worker_node(request).await?;
         Ok(())
+    }
+
+    /// Try to unregister the current worker from the cluster with best effort. Log the result.
+    pub async fn try_unregister(&self) {
+        match self.unregister().await {
+            Ok(_) => {
+                tracing::info!(
+                    worker_id = self.worker_id(),
+                    "successfully unregistered from meta service",
+                )
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e.as_report(),
+                    worker_id = self.worker_id(),
+                    "failed to unregister from meta service",
+                );
+            }
+        }
     }
 
     pub async fn update_schedulability(
@@ -893,6 +940,14 @@ impl MetaClient {
         Ok(resp)
     }
 
+    pub async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {
+        let resp = self
+            .inner
+            .get_cluster_recovery_status(GetClusterRecoveryStatusRequest {})
+            .await?;
+        Ok(resp.get_status().unwrap())
+    }
+
     pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
         let request = GetClusterInfoRequest {};
         let resp = self.inner.get_cluster_info(request).await?;
@@ -912,19 +967,6 @@ impl MetaClient {
         };
         let resp = self.inner.reschedule(request).await?;
         Ok((resp.success, resp.revision))
-    }
-
-    pub async fn get_reschedule_plan(
-        &self,
-        policy: PbPolicy,
-        revision: u64,
-    ) -> Result<GetReschedulePlanResponse> {
-        let request = GetReschedulePlanRequest {
-            revision,
-            policy: Some(policy),
-        };
-        let resp = self.inner.get_reschedule_plan(request).await?;
-        Ok(resp)
     }
 
     pub async fn risectl_get_pinned_versions_summary(
@@ -1171,11 +1213,11 @@ impl MetaClient {
 
     pub async fn list_serving_vnode_mappings(
         &self,
-    ) -> Result<HashMap<u32, (u32, ParallelUnitMapping)>> {
+    ) -> Result<HashMap<u32, (u32, WorkerSlotMapping)>> {
         let req = GetServingVnodeMappingsRequest {};
         let resp = self.inner.get_serving_vnode_mappings(req).await?;
         let mappings = resp
-            .mappings
+            .worker_slot_mappings
             .into_iter()
             .map(|p| {
                 (
@@ -1185,7 +1227,7 @@ impl MetaClient {
                             .get(&p.fragment_id)
                             .cloned()
                             .unwrap_or(0),
-                        ParallelUnitMapping::from_protobuf(p.mapping.as_ref().unwrap()),
+                        WorkerSlotMapping::from_protobuf(p.mapping.as_ref().unwrap()),
                     ),
                 )
             })
@@ -1907,6 +1949,7 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
             ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
+            ,{ cluster_client, get_cluster_recovery_status, GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, pause, PauseRequest, PauseResponse }
@@ -1931,12 +1974,14 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_subscription, CreateSubscriptionRequest, CreateSubscriptionResponse }
             ,{ ddl_client, create_schema, CreateSchemaRequest, CreateSchemaResponse }
             ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }
+             ,{ ddl_client, create_secret, CreateSecretRequest, CreateSecretResponse }
             ,{ ddl_client, create_index, CreateIndexRequest, CreateIndexResponse }
             ,{ ddl_client, create_function, CreateFunctionRequest, CreateFunctionResponse }
             ,{ ddl_client, drop_table, DropTableRequest, DropTableResponse }
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
             ,{ ddl_client, drop_view, DropViewRequest, DropViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
+             , {ddl_client, drop_secret, DropSecretRequest, DropSecretResponse}
             ,{ ddl_client, drop_sink, DropSinkRequest, DropSinkResponse }
             ,{ ddl_client, drop_subscription, DropSubscriptionRequest, DropSubscriptionResponse }
             ,{ ddl_client, drop_database, DropDatabaseRequest, DropDatabaseResponse }
@@ -1997,7 +2042,6 @@ macro_rules! for_all_meta_rpc {
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
-            ,{ scale_client, get_reschedule_plan, GetReschedulePlanRequest, GetReschedulePlanResponse }
             ,{ notification_client, subscribe, SubscribeRequest, Streaming<SubscribeResponse> }
             ,{ backup_client, backup_meta, BackupMetaRequest, BackupMetaResponse }
             ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }

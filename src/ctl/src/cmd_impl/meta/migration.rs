@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
 use anyhow::Context;
+use chrono::DateTime;
 use etcd_client::ConnectOptions;
 use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
@@ -45,20 +46,20 @@ use risingwave_meta_model_v2::hummock_version_stats::TableStats;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::{
     Actor, ActorDispatcher, CatalogVersion, Cluster, Connection, Database, Fragment, Function,
-    Index, Object, ObjectDependency, Schema, Sink, Source, StreamingJob, Subscription,
+    Index, Object, ObjectDependency, Schema, Secret, Sink, Source, StreamingJob, Subscription,
     SystemParameter, Table, User, UserPrivilege, View, Worker, WorkerProperty,
 };
 use risingwave_meta_model_v2::{
     catalog_version, cluster, compaction_config, compaction_status, compaction_task, connection,
     database, function, hummock_pinned_snapshot, hummock_pinned_version, hummock_sequence,
-    hummock_version_delta, hummock_version_stats, index, object, object_dependency, schema, sink,
-    source, streaming_job, subscription, table, user, user_privilege, view, worker,
+    hummock_version_delta, hummock_version_stats, index, object, object_dependency, schema, secret,
+    sink, source, streaming_job, subscription, table, user, user_privilege, view, worker,
     worker_property, CreateType, JobStatus, ObjectId, StreamingParallelism,
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
-    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbSubscription,
-    PbTable, PbView,
+    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSecret, PbSink, PbSource,
+    PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{
@@ -68,7 +69,6 @@ use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::PbSystemParams;
 use risingwave_pb::user::grant_privilege::PbObject as GrantObject;
 use risingwave_pb::user::PbUserInfo;
-use sea_orm::prelude::DateTime;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, DbBackend, EntityTrait, IntoActiveModel, NotSet,
@@ -188,6 +188,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     let functions = PbFunction::list(&meta_store).await?;
     let connections = PbConnection::list(&meta_store).await?;
     let subscriptions = PbSubscription::list(&meta_store).await?;
+    let secrets = PbSecret::list(&meta_store).await?;
 
     // inuse object ids.
     let mut inuse_obj_ids = tables
@@ -319,6 +320,28 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     }
     println!("connections migrated");
 
+    // secret mapping
+    let mut secret_rewrite = HashMap::new();
+    for mut secret in secrets {
+        let id = next_available_id();
+        secret_rewrite.insert(secret.id, id);
+        secret.id = id as _;
+
+        let obj = object::ActiveModel {
+            oid: Set(id as _),
+            obj_type: Set(ObjectType::Secret),
+            owner_id: Set(secret.owner as _),
+            database_id: Set(Some(*db_rewrite.get(&secret.database_id).unwrap() as _)),
+            schema_id: Set(Some(*schema_rewrite.get(&secret.schema_id).unwrap() as _)),
+            ..Default::default()
+        };
+        Object::insert(obj).exec(&meta_store_sql.conn).await?;
+        Secret::insert(secret::ActiveModel::from(secret))
+            .exec(&meta_store_sql.conn)
+            .await?;
+    }
+    println!("secrets migrated");
+
     // add object: table, source, sink, index, view, subscription.
     macro_rules! insert_objects {
         ($objects:expr, $object_type:expr) => {
@@ -337,11 +360,15 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 };
                 if let Some(epoch) = object.initialized_at_epoch.map(Epoch::from) {
                     obj.initialized_at =
-                        Set(DateTime::from_timestamp_millis(epoch.as_unix_millis() as _).unwrap());
+                        Set(DateTime::from_timestamp_millis(epoch.as_unix_millis() as _)
+                            .unwrap()
+                            .naive_utc());
                 }
                 if let Some(epoch) = object.created_at_epoch.map(Epoch::from) {
                     obj.created_at =
-                        Set(DateTime::from_timestamp_millis(epoch.as_unix_millis() as _).unwrap());
+                        Set(DateTime::from_timestamp_millis(epoch.as_unix_millis() as _)
+                            .unwrap()
+                            .naive_utc());
                 }
                 Object::insert(obj).exec(&meta_store_sql.conn).await?;
             }
@@ -367,12 +394,14 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             ..Default::default()
         };
         if let Some(epoch) = table.initialized_at_epoch.map(Epoch::from) {
-            obj.initialized_at =
-                Set(DateTime::from_timestamp_millis(epoch.as_unix_millis() as _).unwrap());
+            obj.initialized_at = Set(DateTime::from_timestamp_millis(epoch.as_unix_millis() as _)
+                .unwrap()
+                .naive_utc());
         }
         if let Some(epoch) = table.created_at_epoch.map(Epoch::from) {
-            obj.created_at =
-                Set(DateTime::from_timestamp_millis(epoch.as_unix_millis() as _).unwrap());
+            obj.created_at = Set(DateTime::from_timestamp_millis(epoch.as_unix_millis() as _)
+                .unwrap()
+                .naive_utc());
         }
         Object::insert(obj).exec(&meta_store_sql.conn).await?;
     }
@@ -460,15 +489,35 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     }
     println!("table fragments migrated");
 
+    let mut object_dependencies = vec![];
+
     // catalogs.
     // source
     if !sources.is_empty() {
         let source_models: Vec<source::ActiveModel> = sources
             .into_iter()
             .map(|mut src| {
+                let mut dependent_secret_ids = HashSet::new();
                 if let Some(id) = src.connection_id.as_mut() {
                     *id = *connection_rewrite.get(id).unwrap();
                 }
+                for secret_ref in src.secret_refs.values_mut() {
+                    secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+                    dependent_secret_ids.insert(secret_ref.secret_id);
+                }
+                if let Some(info) = &mut src.info {
+                    for secret_ref in info.format_encode_secret_refs.values_mut() {
+                        secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+                        dependent_secret_ids.insert(secret_ref.secret_id);
+                    }
+                }
+                object_dependencies.extend(dependent_secret_ids.into_iter().map(|secret_id| {
+                    object_dependency::ActiveModel {
+                        id: NotSet,
+                        oid: Set(secret_id as _),
+                        used_by: Set(src.id as _),
+                    }
+                }));
                 src.into()
             })
             .collect();
@@ -477,8 +526,6 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             .await?;
     }
     println!("sources migrated");
-
-    let mut object_dependencies = vec![];
 
     // table
     for table in tables {
@@ -525,6 +572,24 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 if let Some(id) = s.connection_id.as_mut() {
                     *id = *connection_rewrite.get(id).unwrap();
                 }
+                let mut dependent_secret_ids = HashSet::new();
+                for secret_ref in s.secret_refs.values_mut() {
+                    secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+                    dependent_secret_ids.insert(secret_ref.secret_id);
+                }
+                if let Some(desc) = &mut s.format_desc {
+                    for secret_ref in desc.secret_refs.values_mut() {
+                        secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+                        dependent_secret_ids.insert(secret_ref.secret_id);
+                    }
+                }
+                object_dependencies.extend(dependent_secret_ids.into_iter().map(|secret_id| {
+                    object_dependency::ActiveModel {
+                        id: NotSet,
+                        oid: Set(secret_id as _),
+                        used_by: Set(s.id as _),
+                    }
+                }));
                 s.into()
             })
             .collect();
@@ -683,7 +748,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                     id: Set(vd.id as _),
                     prev_id: Set(vd.prev_id as _),
                     max_committed_epoch: Set(vd.max_committed_epoch as _),
-                    safe_epoch: Set(vd.safe_epoch as _),
+                    safe_epoch: Set(vd.visible_table_safe_epoch() as _),
                     trivial_move: Set(vd.trivial_move),
                     full_version_delta: Set((&vd.to_protobuf()).into()),
                 })

@@ -11,9 +11,9 @@ with open(expected_output_file) as file:
         # debezium sink sends k/v pair
         kv = line.split()
         key = json.loads(kv[0])
-        # kafka consumer outputs string "null" for null payload
-        if kv[1] == "null":
-            value = kv[1]
+        # rpk output nothing for null payload
+        if len(kv) == 1:
+            value = None
         else:
             value = json.loads(kv[1])
             # The `ts_ms` field may vary, so we delete it from the json object
@@ -26,12 +26,10 @@ with open(expected_output_file) as file:
 with open(test_output_file) as file:
     for line in file:
         kv = line.split()
-        if len(kv) != 2:
-            print(line)
-        assert(len(kv) == 2)
         key = json.loads(kv[0])
-        if kv[1] == "null":
-            value = kv[1]
+        # rpk output nothing for null payload
+        if len(kv) == 1:
+            value = None
         else:
             value = json.loads(kv[1])
             # Assert `ts_ms` is an integer here.

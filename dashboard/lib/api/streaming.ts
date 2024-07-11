@@ -22,6 +22,7 @@ import {
   Schema,
   Sink,
   Source,
+  Subscription,
   Table,
   View,
 } from "../../proto/gen/catalog"
@@ -47,9 +48,9 @@ export interface Relation {
   owner: number
   schemaId: number
   databaseId: number
-  columns: (ColumnCatalog | Field)[]
 
   // For display
+  columns?: (ColumnCatalog | Field)[]
   ownerName?: string
   schemaName?: string
   databaseName?: string
@@ -66,6 +67,8 @@ export function relationType(x: Relation) {
     return "SINK"
   } else if ((x as Source).info !== undefined) {
     return "SOURCE"
+  } else if ((x as Subscription).dependentTableId !== undefined) {
+    return "SUBSCRIPTION"
   } else {
     return "UNKNOWN"
   }
@@ -98,7 +101,8 @@ export async function getRelations() {
     await getTables(),
     await getIndexes(),
     await getSinks(),
-    await getSources()
+    await getSources(),
+    await getSubscriptions()
   )
   relations = sortBy(relations, (x) => x.id)
   return relations
@@ -148,6 +152,14 @@ export async function getViews() {
   let views: View[] = (await api.get("/views")).map(View.fromJSON)
   views = sortBy(views, (x) => x.id)
   return views
+}
+
+export async function getSubscriptions() {
+  let subscriptions: Subscription[] = (await api.get("/subscriptions")).map(
+    Subscription.fromJSON
+  )
+  subscriptions = sortBy(subscriptions, (x) => x.id)
+  return subscriptions
 }
 
 export async function getUsers() {

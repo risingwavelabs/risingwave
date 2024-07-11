@@ -17,8 +17,9 @@ use std::ops::Bound;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverError};
+use risingwave_common_service::{Channel, NotificationClient, ObserverError};
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
 use risingwave_hummock_trace::{
@@ -137,10 +138,10 @@ impl ReplayRead for GlobalReplayImpl {
 
 #[async_trait::async_trait]
 impl ReplayStateStore for GlobalReplayImpl {
-    async fn sync(&self, id: u64) -> Result<usize> {
+    async fn sync(&self, id: u64, table_ids: Vec<u32>) -> Result<usize> {
         let result: SyncResult = self
             .store
-            .sync(id)
+            .sync(id, table_ids.into_iter().map(TableId::new).collect())
             .await
             .map_err(|e| TraceError::SyncFailed(format!("{e}")))?;
         Ok(result.sync_size)

@@ -27,6 +27,10 @@ impl ExecutorBuilder for UnionExecutorBuilder {
         _node: &Self::Node,
         _store: impl StateStore,
     ) -> StreamResult<Executor> {
-        Ok((params.info, UnionExecutor::new(params.input)).into())
+        Ok((
+            params.info,
+            UnionExecutor::new(params.input, params.executor_stats, params.actor_context),
+        )
+            .into())
     }
 }

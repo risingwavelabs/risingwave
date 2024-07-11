@@ -60,7 +60,7 @@ use crate::user::UserId;
 /// - **Order Key**: the primary key for storage, used to sort and access data.
 ///
 ///   For an MV, the columns in `ORDER BY` clause will be put at the beginning of the order key. And
-/// the remaining columns in pk will follow behind.
+///   the remaining columns in pk will follow behind.
 ///
 ///   If there's no `ORDER BY` clause, the order key will be the same as pk.
 ///
@@ -210,7 +210,7 @@ impl TableType {
     }
 }
 
-/// The version of a table, used by schema change. See [`PbTableVersion`].
+/// The version of a table, used by schema change. See [`PbTableVersion`] for more details.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TableVersion {
     pub version_id: TableVersionId,
@@ -493,6 +493,10 @@ impl TableCatalog {
                 .collect(),
         )
     }
+
+    pub fn is_created(&self) -> bool {
+        self.stream_job_status == StreamJobStatus::Created
+    }
 }
 
 impl From<PbTable> for TableCatalog {
@@ -595,19 +599,15 @@ impl OwnedByUserCatalog for TableCatalog {
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::catalog::{
-        row_id_column_desc, ColumnCatalog, ColumnDesc, ColumnId, TableId,
-    };
+    use risingwave_common::catalog::{row_id_column_desc, ColumnDesc, ColumnId};
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_pb::catalog::{PbStreamJobStatus, PbTable};
     use risingwave_pb::plan_common::{
         AdditionalColumn, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
     };
 
     use super::*;
-    use crate::catalog::table_catalog::{TableCatalog, TableType};
 
     #[test]
     fn test_into_table_catalog() {

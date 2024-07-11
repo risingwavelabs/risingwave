@@ -33,6 +33,7 @@ impl FrontendTelemetryCreator {
 
 #[async_trait::async_trait]
 impl TelemetryReportCreator for FrontendTelemetryCreator {
+    #[allow(refining_impl_trait)]
     async fn create_report(
         &self,
         tracking_id: String,
@@ -97,7 +98,6 @@ mod tests {
         assert_eq!(report.base.node_type, TelemetryNodeType::Frontend);
     }
 
-    use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
     use risingwave_common::telemetry::{post_telemetry_report_pb, TELEMETRY_REPORT_URL};
 
     // It is ok to
