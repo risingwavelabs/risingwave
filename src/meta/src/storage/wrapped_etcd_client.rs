@@ -94,8 +94,12 @@ impl EtcdRefreshClient {
 impl etcd_client::Client {
     /// Gets a KV client with message size limit removed.
     ///
-    /// Check the background at https://github.com/risingwavelabs/risingwave/pull/11277.
+    /// Check the background at <https://github.com/risingwavelabs/risingwave/pull/11277>.
     fn kv_client_unlimited(&self) -> etcd_client::KvClient {
+        #[cfg(madsim)]
+        return self.kv_client();
+
+        #[cfg(not(madsim))]
         self.kv_client()
             .max_decoding_message_size(usize::MAX)
             .max_encoding_message_size(usize::MAX)
