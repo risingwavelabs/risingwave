@@ -108,19 +108,6 @@ impl HummockManager {
             "delete {} rows from hummock_epoch_to_version",
             res.rows_affected
         );
-
-        // let earliest_valid_version_id: Option<risingwave_meta_model_v2::HummockVersionId> =
-        //     hummock_time_travel_version::Entity::find()
-        //         .select_only()
-        //         .column(hummock_time_travel_version::Column::VersionId)
-        //         .filter(
-        //             hummock_time_travel_version::Column::VersionId
-        //                 .lte(version_watermark.version_id),
-        //         )
-        //         .order_by_desc(hummock_time_travel_version::Column::VersionId)
-        //         .into_tuple()
-        //         .one(&txn)
-        //         .await?;
         let earliest_valid_version = hummock_time_travel_version::Entity::find()
             .select_only()
             .column(hummock_time_travel_version::Column::VersionId)
