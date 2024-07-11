@@ -143,7 +143,6 @@ public class DbzChangeEventConsumer
         currentRecordCommitter = committer;
         for (ChangeEvent<SourceRecord, SourceRecord> event : events) {
             var record = event.value();
-            LOG.info("connect record: {}", record);
             EventType eventType = getEventType(record);
             DebeziumOffset offset =
                     new DebeziumOffset(
@@ -229,6 +228,14 @@ public class DbzChangeEventConsumer
                                 message.getKey(),
                                 message.getPayload());
                         respBuilder.addEvents(message);
+
+                        // emit the schema change event as a single response
+                        respBuilder.setSourceId(sourceId);
+                        var response = respBuilder.build();
+                        outputChannel.put(response);
+
+                        // reset the response builder
+                        respBuilder = GetEventStreamResponse.newBuilder();
                         break;
                     }
 
