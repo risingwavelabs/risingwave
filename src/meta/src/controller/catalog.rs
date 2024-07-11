@@ -2679,6 +2679,7 @@ impl CatalogController {
             .all(&inner.db)
             .await?;
         let mut map = HashMap::new();
+        // Write object at the same time we write subscription, so we must be able to get obj
         for subscription in subscription_objs
             .into_iter()
             .map(|(subscription, obj)| ObjectModel(subscription, obj.unwrap()).into())
