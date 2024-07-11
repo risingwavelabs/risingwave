@@ -45,7 +45,7 @@ steps:
 
   - label: "build-release"
     command: "ci/scripts/build.sh -p ci-release"
-    key: "build"
+    key: "build-release"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v5.1.0:
