@@ -1169,6 +1169,8 @@ impl SpecificParserConfig {
         info: &StreamSourceInfo,
         with_properties: &BTreeMap<String, String>,
     ) -> ConnectorResult<Self> {
+        const JSON_SINGLE_BLOB_COLUMN_KEY: &str = "single_blob_column";
+
         let source_struct = extract_source_struct(info)?;
         let format = source_struct.format;
         let encode = source_struct.encode;
@@ -1295,7 +1297,10 @@ impl SpecificParserConfig {
                     timestamptz_handling: TimestamptzHandling::from_options(
                         &info.format_encode_options,
                     )?,
-                    single_blob_column: Some(info.json_single_blob_column.clone()),
+                    single_blob_column: info
+                        .format_encode_options
+                        .get(JSON_SINGLE_BLOB_COLUMN_KEY)
+                        .cloned(),
                 })
             }
             (SourceFormat::DebeziumMongo, SourceEncode::Json) => {

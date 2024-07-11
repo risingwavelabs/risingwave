@@ -85,6 +85,7 @@ use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_in_with_op
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
+const JSON_SINGLE_BLOB_COLUMN_KEY: &str = "single_blob_column";
 
 /// Map a JSON schema to a relational schema
 async fn extract_json_table_schema(
@@ -302,7 +303,6 @@ pub(crate) async fn bind_columns_from_source(
     const MESSAGE_NAME_KEY: &str = "message";
     const KEY_MESSAGE_NAME_KEY: &str = "key.message";
     const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
-    const JSON_SINGLE_BLOB_COLUMN_KEY: &str = "single_blob_column";
 
     let is_kafka: bool = with_properties.is_kafka_connector();
     let format_encode_options = WithOptions::try_from(source_schema.row_options())?.into_inner();
@@ -469,12 +469,11 @@ pub(crate) async fn bind_columns_from_source(
                 );
             }
 
-            if let Some(ast_string) = try_consume_string_from_options(
+            // Only used and required by Dynamodb and DynamodbCdc for now
+            let _ = try_consume_string_from_options(
                 &mut format_encode_options_to_consume,
                 JSON_SINGLE_BLOB_COLUMN_KEY,
-            ) {
-                stream_source_info.json_single_blob_column = ast_string.0;
-            }
+            );
 
             let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
             stream_source_info.use_schema_registry =
@@ -1263,7 +1262,11 @@ fn validate_dynamodb_source(
             format_string
         ))));
     }
-    if source_info.json_single_blob_column.is_empty() {
+    let single_blob_column = source_info
+        .format_encode_options
+        .get(JSON_SINGLE_BLOB_COLUMN_KEY)
+        .cloned();
+    if single_blob_column.is_none() {
         return Err(RwError::from(ProtocolError(format!(
             "Single blob column must be specified when creating source with FORMAT {}.",
             format_string
@@ -1286,7 +1289,7 @@ fn validate_dynamodb_source(
         })
         .collect_vec();
     if single_blob_columns.len() != 1
-        || single_blob_columns[0].0 != source_info.json_single_blob_column
+        || single_blob_columns[0].0 != single_blob_column.unwrap()
         || single_blob_columns[0].1 != DataType::Jsonb
     {
         return Err(RwError::from(ProtocolError(
