@@ -64,7 +64,7 @@ alter table t2 drop column v1;
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Permission denied: cannot drop column "v1" because it's referenced by a generated column "v2"
+  failed to drop column "v1" because it's referenced by a generated column "v2"
 
 
 statement ok

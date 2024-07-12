@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use fancy_regex::Regex;
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
@@ -96,12 +96,8 @@ pub async fn handle_refresh_schema(
             let re = Regex::new(r#"fail to bind expression in generated column "(.*?)""#).unwrap();
             let captures = re.captures(&report).map_err(anyhow::Error::from)?;
             if let Some(gen_col_name) = captures.and_then(|captures| captures.get(1)) {
-                Err(ErrorCode::PermissionDenied(format!(
-                    "columns to drop are referenced by a generated column \"{}\": {}",
-                    gen_col_name.as_str(),
-                    report,
-                ))
-                .into())
+                Err(anyhow!(e).context(format!("failed to refresh schema because some of the columns to drop are referenced by a generated column \"{}\"",
+                    gen_col_name.as_str())).into())
             } else {
                 Err(e)
             }

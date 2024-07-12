@@ -17,8 +17,8 @@ use std::sync::Arc;
 use anyhow::Context;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::bail_not_implemented;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::{bail, bail_not_implemented};
 use risingwave_sqlparser::ast::{
     AlterTableOperation, ColumnOption, ConnectorSchema, Encode, ObjectName, Statement,
 };
@@ -195,11 +195,11 @@ pub async fn handle_alter_table_column(
                     for idx in refs.ones() {
                         let refed_column = &original_catalog.columns()[idx];
                         if refed_column.name() == column_name.real_value() {
-                            Err(ErrorCode::PermissionDenied(format!(
-                                "cannot drop column \"{}\" because it's referenced by a generated column \"{}\"",
+                            bail!(format!(
+                                "failed to drop column \"{}\" because it's referenced by a generated column \"{}\"",
                                 column_name,
                                 column.name()
-                            )))?
+                            ))
                         }
                     }
                 }
