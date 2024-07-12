@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
+use risingwave_pb::batch_plan::file_scan_node::{FileFormat, StorageType};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::FileScanNode;
 
 use super::batch::prelude::*;
 use super::utils::{childless_record, column_names_pretty, Distill};
@@ -75,7 +77,24 @@ impl ToDistributedBatch for BatchFileScan {
 
 impl ToBatchPb for BatchFileScan {
     fn to_batch_prost_body(&self) -> NodeBody {
-        todo!()
+        NodeBody::FileScan(FileScanNode {
+            columns: self
+                .core
+                .columns()
+                .into_iter()
+                .map(|col| col.to_protobuf())
+                .collect(),
+            file_format: match self.core.file_format {
+                generic::FileFormat::Parquet => FileFormat::Parquet as i32,
+            },
+            storage_type: match self.core.storage_type {
+                generic::StorageType::S3 => StorageType::S3 as i32,
+            },
+            s3_region: self.core.s3_region.clone(),
+            s3_access_key: self.core.s3_access_key.clone(),
+            s3_secret_key: self.core.s3_secret_key.clone(),
+            file_location: self.core.file_location.clone(),
+        })
     }
 }
 

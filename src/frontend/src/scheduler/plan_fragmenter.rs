@@ -431,6 +431,12 @@ pub struct TablePartitionInfo {
 pub enum PartitionInfo {
     Table(TablePartitionInfo),
     Source(Vec<SplitImpl>),
+    File,
+}
+
+#[derive(Clone, Debug)]
+pub struct FileScanInfo {
+    // Currently we only support one file, so we don't need to support any partition info.
 }
 
 /// Fragment part of `Query`.
@@ -444,6 +450,7 @@ pub struct QueryStage {
     /// Indicates whether this stage contains a table scan node and the table's information if so.
     pub table_scan_info: Option<TableScanInfo>,
     pub source_info: Option<SourceScanInfo>,
+    pub file_scan_info: Option<FileScanInfo>,
     pub has_lookup_join: bool,
     pub dml_table_id: Option<TableId>,
     pub session_id: SessionId,
@@ -467,16 +474,21 @@ impl QueryStage {
         self.has_lookup_join
     }
 
-    pub fn clone_with_exchange_info(&self, exchange_info: Option<ExchangeInfo>) -> Self {
+    pub fn clone_with_exchange_info(
+        &self,
+        exchange_info: Option<ExchangeInfo>,
+        parallelism: Option<u32>,
+    ) -> Self {
         if let Some(exchange_info) = exchange_info {
             return Self {
                 query_id: self.query_id.clone(),
                 id: self.id,
                 root: self.root.clone(),
                 exchange_info: Some(exchange_info),
-                parallelism: self.parallelism,
+                parallelism,
                 table_scan_info: self.table_scan_info.clone(),
                 source_info: self.source_info.clone(),
+                file_scan_info: self.file_scan_info.clone(),
                 has_lookup_join: self.has_lookup_join,
                 dml_table_id: self.dml_table_id,
                 session_id: self.session_id,
@@ -507,6 +519,7 @@ impl QueryStage {
             parallelism: Some(task_parallelism),
             table_scan_info: self.table_scan_info.clone(),
             source_info: Some(source_info),
+            file_scan_info: self.file_scan_info.clone(),
             has_lookup_join: self.has_lookup_join,
             dml_table_id: self.dml_table_id,
             session_id: self.session_id,
@@ -553,6 +566,7 @@ struct QueryStageBuilder {
     /// See also [`QueryStage::table_scan_info`].
     table_scan_info: Option<TableScanInfo>,
     source_info: Option<SourceScanInfo>,
+    file_scan_file: Option<FileScanInfo>,
     has_lookup_join: bool,
     dml_table_id: Option<TableId>,
     session_id: SessionId,
@@ -570,6 +584,7 @@ impl QueryStageBuilder {
         exchange_info: Option<ExchangeInfo>,
         table_scan_info: Option<TableScanInfo>,
         source_info: Option<SourceScanInfo>,
+        file_scan_file: Option<FileScanInfo>,
         has_lookup_join: bool,
         dml_table_id: Option<TableId>,
         session_id: SessionId,
@@ -584,6 +599,7 @@ impl QueryStageBuilder {
             children_stages: vec![],
             table_scan_info,
             source_info,
+            file_scan_file,
             has_lookup_join,
             dml_table_id,
             session_id,
@@ -606,6 +622,7 @@ impl QueryStageBuilder {
             parallelism: self.parallelism,
             table_scan_info: self.table_scan_info,
             source_info: self.source_info,
+            file_scan_info: self.file_scan_file,
             has_lookup_join: self.has_lookup_join,
             dml_table_id: self.dml_table_id,
             session_id: self.session_id,
@@ -698,15 +715,10 @@ impl StageGraph {
             // If the stage has parallelism, it means it's a complete stage.
             complete_stages.insert(
                 stage.id,
-                Arc::new(stage.clone_with_exchange_info(exchange_info)),
+                Arc::new(stage.clone_with_exchange_info(exchange_info, stage.parallelism)),
             );
             None
-        } else {
-            assert!(matches!(
-                stage.source_info,
-                Some(SourceScanInfo::Incomplete(_))
-            ));
-
+        } else if matches!(stage.source_info, Some(SourceScanInfo::Incomplete(_))) {
             let complete_source_info = stage
                 .source_info
                 .as_ref()
@@ -739,6 +751,13 @@ impl StageGraph {
             let parallelism = complete_stage.parallelism;
             complete_stages.insert(stage.id, complete_stage);
             parallelism
+        } else {
+            assert!(matches!(&stage.file_scan_info, Some(FileScanInfo {})));
+            complete_stages.insert(
+                stage.id,
+                Arc::new(stage.clone_with_exchange_info(exchange_info, Some(1))),
+            );
+            None
         };
 
         for child_stage_id in self.child_edges.get(&stage.id).unwrap_or(&HashSet::new()) {
@@ -852,6 +871,13 @@ impl BatchPlanFragmenter {
         } else {
             None
         };
+
+        let file_scan_info = if table_scan_info.is_none() && source_info.is_none() {
+            Self::collect_stage_file_scan(root.clone())?
+        } else {
+            None
+        };
+
         let mut has_lookup_join = false;
         let parallelism = match root.distribution() {
             Distribution::Single => {
@@ -899,12 +925,14 @@ impl BatchPlanFragmenter {
                     lookup_join_parallelism
                 } else if source_info.is_some() {
                     0
+                } else if file_scan_info.is_some() {
+                    1
                 } else {
                     self.batch_parallelism
                 }
             }
         };
-        if source_info.is_none() && parallelism == 0 {
+        if source_info.is_none() && file_scan_info.is_none() && parallelism == 0 {
             return Err(BatchError::EmptyWorkerNodes.into());
         }
         let parallelism = if parallelism == 0 {
@@ -920,6 +948,7 @@ impl BatchPlanFragmenter {
             exchange_info,
             table_scan_info,
             source_info,
+            file_scan_info,
             has_lookup_join,
             dml_table_id,
             root.ctx().session_ctx().session_id(),
@@ -1056,6 +1085,23 @@ impl BatchPlanFragmenter {
         node.inputs()
             .into_iter()
             .find_map(|n| Self::collect_stage_source(n).transpose())
+            .transpose()
+    }
+
+    fn collect_stage_file_scan(node: PlanRef) -> SchedulerResult<Option<FileScanInfo>> {
+        if node.node_type() == PlanNodeType::BatchExchange {
+            // Do not visit next stage.
+            return Ok(None);
+        }
+
+        if let Some(_batch_file_scan) = node.as_batch_file_scan() {
+            // Currently the file scan only support one file, so we just need a empty struct.
+            return Ok(Some(FileScanInfo {}));
+        }
+
+        node.inputs()
+            .into_iter()
+            .find_map(|n| Self::collect_stage_file_scan(n).transpose())
             .transpose()
     }
 

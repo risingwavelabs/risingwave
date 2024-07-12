@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use educe::Educe;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 
 use super::GenericPlanNode;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
@@ -60,5 +60,18 @@ impl GenericPlanNode for FileScan {
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
         FunctionalDependencySet::new(self.schema.len())
+    }
+}
+
+impl FileScan {
+    pub fn columns(&self) -> Vec<ColumnDesc> {
+        self.schema
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                ColumnDesc::named(f.name.clone(), ColumnId::new(i as i32), f.data_type.clone())
+            })
+            .collect()
     }
 }
