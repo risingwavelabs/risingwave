@@ -20,6 +20,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::Context;
+use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::types::{DataType, Datum};
@@ -214,7 +215,7 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
 }
 
 /// Aggregate function kind.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum AggKind {
     /// Built-in aggregate function.
     ///
@@ -258,10 +259,6 @@ impl From<PbAggKind> for AggKind {
 }
 
 impl AggKind {
-    pub fn is_user_defined(&self) -> bool {
-        matches!(self, Self::UserDefined(_))
-    }
-
     pub fn from_protobuf(
         pb_type: PbAggKind,
         user_defined: Option<&PbUserDefinedFunctionMetadata>,
