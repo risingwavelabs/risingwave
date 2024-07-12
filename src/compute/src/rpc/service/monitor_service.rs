@@ -390,7 +390,7 @@ pub mod grpc_middleware {
     use either::Either;
     use futures::Future;
     use hyper::Body;
-    use tonic::transport::NamedService;
+    use tonic::server::NamedService;
     use tower::{Layer, Service};
 
     /// Manages the await-trees of `gRPC` requests that are currently served by the compute node.
