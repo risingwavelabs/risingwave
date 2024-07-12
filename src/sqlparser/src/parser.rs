@@ -3649,10 +3649,41 @@ impl Parser<'_> {
                 (Keyword::SYSTEM_TIME, Keyword::AS, Keyword::OF),
                 cut_err(
                     alt((
-                        (
-                            Self::parse_identifier.verify(|ident| {
-                                ident.real_value() == "proctime" || ident.real_value() == "now"
+                        preceded(
+                            (
+                                Self::parse_identifier.verify(|ident| ident.real_value() == "now"),
+                                cut_err(Token::LParen),
+                                cut_err(Token::RParen),
+                                Token::Minus,
+                            ),
+                            Self::parse_literal_interval.try_map(|e| match e {
+                                Expr::Value(v) => match v {
+                                    Value::Interval {
+                                        value,
+                                        leading_field,
+                                        ..
+                                    } => {
+                                        let Some(leading_field) = leading_field else {
+                                            return Err(StrError("expect duration unit".into()));
+                                        };
+                                        Ok(AsOf::ProcessTimeWithInterval((value, leading_field)))
+                                    }
+                                    _ => Err(StrError("expect Value::Interval".into())),
+                                },
+                                _ => Err(StrError("expect Expr::Value".into())),
                             }),
+                        ),
+                        (
+                            Self::parse_identifier.verify(|ident| ident.real_value() == "now"),
+                            cut_err(Token::LParen),
+                            cut_err(Token::RParen),
+                        )
+                            .value(AsOf::ProcessTimeWithInterval((
+                                "0".to_owned(),
+                                DateTimeField::Second,
+                            ))),
+                        (
+                            Self::parse_identifier.verify(|ident| ident.real_value() == "proctime"),
                             cut_err(Token::LParen),
                             cut_err(Token::RParen),
                         )

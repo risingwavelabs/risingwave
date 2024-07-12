@@ -54,6 +54,7 @@ use crate::hummock::event_handler::{
 use crate::hummock::iterator::change_log::ChangeLogIterator;
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
+use crate::hummock::time_travel_version_cache::SimpleTimeTravelVersionCache;
 use crate::hummock::utils::{validate_safe_epoch, wait_for_epoch};
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
 use crate::hummock::{
@@ -119,6 +120,8 @@ pub struct HummockStorage {
     compact_await_tree_reg: Option<CompactionAwaitTreeRegRef>,
 
     hummock_meta_client: Arc<dyn HummockMetaClient>,
+
+    simple_time_travel_version_cache: Arc<SimpleTimeTravelVersionCache>,
 }
 
 pub type ReadVersionTuple = (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion);
@@ -237,6 +240,7 @@ impl HummockStorage {
             write_limiter,
             compact_await_tree_reg: await_tree_reg,
             hummock_meta_client,
+            simple_time_travel_version_cache: Arc::new(SimpleTimeTravelVersionCache::new()),
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -326,20 +330,24 @@ impl HummockStorage {
         table_id: TableId,
         key_range: TableKeyRange,
     ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
-        let pb_version = self
-            .hummock_meta_client
-            .get_version_by_epoch(epoch)
-            .await
-            .inspect_err(|e| tracing::error!("{}", e.to_report_string()))
-            .map_err(|e| HummockError::meta_error(e.to_report_string()))?;
-        let version = HummockVersion::from_rpc_protobuf(&pb_version);
-        validate_safe_epoch(&version, table_id, epoch)?;
-        let (tx, _rx) = unbounded_channel();
+        let fetch = async {
+            let pb_version = self
+                .hummock_meta_client
+                .get_version_by_epoch(epoch)
+                .await
+                .inspect_err(|e| tracing::error!("{}", e.to_report_string()))
+                .map_err(|e| HummockError::meta_error(e.to_report_string()))?;
+            let version = HummockVersion::from_rpc_protobuf(&pb_version);
+            validate_safe_epoch(&version, table_id, epoch)?;
+            let (tx, _rx) = unbounded_channel();
+            Ok(PinnedVersion::new(version, tx))
+        };
+        let version = self
+            .simple_time_travel_version_cache
+            .get_or_insert(epoch, fetch)
+            .await?;
         Ok(get_committed_read_version_tuple(
-            PinnedVersion::new(version, tx),
-            table_id,
-            key_range,
-            epoch,
+            version, table_id, key_range, epoch,
         ))
     }
 
