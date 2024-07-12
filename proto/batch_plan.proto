@@ -67,7 +67,6 @@ message SourceNode {
 }
 
 message FileScanNode {
-
   enum FileFormat {
     FILE_FORMAT_UNSPECIFIED = 0;
     PARQUET = 1;
