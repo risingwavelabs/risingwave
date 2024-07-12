@@ -1299,11 +1299,7 @@ pub fn split_sst(sst_info: &mut SstableInfo, new_sst_id: &mut u64) -> SstableInf
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_pb::hummock::group_delta::DeltaType;
-    use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
-    use risingwave_pb::hummock::{
-        CompactionConfig, GroupConstruct, GroupDestroy, LevelType, PbIntraLevelDelta,
-    };
+    use risingwave_pb::hummock::{CompactionConfig, GroupConstruct, GroupDestroy, LevelType};
 
     use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
     use crate::version::{
@@ -1418,8 +1414,7 @@ mod tests {
                             object_id: 1,
                             sst_id: 1,
                             ..Default::default()
-                        }
-                        .into()],
+                        }],
                         0,
                     ))],
                 },
