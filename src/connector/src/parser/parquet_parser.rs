@@ -144,9 +144,9 @@ impl ParquetParser {
                                     let mut array_builder =
                                     ArrayBuilderImpl::with_type(column_size, source_column.data_type.clone());
                                     for _ in 0..record_batch.num_rows(){
-                                        let datum: Datum =  Some(ScalarImpl::Utf8((self.offset).to_string().into()));
+                                        let datum: Datum = Some(ScalarImpl::Utf8((self.offset).to_string().into()));
                                         self.inc_offset();
-                                        array_builder.append( datum);
+                                        array_builder.append(datum);
                                     }
                                     let res = array_builder.finish();
                                     let column = Arc::new(res);
