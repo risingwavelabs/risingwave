@@ -797,7 +797,6 @@ pub(crate) mod tests {
             filter_key_extractor_manager,
         )
         .await;
-
         hummock_manager_ref
             .report_compact_task(
                 result_task.task_id,
@@ -1389,10 +1388,6 @@ pub(crate) mod tests {
             normal_tables.push(sstable_store.sstable(sst_info, &mut stats).await.unwrap());
         }
         assert!(fast_ret.iter().all(|f| f.file_size < capacity * 6 / 5));
-        println!(
-            "fast sstables file size: {:?}",
-            fast_ret.iter().map(|f| f.file_size).collect_vec(),
-        );
         assert!(can_concat(&ret));
         assert!(can_concat(&fast_ret));
         let read_options = Arc::new(SstableIteratorReadOptions::default());
@@ -1522,7 +1517,6 @@ pub(crate) mod tests {
                 sstable_store.clone(),
             )
             .await;
-            println!("generate ssts size: {}", sst.file_size);
             ssts.push(sst);
         }
         let select_file_count = ssts.len() / 2;
@@ -1869,11 +1863,6 @@ pub(crate) mod tests {
             max_sst_file_size = std::cmp::max(max_sst_file_size, sst_info.file_size);
             sst_infos.push(sst_info);
         }
-        println!(
-            "input data: {}",
-            sst_infos.iter().map(|sst| sst.file_size).sum::<u64>(),
-        );
-
         let target_file_size = max_sst_file_size / 4;
         let mut table_watermarks = BTreeMap::default();
         let key_count = KEY_COUNT / VirtualNode::COUNT * 2;
@@ -1927,11 +1916,6 @@ pub(crate) mod tests {
             ..Default::default()
         };
         let (ret, fast_ret) = run_fast_and_normal_runner(compact_ctx.clone(), task).await;
-        println!(
-            "normal compact result data: {}, fast compact result data: {}",
-            ret.iter().map(|sst| sst.file_size).sum::<u64>(),
-            fast_ret.iter().map(|sst| sst.file_size).sum::<u64>(),
-        );
         // check_compaction_result(compact_ctx.sstable_store, ret.clone(), fast_ret, target_file_size).await;
         let mut fast_tables = Vec::with_capacity(fast_ret.len());
         let mut normal_tables = Vec::with_capacity(ret.len());

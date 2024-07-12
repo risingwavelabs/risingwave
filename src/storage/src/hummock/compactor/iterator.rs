@@ -434,17 +434,19 @@ impl ConcatSstableIterator {
         let mut end_index = if key_range.right.is_empty() {
             block_metas.len()
         } else {
-            block_metas.partition_point(|block| {
+            let ret = block_metas.partition_point(|block| {
                 KeyComparator::compare_encoded_full_key(&block.smallest_key, &key_range.right)
                     != Ordering::Greater
-            })
+            });
+
+            if ret == 0 {
+                // not found
+                return vec![];
+            }
+
+            ret
         }
         .saturating_sub(1);
-
-        if end_index == 0 {
-            // not found
-            return vec![];
-        }
 
         // skip blocks that are not in existing_table_ids
         while start_index <= end_index {
