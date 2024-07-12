@@ -225,7 +225,11 @@ impl HummockMetaClient for MockHummockMetaClient {
         unimplemented!()
     }
 
-    async fn trigger_full_gc(&self, _sst_retention_time_sec: u64) -> Result<()> {
+    async fn trigger_full_gc(
+        &self,
+        _sst_retention_time_sec: u64,
+        _prefix: Option<String>,
+    ) -> Result<()> {
         unimplemented!()
     }
 

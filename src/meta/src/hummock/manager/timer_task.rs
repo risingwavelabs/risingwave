@@ -336,7 +336,7 @@ impl HummockManager {
 
                                 HummockTimerEvent::FullGc => {
                                     if hummock_manager
-                                        .start_full_gc(Duration::from_secs(3600))
+                                        .start_full_gc(Duration::from_secs(3600), None)
                                         .is_ok()
                                     {
                                         tracing::info!("Start full GC from meta node.");

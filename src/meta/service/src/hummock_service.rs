@@ -320,9 +320,9 @@ impl HummockManagerService for HummockServiceImpl {
         &self,
         request: Request<TriggerFullGcRequest>,
     ) -> Result<Response<TriggerFullGcResponse>, Status> {
-        self.hummock_manager.start_full_gc(Duration::from_secs(
-            request.into_inner().sst_retention_time_sec,
-        ))?;
+        let req = request.into_inner();
+        self.hummock_manager
+            .start_full_gc(Duration::from_secs(req.sst_retention_time_sec), req.prefix)?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))
     }
 
