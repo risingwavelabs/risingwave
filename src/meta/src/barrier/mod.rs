@@ -803,7 +803,12 @@ impl GlobalBarrierManager {
     }
 
     async fn failure_recovery(&mut self, err: MetaError) {
-        self.context.tracker.lock().await.abort_all(&err).await;
+        self.context
+            .tracker
+            .lock()
+            .await
+            .abort_all(&err, &self.context)
+            .await;
         self.checkpoint_control.clear_on_err(&err).await;
         self.pending_non_checkpoint_barriers.clear();
 
@@ -831,7 +836,12 @@ impl GlobalBarrierManager {
 
     async fn adhoc_recovery(&mut self) {
         let err = MetaErrorInner::AdhocRecovery.into();
-        self.context.tracker.lock().await.abort_all(&err).await;
+        self.context
+            .tracker
+            .lock()
+            .await
+            .abort_all(&err, &self.context)
+            .await;
         self.checkpoint_control.clear_on_err(&err).await;
 
         if self.enable_recovery {

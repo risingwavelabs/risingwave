@@ -474,7 +474,7 @@ impl GlobalStreamManager {
             dispatchers,
             init_split_assignment,
             definition: definition.to_string(),
-            streaming_job,
+            streaming_job: streaming_job.clone(),
             internal_tables: internal_tables.into_values().collect_vec(),
             ddl_type,
             replace_table: replace_table_command,
@@ -485,7 +485,7 @@ impl GlobalStreamManager {
             self.barrier_scheduler.run_command(command).await?;
             tracing::debug!("first barrier collected for stream job");
             self.metadata_manager
-                .wait_streaming_job_finished(table_id)
+                .wait_streaming_job_finished(&streaming_job)
                 .await?
         };
         match result {

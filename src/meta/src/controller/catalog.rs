@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::iter;
+use std::mem::take;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -109,7 +110,6 @@ impl CatalogController {
             inner: RwLock::new(CatalogControllerInner {
                 db: meta_store.conn,
                 table_id_to_tx: HashMap::new(),
-                table_id_to_version: HashMap::new(),
             }),
         }
     }
@@ -129,11 +129,7 @@ pub struct CatalogControllerInner {
     pub(crate) db: DatabaseConnection,
     /// `DdlController` will update this map, and pass the `tx` side to `CatalogController`.
     /// On notifying, we can remove the entry from this map.
-    pub table_id_to_tx: HashMap<ObjectId, Sender<MetaResult<NotificationVersion>>>,
-    /// Catalogs which were marked as finished and committed.
-    /// But the `DdlController` has not instantiated notification channel.
-    /// Once notified, we can remove the entry from this map.
-    pub table_id_to_version: HashMap<ObjectId, MetaResult<NotificationVersion>>,
+    pub table_id_to_tx: HashMap<ObjectId, Vec<Sender<MetaResult<NotificationVersion>>>>,
 }
 
 impl CatalogController {
@@ -157,6 +153,10 @@ impl CatalogController {
             .notification_manager()
             .notify_frontend_relation_info(operation, relation_info)
             .await
+    }
+
+    pub(crate) async fn current_notification_version(&self) -> NotificationVersion {
+        self.env.notification_manager().current_version().await
     }
 }
 
@@ -3136,20 +3136,28 @@ impl CatalogControllerInner {
         id: i32,
         sender: Sender<MetaResult<NotificationVersion>>,
     ) {
-        self.table_id_to_tx.insert(id, sender);
+        self.table_id_to_tx.entry(id).or_default().push(sender);
     }
 
-    pub(crate) fn table_is_finished(&mut self, id: i32) -> Option<MetaResult<NotificationVersion>> {
-        self.table_id_to_version.remove(&id)
+    pub(crate) async fn streaming_job_is_finished(&mut self, id: i32) -> MetaResult<bool> {
+        let status = StreamingJob::find()
+            .select_only()
+            .column(streaming_job::Column::JobStatus)
+            .filter(streaming_job::Column::JobId.eq(id))
+            .into_tuple::<JobStatus>()
+            .one(&self.db)
+            .await?;
+
+        status
+            .map(|status| status == JobStatus::Created)
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found("streaming job", "may have been cancelled/dropped")
+            })
     }
 
-    pub(crate) fn notify_finish_failed(&mut self, id: ObjectId, err: MetaError) {
-        // assert!(!self.table_id_to_version.contains_key(&id));
-        // assert!(!self.table_id_to_tx.contains_key(&id));
-        if let Some(tx) = self.table_id_to_tx.remove(&id) {
-            let _ = tx.send(Err(err));
-        } else {
-            self.table_id_to_version.insert(id, Err(err));
+    pub(crate) fn notify_finish_failed(&mut self, err: &MetaError) {
+        for tx in take(&mut self.table_id_to_tx).into_values().flatten() {
+            let _ = tx.send(Err(err.clone()));
         }
     }
 }

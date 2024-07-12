@@ -467,8 +467,7 @@ impl DdlController {
     async fn create_source(&self, mut source: Source) -> MetaResult<NotificationVersion> {
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
-                let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
-                source.id = source_id;
+                source.id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
                 // set the initialized_at_epoch to the current epoch.
                 source.initialized_at_epoch = Some(Epoch::now().0);
                 source.initialized_at_cluster_version = Some(current_cluster_version());
@@ -486,8 +485,7 @@ impl DdlController {
 
                 mgr.catalog_manager
                     .finish_create_source_procedure(source, vec![])
-                    .await?;
-                mgr.wait_streaming_job_finished(source_id).await
+                    .await
             }
             MetadataManager::V2(mgr) => {
                 mgr.catalog_controller
