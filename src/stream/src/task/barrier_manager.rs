@@ -703,9 +703,6 @@ impl LocalBarrierWorker {
             to_collect
         );
 
-        // There must be some actors to collect from.
-        assert!(!to_collect.is_empty());
-
         for actor_id in &to_collect {
             if let Some(e) = self.failure_actors.get(actor_id) {
                 // The failure actors could exit before the barrier is issued, while their

@@ -766,10 +766,10 @@ impl GlobalBarrierManager {
 
         send_latency_timer.observe_duration();
 
-        let node_to_collect = match self
-            .control_stream_manager
-            .inject_barrier(command_ctx.clone())
-        {
+        let node_to_collect = match self.control_stream_manager.inject_barrier(
+            command_ctx.clone(),
+            self.state.inflight_actor_infos.existing_table_ids(),
+        ) {
             Ok(node_to_collect) => node_to_collect,
             Err(err) => {
                 for notifier in notifiers {

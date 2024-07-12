@@ -33,6 +33,8 @@ pub(super) struct Spiller<'a> {
 
 impl<'a> Spiller<'a> {
     pub(super) fn new(unsync_data: &'a mut UnsyncData) -> Self {
+        // TODO: devide spill payload by epoch-table_ids
+        let temp = 0;
         let mut epoch_info: HashMap<_, EpochSpillableDataInfo> = HashMap::new();
         for instance_data in unsync_data
             .table_data
