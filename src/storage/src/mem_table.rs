@@ -24,7 +24,7 @@ use bytes::Bytes;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common_estimate_size::{EstimateSize, KvSize};
@@ -545,15 +545,6 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
 impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalStateStore<S> {
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
-
-    #[allow(clippy::unused_async)]
-    async fn may_exist(
-        &self,
-        _key_range: TableKeyRange,
-        _read_options: ReadOptions,
-    ) -> StorageResult<bool> {
-        Ok(true)
-    }
 
     async fn get(
         &self,

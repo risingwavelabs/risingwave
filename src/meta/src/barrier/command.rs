@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
 use risingwave_common::types::Timestamptz;

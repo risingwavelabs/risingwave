@@ -38,7 +38,7 @@ use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, Index, PbSource, PbStreamJobStatus,
     Schema, Secret, Sink, Source, StreamJobStatus, Subscription, Table, View,
 };
-use risingwave_pb::ddl_service::{alter_owner_request, alter_set_schema_request};
+use risingwave_pb::ddl_service::{alter_owner_request, alter_set_schema_request, TableJobType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{Action, ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -3642,7 +3642,7 @@ impl CatalogManager {
 
     /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
     pub async fn start_replace_table_procedure(&self, stream_job: &StreamingJob) -> MetaResult<()> {
-        let StreamingJob::Table(source, table, ..) = stream_job else {
+        let StreamingJob::Table(source, table, job_type) = stream_job else {
             unreachable!("unexpected job: {stream_job:?}")
         };
         let core = &mut *self.core.lock().await;
@@ -3650,7 +3650,10 @@ impl CatalogManager {
         database_core.ensure_database_id(table.database_id)?;
         database_core.ensure_schema_id(table.schema_id)?;
 
-        assert!(table.dependent_relations.is_empty());
+        // general table streaming job should not have dependent relations
+        if matches!(job_type, TableJobType::General) {
+            assert!(table.dependent_relations.is_empty());
+        }
 
         let key = (table.database_id, table.schema_id, table.name.clone());
         let original_table = database_core
@@ -3804,8 +3807,6 @@ impl CatalogManager {
     ) {
         let database_core = &mut core.database;
         let key = (table.database_id, table.schema_id, table.name.clone());
-
-        assert!(table.dependent_relations.is_empty());
 
         assert!(
             database_core.tables.contains_key(&table.id)

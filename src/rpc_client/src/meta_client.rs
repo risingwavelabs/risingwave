@@ -527,6 +527,7 @@ impl MetaClient {
         table: PbTable,
         graph: StreamFragmentGraph,
         table_col_index_mapping: ColIndexMapping,
+        job_type: PbTableJobType,
     ) -> Result<CatalogVersion> {
         let request = ReplaceTablePlanRequest {
             plan: Some(ReplaceTablePlan {
@@ -534,6 +535,7 @@ impl MetaClient {
                 table: Some(table),
                 fragment_graph: Some(graph),
                 table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
+                job_type: job_type as _,
             }),
         };
         let resp = self.inner.replace_table_plan(request).await?;
@@ -936,6 +938,14 @@ impl MetaClient {
         };
         let resp = self.inner.apply_throttle(request).await?;
         Ok(resp)
+    }
+
+    pub async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {
+        let resp = self
+            .inner
+            .get_cluster_recovery_status(GetClusterRecoveryStatusRequest {})
+            .await?;
+        Ok(resp.get_status().unwrap())
     }
 
     pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
@@ -1939,6 +1949,7 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
             ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
+            ,{ cluster_client, get_cluster_recovery_status, GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, pause, PauseRequest, PauseResponse }

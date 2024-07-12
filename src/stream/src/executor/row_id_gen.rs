@@ -14,7 +14,7 @@
 
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{Array, ArrayBuilder, ArrayRef, Op, SerialArrayBuilder};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::Serial;
 use risingwave_common::util::iter_util::ZipEqFast;

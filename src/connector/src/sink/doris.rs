@@ -21,7 +21,7 @@ use base64::engine::general_purpose;
 use base64::Engine;
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use serde::Deserialize;

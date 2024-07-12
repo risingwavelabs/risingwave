@@ -17,7 +17,7 @@ use std::marker::PhantomData;
 
 use anyhow::Context;
 use itertools::Itertools;
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{
