@@ -571,6 +571,7 @@ message VacuumTask {
 // Scan object store to get candidate orphan SSTs.
 message FullScanTask {
   uint64 sst_retention_time_sec = 1;
+  optional string prefix = 2;
 }
 
 // Cancel compact task
@@ -614,6 +615,7 @@ message ReportFullScanTaskResponse {
 
 message TriggerFullGCRequest {
   uint64 sst_retention_time_sec = 1;
+  optional string prefix = 2;
 }
 
 message TriggerFullGCResponse {

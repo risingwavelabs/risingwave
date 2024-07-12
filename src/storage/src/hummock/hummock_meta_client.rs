@@ -111,9 +111,13 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
             .await
     }
 
-    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()> {
+    async fn trigger_full_gc(
+        &self,
+        sst_retention_time_sec: u64,
+        prefix: Option<String>,
+    ) -> Result<()> {
         self.meta_client
-            .trigger_full_gc(sst_retention_time_sec)
+            .trigger_full_gc(sst_retention_time_sec, prefix)
             .await
     }
 

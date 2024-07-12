@@ -92,6 +92,7 @@ async fn test_full_scan() {
 
     let task = FullScanTask {
         sst_retention_time_sec: 10000,
+        prefix: None,
     };
     let (scan_result, _, _) = Vacuum::full_scan_inner(task, object_metadata_iter.clone())
         .await
@@ -100,6 +101,7 @@ async fn test_full_scan() {
 
     let task = FullScanTask {
         sst_retention_time_sec: 6000,
+        prefix: None,
     };
     let (scan_result, _, _) = Vacuum::full_scan_inner(task, object_metadata_iter.clone())
         .await
@@ -108,6 +110,7 @@ async fn test_full_scan() {
 
     let task = FullScanTask {
         sst_retention_time_sec: 2000,
+        prefix: None,
     };
     let (scan_result, _, _) = Vacuum::full_scan_inner(task, object_metadata_iter)
         .await

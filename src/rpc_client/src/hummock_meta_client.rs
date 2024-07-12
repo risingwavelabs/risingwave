@@ -54,7 +54,11 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         total_object_count: u64,
         total_object_size: u64,
     ) -> Result<()>;
-    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()>;
+    async fn trigger_full_gc(
+        &self,
+        sst_retention_time_sec: u64,
+        prefix: Option<String>,
+    ) -> Result<()>;
 
     async fn subscribe_compaction_event(
         &self,

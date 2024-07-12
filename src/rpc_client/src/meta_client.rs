@@ -1506,10 +1506,15 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()> {
+    async fn trigger_full_gc(
+        &self,
+        sst_retention_time_sec: u64,
+        prefix: Option<String>,
+    ) -> Result<()> {
         self.inner
             .trigger_full_gc(TriggerFullGcRequest {
                 sst_retention_time_sec,
+                prefix,
             })
             .await?;
         Ok(())
