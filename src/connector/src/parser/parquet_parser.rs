@@ -53,14 +53,17 @@ impl ParquetParser {
         #[for_await]
         for record_batch in record_batch_stream {
             let record_batch: RecordBatch = record_batch?;
+            let record_batch_num_rows = record_batch.num_rows();
             // Convert each record batch into a stream chunk according to user defined schema.
             let chunk: StreamChunk = self.convert_record_batch_to_stream_chunk(record_batch)?;
+
             yield chunk;
+            self.update_offset(record_batch_num_rows);
         }
     }
 
-    fn inc_offset(&mut self) {
-        self.offset += 1;
+    fn update_offset(&mut self, record_batch_num_rows: usize) {
+        self.offset += record_batch_num_rows;
     }
 
     /// The function `convert_record_batch_to_stream_chunk` is designed to transform the given `RecordBatch` into a `StreamChunk`.
@@ -142,9 +145,8 @@ impl ParquetParser {
                                 risingwave_pb::plan_common::additional_column::ColumnType::Offset(_) =>{
                                     let mut array_builder =
                                     ArrayBuilderImpl::with_type(column_size, source_column.data_type.clone());
-                                    for _ in 0..record_batch.num_rows(){
-                                        let datum: Datum =  Some(ScalarImpl::Utf8((self.offset).to_string().into()));
-                                        self.inc_offset();
+                                    for i in 0..record_batch.num_rows(){
+                                        let datum: Datum =  Some(ScalarImpl::Utf8((self.offset+i).to_string().into()));
                                         array_builder.append( datum);
                                     }
                                     let res = array_builder.finish();
