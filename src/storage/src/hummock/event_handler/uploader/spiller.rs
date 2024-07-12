@@ -17,7 +17,9 @@ use std::collections::{HashMap, HashSet};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
 
-use crate::hummock::event_handler::uploader::{UnsyncData, UploadTaskInput};
+use crate::hummock::event_handler::uploader::{
+    LocalInstanceUnsyncData, UnsyncData, UnsyncEpochId, UploadTaskInput,
+};
 use crate::hummock::event_handler::LocalInstanceId;
 
 #[derive(Default)]
@@ -28,13 +30,23 @@ struct EpochSpillableDataInfo {
 
 pub(super) struct Spiller<'a> {
     unsync_data: &'a mut UnsyncData,
-    epoch_info: HashMap<HummockEpoch, EpochSpillableDataInfo>,
+    epoch_info: HashMap<UnsyncEpochId, EpochSpillableDataInfo>,
+    unsync_epoch_id_map: HashMap<(HummockEpoch, TableId), UnsyncEpochId>,
 }
 
 impl<'a> Spiller<'a> {
     pub(super) fn new(unsync_data: &'a mut UnsyncData) -> Self {
-        // TODO: devide spill payload by epoch-table_ids
-        let temp = 0;
+        let unsync_epoch_id_map: HashMap<_, _> = unsync_data
+            .unsync_epochs
+            .iter()
+            .flat_map(|(unsync_epoch_id, table_ids)| {
+                let epoch = unsync_epoch_id.epoch();
+                let unsync_epoch_id = *unsync_epoch_id;
+                table_ids
+                    .iter()
+                    .map(move |table_id| ((epoch, *table_id), unsync_epoch_id))
+            })
+            .collect();
         let mut epoch_info: HashMap<_, EpochSpillableDataInfo> = HashMap::new();
         for instance_data in unsync_data
             .table_data
@@ -42,7 +54,10 @@ impl<'a> Spiller<'a> {
             .flat_map(|table_data| table_data.instance_data.values())
         {
             if let Some((epoch, spill_size)) = instance_data.spillable_data_info() {
-                let epoch_info = epoch_info.entry(epoch).or_default();
+                let unsync_epoch_id = unsync_epoch_id_map
+                    .get(&(epoch, instance_data.table_id))
+                    .expect("should exist");
+                let epoch_info = epoch_info.entry(*unsync_epoch_id).or_default();
                 assert!(epoch_info.instance_ids.insert(instance_data.instance_id));
                 epoch_info.payload_size += spill_size;
             }
@@ -50,20 +65,24 @@ impl<'a> Spiller<'a> {
         Self {
             unsync_data,
             epoch_info,
+            unsync_epoch_id_map,
         }
     }
 
     pub(super) fn next_spilled_payload(
         &mut self,
     ) -> Option<(HummockEpoch, UploadTaskInput, HashSet<TableId>)> {
-        // TODO: may get the epoch with max payload with btree if possible
-        if let Some(epoch) = self
+        if let Some(unsync_epoch_id) = self
             .epoch_info
             .iter()
             .max_by_key(|(_, info)| info.payload_size)
-            .map(|(epoch, _)| *epoch)
+            .map(|(unsync_epoch_id, _)| *unsync_epoch_id)
         {
-            let spill_info = self.epoch_info.remove(&epoch).expect("should exist");
+            let spill_epoch = unsync_epoch_id.epoch();
+            let spill_info = self
+                .epoch_info
+                .remove(&unsync_epoch_id)
+                .expect("should exist");
             let epoch_info = &mut self.epoch_info;
             let mut payload = HashMap::new();
             let mut spilled_table_ids = HashSet::new();
@@ -81,19 +100,23 @@ impl<'a> Spiller<'a> {
                     .instance_data
                     .get_mut(&instance_id)
                     .expect("should exist");
-                let instance_payload = instance_data.spill(epoch);
+                let instance_payload = instance_data.spill(spill_epoch);
                 assert!(!instance_payload.is_empty());
                 payload.insert(instance_id, instance_payload);
                 spilled_table_ids.insert(table_id);
 
                 // update the spill info
                 if let Some((new_spill_epoch, size)) = instance_data.spillable_data_info() {
-                    let info = epoch_info.entry(new_spill_epoch).or_default();
+                    let new_unsync_epoch_id = self
+                        .unsync_epoch_id_map
+                        .get(&(new_spill_epoch, instance_data.table_id))
+                        .expect("should exist");
+                    let info = epoch_info.entry(*new_unsync_epoch_id).or_default();
                     assert!(info.instance_ids.insert(instance_id));
                     info.payload_size += size;
                 }
             }
-            Some((epoch, payload, spilled_table_ids))
+            Some((spill_epoch, payload, spilled_table_ids))
         } else {
             None
         }
@@ -101,6 +124,24 @@ impl<'a> Spiller<'a> {
 
     pub(super) fn unsync_data(&mut self) -> &mut UnsyncData {
         self.unsync_data
+    }
+}
+
+impl LocalInstanceUnsyncData {
+    fn spillable_data_info(&self) -> Option<(HummockEpoch, usize)> {
+        self.sealed_data
+            .back()
+            .or(self.current_epoch_data.as_ref())
+            .and_then(|epoch_data| {
+                if !epoch_data.is_empty() {
+                    Some((
+                        epoch_data.epoch,
+                        epoch_data.imms.iter().map(|imm| imm.size()).sum(),
+                    ))
+                } else {
+                    None
+                }
+            })
     }
 }
 
