@@ -55,7 +55,7 @@ pub struct DynamodbJsonParser {
     payload_builder: AccessBuilderImpl,
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
     source_ctx: SourceContextRef,
-    single_blob_column: String,
+    single_jsonb_column: String,
 }
 
 impl DynamodbJsonParser {
@@ -64,13 +64,13 @@ impl DynamodbJsonParser {
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> ConnectorResult<Self> {
-        let (payload_builder, single_blob_column) =
+        let (payload_builder, single_jsonb_column) =
             build_dynamodb_json_accessor_builder(props.encoding_config).await?;
         Ok(Self {
             payload_builder,
             rw_columns,
             source_ctx,
-            single_blob_column,
+            single_jsonb_column,
         })
     }
 
@@ -81,7 +81,7 @@ impl DynamodbJsonParser {
     ) -> ConnectorResult<()> {
         let payload_accessor = self.payload_builder.generate_accessor(payload).await?;
         writer.do_insert(|column| {
-            if column.name == self.single_blob_column {
+            if column.name == self.single_jsonb_column {
                 assert_matches!(column.data_type, DataType::Jsonb);
                 payload_accessor.access(&[ITEM], &column.data_type)
             } else {

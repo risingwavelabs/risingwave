@@ -85,7 +85,7 @@ use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_in_with_op
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
-const JSON_SINGLE_BLOB_COLUMN_KEY: &str = "single_blob_column";
+const JSON_SINGLE_JSONB_COLUMN_KEY: &str = "single_jsonb_column";
 
 /// Map a JSON schema to a relational schema
 async fn extract_json_table_schema(
@@ -472,7 +472,7 @@ pub(crate) async fn bind_columns_from_source(
             // Only used and required by Dynamodb and DynamodbCdc for now
             let _ = try_consume_string_from_options(
                 &mut format_encode_options_to_consume,
-                JSON_SINGLE_BLOB_COLUMN_KEY,
+                JSON_SINGLE_JSONB_COLUMN_KEY,
             );
 
             let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
@@ -1253,18 +1253,18 @@ pub(super) fn check_nexmark_schema(
 /// TODO: perhaps put the hint in notice is better. The error message format might be not that reliable.
 fn hint_dynamodb(format: &str) -> String {
     format!(
-        r#"Hint: For FORMAT {format:} ENCODE JSON, single_blob_column MUST be JSONB type and the only column not be part of primary key.
+        r#"Hint: For FORMAT {format:} ENCODE JSON, single_jsonb_column MUST be JSONB type and the only column not be part of primary key.
 example:
     CREATE TABLE <table_name> (
         <key_name_1> <key_type_1>,
         <key_name_2> <key_type_2>,
         ...
-        <single_blob_column_name> JSONB
+        <single_jsonb_column_name> JSONB
         PRIMARY KEY (<key_name_1>, <key_name_2>, ...)
     )
     WITH (...)
     FORMAT {format:} ENCODE JSON (
-        single_blob_column = '<single_blob_column_name>'
+        single_jsonb_column = '<single_jsonb_column_name>'
     )
 "#
     )
@@ -1282,11 +1282,11 @@ fn validate_dynamodb_source(
             hint_dynamodb(format_string),
         ))));
     }
-    let single_blob_column = source_info
+    let single_jsonb_column = source_info
         .format_encode_options
-        .get(JSON_SINGLE_BLOB_COLUMN_KEY)
+        .get(JSON_SINGLE_JSONB_COLUMN_KEY)
         .cloned();
-    let single_blob_columns = columns
+    let single_jsonb_columns = columns
         .iter()
         .filter_map(|col| {
             if sql_defined_pk_names.contains(&col.column_desc.name) {
@@ -1296,14 +1296,14 @@ fn validate_dynamodb_source(
             }
         })
         .collect_vec();
-    if single_blob_column.is_none() // must have single blob column
+    if single_jsonb_column.is_none() // must have single jsonb column
         || sql_defined_pk_names.len() + 1 != columns.len() // must be the only column not included in the primary keys
-        || single_blob_columns.len() != 1 // ensure single blob column is not one of the primary key columns
-        || single_blob_columns[0].0 != single_blob_column.unwrap() // match names
-        || single_blob_columns[0].1 != DataType::Jsonb
+        || single_jsonb_columns.len() != 1 // ensure single jsonb column is not one of the primary key columns
+        || single_jsonb_columns[0].0 != single_jsonb_column.unwrap() // match names
+        || single_jsonb_columns[0].1 != DataType::Jsonb
     {
         return Err(RwError::from(ProtocolError(format!(
-            "The Single blob column, which must be specified as a jsonb column, should also be the only column not included in the primary keys.\n\n{}",
+            "The Single jsonb column, which must be specified as a jsonb column, should also be the only column not included in the primary keys.\n\n{}",
             hint_dynamodb(format_string),
         ))));
     }

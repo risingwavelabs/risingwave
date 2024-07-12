@@ -38,7 +38,7 @@ mod tests {
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
                 timestamptz_handling: None,
-                single_blob_column: None,
+                single_jsonb_column: None,
             }),
             protocol_config: ProtocolProperties::Maxwell,
         };

@@ -28,11 +28,11 @@ pub(crate) async fn build_dynamodb_json_accessor_builder(
 ) -> ConnectorResult<(AccessBuilderImpl, String)> {
     match config {
         EncodingProperties::Json(json_config) => {
-            assert!(json_config.single_blob_column.is_some());
-            let single_blob_column = json_config.single_blob_column.clone().unwrap();
+            assert!(json_config.single_jsonb_column.is_some());
+            let single_jsonb_column = json_config.single_jsonb_column.clone().unwrap();
             Ok((
                 AccessBuilderImpl::Json(JsonAccessBuilder::new_for_dynamodb(json_config)?),
-                single_blob_column,
+                single_jsonb_column,
             ))
         }
         _ => bail!("unsupported encoding for Dynamodb"),
