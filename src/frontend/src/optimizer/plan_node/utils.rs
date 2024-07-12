@@ -410,7 +410,7 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
             let date_time = speedate::DateTime::parse_str_rfc3339(ts)
                 .map_err(|_e| anyhow!("fail to parse timestamp"))?;
             AsOfType::Timestamp(as_of::Timestamp {
-                timestamp: date_time.timestamp(),
+                timestamp: date_time.timestamp_tz(),
             })
         }
         AsOf::VersionNum(_) | AsOf::VersionString(_) => {
