@@ -94,6 +94,14 @@ macro_rules! impl_expr_impl {
             $($t(Box<$t>),)*
         }
 
+        impl ExprImpl {
+            pub fn variant_name(&self) -> &'static str {
+                match self {
+                    $(ExprImpl::$t(_) => stringify!($t),)*
+                }
+            }
+        }
+
         $(
         impl From<$t> for ExprImpl {
             fn from(o: $t) -> ExprImpl {

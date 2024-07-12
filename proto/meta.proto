@@ -362,12 +362,26 @@ message ListAllNodesResponse {
   repeated common.WorkerNode nodes = 2;
 }
 
+message GetClusterRecoveryStatusRequest {}
+
+enum RecoveryStatus {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_STARTING = 1;
+  STATUS_RECOVERING = 2;
+  STATUS_RUNNING = 3;
+}
+
+message GetClusterRecoveryStatusResponse {
+  RecoveryStatus status = 1;
+}
+
 service ClusterService {
   rpc AddWorkerNode(AddWorkerNodeRequest) returns (AddWorkerNodeResponse);
   rpc ActivateWorkerNode(ActivateWorkerNodeRequest) returns (ActivateWorkerNodeResponse);
   rpc DeleteWorkerNode(DeleteWorkerNodeRequest) returns (DeleteWorkerNodeResponse);
   rpc UpdateWorkerNodeSchedulability(UpdateWorkerNodeSchedulabilityRequest) returns (UpdateWorkerNodeSchedulabilityResponse);
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
+  rpc GetClusterRecoveryStatus(GetClusterRecoveryStatusRequest) returns (GetClusterRecoveryStatusResponse);
 }
 
 enum SubscribeType {

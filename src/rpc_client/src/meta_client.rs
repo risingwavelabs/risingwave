@@ -940,6 +940,14 @@ impl MetaClient {
         Ok(resp)
     }
 
+    pub async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {
+        let resp = self
+            .inner
+            .get_cluster_recovery_status(GetClusterRecoveryStatusRequest {})
+            .await?;
+        Ok(resp.get_status().unwrap())
+    }
+
     pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
         let request = GetClusterInfoRequest {};
         let resp = self.inner.get_cluster_info(request).await?;
@@ -1371,6 +1379,12 @@ impl MetaClient {
         let resp = self.inner.cancel_compact_task(req).await?;
         Ok(resp.ret)
     }
+
+    pub async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion> {
+        let req = GetVersionByEpochRequest { epoch };
+        let resp = self.inner.get_version_by_epoch(req).await?;
+        Ok(resp.version.unwrap())
+    }
 }
 
 #[async_trait]
@@ -1492,10 +1506,15 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()> {
+    async fn trigger_full_gc(
+        &self,
+        sst_retention_time_sec: u64,
+        prefix: Option<String>,
+    ) -> Result<()> {
         self.inner
             .trigger_full_gc(TriggerFullGcRequest {
                 sst_retention_time_sec,
+                prefix,
             })
             .await?;
         Ok(())
@@ -1531,6 +1550,10 @@ impl HummockMetaClient for MetaClient {
             .await?;
 
         Ok((request_sender, Box::pin(stream)))
+    }
+
+    async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion> {
+        self.get_version_by_epoch(epoch).await
     }
 }
 
@@ -1941,6 +1964,7 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
             ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
+            ,{ cluster_client, get_cluster_recovery_status, GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, pause, PauseRequest, PauseResponse }
@@ -2026,6 +2050,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, list_compact_task_progress, ListCompactTaskProgressRequest, ListCompactTaskProgressResponse }
             ,{ hummock_client, cancel_compact_task, CancelCompactTaskRequest, CancelCompactTaskResponse}
             ,{ hummock_client, list_change_log_epochs, ListChangeLogEpochsRequest, ListChangeLogEpochsResponse }
+            ,{ hummock_client, get_version_by_epoch, GetVersionByEpochRequest, GetVersionByEpochResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

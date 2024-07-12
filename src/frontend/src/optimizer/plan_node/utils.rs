@@ -325,10 +325,13 @@ macro_rules! plan_node_name {
 pub(crate) use plan_node_name;
 use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::PbAggKind;
+use risingwave_pb::plan_common::as_of::AsOfType;
+use risingwave_pb::plan_common::{as_of, PbAsOf};
+use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
 use super::pretty_config;
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 use crate::expr::InputRef;
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
@@ -386,4 +389,28 @@ pub(crate) fn plan_has_backfill_leaf_nodes(plan: &PlanRef) -> bool {
         assert!(!plan.inputs().is_empty());
         plan.inputs().iter().all(plan_has_backfill_leaf_nodes)
     }
+}
+
+pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
+    let Some(ref a) = a else {
+        return Ok(None);
+    };
+    let as_of_type = match a {
+        AsOf::ProcessTime => AsOfType::ProcessTime(as_of::ProcessTime {}),
+        AsOf::TimestampNum(ts) => AsOfType::Timestamp(as_of::Timestamp { timestamp: *ts }),
+        AsOf::TimestampString(ts) => AsOfType::Timestamp(as_of::Timestamp {
+            // should already have been validated by the parser
+            timestamp: ts.parse().unwrap(),
+        }),
+        AsOf::VersionNum(_) | AsOf::VersionString(_) => {
+            return Err(ErrorCode::NotSupported(
+                "do not support as of version".to_string(),
+                "please use as of timestamp".to_string(),
+            )
+            .into());
+        }
+    };
+    Ok(Some(PbAsOf {
+        as_of_type: Some(as_of_type),
+    }))
 }
