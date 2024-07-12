@@ -154,6 +154,7 @@ enum EncodeType {
   ENCODE_TYPE_TEXT = 9;
 }
 
+// Deprecated. Use FormatType and EncodeType instead.
 enum RowFormatType {
   ROW_UNSPECIFIED = 0;
   JSON = 1;
@@ -169,8 +170,6 @@ enum RowFormatType {
   UPSERT_AVRO = 11;
   DEBEZIUM_MONGO_JSON = 12;
   BYTES = 13;
-  DYNAMODB_JSON = 14;
-  DYNAMODB_CDC_JSON = 15;
 }
 
 message IndexAndExpr {

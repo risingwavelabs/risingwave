@@ -279,8 +279,6 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
             RowFormatType::UpsertAvro => (SourceFormat::Upsert, SourceEncode::Avro),
             RowFormatType::DebeziumMongoJson => (SourceFormat::DebeziumMongo, SourceEncode::Json),
             RowFormatType::Bytes => (SourceFormat::Plain, SourceEncode::Bytes),
-            RowFormatType::DynamodbJson => (SourceFormat::Dynamodb, SourceEncode::Json),
-            RowFormatType::DynamodbCdcJson => (SourceFormat::DynamodbCdc, SourceEncode::Json),
             RowFormatType::RowUnspecified => unreachable!(),
         };
         return Ok(SourceStruct::new(format, encode));
