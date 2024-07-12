@@ -270,27 +270,6 @@ impl SinkParam {
     }
 }
 
-// impl From<SinkCatalog> for SinkParam {
-//     fn from(sink_catalog: SinkCatalog) -> Self {
-//         let columns = sink_catalog
-//             .visible_columns()
-//             .map(|col| col.column_desc.clone())
-//             .collect();
-//         Self {
-//             sink_id: sink_catalog.id,
-//             sink_name: sink_catalog.name,
-//             properties: sink_catalog.properties,
-//             secret_refs: sink_catalog.secret_refs,
-//             columns,
-//             downstream_pk: sink_catalog.downstream_pk,
-//             sink_type: sink_catalog.sink_type,
-//             format_desc: sink_catalog.format_desc,
-//             db_name: sink_catalog.db_name,
-//             sink_from_name: sink_catalog.sink_from_name,
-//         }
-//     }
-// }
-
 #[derive(Clone)]
 pub struct SinkMetrics {
     pub sink_commit_duration_metrics: LabelGuardedHistogram<3>,
