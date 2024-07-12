@@ -61,6 +61,7 @@ use crate::parser::util::{
     extreact_timestamp_from_meta,
 };
 use crate::schema::schema_registry::SchemaRegistryAuth;
+use crate::schema::AWS_GLUE_SCHEMA_ARN_KEY;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
     extract_source_struct, BoxSourceStream, ChunkSourceStream, SourceColumnDesc, SourceColumnType,
@@ -1068,17 +1069,47 @@ impl SpecificParserConfig {
 
 #[derive(Debug, Default, Clone)]
 pub struct AvroProperties {
-    pub use_schema_registry: bool,
-    pub row_schema_location: String,
-    pub client_config: SchemaRegistryAuth,
-    pub aws_auth_props: Option<AwsAuthProps>,
-    pub topic: String,
+    pub schema_location: SchemaLocation,
     pub enable_upsert: bool,
     pub record_name: Option<String>,
     pub key_record_name: Option<String>,
-    pub name_strategy: PbSchemaRegistryNameStrategy,
     pub map_handling: Option<MapHandling>,
     pub skip_fixed_header: Option<u8>,
+}
+
+/// WIP: may cover protobuf and json schema later.
+#[derive(Debug, Clone)]
+pub enum SchemaLocation {
+    /// Avsc from `https://`, `s3://` or `file://`.
+    File {
+        url: String,
+        aws_auth_props: Option<AwsAuthProps>, // for s3
+    },
+    /// <https://docs.confluent.io/platform/current/schema-registry/index.html>
+    Confluent {
+        urls: String,
+        client_config: SchemaRegistryAuth,
+        name_strategy: PbSchemaRegistryNameStrategy,
+        topic: String,
+    },
+    /// <https://docs.aws.amazon.com/glue/latest/dg/schema-registry.html>
+    Glue {
+        schema_arn: String,
+        aws_auth_props: AwsAuthProps,
+        // When `Some(_)`, ignore AWS and load schemas from provided config
+        mock_config: Option<String>,
+    },
+}
+
+// TODO: `SpecificParserConfig` shall not `impl`/`derive` a `Default`
+impl Default for SchemaLocation {
+    fn default() -> Self {
+        // backward compatible but undesired
+        Self::File {
+            url: Default::default(),
+            aws_auth_props: None,
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -1181,10 +1212,6 @@ impl SpecificParserConfig {
                         Some(info.proto_message_name.clone())
                     },
                     key_record_name: info.key_message_name.clone(),
-                    name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
-                        .unwrap(),
-                    use_schema_registry: info.use_schema_registry,
-                    row_schema_location: info.row_schema_location.clone(),
                     map_handling: MapHandling::from_options(&info.format_encode_options)?,
                     skip_fixed_header: info
                         .format_encode_options
@@ -1197,17 +1224,40 @@ impl SpecificParserConfig {
                 if format == SourceFormat::Upsert {
                     config.enable_upsert = true;
                 }
-                if info.use_schema_registry {
-                    config.topic.clone_from(get_kafka_topic(with_properties)?);
-                    config.client_config = SchemaRegistryAuth::from(&info.format_encode_options);
-                } else {
-                    config.aws_auth_props = Some(
-                        serde_json::from_value::<AwsAuthProps>(
+                config.schema_location = if let Some(schema_arn) =
+                    info.format_encode_options.get(AWS_GLUE_SCHEMA_ARN_KEY)
+                {
+                    SchemaLocation::Glue {
+                        schema_arn: schema_arn.clone(),
+                        aws_auth_props: serde_json::from_value::<AwsAuthProps>(
                             serde_json::to_value(info.format_encode_options.clone()).unwrap(),
                         )
                         .map_err(|e| anyhow::anyhow!(e))?,
-                    );
-                }
+                        // The option `mock_config` is not public and we can break compatibility.
+                        mock_config: info
+                            .format_encode_options
+                            .get("aws.glue.mock_config")
+                            .cloned(),
+                    }
+                } else if info.use_schema_registry {
+                    SchemaLocation::Confluent {
+                        urls: info.row_schema_location.clone(),
+                        client_config: SchemaRegistryAuth::from(&info.format_encode_options),
+                        name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
+                            .unwrap(),
+                        topic: get_kafka_topic(with_properties)?.clone(),
+                    }
+                } else {
+                    SchemaLocation::File {
+                        url: info.row_schema_location.clone(),
+                        aws_auth_props: Some(
+                            serde_json::from_value::<AwsAuthProps>(
+                                serde_json::to_value(info.format_encode_options.clone()).unwrap(),
+                            )
+                            .map_err(|e| anyhow::anyhow!(e))?,
+                        ),
+                    }
+                };
                 EncodingProperties::Avro(config)
             }
             (SourceFormat::Plain, SourceEncode::Protobuf)
@@ -1247,12 +1297,14 @@ impl SpecificParserConfig {
                     } else {
                         Some(info.proto_message_name.clone())
                     },
-                    name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
-                        .unwrap(),
                     key_record_name: info.key_message_name.clone(),
-                    row_schema_location: info.row_schema_location.clone(),
-                    topic: get_kafka_topic(with_properties).unwrap().clone(),
-                    client_config: SchemaRegistryAuth::from(&info.format_encode_options),
+                    schema_location: SchemaLocation::Confluent {
+                        urls: info.row_schema_location.clone(),
+                        client_config: SchemaRegistryAuth::from(&info.format_encode_options),
+                        name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
+                            .unwrap(),
+                        topic: get_kafka_topic(with_properties).unwrap().clone(),
+                    },
                     ..Default::default()
                 })
             }
