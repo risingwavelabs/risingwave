@@ -233,6 +233,28 @@ def test_cursor_op():
     execute_insert("close cur",conn)
     drop_table_subscription()
 
+def test_rebuild_table():
+    print(f"test_rebuild_table")
+    create_table_subscription()
+    conn = psycopg2.connect(
+        host="localhost",
+        port="4566",
+        user="root",
+        database="dev"
+    )
+
+    execute_insert("declare cur subscription cursor for sub2",conn)
+    execute_insert("insert into t2 values(1,1)",conn)
+    execute_insert("flush",conn)
+    execute_insert("update t2 set v2 = 100 where v1 = 1",conn)
+    execute_insert("flush",conn)
+    row = execute_query("fetch next from cur",conn)
+    check_rows_data([1,1],row,1)
+    row = execute_query("fetch next from cur",conn)
+    check_rows_data([1,1],row,4)
+    row = execute_query("fetch next from cur",conn)
+    check_rows_data([1,100],row,3)
+
 if __name__ == "__main__":
     test_cursor_snapshot()
     test_cursor_op()
@@ -240,3 +262,4 @@ if __name__ == "__main__":
     test_cursor_since_rw_timestamp()
     test_cursor_since_now()
     test_cursor_since_begin()
+    test_rebuild_table()
