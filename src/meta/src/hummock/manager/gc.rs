@@ -350,17 +350,19 @@ mod tests {
 
         // No task scheduled because no available worker.
         assert!(!hummock_manager
-            .start_full_gc(Duration::from_secs(
-                hummock_manager.env.opts.min_sst_retention_time_sec - 1
-            ))
+            .start_full_gc(
+                Duration::from_secs(hummock_manager.env.opts.min_sst_retention_time_sec - 1,),
+                None
+            )
             .unwrap());
 
         let mut receiver = compactor_manager.add_compactor(context_id);
 
         assert!(hummock_manager
-            .start_full_gc(Duration::from_secs(
-                hummock_manager.env.opts.min_sst_retention_time_sec - 1
-            ))
+            .start_full_gc(
+                Duration::from_secs(hummock_manager.env.opts.min_sst_retention_time_sec - 1),
+                None
+            )
             .unwrap());
         let full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
             ResponseEvent::FullScanTask(task) => task,
@@ -375,9 +377,10 @@ mod tests {
         );
 
         assert!(hummock_manager
-            .start_full_gc(Duration::from_secs(
-                hummock_manager.env.opts.min_sst_retention_time_sec + 1
-            ))
+            .start_full_gc(
+                Duration::from_secs(hummock_manager.env.opts.min_sst_retention_time_sec + 1),
+                None
+            )
             .unwrap());
         let full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
             ResponseEvent::FullScanTask(task) => task,
