@@ -48,7 +48,7 @@ ALTER TABLE t REFRESH SCHEMA;
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Permission denied: columns to drop is referenced by generated columns: Failed to bind expression: bar + 1: Item not found: Invalid column: bar
+  Permission denied: columns to drop is referenced by a generated column "gen_col": fail to bind expression in generated column "gen_col": Failed to bind expression: bar + 1: Item not found: Invalid column: bar
 
 
 # TODO: Add support for dropping generated columns for table with schema registry

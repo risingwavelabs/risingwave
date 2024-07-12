@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::Context;
+use fancy_regex::Regex;
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
 use risingwave_sqlparser::ast::{ConnectorSchema, ObjectName, Statement};
@@ -91,13 +92,14 @@ pub async fn handle_refresh_schema(
             // This is a workaround for reporting errors when columns to drop is referenced by generated column.
             // Finding the actual columns to drop requires generating `PbSource` from the sql definition
             // and fetching schema from schema registry, which will cause a lot of unnecessary refactor.
-            // The only cause of those matched errors is the generated column referencing the column to drop.
-            if report.contains("Failed to bind expression")
-                && report.contains("Item not found: Invalid column")
-            {
+            // Here we match the error message to yield when failing to bind generated column exprs.
+            let re = Regex::new(r#"fail to bind expression in generated column "(.*?)""#).unwrap();
+            let captures = re.captures(&report).map_err(anyhow::Error::from)?;
+            if let Some(gen_col_name) = captures.and_then(|captures| captures.get(1)) {
                 Err(ErrorCode::PermissionDenied(format!(
-                    "columns to drop is referenced by generated columns: {}",
-                    report
+                    "columns to drop is referenced by a generated column \"{}\": {}",
+                    gen_col_name.as_str(),
+                    report,
                 ))
                 .into())
             } else {
