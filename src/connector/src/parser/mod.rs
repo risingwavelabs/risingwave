@@ -24,6 +24,7 @@ pub use debezium::*;
 use futures::{Future, TryFutureExt};
 use futures_async_stream::try_stream;
 pub use json_parser::*;
+pub use parquet_parser::ParquetParser;
 pub use protobuf::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::bail;
@@ -76,6 +77,7 @@ mod debezium;
 mod json_parser;
 mod maxwell;
 mod mysql;
+pub mod parquet_parser;
 pub mod plain_parser;
 mod postgres;
 
@@ -1117,6 +1119,7 @@ pub enum EncodingProperties {
     Json(JsonProperties),
     MongoJson,
     Bytes(BytesProperties),
+    Parquet,
     Native,
     /// Encoding can't be specified because the source will determines it. Now only used in Iceberg.
     None,
@@ -1170,6 +1173,7 @@ impl SpecificParserConfig {
                 delimiter: info.csv_delimiter as u8,
                 has_header: info.csv_has_header,
             }),
+            (SourceFormat::Plain, SourceEncode::Parquet) => EncodingProperties::Parquet,
             (SourceFormat::Plain, SourceEncode::Avro)
             | (SourceFormat::Upsert, SourceEncode::Avro) => {
                 let mut config = AvroProperties {
