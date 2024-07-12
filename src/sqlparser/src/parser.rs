@@ -3651,8 +3651,7 @@ impl Parser<'_> {
                     alt((
                         preceded(
                             (
-                                Self::parse_identifier
-                                    .verify(|ident| ident.real_value() == "current"),
+                                Self::parse_identifier.verify(|ident| ident.real_value() == "now"),
                                 cut_err(Token::LParen),
                                 cut_err(Token::RParen),
                                 Token::Minus,
@@ -3675,7 +3674,7 @@ impl Parser<'_> {
                             }),
                         ),
                         (
-                            Self::parse_identifier.verify(|ident| ident.real_value() == "current"),
+                            Self::parse_identifier.verify(|ident| ident.real_value() == "now"),
                             cut_err(Token::LParen),
                             cut_err(Token::RParen),
                         )
@@ -3684,9 +3683,7 @@ impl Parser<'_> {
                                 Some(DateTimeField::Second),
                             ))),
                         (
-                            Self::parse_identifier.verify(|ident| {
-                                ident.real_value() == "proctime" || ident.real_value() == "now"
-                            }),
+                            Self::parse_identifier.verify(|ident| ident.real_value() == "proctime"),
                             cut_err(Token::LParen),
                             cut_err(Token::RParen),
                         )

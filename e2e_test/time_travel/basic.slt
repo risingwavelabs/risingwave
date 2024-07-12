@@ -19,18 +19,18 @@ SELECT *  FROM t;
 1
 
 query I
-SELECT *  FROM t FOR SYSTEM_TIME AS OF CURRENT();
+SELECT *  FROM t FOR SYSTEM_TIME AS OF now();
 ----
 1
 
 query I
-SELECT *  FROM t FOR SYSTEM_TIME AS OF CURRENT() - '5' second;
+SELECT *  FROM t FOR SYSTEM_TIME AS OF now() - '5' second;
 ----
 
 sleep 5s
 
 query I
-SELECT *  FROM t FOR SYSTEM_TIME AS OF CURRENT() - '5' second;
+SELECT *  FROM t FOR SYSTEM_TIME AS OF now() - '5' second;
 ----
 1
 

@@ -21,29 +21,29 @@ SELECT count(*) FROM t1 join t2 on t1.k1=t2.k2;
 1
 
 query I
-SELECT count(*) FROM t1 FOR SYSTEM_TIME AS OF CURRENT() join t2  FOR SYSTEM_TIME AS OF CURRENT() on t1.k1=t2.k2;
+SELECT count(*) FROM t1 FOR SYSTEM_TIME AS OF now() join t2  FOR SYSTEM_TIME AS OF now() on t1.k1=t2.k2;
 ----
 1
 
 query I
-SELECT count(*) FROM t1 FOR SYSTEM_TIME AS OF CURRENT() - '5' second join t2  FOR SYSTEM_TIME AS OF CURRENT() on t1.k1=t2.k2;
+SELECT count(*) FROM t1 FOR SYSTEM_TIME AS OF now() - '5' second join t2  FOR SYSTEM_TIME AS OF now() on t1.k1=t2.k2;
 ----
 0
 
 query I
-SELECT count(*) FROM t1 FOR SYSTEM_TIME AS OF CURRENT() join t2  FOR SYSTEM_TIME AS OF CURRENT() - '5' second on t1.k1=t2.k2;
+SELECT count(*) FROM t1 FOR SYSTEM_TIME AS OF now() join t2  FOR SYSTEM_TIME AS OF now() - '5' second on t1.k1=t2.k2;
 ----
 0
 
 sleep 5s
 
 query I
-SELECT count(*) FROM t1 FOR SYSTEM_TIME AS OF CURRENT() - '5' second join t2  FOR SYSTEM_TIME AS OF CURRENT() on t1.k1=t2.k2;
+SELECT count(*) FROM t1 FOR SYSTEM_TIME AS OF now() - '5' second join t2  FOR SYSTEM_TIME AS OF now() on t1.k1=t2.k2;
 ----
 1
 
 query I
-SELECT count(*) FROM t1 FOR SYSTEM_TIME AS OF CURRENT() join t2  FOR SYSTEM_TIME AS OF CURRENT() - '5' second on t1.k1=t2.k2;
+SELECT count(*) FROM t1 FOR SYSTEM_TIME AS OF now() join t2  FOR SYSTEM_TIME AS OF now() - '5' second on t1.k1=t2.k2;
 ----
 1
 
