@@ -3154,7 +3154,7 @@ impl fmt::Display for SetVariableValueSingle {
 pub enum AsOf {
     ProcessTime,
     // used by time travel
-    ProcessTimeWithInterval((String, Option<DateTimeField>)),
+    ProcessTimeWithInterval((String, DateTimeField)),
     // the number of seconds that have elapsed since the Unix epoch, which is January 1, 1970 at 00:00:00 Coordinated Universal Time (UTC).
     TimestampNum(i64),
     TimestampString(String),
@@ -3167,14 +3167,11 @@ impl fmt::Display for AsOf {
         use AsOf::*;
         match self {
             ProcessTime => write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()"),
-            ProcessTimeWithInterval((value, leading_field)) => match leading_field {
-                None => {
-                    write!(f, " FOR SYSTEM_TIME AS OF {}", value)
-                }
-                Some(field) => {
-                    write!(f, " FOR SYSTEM_TIME AS OF {} {}", value, field)
-                }
-            },
+            ProcessTimeWithInterval((value, leading_field)) => write!(
+                f,
+                " FOR SYSTEM_TIME AS OF NOW() - {} {}",
+                value, leading_field
+            ),
             TimestampNum(ts) => write!(f, " FOR SYSTEM_TIME AS OF {}", ts),
             TimestampString(ts) => write!(f, " FOR SYSTEM_TIME AS OF '{}'", ts),
             VersionNum(v) => write!(f, " FOR SYSTEM_VERSION AS OF {}", v),

@@ -3663,9 +3663,9 @@ impl Parser<'_> {
                                         leading_field,
                                         ..
                                     } => {
-                                        if leading_field.is_none() {
-                                            return Err(StrError("expect leading_field".into()));
-                                        }
+                                        let Some(leading_field) = leading_field else {
+                                            return Err(StrError("expect duration unit".into()));
+                                        };
                                         Ok(AsOf::ProcessTimeWithInterval((value, leading_field)))
                                     }
                                     _ => Err(StrError("expect Value::Interval".into())),
@@ -3680,7 +3680,7 @@ impl Parser<'_> {
                         )
                             .value(AsOf::ProcessTimeWithInterval((
                                 "0".to_owned(),
-                                Some(DateTimeField::Second),
+                                DateTimeField::Second,
                             ))),
                         (
                             Self::parse_identifier.verify(|ident| ident.real_value() == "proctime"),
