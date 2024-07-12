@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::default::Default;
 use std::vec;
 
+use anyhow::anyhow;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
@@ -27,7 +28,6 @@ use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
 };
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use thiserror_ext::AsReport;
 
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, TableCatalog, TableId};
@@ -406,10 +406,13 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
             .into());
         }
         AsOf::TimestampNum(ts) => AsOfType::Timestamp(as_of::Timestamp { timestamp: *ts }),
-        AsOf::TimestampString(ts) => AsOfType::Timestamp(as_of::Timestamp {
-            // should already have been validated by the parser
-            timestamp: ts.parse().unwrap(),
-        }),
+        AsOf::TimestampString(ts) => {
+            let date_time = speedate::DateTime::parse_str_rfc3339(ts)
+                .map_err(|_e| anyhow!("fail to parse timestamp"))?;
+            AsOfType::Timestamp(as_of::Timestamp {
+                timestamp: date_time.timestamp(),
+            })
+        }
         AsOf::VersionNum(_) | AsOf::VersionString(_) => {
             return Err(ErrorCode::NotSupported(
                 "do not support as of version".to_string(),
@@ -424,12 +427,12 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
                     .clone()
                     .map(crate::Binder::bind_date_time_field),
             )
-            .map_err(|e| ErrorCode::InvalidParameterValue(e.to_report_string()))?;
+            .map_err(|_| anyhow!("fail to parse interval"))?;
             let interval_sec = (interval.epoch_in_micros() / 1_000_000) as i64;
             let timestamp = chrono::Utc::now()
                 .timestamp()
                 .checked_sub(interval_sec)
-                .ok_or_else(|| ErrorCode::InvalidParameterValue(a.to_string()))?;
+                .ok_or_else(|| anyhow!("invalid timestamp"))?;
             AsOfType::Timestamp(as_of::Timestamp { timestamp })
         }
     };
