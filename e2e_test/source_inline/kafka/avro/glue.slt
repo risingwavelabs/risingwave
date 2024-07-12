@@ -7,7 +7,7 @@ system ok
 rpk topic create 'glue-sample-my-event'
 
 system ok
-rpk topic produce -f '%v{hex}\n' 'glue-sample-my-event' <<EOF
+rpk topic produce -f '%v{hex}\\n' 'glue-sample-my-event' <<EOF
 03005af405ef11b5444281a2e0563e5a734606666f6f80868dc8ebd98404
 EOF
 
@@ -104,7 +104,7 @@ select * from t;
 foo 2006-01-02 22:04:05.123456+00:00 NULL
 
 system ok
-rpk topic produce -f '%v{hex}\n' 'glue-sample-my-event' <<EOF
+rpk topic produce -f '%v{hex}\\n' 'glue-sample-my-event' <<EOF
 03004516411bb1e74e67839f3ef1b8c292800441428089b5e9a886ee050208deadbeef
 EOF
 
