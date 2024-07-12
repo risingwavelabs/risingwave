@@ -1243,7 +1243,7 @@ impl SpecificParserConfig {
                         .unwrap(),
                     key_record_name: info.key_message_name.clone(),
                     row_schema_location: info.row_schema_location.clone(),
-                    topic: get_kafka_topic(with_properties).unwrap().clone(),
+                    topic: get_kafka_topic(with_properties)?.clone(),
                     client_config: SchemaRegistryAuth::from(&info.format_encode_options),
                     ..Default::default()
                 })
