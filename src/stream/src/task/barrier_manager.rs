@@ -661,7 +661,7 @@ impl LocalBarrierWorker {
     /// Broadcast a barrier to all senders. Save a receiver which will get notified when this
     /// barrier is finished, in managed mode.
     ///
-    /// Note that the error returned here is typically a [`StreamError::BarrierSend`], which is not
+    /// Note that the error returned here is typically a [`StreamError::barrier_send`], which is not
     /// the root cause of the failure. The caller should then call [`Self::try_find_root_failure`]
     /// to find the root cause.
     fn send_barrier(
