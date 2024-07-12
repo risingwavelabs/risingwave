@@ -177,7 +177,11 @@ impl HummockManager {
     /// 3. Meta node decides which SSTs to delete. See `HummockManager::complete_full_gc`.
     ///
     /// Returns Ok(false) if there is no worker available.
-    pub fn start_full_gc(&self, sst_retention_time: Duration) -> Result<bool> {
+    pub fn start_full_gc(
+        &self,
+        sst_retention_time: Duration,
+        prefix: Option<String>,
+    ) -> Result<bool> {
         self.metrics.full_gc_trigger_count.inc();
         // Set a minimum sst_retention_time to avoid deleting SSTs of on-going write op.
         let sst_retention_time = cmp::max(
@@ -185,8 +189,9 @@ impl HummockManager {
             Duration::from_secs(self.env.opts.min_sst_retention_time_sec),
         );
         tracing::info!(
-            "run full GC with sst_retention_time = {} secs",
-            sst_retention_time.as_secs()
+            retention_sec = sst_retention_time.as_secs(),
+            prefix = prefix.as_ref().unwrap_or(&String::from("")),
+            "run full GC"
         );
         let compactor = match self.compactor_manager.next_compactor() {
             None => {
@@ -198,6 +203,7 @@ impl HummockManager {
         compactor
             .send_event(ResponseEvent::FullScanTask(FullScanTask {
                 sst_retention_time_sec: sst_retention_time.as_secs(),
+                prefix,
             }))
             .map_err(|_| Error::CompactorUnreachable(compactor.context_id()))?;
         Ok(true)
