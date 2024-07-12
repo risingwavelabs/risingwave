@@ -97,7 +97,7 @@ pub async fn handle_refresh_schema(
             let captures = re.captures(&report).map_err(anyhow::Error::from)?;
             if let Some(gen_col_name) = captures.and_then(|captures| captures.get(1)) {
                 Err(ErrorCode::PermissionDenied(format!(
-                    "columns to drop is referenced by a generated column \"{}\": {}",
+                    "columns to drop are referenced by a generated column \"{}\": {}",
                     gen_col_name.as_str(),
                     report,
                 ))
