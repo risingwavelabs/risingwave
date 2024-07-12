@@ -93,6 +93,7 @@ opendal = { workspace = true, features = [
 ] }
 openssl = "0.10"
 parking_lot = { workspace = true }
+parquet = { workspace = true }
 paste = "1"
 pg_bigdecimal = { git = "https://github.com/risingwavelabs/rust-pg_bigdecimal", rev = "0b7893d88894ca082b4525f94f812da034486f7c" }
 postgres-openssl = "0.5.0"

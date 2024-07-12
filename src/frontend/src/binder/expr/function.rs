@@ -266,6 +266,11 @@ impl Binder {
             );
         }
 
+        // file_scan table function
+        if function_name.eq_ignore_ascii_case("file_scan") {
+            self.ensure_table_function_allowed()?;
+            return Ok(TableFunction::new_file_scan(inputs)?.into());
+        }
         // table function
         if let Ok(function_type) = TableFunctionType::from_str(function_name.as_str()) {
             self.ensure_table_function_allowed()?;
