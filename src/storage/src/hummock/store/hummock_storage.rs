@@ -30,9 +30,11 @@ use risingwave_hummock_sdk::key::{
     is_empty_key_range, vnode, vnode_range, TableKey, TableKeyRange,
 };
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
 use tracing::error;
@@ -115,6 +117,8 @@ pub struct HummockStorage {
     write_limiter: WriteLimiterRef,
 
     compact_await_tree_reg: Option<CompactionAwaitTreeRegRef>,
+
+    hummock_meta_client: Arc<dyn HummockMetaClient>,
 }
 
 pub type ReadVersionTuple = (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion);
@@ -232,6 +236,7 @@ impl HummockStorage {
             min_current_epoch,
             write_limiter,
             compact_await_tree_reg: await_tree_reg,
+            hummock_meta_client,
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -254,7 +259,10 @@ impl HummockStorage {
     ) -> StorageResult<Option<Bytes>> {
         let key_range = (Bound::Included(key.clone()), Bound::Included(key.clone()));
 
-        let (key_range, read_version_tuple) = if read_options.read_version_from_backup {
+        let (key_range, read_version_tuple) = if read_options.read_version_from_time_travel {
+            self.build_read_version_by_time_travel(epoch, read_options.table_id, key_range)
+                .await?
+        } else if read_options.read_version_from_backup {
             self.build_read_version_tuple_from_backup(epoch, read_options.table_id, key_range)
                 .await?
         } else {
@@ -276,7 +284,10 @@ impl HummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageIterator> {
-        let (key_range, read_version_tuple) = if read_options.read_version_from_backup {
+        let (key_range, read_version_tuple) = if read_options.read_version_from_time_travel {
+            self.build_read_version_by_time_travel(epoch, read_options.table_id, key_range)
+                .await?
+        } else if read_options.read_version_from_backup {
             self.build_read_version_tuple_from_backup(epoch, read_options.table_id, key_range)
                 .await?
         } else {
@@ -294,7 +305,10 @@ impl HummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageRevIterator> {
-        let (key_range, read_version_tuple) = if read_options.read_version_from_backup {
+        let (key_range, read_version_tuple) = if read_options.read_version_from_time_travel {
+            self.build_read_version_by_time_travel(epoch, read_options.table_id, key_range)
+                .await?
+        } else if read_options.read_version_from_backup {
             self.build_read_version_tuple_from_backup(epoch, read_options.table_id, key_range)
                 .await?
         } else {
@@ -304,6 +318,29 @@ impl HummockStorage {
         self.hummock_version_reader
             .rev_iter(key_range, epoch, read_options, read_version_tuple, None)
             .await
+    }
+
+    async fn build_read_version_by_time_travel(
+        &self,
+        epoch: u64,
+        table_id: TableId,
+        key_range: TableKeyRange,
+    ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
+        let pb_version = self
+            .hummock_meta_client
+            .get_version_by_epoch(epoch)
+            .await
+            .inspect_err(|e| tracing::error!("{}", e.to_report_string()))
+            .map_err(|e| HummockError::meta_error(e.to_report_string()))?;
+        let version = HummockVersion::from_rpc_protobuf(&pb_version);
+        validate_safe_epoch(&version, table_id, epoch)?;
+        let (tx, _rx) = unbounded_channel();
+        Ok(get_committed_read_version_tuple(
+            PinnedVersion::new(version, tx),
+            table_id,
+            key_range,
+            epoch,
+        ))
     }
 
     async fn build_read_version_tuple_from_backup(
@@ -640,9 +677,6 @@ impl StateStore for HummockStorage {
         Ok(())
     }
 }
-
-#[cfg(any(test, feature = "test"))]
-use risingwave_hummock_sdk::version::HummockVersion;
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {
