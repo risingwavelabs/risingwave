@@ -10806,7 +10806,7 @@ dependencies = [
  "sql-json-path",
  "thiserror",
  "thiserror-ext",
- "tonic 0.10.2",
+ "tonic 0.11.0",
  "tracing",
  "workspace-hack",
  "zstd 0.13.0",
