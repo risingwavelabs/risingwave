@@ -223,6 +223,8 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             | F::DebeziumMongo
             | F::Maxwell
             | F::Canal
+            | F::Dynamodb
+            | F::DynamodbCdc
             | F::None) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink format unsupported: {}",

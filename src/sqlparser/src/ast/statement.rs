@@ -117,6 +117,10 @@ pub enum Format {
     Upsert,
     // Keyword::PLAIN
     Plain,
+    // Keyword::DYNAMODB
+    Dynamodb,
+    // Keyword::DYNAMODB_CDC
+    DynamodbCdc,
 }
 
 // TODO: unify with `from_keyword`
@@ -134,6 +138,8 @@ impl fmt::Display for Format {
                 Format::Upsert => "UPSERT",
                 Format::Plain => "PLAIN",
                 Format::None => "NONE",
+                Format::Dynamodb => "DYNAMODB",
+                Format::DynamodbCdc => "DYNAMODB_CDC",
             }
         )
     }
@@ -150,6 +156,8 @@ impl Format {
             "UPSERT" => Format::Upsert,
             "NATIVE" => Format::Native,
             "NONE" => Format::None,
+            "DYNAMODB" => Format::Dynamodb,
+            "DYNAMODB_CDC" => Format::DynamodbCdc,
             _ => parser_err!(
                 "expected CANAL | PROTOBUF | DEBEZIUM | MAXWELL | PLAIN | NATIVE | NONE after FORMAT"
             ),

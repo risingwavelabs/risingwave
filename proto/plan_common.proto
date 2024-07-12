@@ -152,6 +152,8 @@ enum FormatType {
   FORMAT_TYPE_UPSERT = 6;
   FORMAT_TYPE_PLAIN = 7;
   FORMAT_TYPE_NONE = 8;
+  FORMAT_TYPE_DYNAMODB = 9;
+  FORMAT_TYPE_DYNAMODB_CDC = 10;
 }
 
 enum EncodeType {
@@ -167,6 +169,7 @@ enum EncodeType {
   ENCODE_TYPE_TEXT = 9;
 }
 
+// Deprecated. Use FormatType and EncodeType instead.
 enum RowFormatType {
   ROW_UNSPECIFIED = 0;
   JSON = 1;

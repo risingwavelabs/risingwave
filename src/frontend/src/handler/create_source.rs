@@ -85,6 +85,7 @@ use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_in_with_op
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
+const JSON_SINGLE_JSONB_COLUMN_KEY: &str = "single_jsonb_column";
 
 /// Map a JSON schema to a relational schema
 async fn extract_json_table_schema(
@@ -443,7 +444,13 @@ pub(crate) async fn bind_columns_from_source(
             None
         }
         (
-            Format::Plain | Format::Upsert | Format::Maxwell | Format::Canal | Format::Debezium,
+            Format::Plain
+            | Format::Upsert
+            | Format::Maxwell
+            | Format::Canal
+            | Format::Debezium
+            | Format::Dynamodb
+            | Format::DynamodbCdc,
             Encode::Json,
         ) => {
             if matches!(
@@ -461,6 +468,12 @@ pub(crate) async fn bind_columns_from_source(
                     TimestamptzHandling::OPTION_KEY,
                 );
             }
+
+            // Only used and required by Dynamodb and DynamodbCdc for now
+            let _ = try_consume_string_from_options(
+                &mut format_encode_options_to_consume,
+                JSON_SINGLE_JSONB_COLUMN_KEY,
+            );
 
             let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
             stream_source_info.use_schema_registry =
@@ -834,6 +847,26 @@ pub(crate) async fn bind_source_pk(
             }
             sql_defined_pk_names
         }
+        (Format::Dynamodb, Encode::Json) => {
+            if !additional_column_names.is_empty() {
+                return Err(RwError::from(ProtocolError(format!(
+                    "FORMAT DYNAMODB forbids additional columns, but got {:?}",
+                    additional_column_names
+                ))));
+            }
+            validate_dynamodb_source(source_info, columns, &sql_defined_pk_names, "DYNAMODB")?;
+            sql_defined_pk_names
+        }
+        (Format::DynamodbCdc, Encode::Json) => {
+            if !additional_column_names.is_empty() {
+                return Err(RwError::from(ProtocolError(format!(
+                    "FORMAT DYNAMODB_CDC forbids additional columns, but got {:?}",
+                    additional_column_names
+                ))));
+            }
+            validate_dynamodb_source(source_info, columns, &sql_defined_pk_names, "DYNAMODB_CDC")?;
+            sql_defined_pk_names
+        }
         (Format::Debezium, Encode::Avro) => {
             if !additional_column_names.is_empty() {
                 return Err(RwError::from(ProtocolError(format!(
@@ -998,6 +1031,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Debezium => vec![Encode::Json],
                     Format::Maxwell => vec![Encode::Json],
                     Format::Canal => vec![Encode::Json],
+                    Format::DynamodbCdc => vec![Encode::Json],
                 ),
                 GOOGLE_PUBSUB_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Avro, Encode::Bytes],
@@ -1018,6 +1052,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 ),
                 OPENDAL_S3_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv, Encode::Json],
+                    Format::Dynamodb => vec![Encode::Json],
                 ),
                 GCS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv, Encode::Json],
@@ -1210,6 +1245,66 @@ pub(super) fn check_nexmark_schema(
         let cmp = pretty_assertions::Comparison::new(&expected, &user_defined);
         return Err(RwError::from(ProtocolError(format!(
             "The schema of the nexmark source must specify all columns in order:\n{cmp}",
+        ))));
+    }
+    Ok(())
+}
+
+/// TODO: perhaps put the hint in notice is better. The error message format might be not that reliable.
+fn hint_dynamodb(format: &str) -> String {
+    format!(
+        r#"Hint: For FORMAT {format:} ENCODE JSON, single_jsonb_column MUST be JSONB type and the only column not be part of primary key.
+example:
+    CREATE TABLE <table_name> (
+        <key_name_1> <key_type_1>,
+        <key_name_2> <key_type_2>,
+        ...
+        <single_jsonb_column_name> JSONB
+        PRIMARY KEY (<key_name_1>, <key_name_2>, ...)
+    )
+    WITH (...)
+    FORMAT {format:} ENCODE JSON (
+        single_jsonb_column = '<single_jsonb_column_name>'
+    )
+"#
+    )
+}
+
+fn validate_dynamodb_source(
+    source_info: &StreamSourceInfo,
+    columns: &mut [ColumnCatalog],
+    sql_defined_pk_names: &Vec<String>,
+    format_string: &str,
+) -> Result<()> {
+    if sql_defined_pk_names.is_empty() {
+        return Err(RwError::from(ProtocolError(format!(
+            "Primary key must be specified when creating source with FORMAT {}.",
+            hint_dynamodb(format_string),
+        ))));
+    }
+    let single_jsonb_column = source_info
+        .format_encode_options
+        .get(JSON_SINGLE_JSONB_COLUMN_KEY)
+        .cloned();
+    let single_jsonb_columns = columns
+        .iter()
+        .filter_map(|col| {
+            if sql_defined_pk_names.contains(&col.column_desc.name) {
+                None
+            } else {
+                Some((col.name().to_string(), col.data_type().clone()))
+            }
+        })
+        .collect_vec();
+    if single_jsonb_column.is_none() // must have single jsonb column
+        || sql_defined_pk_names.len() + 1 != columns.len() // must be the only column not included in the primary keys
+        || single_jsonb_columns.len() != 1 // ensure single jsonb column is not one of the primary key columns
+        || single_jsonb_columns[0].0 != single_jsonb_column.unwrap() // match names
+        || single_jsonb_columns[0].1 != DataType::Jsonb
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "The Single jsonb column, which must be specified as a jsonb column, should also be the only column not included in the primary keys.\n\n{}",
+            hint_dynamodb(format_string),
         ))));
     }
     Ok(())
@@ -1594,6 +1689,8 @@ fn format_to_prost(format: &Format) -> FormatType {
         Format::Maxwell => FormatType::Maxwell,
         Format::Canal => FormatType::Canal,
         Format::None => FormatType::None,
+        Format::Dynamodb => FormatType::Dynamodb,
+        Format::DynamodbCdc => FormatType::DynamodbCdc,
     }
 }
 fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {

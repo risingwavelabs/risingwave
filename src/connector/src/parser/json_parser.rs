@@ -76,6 +76,23 @@ impl JsonAccessBuilder {
             json_parse_options,
         })
     }
+
+    pub fn new_for_dynamodb(config: JsonProperties) -> ConnectorResult<Self> {
+        assert!(
+            !config.use_schema_registry,
+            "Dynamodb source does not support schema registry"
+        );
+        let mut json_parse_options = JsonParseOptions::DYNAMODB;
+        if let Some(mode) = config.timestamptz_handling {
+            json_parse_options.timestamptz_handling = mode;
+        }
+
+        Ok(Self {
+            value: None,
+            payload_start_idx: 0,
+            json_parse_options,
+        })
+    }
 }
 
 pub async fn fetch_json_schema_and_map_to_columns(
