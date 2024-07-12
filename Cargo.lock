@@ -5022,8 +5022,9 @@ dependencies = [
 
 [[package]]
 name = "etcd-client"
-version = "0.12.1"
-source = "git+https://github.com/risingwavelabs/etcd-client.git?rev=4e84d40#4e84d40a84b35718d814cc2afccc9274c9d78e1e"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ae697f3928e8c89ae6f4dcf788059f49fd01a76dc53e63628f5a33881f5715e"
 dependencies = [
  "http 0.2.9",
  "prost 0.12.1",

@@ -34,7 +34,7 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{Event, ReportTask};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    compact_task, CompactTask, HummockSnapshot, SubscribeCompactionEventRequest,
+    compact_task, CompactTask, HummockSnapshot, PbHummockVersion, SubscribeCompactionEventRequest,
     SubscribeCompactionEventResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
@@ -224,7 +224,11 @@ impl HummockMetaClient for MockHummockMetaClient {
         unimplemented!()
     }
 
-    async fn trigger_full_gc(&self, _sst_retention_time_sec: u64) -> Result<()> {
+    async fn trigger_full_gc(
+        &self,
+        _sst_retention_time_sec: u64,
+        _prefix: Option<String>,
+    ) -> Result<()> {
         unimplemented!()
     }
 
@@ -340,6 +344,10 @@ impl HummockMetaClient for MockHummockMetaClient {
                 _handle: join_handle_vec,
             }),
         ))
+    }
+
+    async fn get_version_by_epoch(&self, _epoch: HummockEpoch) -> Result<PbHummockVersion> {
+        unimplemented!()
     }
 }
 

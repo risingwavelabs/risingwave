@@ -12,19 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_rpc_client::HummockMetaClient;
+use sea_orm::entity::prelude::*;
+use sea_orm::{DeriveEntityModel, DeriveRelation, EnumIter};
 
-use crate::CtlContext;
+use crate::{Epoch, HummockVersionId};
 
-pub async fn trigger_full_gc(
-    context: &CtlContext,
-    sst_retention_time_sec: u64,
-    prefix: Option<String>,
-) -> anyhow::Result<()> {
-    let meta_client = context.meta_client().await?;
-    let result = meta_client
-        .trigger_full_gc(sst_retention_time_sec, prefix)
-        .await;
-    println!("{:#?}", result);
-    Ok(())
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Default)]
+#[sea_orm(table_name = "hummock_epoch_to_version")]
+pub struct Model {
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub epoch: Epoch,
+    pub version_id: HummockVersionId,
 }
+
+impl ActiveModelBehavior for ActiveModel {}
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
