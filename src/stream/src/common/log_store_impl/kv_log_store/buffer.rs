@@ -19,7 +19,7 @@ use std::sync::Arc;
 use await_tree::InstrumentAwait;
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult, TruncateOffset};
 use tokio::sync::{oneshot, Notify};
 

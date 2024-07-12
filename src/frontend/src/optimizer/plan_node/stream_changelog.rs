@@ -43,7 +43,8 @@ impl StreamChangeLog {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            input.append_only(),
+            // The changelog will convert all delete/update to insert, so it must be true here.
+            true,
             input.emit_on_window_close(),
             watermark_columns,
         );

@@ -334,6 +334,7 @@ impl GlobalStreamManager {
         table_fragments: &TableFragments,
         building_locations: &Locations,
         existing_locations: &Locations,
+        subscription_depend_table_id: TableId,
     ) -> MetaResult<()> {
         let actor_map = table_fragments.actor_map();
 
@@ -367,7 +368,7 @@ impl GlobalStreamManager {
                             to_build_actor_info(
                                 actor_map[actor_id].clone(),
                                 &subscriptions,
-                                table_fragments.table_id(),
+                                subscription_depend_table_id,
                             )
                         })
                         .collect::<Vec<_>>();
@@ -406,8 +407,13 @@ impl GlobalStreamManager {
         let mut replace_table_command = None;
         let mut replace_table_id = None;
 
-        self.build_actors(&table_fragments, &building_locations, &existing_locations)
-            .await?;
+        self.build_actors(
+            &table_fragments,
+            &building_locations,
+            &existing_locations,
+            table_fragments.table_id(),
+        )
+        .await?;
         tracing::debug!(
             table_id = %table_fragments.table_id(),
             "built actors finished"
@@ -418,6 +424,7 @@ impl GlobalStreamManager {
                 &table_fragments,
                 &context.building_locations,
                 &context.existing_locations,
+                context.old_table_fragments.table_id(),
             )
             .await?;
 
@@ -504,8 +511,13 @@ impl GlobalStreamManager {
             existing_locations,
         }: ReplaceTableContext,
     ) -> MetaResult<()> {
-        self.build_actors(&table_fragments, &building_locations, &existing_locations)
-            .await?;
+        self.build_actors(
+            &table_fragments,
+            &building_locations,
+            &existing_locations,
+            old_table_fragments.table_id(),
+        )
+        .await?;
 
         let dummy_table_id = table_fragments.table_id();
         let init_split_assignment = self.source_manager.allocate_splits(&dummy_table_id).await?;
@@ -656,7 +668,7 @@ impl GlobalStreamManager {
                     )))?;
                 }
                 if let MetadataManager::V1(mgr) = &self.metadata_manager {
-                    mgr.catalog_manager.cancel_create_table_procedure(id.into(), fragment.internal_table_ids()).await?;
+                    mgr.catalog_manager.cancel_create_materialized_view_procedure(id.into(), fragment.internal_table_ids()).await?;
                 }
 
                 self.barrier_scheduler
@@ -1128,7 +1140,7 @@ mod tests {
             };
 
             self.catalog_manager
-                .start_create_table_procedure(&table, vec![])
+                .start_create_table_procedure(&table)
                 .await?;
             self.fragment_manager
                 .start_create_table_fragments(table_fragments.clone())
@@ -1137,7 +1149,7 @@ mod tests {
                 .create_streaming_job(table_fragments, ctx)
                 .await?;
             self.catalog_manager
-                .finish_create_table_procedure(vec![], table)
+                .finish_create_materialized_view_procedure(vec![], table)
                 .await?;
             Ok(())
         }

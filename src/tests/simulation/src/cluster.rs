@@ -32,6 +32,7 @@ use itertools::Itertools;
 use madsim::runtime::{Handle, NodeHandle};
 use rand::seq::IteratorRandom;
 use rand::Rng;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 #[cfg(madsim)]
 use risingwave_object_store::object::sim::SimServer as ObjectStoreSimServer;
 use risingwave_pb::common::WorkerNode;
@@ -454,7 +455,12 @@ impl Cluster {
                 .create_node()
                 .name(format!("meta-{i}"))
                 .ip([192, 168, 1, i as u8].into())
-                .init(move || risingwave_meta_node::start(opts.clone()))
+                .init(move || {
+                    risingwave_meta_node::start(
+                        opts.clone(),
+                        CancellationToken::new(), // dummy
+                    )
+                })
                 .build();
         }
 
@@ -476,7 +482,12 @@ impl Cluster {
                 .create_node()
                 .name(format!("frontend-{i}"))
                 .ip([192, 168, 2, i as u8].into())
-                .init(move || risingwave_frontend::start(opts.clone()))
+                .init(move || {
+                    risingwave_frontend::start(
+                        opts.clone(),
+                        CancellationToken::new(), // dummy
+                    )
+                })
                 .build();
         }
 
@@ -500,7 +511,12 @@ impl Cluster {
                 .name(format!("compute-{i}"))
                 .ip([192, 168, 3, i as u8].into())
                 .cores(conf.compute_node_cores)
-                .init(move || risingwave_compute::start(opts.clone()))
+                .init(move || {
+                    risingwave_compute::start(
+                        opts.clone(),
+                        CancellationToken::new(), // dummy
+                    )
+                })
                 .build();
         }
 
@@ -519,7 +535,12 @@ impl Cluster {
                 .create_node()
                 .name(format!("compactor-{i}"))
                 .ip([192, 168, 4, i as u8].into())
-                .init(move || risingwave_compactor::start(opts.clone()))
+                .init(move || {
+                    risingwave_compactor::start(
+                        opts.clone(),
+                        CancellationToken::new(), // dummy
+                    )
+                })
                 .build();
         }
 

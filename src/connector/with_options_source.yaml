@@ -33,6 +33,10 @@ GcsProperties:
     field_type: String
     required: false
     default: Default::default
+  - name: compression_format
+    field_type: CompressionFormat
+    required: false
+    default: Default::default
 IcebergProperties:
   fields:
   - name: catalog.type
@@ -616,6 +620,10 @@ OpendalS3Properties:
   - name: s3.endpoint_url
     field_type: String
     required: false
+  - name: compression_format
+    field_type: CompressionFormat
+    required: false
+    default: Default::default
   - name: s3.assume_role
     field_type: String
     comments: The following are only supported by `s3_v2` (opendal) source.
@@ -630,6 +638,10 @@ PosixFsProperties:
   - name: match_pattern
     field_type: String
     comments: The regex pattern to match files under root directory.
+    required: false
+    default: Default::default
+  - name: compression_format
+    field_type: CompressionFormat
     required: false
     default: Default::default
 PubsubProperties:
@@ -769,6 +781,10 @@ S3Properties:
   - name: s3.endpoint_url
     field_type: String
     required: false
+  - name: compression_format
+    field_type: CompressionFormat
+    required: false
+    default: Default::default
 TestSourceProperties:
   fields:
   - name: properties

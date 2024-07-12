@@ -43,7 +43,7 @@ use crate::executor::{DataChunk, Executor};
 ///             database_name: Some("demo_db".into()),
 ///             table_name: "demo_table".into(),
 ///             catalog_type: Some("storage".into()),
-///             path: "s3a://hummock001/".into(),
+///             path: "s3://hummock001/".into(),
 ///             endpoint: Some("http://127.0.0.1:9301".into()),
 ///             access_key: "hummockadmin".into(),
 ///             secret_key: "hummockadmin".into(),

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::connector_service::coordinate_response::{
     self, CommitResponse, StartCoordinationResponse,
 };

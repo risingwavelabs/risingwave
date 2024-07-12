@@ -25,7 +25,7 @@ use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use futures_async_stream::try_stream;
 use prost::Message;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
@@ -415,21 +415,6 @@ pub trait LocalStateStore: StaticSendSync {
     /// the previous write epoch is sealed.
     fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
 
-    /// Check existence of a given `key_range`.
-    /// It is better to provide `prefix_hint` in `read_options`, which will be used
-    /// for checking bloom filter if hummock is used. If `prefix_hint` is not provided,
-    /// the false positive rate can be significantly higher because bloom filter cannot
-    /// be used.
-    ///
-    /// Returns:
-    /// - false: `key_range` is guaranteed to be absent in storage.
-    /// - true: `key_range` may or may not exist in storage.
-    fn may_exist(
-        &self,
-        key_range: TableKeyRange,
-        read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<bool>> + Send + '_;
-
     // Updates the vnode bitmap corresponding to the local state store
     // Returns the previous vnode bitmap
     fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap>;
@@ -501,6 +486,7 @@ pub struct ReadOptions {
     /// Read from historical hummock version of meta snapshot backup.
     /// It should only be used by `StorageTable` for batch query.
     pub read_version_from_backup: bool,
+    pub read_version_from_time_travel: bool,
 }
 
 impl From<TracedReadOptions> for ReadOptions {
@@ -513,6 +499,7 @@ impl From<TracedReadOptions> for ReadOptions {
             retention_seconds: value.retention_seconds,
             table_id: value.table_id.into(),
             read_version_from_backup: value.read_version_from_backup,
+            read_version_from_time_travel: value.read_version_from_time_travel,
         }
     }
 }
@@ -527,6 +514,7 @@ impl From<ReadOptions> for TracedReadOptions {
             retention_seconds: value.retention_seconds,
             table_id: value.table_id.into(),
             read_version_from_backup: value.read_version_from_backup,
+            read_version_from_time_travel: value.read_version_from_time_travel,
         }
     }
 }
