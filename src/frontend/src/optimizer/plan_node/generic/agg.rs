@@ -104,7 +104,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         self.two_phase_agg_enabled()
             && !self.agg_calls.is_empty()
             && self.agg_calls.iter().all(|call| {
-                let agg_kind_ok = matches!(call.agg_kind, agg_kinds::support_two_phase!());
+                let agg_kind_ok = !matches!(call.agg_kind, agg_kinds::simply_cannot_two_phase!());
                 let order_ok = matches!(call.agg_kind, agg_kinds::result_unaffected_by_order_by!())
                     || call.order_by.is_empty();
                 let distinct_ok =
@@ -466,7 +466,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                                     })
                                     .collect()
                             }
-                            AggKind::Builtin(PbAggKind::JsonbObjectAgg) => agg_call
+                            AggKind::Builtin(PbAggKind::JsonbObjectAgg)
+                            | AggKind::WrapScalar(_) => agg_call
                                 .order_by
                                 .iter()
                                 .map(|o| (o.order_type, o.column_index))
@@ -540,7 +541,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     continue;
                 }
                 AggKind::WrapScalar(_) => {
-                    todo!()
+                    // for wrapped scalar function, the state is always NULL
+                    continue;
                 }
                 AggKind::Builtin(kind) => kind,
             };

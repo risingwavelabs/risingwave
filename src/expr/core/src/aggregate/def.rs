@@ -379,28 +379,33 @@ pub mod agg_kinds {
     }
     pub use result_unaffected_by_distinct;
 
-    /// [`AggKind`](super::AggKind)s that can be 2-phased.
+    /// [`AggKind`](crate::aggregate::AggKind)s that are simply cannot 2-phased.
     #[macro_export]
-    macro_rules! support_two_phase {
+    macro_rules! simply_cannot_two_phase {
         () => {
             AggKind::Builtin(
-                PbAggKind::Sum
-                    | PbAggKind::Min
-                    | PbAggKind::Max
-                    | PbAggKind::Count
-                    | PbAggKind::Avg
-                    | PbAggKind::Sum0
-                    | PbAggKind::VarPop
-                    | PbAggKind::VarSamp
-                    | PbAggKind::StddevPop
-                    | PbAggKind::StddevSamp
-                    | PbAggKind::BitXor
-                    | PbAggKind::Grouping
-                    | PbAggKind::InternalLastSeenValue,
+                PbAggKind::StringAgg
+                    | PbAggKind::ApproxCountDistinct
+                    | PbAggKind::ArrayAgg
+                    | PbAggKind::JsonbAgg
+                    | PbAggKind::JsonbObjectAgg
+                    | PbAggKind::FirstValue
+                    | PbAggKind::LastValue
+                    | PbAggKind::PercentileCont
+                    | PbAggKind::PercentileDisc
+                    | PbAggKind::Mode
+                    // FIXME(wrj): move `BoolAnd` and `BoolOr` out
+                    //  after we support general merge in stateless_simple_agg
+                    | PbAggKind::BoolAnd
+                    | PbAggKind::BoolOr
+                    | PbAggKind::BitAnd
+                    | PbAggKind::BitOr
             )
+            | AggKind::UserDefined(_)
+            | AggKind::WrapScalar(_)
         };
     }
-    pub use support_two_phase;
+    pub use simply_cannot_two_phase;
 
     /// [`AggKind`](super::AggKind)s that are implemented with a single value state (so-called
     /// stateless).
@@ -448,17 +453,23 @@ pub mod agg_kinds {
 impl AggKind {
     /// Get the total phase agg kind from the partial phase agg kind.
     pub fn partial_to_total(&self) -> Option<Self> {
-        let Self::Builtin(kind) = self else {
-            return None;
-        };
-        match kind {
-            PbAggKind::BitXor
-            | PbAggKind::Min
-            | PbAggKind::Max
-            | PbAggKind::Sum
-            | PbAggKind::InternalLastSeenValue => Some(Self::Builtin(*kind)),
-            PbAggKind::Sum0 | PbAggKind::Count => Some(Self::Builtin(PbAggKind::Sum0)),
-            _ => None,
+        match self {
+            AggKind::Builtin(
+                PbAggKind::BitXor
+                | PbAggKind::Min
+                | PbAggKind::Max
+                | PbAggKind::Sum
+                | PbAggKind::InternalLastSeenValue,
+            ) => Some(self.clone()),
+            AggKind::Builtin(PbAggKind::Sum0 | PbAggKind::Count) => {
+                Some(Self::Builtin(PbAggKind::Sum0))
+            }
+            agg_kinds::simply_cannot_two_phase!() => None,
+            agg_kinds::rewritten!() => None,
+            // invalid variants
+            AggKind::Builtin(
+                PbAggKind::Unspecified | PbAggKind::UserDefined | PbAggKind::WrapScalar,
+            ) => None,
         }
     }
 }
