@@ -34,11 +34,13 @@ use risingwave_connector::parser::additional_columns::{
 };
 use risingwave_connector::parser::{
     fetch_json_schema_and_map_to_columns, AvroParserConfig, DebeziumAvroParserConfig,
-    ProtobufParserConfig, SpecificParserConfig, TimestamptzHandling, DEBEZIUM_IGNORE_KEY,
+    ProtobufParserConfig, SchemaLocation, SpecificParserConfig, TimestamptzHandling,
+    DEBEZIUM_IGNORE_KEY,
 };
 use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
 };
+use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
@@ -159,7 +161,7 @@ async fn extract_avro_table_schema(
     } else {
         if let risingwave_connector::parser::EncodingProperties::Avro(avro_props) =
             &parser_config.encoding_config
-            && !avro_props.use_schema_registry
+            && matches!(avro_props.schema_location, SchemaLocation::File { .. })
             && !format_encode_options
                 .get("with_deprecated_file_header")
                 .is_some_and(|v| v == "true")
@@ -396,33 +398,43 @@ pub(crate) async fn bind_columns_from_source(
             )
         }
         (format @ (Format::Plain | Format::Upsert | Format::Debezium), Encode::Avro) => {
-            let (row_schema_location, use_schema_registry) =
-                get_schema_location(&mut format_encode_options_to_consume)?;
+            if format_encode_options_to_consume
+                .remove(AWS_GLUE_SCHEMA_ARN_KEY)
+                .is_none()
+            {
+                // Legacy logic that assumes either `schema.location` or confluent `schema.registry`.
+                // The handling of newly added aws glue is centralized in `connector::parser`.
+                // TODO(xiangjinwu): move these option parsing to `connector::parser` as well.
 
-            if matches!(format, Format::Debezium) && !use_schema_registry {
-                return Err(RwError::from(ProtocolError(
-                    "schema location for DEBEZIUM_AVRO row format is not supported".to_string(),
-                )));
+                let (row_schema_location, use_schema_registry) =
+                    get_schema_location(&mut format_encode_options_to_consume)?;
+
+                if matches!(format, Format::Debezium) && !use_schema_registry {
+                    return Err(RwError::from(ProtocolError(
+                        "schema location for DEBEZIUM_AVRO row format is not supported".to_string(),
+                    )));
+                }
+
+                let message_name = try_consume_string_from_options(
+                    &mut format_encode_options_to_consume,
+                    MESSAGE_NAME_KEY,
+                );
+                let name_strategy = get_sr_name_strategy_check(
+                    &mut format_encode_options_to_consume,
+                    use_schema_registry,
+                )?;
+
+                stream_source_info.use_schema_registry = use_schema_registry;
+                stream_source_info
+                    .row_schema_location
+                    .clone_from(&row_schema_location.0);
+                stream_source_info.proto_message_name =
+                    message_name.unwrap_or(AstString("".into())).0;
+                stream_source_info.key_message_name =
+                    get_key_message_name(&mut format_encode_options_to_consume);
+                stream_source_info.name_strategy =
+                    name_strategy.unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32);
             }
-
-            let message_name = try_consume_string_from_options(
-                &mut format_encode_options_to_consume,
-                MESSAGE_NAME_KEY,
-            );
-            let name_strategy = get_sr_name_strategy_check(
-                &mut format_encode_options_to_consume,
-                use_schema_registry,
-            )?;
-
-            stream_source_info.use_schema_registry = use_schema_registry;
-            stream_source_info
-                .row_schema_location
-                .clone_from(&row_schema_location.0);
-            stream_source_info.proto_message_name = message_name.unwrap_or(AstString("".into())).0;
-            stream_source_info.key_message_name =
-                get_key_message_name(&mut format_encode_options_to_consume);
-            stream_source_info.name_strategy =
-                name_strategy.unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32);
 
             Some(
                 extract_avro_table_schema(
@@ -457,6 +469,8 @@ pub(crate) async fn bind_columns_from_source(
 
             None
         }
+        // For parquet format, this step is implemented in parquet parser.
+        (Format::Plain, Encode::Parquet) => None,
         (
             Format::Plain | Format::Upsert | Format::Maxwell | Format::Canal | Format::Debezium,
             Encode::Json,
@@ -1042,7 +1056,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Csv, Encode::Json],
                 ),
                 OPENDAL_S3_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Csv, Encode::Json],
+                    Format::Plain => vec![Encode::Csv, Encode::Json, Encode::Parquet],
                 ),
                 GCS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv, Encode::Json],
@@ -1631,6 +1645,7 @@ fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {
         Encode::Csv => EncodeType::Csv,
         Encode::Bytes => EncodeType::Bytes,
         Encode::Template => EncodeType::Template,
+        Encode::Parquet => EncodeType::Parquet,
         Encode::None => EncodeType::None,
         Encode::Text => EncodeType::Text,
     }
