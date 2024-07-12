@@ -248,11 +248,12 @@ def test_rebuild_table():
     execute_insert("flush",conn)
     execute_insert("update t2 set v2 = 100 where v1 = 1",conn)
     execute_insert("flush",conn)
-    row = execute_query("fetch 4 from cur",conn)
-    assert len(row) == 3
-    check_rows_data([1,1],row[0],1)
-    check_rows_data([1,1],row[1],4)
-    check_rows_data([1,100],row[2],3)
+    row = execute_query("fetch next from cur",conn)
+    check_rows_data([1,1],row,1)
+    row = execute_query("fetch next from cur",conn)
+    check_rows_data([1,1],row,4)
+    row = execute_query("fetch next from cur",conn)
+    check_rows_data([1,100],row,3)
 
 if __name__ == "__main__":
     test_cursor_snapshot()
