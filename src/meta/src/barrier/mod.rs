@@ -865,7 +865,7 @@ impl GlobalBarrierManagerContext {
             ..
         } = node;
         assert!(state.node_to_collect.is_empty());
-        let resps: Vec<BarrierCompleteResponse> = state.resps;
+        let resps = state.resps;
         let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
         let create_mview_progress = resps
             .iter()
