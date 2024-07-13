@@ -991,7 +991,6 @@ impl DdlController {
                     stream_job,
                     table_fragments,
                     ctx,
-                    internal_tables,
                 )
                     .await
             }
@@ -1006,7 +1005,6 @@ impl DdlController {
                             stream_job,
                             table_fragments,
                             ctx,
-                            internal_tables,
                         )
                         .await;
                     match result {
@@ -1287,7 +1285,6 @@ impl DdlController {
         stream_job: StreamingJob,
         table_fragments: TableFragments,
         ctx: CreateStreamingJobContext,
-        internal_tables: Vec<Table>,
     ) -> MetaResult<NotificationVersion> {
         let job_id = stream_job.id();
         tracing::debug!(id = job_id, "creating stream job");
@@ -1303,41 +1300,7 @@ impl DdlController {
                 .await?
         };
 
-        match result {
-            Err(e) => {
-                match stream_job.create_type() {
-                    CreateType::Background => {
-                        tracing::error!(id = job_id, error = %e.as_report(), "finish stream job failed");
-                        let should_cancel = match mgr
-                            .fragment_manager
-                            .select_table_fragments_by_table_id(&job_id.into())
-                            .await
-                        {
-                            Err(err) => err.is_fragment_not_found(),
-                            Ok(table_fragments) => table_fragments.is_initial(),
-                        };
-                        if should_cancel {
-                            // If the table fragments are not found or in initial state, it means that the stream job has not been created.
-                            // We need to cancel the stream job.
-                            self.cancel_stream_job(&stream_job, internal_tables, Some(&e))
-                                .await?;
-                        } else {
-                            // NOTE: This assumes that we will trigger recovery,
-                            // and recover stream job progress.
-                        }
-                    }
-                    _ => {
-                        self.cancel_stream_job(&stream_job, internal_tables, Some(&e))
-                            .await?;
-                    }
-                }
-                Err(e)
-            }
-            Ok(version) => {
-                tracing::info!(id = job_id, "finish stream job succeeded");
-                Ok(version)
-            }
-        }
+        result.inspect(|_| tracing::info!(id = job_id, "finish stream job succeeded"))
     }
 
     async fn drop_streaming_job(
