@@ -739,7 +739,7 @@ impl TableUnsyncData {
 
     fn max_epoch(&self) -> Option<HummockEpoch> {
         self.unsync_epochs
-            .first_key_value()
+            .last_key_value()
             .map(|(epoch, _)| *epoch)
             .or_else(|| self.max_sync_epoch())
     }
