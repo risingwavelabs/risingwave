@@ -158,21 +158,13 @@ pub struct CatalogManager {
 pub struct CatalogManagerCore {
     pub database: DatabaseManager,
     pub user: UserManager,
-    /// `DdlController` will update this map, and pass the `tx` side to `CatalogController`.
-    /// On notifying, we can remove the entry from this map.
-    pub table_id_to_tx: HashMap<TableId, Vec<Sender<MetaResult<NotificationVersion>>>>,
 }
 
 impl CatalogManagerCore {
     async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
         let database = DatabaseManager::new(env.clone()).await?;
         let user = UserManager::new(env.clone(), &database).await?;
-        let table_id_to_tx = HashMap::new();
-        Ok(Self {
-            database,
-            user,
-            table_id_to_tx,
-        })
+        Ok(Self { database, user })
     }
 
     pub(crate) fn register_finish_notifier(
@@ -180,7 +172,11 @@ impl CatalogManagerCore {
         id: TableId,
         sender: Sender<MetaResult<NotificationVersion>>,
     ) {
-        self.table_id_to_tx.entry(id).or_default().push(sender);
+        self.database
+            .table_id_to_tx
+            .entry(id)
+            .or_default()
+            .push(sender);
     }
 
     pub(crate) fn streaming_job_is_finished(&mut self, job: &StreamingJob) -> MetaResult<bool> {
@@ -234,13 +230,22 @@ impl CatalogManagerCore {
     }
 
     pub(crate) fn notify_finish(&mut self, id: TableId, version: NotificationVersion) {
-        for tx in self.table_id_to_tx.remove(&id).into_iter().flatten() {
+        for tx in self
+            .database
+            .table_id_to_tx
+            .remove(&id)
+            .into_iter()
+            .flatten()
+        {
             let _ = tx.send(Ok(version));
         }
     }
 
     pub(crate) fn notify_finish_failed(&mut self, err: &MetaError) {
-        for tx in take(&mut self.table_id_to_tx).into_values().flatten() {
+        for tx in take(&mut self.database.table_id_to_tx)
+            .into_values()
+            .flatten()
+        {
             let _ = tx.send(Err(err.clone()));
         }
     }
@@ -1445,6 +1450,18 @@ impl CatalogManager {
             for &dependent_relation_id in &table.dependent_relations {
                 database_core.decrease_relation_ref_count(dependent_relation_id);
             }
+        }
+
+        for tx in core
+            .database
+            .table_id_to_tx
+            .remove(&table_id)
+            .into_iter()
+            .flatten()
+        {
+            let _ = tx.send(Err(MetaError::cancelled(format!(
+                "materialized view {table_id} has been cancelled"
+            ))));
         }
 
         // FIXME(kwannoel): Propagate version to fe
