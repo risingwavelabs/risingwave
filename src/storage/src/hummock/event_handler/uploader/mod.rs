@@ -1476,7 +1476,7 @@ impl HummockUploader {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::collections::{HashMap, HashSet, VecDeque};
+    use std::collections::{HashMap, HashSet};
     use std::future::{poll_fn, Future};
     use std::ops::Deref;
     use std::pin::pin;
@@ -1485,26 +1485,15 @@ pub(crate) mod tests {
     use std::sync::Arc;
     use std::task::Poll;
 
-    use futures::future::BoxFuture;
     use futures::FutureExt;
-    use prometheus::core::GenericGauge;
     use risingwave_common::util::epoch::EpochExt;
     use risingwave_hummock_sdk::HummockEpoch;
-    use spin::Mutex;
-    use tokio::spawn;
     use tokio::sync::oneshot;
-    use tokio::task::yield_now;
 
     use super::test_utils::*;
-    use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
-    use crate::hummock::event_handler::uploader::{
-        get_payload_imm_ids, HummockUploader, SyncedData, UploadTaskInfo, UploadTaskOutput,
-        UploadingTask,
-    };
-    use crate::hummock::event_handler::{LocalInstanceId, TEST_LOCAL_INSTANCE_ID};
+    use crate::hummock::event_handler::uploader::{get_payload_imm_ids, SyncedData, UploadingTask};
+    use crate::hummock::event_handler::TEST_LOCAL_INSTANCE_ID;
     use crate::hummock::HummockError;
-    use crate::mem_table::ImmId;
-    use crate::monitor::HummockStateStoreMetrics;
     use crate::opts::StorageOpts;
 
     #[tokio::test]
@@ -1767,82 +1756,6 @@ pub(crate) mod tests {
         uploader.update_pinned_version(version5);
         assert_eq!(epoch6, uploader.test_max_synced_epoch());
         assert_eq!(epoch6, uploader.test_max_syncing_epoch());
-    }
-
-    pub(crate) fn prepare_uploader_order_test(
-        config: &StorageOpts,
-        skip_schedule: bool,
-    ) -> (
-        BufferTracker,
-        HummockUploader,
-        impl Fn(HashMap<LocalInstanceId, Vec<ImmId>>) -> (BoxFuture<'static, ()>, oneshot::Sender<()>),
-    ) {
-        let gauge = GenericGauge::new("test", "test").unwrap();
-        let buffer_tracker = BufferTracker::from_storage_opts(config, gauge);
-        // (the started task send the imm ids of payload, the started task wait for finish notify)
-        #[allow(clippy::type_complexity)]
-        let task_notifier_holder: Arc<
-            Mutex<VecDeque<(oneshot::Sender<UploadTaskInfo>, oneshot::Receiver<()>)>>,
-        > = Arc::new(Mutex::new(VecDeque::new()));
-
-        let new_task_notifier = {
-            let task_notifier_holder = task_notifier_holder.clone();
-            move |imm_ids: HashMap<LocalInstanceId, Vec<ImmId>>| {
-                let (start_tx, start_rx) = oneshot::channel();
-                let (finish_tx, finish_rx) = oneshot::channel();
-                task_notifier_holder
-                    .lock()
-                    .push_front((start_tx, finish_rx));
-                let await_start_future = async move {
-                    let task_info = start_rx.await.unwrap();
-                    assert_eq!(imm_ids, task_info.imm_ids);
-                }
-                .boxed();
-                (await_start_future, finish_tx)
-            }
-        };
-
-        let config = StorageOpts::default();
-        let uploader = HummockUploader::new(
-            Arc::new(HummockStateStoreMetrics::unused()),
-            initial_pinned_version(),
-            Arc::new({
-                move |_, task_info: UploadTaskInfo| {
-                    let task_notifier_holder = task_notifier_holder.clone();
-                    let task_item = task_notifier_holder.lock().pop_back();
-                    let start_epoch = *task_info.epochs.last().unwrap();
-                    let end_epoch = *task_info.epochs.first().unwrap();
-                    assert!(end_epoch >= start_epoch);
-                    spawn(async move {
-                        let ssts = gen_sstable_info(start_epoch, end_epoch);
-                        if !skip_schedule {
-                            let (start_tx, finish_rx) = task_item.unwrap();
-                            start_tx.send(task_info).unwrap();
-                            finish_rx.await.unwrap();
-                        }
-                        Ok(UploadTaskOutput {
-                            new_value_ssts: ssts,
-                            old_value_ssts: vec![],
-                            wait_poll_timer: None,
-                        })
-                    })
-                }
-            }),
-            buffer_tracker.clone(),
-            &config,
-        );
-        (buffer_tracker, uploader, new_task_notifier)
-    }
-
-    pub(crate) async fn assert_uploader_pending(uploader: &mut HummockUploader) {
-        for _ in 0..10 {
-            yield_now().await;
-        }
-        assert!(
-            poll_fn(|cx| Poll::Ready(uploader.next_uploaded_sst().poll_unpin(cx)))
-                .await
-                .is_pending()
-        )
     }
 
     #[tokio::test]

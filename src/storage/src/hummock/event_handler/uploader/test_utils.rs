@@ -14,14 +14,19 @@
 
 #![cfg(test)]
 
-use std::collections::{HashMap, HashSet};
-use std::future::Future;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::future::{Future, poll_fn};
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
+use std::task::Poll;
 
 use bytes::Bytes;
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use itertools::Itertools;
+use prometheus::core::GenericGauge;
+use spin::Mutex;
 use risingwave_common::catalog::TableId;
 use risingwave_common::must_match;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
@@ -32,6 +37,8 @@ use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{KeyRange, SstableInfo, StateTableInfoDelta};
 use tokio::spawn;
 use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::oneshot;
+use tokio::task::yield_now;
 
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::uploader::uploader_imm::UploaderImm;
@@ -45,7 +52,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchId, SharedBufferValue,
 };
 use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
-use crate::mem_table::ImmutableMemtable;
+use crate::mem_table::{ImmId, ImmutableMemtable};
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 use crate::store::SealCurrentEpochOptions;
@@ -109,6 +116,15 @@ pub(super) async fn gen_imm_with_limiter(
     epoch: HummockEpoch,
     limiter: Option<&MemoryLimiter>,
 ) -> ImmutableMemtable {
+    gen_imm_inner(TEST_TABLE_ID, epoch, 0, limiter).await
+}
+
+pub(super) async fn gen_imm_inner(
+    table_id: TableId,
+    epoch: HummockEpoch,
+    spill_offset: u16,
+    limiter: Option<&MemoryLimiter>,
+) -> ImmutableMemtable {
     let sorted_items = vec![(
         TableKey(Bytes::from(dummy_table_key())),
         SharedBufferValue::Delete,
@@ -120,11 +136,11 @@ pub(super) async fn gen_imm_with_limiter(
     };
     SharedBufferBatch::build_shared_buffer_batch(
         epoch,
-        0,
+        spill_offset,
         sorted_items,
         None,
         size,
-        TEST_TABLE_ID,
+        table_id,
         tracker,
     )
 }
@@ -247,14 +263,84 @@ impl HummockUploader {
     }
 
     pub(super) fn start_epochs_for_test(&mut self, epochs: impl IntoIterator<Item = HummockEpoch>) {
-        let mut last_epoch = None;
         for epoch in epochs {
-            last_epoch = Some(epoch);
             self.start_epoch(epoch, HashSet::from_iter([TEST_TABLE_ID]));
         }
-        self.start_epoch(
-            last_epoch.unwrap().next_epoch(),
-            HashSet::from_iter([TEST_TABLE_ID]),
-        );
     }
+}
+
+pub(crate) fn prepare_uploader_order_test(
+    config: &StorageOpts,
+    skip_schedule: bool,
+) -> (
+    BufferTracker,
+    HummockUploader,
+    impl Fn(HashMap<LocalInstanceId, Vec<ImmId>>) -> (BoxFuture<'static, ()>, oneshot::Sender<()>),
+) {
+    let gauge = GenericGauge::new("test", "test").unwrap();
+    let buffer_tracker = BufferTracker::from_storage_opts(config, gauge);
+    // (the started task send the imm ids of payload, the started task wait for finish notify)
+    #[allow(clippy::type_complexity)]
+    let task_notifier_holder: Arc<
+        Mutex<VecDeque<(oneshot::Sender<UploadTaskInfo>, oneshot::Receiver<()>)>>,
+    > = Arc::new(Mutex::new(VecDeque::new()));
+
+    let new_task_notifier = {
+        let task_notifier_holder = task_notifier_holder.clone();
+        move |imm_ids: HashMap<LocalInstanceId, Vec<ImmId>>| {
+            let (start_tx, start_rx) = oneshot::channel();
+            let (finish_tx, finish_rx) = oneshot::channel();
+            task_notifier_holder
+                .lock()
+                .push_front((start_tx, finish_rx));
+            let await_start_future = async move {
+                let task_info = start_rx.await.unwrap();
+                assert_eq!(imm_ids, task_info.imm_ids);
+            }
+            .boxed();
+            (await_start_future, finish_tx)
+        }
+    };
+
+    let config = StorageOpts::default();
+    let uploader = HummockUploader::new(
+        Arc::new(HummockStateStoreMetrics::unused()),
+        initial_pinned_version(),
+        Arc::new({
+            move |_, task_info: UploadTaskInfo| {
+                let task_notifier_holder = task_notifier_holder.clone();
+                let task_item = task_notifier_holder.lock().pop_back();
+                let start_epoch = *task_info.epochs.last().unwrap();
+                let end_epoch = *task_info.epochs.first().unwrap();
+                assert!(end_epoch >= start_epoch);
+                spawn(async move {
+                    let ssts = gen_sstable_info(start_epoch, end_epoch);
+                    if !skip_schedule {
+                        let (start_tx, finish_rx) = task_item.unwrap();
+                        start_tx.send(task_info).unwrap();
+                        finish_rx.await.unwrap();
+                    }
+                    Ok(UploadTaskOutput {
+                        new_value_ssts: ssts,
+                        old_value_ssts: vec![],
+                        wait_poll_timer: None,
+                    })
+                })
+            }
+        }),
+        buffer_tracker.clone(),
+        &config,
+    );
+    (buffer_tracker, uploader, new_task_notifier)
+}
+
+pub(crate) async fn assert_uploader_pending(uploader: &mut HummockUploader) {
+    for _ in 0..10 {
+        yield_now().await;
+    }
+    assert!(
+        poll_fn(|cx| Poll::Ready(uploader.next_uploaded_sst().poll_unpin(cx)))
+            .await
+            .is_pending()
+    )
 }
