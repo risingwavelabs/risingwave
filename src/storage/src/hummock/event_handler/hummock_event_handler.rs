@@ -737,6 +737,9 @@ impl HummockEventHandler {
             HummockEvent::Shutdown => {
                 unreachable!("shutdown is handled specially")
             }
+            HummockEvent::StartEpoch { epoch, table_ids } => {
+                self.uploader.start_epoch(epoch, table_ids);
+            }
             HummockEvent::InitEpoch {
                 instance_id,
                 init_epoch,
@@ -1146,6 +1149,11 @@ mod tests {
             rx.await.unwrap()
         };
 
+        send_event(HummockEvent::StartEpoch {
+            epoch: epoch1,
+            table_ids: HashSet::from_iter([TEST_TABLE_ID]),
+        });
+
         send_event(HummockEvent::InitEpoch {
             instance_id: guard.instance_id,
             init_epoch: epoch1,
@@ -1159,6 +1167,11 @@ mod tests {
         send_event(HummockEvent::ImmToUploader {
             instance_id: guard.instance_id,
             imm: imm1,
+        });
+
+        send_event(HummockEvent::StartEpoch {
+            epoch: epoch2,
+            table_ids: HashSet::from_iter([TEST_TABLE_ID]),
         });
 
         send_event(HummockEvent::LocalSealEpoch {
@@ -1178,6 +1191,10 @@ mod tests {
         });
 
         let epoch3 = epoch2.next_epoch();
+        send_event(HummockEvent::StartEpoch {
+            epoch: epoch3,
+            table_ids: HashSet::from_iter([TEST_TABLE_ID]),
+        });
         send_event(HummockEvent::LocalSealEpoch {
             instance_id: guard.instance_id,
             next_epoch: epoch3,
