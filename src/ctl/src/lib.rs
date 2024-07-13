@@ -210,14 +210,16 @@ enum HummockCommands {
         #[clap(short, long = "level", default_value_t = 1)]
         level: u32,
 
-        #[clap(short, long = "sst-ids")]
+        #[clap(short, long = "sst-ids", value_delimiter = ',')]
         sst_ids: Vec<u64>,
     },
-    /// trigger a full GC for SSTs that is not in version and with timestamp <= now -
-    /// `sst_retention_time_sec`.
+    /// Trigger a full GC for SSTs that is not pinned, with timestamp <= now -
+    /// `sst_retention_time_sec`, and with `prefix` in path.
     TriggerFullGc {
         #[clap(short, long = "sst_retention_time_sec", default_value_t = 259200)]
         sst_retention_time_sec: u64,
+        #[clap(short, long = "prefix", required = false)]
+        prefix: Option<String>,
     },
     /// List pinned versions of each worker.
     ListPinnedVersions {},
@@ -227,7 +229,7 @@ enum HummockCommands {
     ListCompactionGroup,
     /// Update compaction config for compaction groups.
     UpdateCompactionConfig {
-        #[clap(long)]
+        #[clap(long, value_delimiter = ',')]
         compaction_group_ids: Vec<u64>,
         #[clap(long)]
         max_bytes_for_level_base: Option<u64>,
@@ -270,7 +272,7 @@ enum HummockCommands {
     SplitCompactionGroup {
         #[clap(long)]
         compaction_group_id: u64,
-        #[clap(long)]
+        #[clap(long, value_delimiter = ',')]
         table_ids: Vec<u32>,
     },
     /// Pause version checkpoint, which subsequently pauses GC of delta log and SST object.
@@ -447,7 +449,10 @@ enum MetaCommands {
         opts: RestoreOpts,
     },
     /// delete meta snapshots
-    DeleteMetaSnapshots { snapshot_ids: Vec<u64> },
+    DeleteMetaSnapshots {
+        #[clap(long, value_delimiter = ',')]
+        snapshot_ids: Vec<u64>,
+    },
 
     /// List all existing connections in the catalog
     ListConnections,
@@ -626,7 +631,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Hummock(HummockCommands::TriggerFullGc {
             sst_retention_time_sec,
-        }) => cmd_impl::hummock::trigger_full_gc(context, sst_retention_time_sec).await?,
+            prefix,
+        }) => cmd_impl::hummock::trigger_full_gc(context, sst_retention_time_sec, prefix).await?,
         Commands::Hummock(HummockCommands::ListPinnedVersions {}) => {
             list_pinned_versions(context).await?
         }

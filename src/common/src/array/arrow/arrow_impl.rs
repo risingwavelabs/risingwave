@@ -524,8 +524,11 @@ pub trait FromArrow {
             Float64 => self.from_float64_array(array.as_any().downcast_ref().unwrap()),
             Date32 => self.from_date32_array(array.as_any().downcast_ref().unwrap()),
             Time64(Microsecond) => self.from_time64us_array(array.as_any().downcast_ref().unwrap()),
-            Timestamp(Microsecond, _) => {
+            Timestamp(Microsecond, None) => {
                 self.from_timestampus_array(array.as_any().downcast_ref().unwrap())
+            }
+            Timestamp(Microsecond, Some(_)) => {
+                self.from_timestampus_some_array(array.as_any().downcast_ref().unwrap())
             }
             Interval(MonthDayNano) => {
                 self.from_interval_array(array.as_any().downcast_ref().unwrap())
@@ -626,6 +629,13 @@ pub trait FromArrow {
         array: &arrow_array::TimestampMicrosecondArray,
     ) -> Result<ArrayImpl, ArrayError> {
         Ok(ArrayImpl::Timestamp(array.into()))
+    }
+
+    fn from_timestampus_some_array(
+        &self,
+        array: &arrow_array::TimestampMicrosecondArray,
+    ) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Timestamptz(array.into()))
     }
 
     fn from_interval_array(

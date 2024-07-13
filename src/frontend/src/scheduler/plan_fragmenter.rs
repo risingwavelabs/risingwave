@@ -351,7 +351,9 @@ impl SourceScanInfo {
                             })
                             .map_err(|_e| anyhow!("fail to parse timestamp"))?,
                     ),
-                    Some(AsOf::ProcessTime) => unreachable!(),
+                    Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+                        unreachable!()
+                    }
                     None => None,
                 };
 
