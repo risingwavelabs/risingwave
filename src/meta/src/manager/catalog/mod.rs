@@ -184,14 +184,39 @@ impl CatalogManagerCore {
     }
 
     pub(crate) fn table_is_finished(&mut self, job: &StreamingJob) -> MetaResult<bool> {
+        fn gen_err(job: &StreamingJob, name: &String) -> MetaError {
+            MetaError::catalog_id_not_found(
+                job.job_type_str(),
+                format!("{} may have been dropped/cancelled", name),
+            )
+        }
         let (job_status, name) = match job {
-            StreamingJob::MaterializedView(table) | StreamingJob::Table(_, table, _) => (
+            StreamingJob::MaterializedView(table) => (
                 self.database
                     .tables
                     .get(&table.id)
                     .map(|table| table.stream_job_status),
                 &table.name,
             ),
+            StreamingJob::Table(_, table, _) => {
+                return if self
+                    .database
+                    .tables
+                    .get(&table.id)
+                    .map(|table| table.stream_job_status == StreamJobStatus::Created as i32)
+                    == Some(true)
+                {
+                    Ok(true)
+                } else if self
+                    .database
+                    .in_progress_creation_streaming_job
+                    .contains_key(&table.id)
+                {
+                    Ok(false)
+                } else {
+                    Err(gen_err(job, &table.name))
+                };
+            }
             StreamingJob::Sink(sink, _) => (
                 self.database
                     .sinks
@@ -213,12 +238,7 @@ impl CatalogManagerCore {
 
         job_status
             .map(|status| status == StreamJobStatus::Created as i32)
-            .ok_or_else(|| {
-                MetaError::catalog_id_not_found(
-                    job.job_type_str(),
-                    format!("{} may have been dropped/cancelled", name),
-                )
-            })
+            .ok_or_else(|| gen_err(job, name))
     }
 
     pub(crate) fn notify_finish(&mut self, id: TableId, version: NotificationVersion) {
