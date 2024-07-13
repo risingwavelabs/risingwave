@@ -822,11 +822,14 @@ impl MetadataManager {
         }
     }
 
-    #[expect(clippy::unused_async)]
     pub async fn get_mv_depended_subscriptions(
         &self,
     ) -> MetaResult<HashMap<TableId, HashMap<u32, u64>>> {
-        // TODO(subscription): support the correct logic when supporting L0 log store subscriptions
-        Ok(HashMap::new())
+        match self {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.get_mv_depended_subscriptions().await,
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller.get_mv_depended_subscriptions().await
+            }
+        }
     }
 }

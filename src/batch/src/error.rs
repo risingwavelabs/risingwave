@@ -154,6 +154,13 @@ pub enum BatchError {
         #[backtrace]
         opendal::Error,
     ),
+
+    #[error("Failed to execute time travel query")]
+    TimeTravel(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 // Serialize/deserialize error.

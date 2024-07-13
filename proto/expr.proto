@@ -345,6 +345,8 @@ message TableFunction {
     JSONB_PATH_QUERY = 15;
     JSONB_POPULATE_RECORDSET = 16;
     JSONB_TO_RECORDSET = 17;
+    // file scan
+    FILE_SCAN = 19;
     // User defined table function
     USER_DEFINED = 100;
   }

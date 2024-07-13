@@ -42,8 +42,8 @@ use risingwave_pb::plan_common::StorageTableDesc;
 
 use crate::error::Result;
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
-    ExecutorBuilder, JoinType, LookupJoinBase,
+    unix_timestamp_sec_to_epoch, AsOf, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
+    DummyExecutor, Executor, ExecutorBuilder, JoinType, LookupJoinBase,
 };
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
@@ -66,6 +66,7 @@ struct InnerSideExecutorBuilder<C> {
     chunk_size: usize,
     shutdown_rx: ShutdownToken,
     next_stage_id: usize,
+    as_of: Option<AsOf>,
 }
 
 /// Used to build the executor for the inner side
@@ -108,6 +109,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             ordered: false,
             vnode_bitmap: Some(vnode_bitmap.finish().to_protobuf()),
             limit: None,
+            as_of: self.as_of.as_ref().map(Into::into),
         });
 
         Ok(row_seq_scan_node)
@@ -296,6 +298,24 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             source.plan_node().get_node_body().unwrap(),
             NodeBody::LocalLookupJoin
         )?;
+        // as_of takes precedence
+        let as_of = lookup_join_node
+            .as_of
+            .as_ref()
+            .map(AsOf::try_from)
+            .transpose()?;
+        let query_epoch = as_of
+            .as_ref()
+            .map(|a| {
+                let epoch = unix_timestamp_sec_to_epoch(a.timestamp).0;
+                tracing::debug!(epoch, "time travel");
+                risingwave_pb::common::BatchQueryEpoch {
+                    epoch: Some(risingwave_pb::common::batch_query_epoch::Epoch::TimeTravel(
+                        epoch,
+                    )),
+                }
+            })
+            .unwrap_or_else(|| source.epoch());
 
         let join_type = JoinType::from_prost(lookup_join_node.get_join_type()?);
         let condition = match lookup_join_node.get_condition() {
@@ -402,12 +422,13 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             lookup_prefix_len,
             context: source.context().clone(),
             task_id: source.task_id.clone(),
-            epoch: source.epoch(),
+            epoch: query_epoch,
             worker_slot_to_scan_range_mapping: HashMap::new(),
             chunk_size,
             shutdown_rx: source.shutdown_rx.clone(),
             next_stage_id: 0,
             worker_slot_mapping,
+            as_of,
         };
 
         let identity = source.plan_node().get_identity().clone();

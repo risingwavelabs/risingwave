@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::array::ArrayError;
 use risingwave_common::error::def_anyhow_newtype;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
@@ -41,17 +42,20 @@ def_anyhow_newtype! {
     url::ParseError => "failed to parse url",
     serde_json::Error => "failed to parse json",
     csv::Error => "failed to parse csv",
+
     uuid::Error => transparent, // believed to be self-explanatory
 
     // Connector errors
     opendal::Error => transparent, // believed to be self-explanatory
-
+    parquet::errors::ParquetError => transparent,
+    ArrayError => "Array error",
     sqlx::Error => transparent, // believed to be self-explanatory
     mysql_async::Error => "MySQL error",
     tokio_postgres::Error => "Postgres error",
     apache_avro::Error => "Avro error",
     rdkafka::error::KafkaError => "Kafka error",
     pulsar::Error => "Pulsar error",
+
     async_nats::jetstream::consumer::StreamError => "Nats error",
     async_nats::jetstream::consumer::pull::MessagesError => "Nats error",
     async_nats::jetstream::context::CreateStreamError => "Nats error",
