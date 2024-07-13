@@ -183,7 +183,7 @@ impl CatalogManagerCore {
         self.table_id_to_tx.entry(id).or_default().push(sender);
     }
 
-    pub(crate) fn table_is_finished(&mut self, job: &StreamingJob) -> MetaResult<bool> {
+    pub(crate) fn streaming_job_is_finished(&mut self, job: &StreamingJob) -> MetaResult<bool> {
         fn gen_err(job: &StreamingJob, name: &String) -> MetaError {
             MetaError::catalog_id_not_found(
                 job.job_type_str(),
@@ -191,32 +191,13 @@ impl CatalogManagerCore {
             )
         }
         let (job_status, name) = match job {
-            StreamingJob::MaterializedView(table) => (
+            StreamingJob::MaterializedView(table) | StreamingJob::Table(_, table, _) => (
                 self.database
                     .tables
                     .get(&table.id)
                     .map(|table| table.stream_job_status),
                 &table.name,
             ),
-            StreamingJob::Table(_, table, _) => {
-                return if self
-                    .database
-                    .tables
-                    .get(&table.id)
-                    .map(|table| table.stream_job_status == StreamJobStatus::Created as i32)
-                    == Some(true)
-                {
-                    Ok(true)
-                } else if self
-                    .database
-                    .in_progress_creation_streaming_job
-                    .contains_key(&table.id)
-                {
-                    Ok(false)
-                } else {
-                    Err(gen_err(job, &table.name))
-                };
-            }
             StreamingJob::Sink(sink, _) => (
                 self.database
                     .sinks
@@ -238,6 +219,17 @@ impl CatalogManagerCore {
 
         job_status
             .map(|status| status == StreamJobStatus::Created as i32)
+            .or_else(|| {
+                if self
+                    .database
+                    .in_progress_creation_streaming_job
+                    .contains_key(&job.id())
+                {
+                    Some(false)
+                } else {
+                    None
+                }
+            })
             .ok_or_else(|| gen_err(job, name))
     }
 

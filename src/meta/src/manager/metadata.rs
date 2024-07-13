@@ -873,7 +873,7 @@ impl MetadataManagerV1 {
         job: &StreamingJob,
     ) -> MetaResult<NotificationVersion> {
         let mut mgr = self.catalog_manager.get_catalog_core_guard().await;
-        if mgr.table_is_finished(job)? {
+        if mgr.streaming_job_is_finished(job)? {
             return Ok(self.catalog_manager.current_notification_version().await);
         }
         let (tx, rx) = oneshot::channel();
