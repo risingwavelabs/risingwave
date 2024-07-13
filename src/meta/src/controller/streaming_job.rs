@@ -418,7 +418,7 @@ impl CatalogController {
         job_id: ObjectId,
         is_cancelled: bool,
     ) -> MetaResult<bool> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let cnt = Object::find_by_id(job_id).count(&txn).await?;
@@ -472,6 +472,15 @@ impl CatalogController {
         }
         if let Some(source_id) = associated_source_id {
             Object::delete_by_id(source_id).exec(&txn).await?;
+        }
+
+        for tx in inner.table_id_to_tx.remove(&job_id).into_iter().flatten() {
+            let err = if is_cancelled {
+                MetaError::cancelled("stremaing job {job_id} is cancelled")
+            } else {
+                MetaError::catalog_id_not_found("stream job", "streaming job {job_id} failed")
+            };
+            let _ = tx.send(Err(err));
         }
         txn.commit().await?;
 

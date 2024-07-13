@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
@@ -25,10 +25,7 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
 use super::command::CommandContext;
-use crate::barrier::{
-    Command, GlobalBarrierManagerContext, TableActorMap, TableDefinitionMap, TableFragmentMap,
-    TableInternalTableMap, TableStreamJobMap, TableUpstreamMvCountMap,
-};
+use crate::barrier::{Command, GlobalBarrierManagerContext};
 use crate::manager::{
     DdlType, MetadataManager, MetadataManagerV1, MetadataManagerV2, StreamingJob,
 };
@@ -303,19 +300,21 @@ impl CreateMviewProgressTracker {
     /// 1. `CreateMviewProgress`.
     /// 2. `Backfill` position.
     pub fn recover_v1(
-        table_map: TableActorMap,
-        mut upstream_mv_counts: TableUpstreamMvCountMap,
-        mut definitions: TableDefinitionMap,
         version_stats: HummockVersionStats,
-        mut table_fragment_map: TableFragmentMap,
-        mut table_internal_table_map: TableInternalTableMap,
-        mut table_stream_job_map: TableStreamJobMap,
+        mviews: HashMap<
+            TableId,
+            (
+                TableFragments,
+                Table,      // mview table
+                Vec<Table>, // internal tables
+            ),
+        >,
         metadata_manager: MetadataManagerV1,
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
-        let table_map: HashMap<_, HashSet<ActorId>> = table_map.into();
-        for (creating_table_id, actors) in table_map {
+        for (creating_table_id, (table_fragments, mview, internal_tables)) in mviews {
+            let actors = table_fragments.backfill_actor_ids();
             let mut states = HashMap::new();
             tracing::debug!(?actors, ?creating_table_id, "recover progress for actors");
             for actor in actors {
@@ -325,18 +324,15 @@ impl CreateMviewProgressTracker {
 
             let progress = Self::recover_progress(
                 states,
-                creating_table_id,
-                &mut upstream_mv_counts,
-                &mut definitions,
+                table_fragments.dependent_table_ids(),
+                mview.definition.clone(),
                 &version_stats,
             );
-            let internal_tables = table_internal_table_map.remove(&creating_table_id).unwrap();
-            let streaming_job = table_stream_job_map.remove(&creating_table_id).unwrap();
             let tracking_job = TrackingJob::RecoveredV1(RecoveredTrackingJobV1 {
-                fragments: table_fragment_map.remove(&creating_table_id).unwrap(),
+                fragments: table_fragments,
                 metadata_manager: metadata_manager.clone(),
                 internal_tables,
-                streaming_job,
+                streaming_job: StreamingJob::MaterializedView(mview),
             });
             progress_map.insert(creating_table_id, (progress, tracking_job));
         }
@@ -348,17 +344,15 @@ impl CreateMviewProgressTracker {
     }
 
     pub fn recover_v2(
-        table_map: TableActorMap,
-        mut upstream_mv_counts: TableUpstreamMvCountMap,
-        mut definitions: TableDefinitionMap,
+        mview_map: HashMap<TableId, (String, TableFragments)>,
         version_stats: HummockVersionStats,
         metadata_manager: MetadataManagerV2,
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
-        let table_map: HashMap<_, HashSet<ActorId>> = table_map.into();
-        for (creating_table_id, actors) in table_map {
+        for (creating_table_id, (definition, table_fragments)) in mview_map {
             let mut states = HashMap::new();
+            let actors = table_fragments.backfill_actor_ids();
             for actor in actors {
                 actor_map.insert(actor, creating_table_id);
                 states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0));
@@ -366,9 +360,8 @@ impl CreateMviewProgressTracker {
 
             let progress = Self::recover_progress(
                 states,
-                creating_table_id,
-                &mut upstream_mv_counts,
-                &mut definitions,
+                table_fragments.dependent_table_ids(),
+                definition,
                 &version_stats,
             );
             let tracking_job = TrackingJob::RecoveredV2(RecoveredTrackingJobV2 {
@@ -386,12 +379,10 @@ impl CreateMviewProgressTracker {
 
     fn recover_progress(
         states: HashMap<ActorId, BackfillState>,
-        creating_table_id: TableId,
-        upstream_mv_counts: &mut TableUpstreamMvCountMap,
-        definitions: &mut TableDefinitionMap,
+        upstream_mv_count: HashMap<TableId, usize>,
+        definition: String,
         version_stats: &HummockVersionStats,
     ) -> Progress {
-        let upstream_mv_count = upstream_mv_counts.remove(&creating_table_id).unwrap();
         let upstream_total_key_count = upstream_mv_count
             .iter()
             .map(|(upstream_mv, count)| {
@@ -402,7 +393,6 @@ impl CreateMviewProgressTracker {
                         .map_or(0, |stat| stat.total_key_count as u64)
             })
             .sum();
-        let definition = definitions.remove(&creating_table_id).unwrap();
         Progress {
             states,
             done_count: 0, // Fill only after first barrier pass
