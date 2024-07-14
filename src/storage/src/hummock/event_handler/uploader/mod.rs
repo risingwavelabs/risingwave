@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod spiller;
 mod task_manager;
+pub(crate) mod test_utils;
 
 use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
@@ -43,6 +45,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
 use crate::hummock::event_handler::hummock_event_handler::{send_sync_result, BufferTracker};
+use crate::hummock::event_handler::uploader::spiller::Spiller;
 use crate::hummock::event_handler::uploader::uploader_imm::UploaderImm;
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -657,6 +660,7 @@ impl TableUnsyncData {
             impl Iterator<Item = (HummockEpoch, Vec<VnodeWatermark>)>,
         )>,
         impl Iterator<Item = UploadingTaskId>,
+        BTreeMap<HummockEpoch, ()>,
     ) {
         if let Some(prev_epoch) = self.max_sync_epoch() {
             assert_gt!(epoch, prev_epoch)
@@ -687,6 +691,7 @@ impl TableUnsyncData {
             take_before_epoch(&mut self.spill_tasks, epoch)
                 .into_values()
                 .flat_map(|tasks| tasks.into_iter()),
+            epochs,
         )
     }
 
@@ -735,7 +740,7 @@ impl TableUnsyncData {
 
     fn max_epoch(&self) -> Option<HummockEpoch> {
         self.unsync_epochs
-            .first_key_value()
+            .last_key_value()
             .map(|(epoch, _)| *epoch)
             .or_else(|| self.max_sync_epoch())
     }
@@ -747,6 +752,22 @@ impl TableUnsyncData {
     }
 }
 
+#[derive(Eq, Hash, PartialEq, Copy, Clone)]
+struct UnsyncEpochId(HummockEpoch, TableId);
+
+impl UnsyncEpochId {
+    fn epoch(&self) -> HummockEpoch {
+        self.0
+    }
+}
+
+fn get_unsync_epoch_id(epoch: HummockEpoch, table_ids: &HashSet<TableId>) -> Option<UnsyncEpochId> {
+    table_ids
+        .iter()
+        .min()
+        .map(|table_id| UnsyncEpochId(epoch, *table_id))
+}
+
 #[derive(Default)]
 /// Unsync data, can be either imm or spilled sst, and some aggregated epoch information.
 ///
@@ -756,9 +777,7 @@ struct UnsyncData {
     table_data: HashMap<TableId, TableUnsyncData>,
     // An index as a mapping from instance id to its table id
     instance_table_id: HashMap<LocalInstanceId, TableId>,
-    // TODO: this is only used in spill to get existing epochs and can be removed
-    // when we support spill not based on epoch
-    epochs: BTreeMap<HummockEpoch, HashSet<TableId>>,
+    unsync_epochs: HashMap<UnsyncEpochId, HashSet<TableId>>,
 }
 
 impl UnsyncData {
@@ -869,49 +888,56 @@ impl UploaderData {
         table_ids: HashSet<TableId>,
         sync_result_sender: oneshot::Sender<HummockResult<SyncedData>>,
     ) {
-        // clean old epochs
-        let epochs = take_before_epoch(&mut self.unsync_data.epochs, epoch);
-        if cfg!(debug_assertions) {
-            for epoch_table_ids in epochs.into_values() {
-                assert_eq!(epoch_table_ids, table_ids);
-            }
-        }
-
         let mut all_table_watermarks = HashMap::new();
         let mut uploading_tasks = HashSet::new();
         let mut spilled_tasks = BTreeSet::new();
 
         let mut flush_payload = HashMap::new();
-        for (table_id, table_data) in &self.unsync_data.table_data {
-            if !table_ids.contains(table_id) {
-                table_data.assert_after_epoch(epoch);
-            }
-        }
-        for table_id in &table_ids {
-            let table_data = self
+
+        if let Some(UnsyncEpochId(_, min_table_id)) = get_unsync_epoch_id(epoch, &table_ids) {
+            let min_table_id_data = self
                 .unsync_data
                 .table_data
-                .get_mut(table_id)
+                .get_mut(&min_table_id)
                 .expect("should exist");
-            let (unflushed_payload, table_watermarks, task_ids) = table_data.sync(epoch);
-            for (instance_id, payload) in unflushed_payload {
-                if !payload.is_empty() {
-                    flush_payload.insert(instance_id, payload);
-                }
-            }
-            if let Some((direction, watermarks)) = table_watermarks {
-                Self::add_table_watermarks(
-                    &mut all_table_watermarks,
-                    *table_id,
-                    direction,
-                    watermarks,
+            let epochs = take_before_epoch(&mut min_table_id_data.unsync_epochs.clone(), epoch);
+            for epoch in epochs.keys() {
+                assert_eq!(
+                    self.unsync_data
+                        .unsync_epochs
+                        .remove(&UnsyncEpochId(*epoch, min_table_id))
+                        .expect("should exist"),
+                    table_ids
                 );
             }
-            for task_id in task_ids {
-                if self.spilled_data.contains_key(&task_id) {
-                    spilled_tasks.insert(task_id);
-                } else {
-                    uploading_tasks.insert(task_id);
+            for table_id in &table_ids {
+                let table_data = self
+                    .unsync_data
+                    .table_data
+                    .get_mut(table_id)
+                    .expect("should exist");
+                let (unflushed_payload, table_watermarks, task_ids, table_unsync_epochs) =
+                    table_data.sync(epoch);
+                assert_eq!(table_unsync_epochs, epochs);
+                for (instance_id, payload) in unflushed_payload {
+                    if !payload.is_empty() {
+                        flush_payload.insert(instance_id, payload);
+                    }
+                }
+                if let Some((direction, watermarks)) = table_watermarks {
+                    Self::add_table_watermarks(
+                        &mut all_table_watermarks,
+                        *table_id,
+                        direction,
+                        watermarks,
+                    );
+                }
+                for task_id in task_ids {
+                    if self.spilled_data.contains_key(&task_id) {
+                        spilled_tasks.insert(task_id);
+                    } else {
+                        uploading_tasks.insert(task_id);
+                    }
                 }
             }
         }
@@ -1153,7 +1179,13 @@ impl HummockUploader {
                 });
             table_data.new_epoch(epoch);
         }
-        data.unsync_data.epochs.insert(epoch, table_ids);
+        if let Some(unsync_epoch_id) = get_unsync_epoch_id(epoch, &table_ids) {
+            assert!(data
+                .unsync_data
+                .unsync_epochs
+                .insert(unsync_epoch_id, table_ids)
+                .is_none());
+        }
     }
 
     pub(super) fn start_sync_epoch(
@@ -1209,43 +1241,28 @@ impl HummockUploader {
             return false;
         };
         if self.context.buffer_tracker.need_flush() {
+            let mut spiller = Spiller::new(&mut data.unsync_data);
             let mut curr_batch_flush_size = 0;
             // iterate from older epoch to newer epoch
-            for (epoch, table_ids) in &data.unsync_data.epochs {
-                if !self
-                    .context
-                    .buffer_tracker
-                    .need_more_flush(curr_batch_flush_size)
+            while self
+                .context
+                .buffer_tracker
+                .need_more_flush(curr_batch_flush_size)
+                && let Some((epoch, payload, spilled_table_ids)) = spiller.next_spilled_payload()
+            {
+                assert!(!payload.is_empty());
                 {
-                    break;
-                }
-                let mut spilled_table_ids = HashSet::new();
-                let mut payload = HashMap::new();
-                for table_id in table_ids {
-                    let table_data = data
-                        .unsync_data
-                        .table_data
-                        .get_mut(table_id)
-                        .expect("should exist");
-                    for (instance_id, instance_data) in &mut table_data.instance_data {
-                        let instance_payload = instance_data.spill(*epoch);
-                        if !instance_payload.is_empty() {
-                            payload.insert(*instance_id, instance_payload);
-                            spilled_table_ids.insert(*table_id);
-                        }
-                    }
-                }
-                if !payload.is_empty() {
                     let (task_id, task_size, spilled_table_ids) =
                         data.task_manager
                             .spill(&self.context, spilled_table_ids, payload);
                     for table_id in spilled_table_ids {
-                        data.unsync_data
+                        spiller
+                            .unsync_data()
                             .table_data
                             .get_mut(table_id)
                             .expect("should exist")
                             .spill_tasks
-                            .entry(*epoch)
+                            .entry(epoch)
                             .or_default()
                             .push_front(task_id);
                     }
@@ -1459,257 +1476,25 @@ impl HummockUploader {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::collections::{HashMap, HashSet, VecDeque};
+    use std::collections::{HashMap, HashSet};
     use std::future::{poll_fn, Future};
     use std::ops::Deref;
     use std::pin::pin;
     use std::sync::atomic::AtomicUsize;
-    use std::sync::atomic::Ordering::{Relaxed, SeqCst};
-    use std::sync::{Arc, LazyLock};
+    use std::sync::atomic::Ordering::SeqCst;
+    use std::sync::Arc;
     use std::task::Poll;
 
-    use bytes::Bytes;
-    use futures::future::BoxFuture;
     use futures::FutureExt;
-    use itertools::Itertools;
-    use prometheus::core::GenericGauge;
-    use risingwave_common::catalog::TableId;
-    use risingwave_common::must_match;
-    use risingwave_common::util::epoch::{test_epoch, EpochExt};
-    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::key::{FullKey, TableKey};
-    use risingwave_hummock_sdk::version::HummockVersion;
-    use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
-    use risingwave_pb::hummock::{KeyRange, SstableInfo, StateTableInfoDelta};
-    use spin::Mutex;
-    use tokio::spawn;
-    use tokio::sync::mpsc::unbounded_channel;
+    use risingwave_common::util::epoch::EpochExt;
+    use risingwave_hummock_sdk::HummockEpoch;
     use tokio::sync::oneshot;
-    use tokio::task::yield_now;
 
-    use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
-    use crate::hummock::event_handler::uploader::uploader_imm::UploaderImm;
-    use crate::hummock::event_handler::uploader::{
-        get_payload_imm_ids, HummockUploader, SyncedData, TableUnsyncData, UploadTaskInfo,
-        UploadTaskOutput, UploadTaskPayload, UploaderContext, UploaderData, UploaderState,
-        UploadingTask, UploadingTaskId,
-    };
-    use crate::hummock::event_handler::{LocalInstanceId, TEST_LOCAL_INSTANCE_ID};
-    use crate::hummock::local_version::pinned_version::PinnedVersion;
-    use crate::hummock::shared_buffer::shared_buffer_batch::{
-        SharedBufferBatch, SharedBufferBatchId, SharedBufferValue,
-    };
-    use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
-    use crate::mem_table::{ImmId, ImmutableMemtable};
-    use crate::monitor::HummockStateStoreMetrics;
+    use super::test_utils::*;
+    use crate::hummock::event_handler::uploader::{get_payload_imm_ids, SyncedData, UploadingTask};
+    use crate::hummock::event_handler::TEST_LOCAL_INSTANCE_ID;
+    use crate::hummock::HummockError;
     use crate::opts::StorageOpts;
-    use crate::store::SealCurrentEpochOptions;
-
-    const INITIAL_EPOCH: HummockEpoch = test_epoch(5);
-    pub(crate) const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
-
-    pub trait UploadOutputFuture =
-        Future<Output = HummockResult<UploadTaskOutput>> + Send + 'static;
-    pub trait UploadFn<Fut: UploadOutputFuture> =
-        Fn(UploadTaskPayload, UploadTaskInfo) -> Fut + Send + Sync + 'static;
-
-    impl HummockUploader {
-        fn data(&self) -> &UploaderData {
-            must_match!(&self.state, UploaderState::Working(data) => data)
-        }
-
-        fn table_data(&self) -> &TableUnsyncData {
-            self.data()
-                .unsync_data
-                .table_data
-                .get(&TEST_TABLE_ID)
-                .expect("should exist")
-        }
-
-        fn test_max_syncing_epoch(&self) -> HummockEpoch {
-            self.table_data().max_sync_epoch().unwrap()
-        }
-
-        fn test_max_synced_epoch(&self) -> HummockEpoch {
-            self.table_data().max_synced_epoch.unwrap()
-        }
-    }
-
-    fn test_hummock_version(epoch: HummockEpoch) -> HummockVersion {
-        let mut version = HummockVersion::default();
-        version.id = epoch;
-        version.max_committed_epoch = epoch;
-        version.state_table_info.apply_delta(
-            &HashMap::from_iter([(
-                TEST_TABLE_ID,
-                StateTableInfoDelta {
-                    committed_epoch: epoch,
-                    safe_epoch: epoch,
-                    compaction_group_id: StaticCompactionGroupId::StateDefault as _,
-                },
-            )]),
-            &HashSet::new(),
-        );
-        version
-    }
-
-    fn initial_pinned_version() -> PinnedVersion {
-        PinnedVersion::new(test_hummock_version(INITIAL_EPOCH), unbounded_channel().0)
-    }
-
-    fn dummy_table_key() -> Vec<u8> {
-        vec![b't', b'e', b's', b't']
-    }
-
-    async fn gen_imm_with_limiter(
-        epoch: HummockEpoch,
-        limiter: Option<&MemoryLimiter>,
-    ) -> ImmutableMemtable {
-        let sorted_items = vec![(
-            TableKey(Bytes::from(dummy_table_key())),
-            SharedBufferValue::Delete,
-        )];
-        let size = SharedBufferBatch::measure_batch_size(&sorted_items, None).0;
-        let tracker = match limiter {
-            Some(limiter) => Some(limiter.require_memory(size as u64).await),
-            None => None,
-        };
-        SharedBufferBatch::build_shared_buffer_batch(
-            epoch,
-            0,
-            sorted_items,
-            None,
-            size,
-            TEST_TABLE_ID,
-            tracker,
-        )
-    }
-
-    pub(crate) async fn gen_imm(epoch: HummockEpoch) -> ImmutableMemtable {
-        gen_imm_with_limiter(epoch, None).await
-    }
-
-    fn gen_sstable_info(
-        start_epoch: HummockEpoch,
-        end_epoch: HummockEpoch,
-    ) -> Vec<LocalSstableInfo> {
-        let start_full_key = FullKey::new(TEST_TABLE_ID, TableKey(dummy_table_key()), start_epoch);
-        let end_full_key = FullKey::new(TEST_TABLE_ID, TableKey(dummy_table_key()), end_epoch);
-        let gen_sst_object_id = (start_epoch << 8) + end_epoch;
-        vec![LocalSstableInfo::for_test(SstableInfo {
-            object_id: gen_sst_object_id,
-            sst_id: gen_sst_object_id,
-            key_range: Some(KeyRange {
-                left: start_full_key.encode(),
-                right: end_full_key.encode(),
-                right_exclusive: true,
-            }),
-            table_ids: vec![TEST_TABLE_ID.table_id],
-            ..Default::default()
-        })]
-    }
-
-    fn test_uploader_context<F, Fut>(upload_fn: F) -> UploaderContext
-    where
-        Fut: UploadOutputFuture,
-        F: UploadFn<Fut>,
-    {
-        let config = StorageOpts::default();
-        UploaderContext::new(
-            initial_pinned_version(),
-            Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
-            BufferTracker::for_test(),
-            &config,
-            Arc::new(HummockStateStoreMetrics::unused()),
-        )
-    }
-
-    fn test_uploader<F, Fut>(upload_fn: F) -> HummockUploader
-    where
-        Fut: UploadOutputFuture,
-        F: UploadFn<Fut>,
-    {
-        let config = StorageOpts {
-            ..Default::default()
-        };
-        HummockUploader::new(
-            Arc::new(HummockStateStoreMetrics::unused()),
-            initial_pinned_version(),
-            Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
-            BufferTracker::for_test(),
-            &config,
-        )
-    }
-
-    fn dummy_success_upload_output() -> UploadTaskOutput {
-        UploadTaskOutput {
-            new_value_ssts: gen_sstable_info(INITIAL_EPOCH, INITIAL_EPOCH),
-            old_value_ssts: vec![],
-            wait_poll_timer: None,
-        }
-    }
-
-    #[allow(clippy::unused_async)]
-    async fn dummy_success_upload_future(
-        _: UploadTaskPayload,
-        _: UploadTaskInfo,
-    ) -> HummockResult<UploadTaskOutput> {
-        Ok(dummy_success_upload_output())
-    }
-
-    #[allow(clippy::unused_async)]
-    async fn dummy_fail_upload_future(
-        _: UploadTaskPayload,
-        _: UploadTaskInfo,
-    ) -> HummockResult<UploadTaskOutput> {
-        Err(HummockError::other("failed"))
-    }
-
-    impl UploadingTask {
-        fn from_vec(imms: Vec<ImmutableMemtable>, context: &UploaderContext) -> Self {
-            let input = HashMap::from_iter([(
-                TEST_LOCAL_INSTANCE_ID,
-                imms.into_iter().map(UploaderImm::for_test).collect_vec(),
-            )]);
-            static NEXT_TASK_ID: LazyLock<AtomicUsize> = LazyLock::new(|| AtomicUsize::new(0));
-            Self::new(
-                UploadingTaskId(NEXT_TASK_ID.fetch_add(1, Relaxed)),
-                input,
-                context,
-            )
-        }
-    }
-
-    fn get_imm_ids<'a>(
-        imms: impl IntoIterator<Item = &'a ImmutableMemtable>,
-    ) -> HashMap<LocalInstanceId, Vec<SharedBufferBatchId>> {
-        HashMap::from_iter([(
-            TEST_LOCAL_INSTANCE_ID,
-            imms.into_iter().map(|imm| imm.batch_id()).collect_vec(),
-        )])
-    }
-
-    impl HummockUploader {
-        fn local_seal_epoch_for_test(&mut self, instance_id: LocalInstanceId, epoch: HummockEpoch) {
-            self.local_seal_epoch(
-                instance_id,
-                epoch.next_epoch(),
-                SealCurrentEpochOptions::for_test(),
-            );
-        }
-
-        fn start_epochs_for_test(&mut self, epochs: impl IntoIterator<Item = HummockEpoch>) {
-            let mut last_epoch = None;
-            for epoch in epochs {
-                last_epoch = Some(epoch);
-                self.start_epoch(epoch, HashSet::from_iter([TEST_TABLE_ID]));
-            }
-            self.start_epoch(
-                last_epoch.unwrap().next_epoch(),
-                HashSet::from_iter([TEST_TABLE_ID]),
-            );
-        }
-    }
 
     #[tokio::test]
     pub async fn test_uploading_task_future() {
@@ -1971,82 +1756,6 @@ pub(crate) mod tests {
         uploader.update_pinned_version(version5);
         assert_eq!(epoch6, uploader.test_max_synced_epoch());
         assert_eq!(epoch6, uploader.test_max_syncing_epoch());
-    }
-
-    fn prepare_uploader_order_test(
-        config: &StorageOpts,
-        skip_schedule: bool,
-    ) -> (
-        BufferTracker,
-        HummockUploader,
-        impl Fn(HashMap<LocalInstanceId, Vec<ImmId>>) -> (BoxFuture<'static, ()>, oneshot::Sender<()>),
-    ) {
-        let gauge = GenericGauge::new("test", "test").unwrap();
-        let buffer_tracker = BufferTracker::from_storage_opts(config, gauge);
-        // (the started task send the imm ids of payload, the started task wait for finish notify)
-        #[allow(clippy::type_complexity)]
-        let task_notifier_holder: Arc<
-            Mutex<VecDeque<(oneshot::Sender<UploadTaskInfo>, oneshot::Receiver<()>)>>,
-        > = Arc::new(Mutex::new(VecDeque::new()));
-
-        let new_task_notifier = {
-            let task_notifier_holder = task_notifier_holder.clone();
-            move |imm_ids: HashMap<LocalInstanceId, Vec<ImmId>>| {
-                let (start_tx, start_rx) = oneshot::channel();
-                let (finish_tx, finish_rx) = oneshot::channel();
-                task_notifier_holder
-                    .lock()
-                    .push_front((start_tx, finish_rx));
-                let await_start_future = async move {
-                    let task_info = start_rx.await.unwrap();
-                    assert_eq!(imm_ids, task_info.imm_ids);
-                }
-                .boxed();
-                (await_start_future, finish_tx)
-            }
-        };
-
-        let config = StorageOpts::default();
-        let uploader = HummockUploader::new(
-            Arc::new(HummockStateStoreMetrics::unused()),
-            initial_pinned_version(),
-            Arc::new({
-                move |_, task_info: UploadTaskInfo| {
-                    let task_notifier_holder = task_notifier_holder.clone();
-                    let task_item = task_notifier_holder.lock().pop_back();
-                    let start_epoch = *task_info.epochs.last().unwrap();
-                    let end_epoch = *task_info.epochs.first().unwrap();
-                    assert!(end_epoch >= start_epoch);
-                    spawn(async move {
-                        let ssts = gen_sstable_info(start_epoch, end_epoch);
-                        if !skip_schedule {
-                            let (start_tx, finish_rx) = task_item.unwrap();
-                            start_tx.send(task_info).unwrap();
-                            finish_rx.await.unwrap();
-                        }
-                        Ok(UploadTaskOutput {
-                            new_value_ssts: ssts,
-                            old_value_ssts: vec![],
-                            wait_poll_timer: None,
-                        })
-                    })
-                }
-            }),
-            buffer_tracker.clone(),
-            &config,
-        );
-        (buffer_tracker, uploader, new_task_notifier)
-    }
-
-    async fn assert_uploader_pending(uploader: &mut HummockUploader) {
-        for _ in 0..10 {
-            yield_now().await;
-        }
-        assert!(
-            poll_fn(|cx| Poll::Ready(uploader.next_uploaded_sst().poll_unpin(cx)))
-                .await
-                .is_pending()
-        )
     }
 
     #[tokio::test]

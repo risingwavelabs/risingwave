@@ -586,9 +586,6 @@ async fn test_batch_scan_chunk_with_value_indices() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    test_env
-        .storage
-        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 

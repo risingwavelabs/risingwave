@@ -1966,9 +1966,6 @@ async fn test_replicated_state_table_replication() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    test_env
-        .storage
-        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
     state_table.commit(epoch).await.unwrap();
     replicated_state_table.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
@@ -2029,9 +2026,6 @@ async fn test_replicated_state_table_replication() {
     replicated_state_table.write_chunk(replicate_chunk);
 
     epoch.inc_for_test();
-    test_env
-        .storage
-        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));

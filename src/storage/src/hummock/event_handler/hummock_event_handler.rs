@@ -936,7 +936,7 @@ mod tests {
     use tokio::sync::oneshot;
 
     use crate::hummock::event_handler::refiller::CacheRefiller;
-    use crate::hummock::event_handler::uploader::tests::{gen_imm, TEST_TABLE_ID};
+    use crate::hummock::event_handler::uploader::test_utils::{gen_imm, TEST_TABLE_ID};
     use crate::hummock::event_handler::uploader::UploadTaskOutput;
     use crate::hummock::event_handler::{HummockEvent, HummockEventHandler, HummockVersionUpdate};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
