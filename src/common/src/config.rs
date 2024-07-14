@@ -223,6 +223,20 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::enable_hummock_data_archive")]
     pub enable_hummock_data_archive: bool,
 
+    /// If enabled, time travel query is available.
+    #[serde(default = "default::meta::enable_hummock_time_travel")]
+    pub enable_hummock_time_travel: bool,
+
+    /// The data retention period for time travel.
+    #[serde(default = "default::meta::hummock_time_travel_retention_ms")]
+    pub hummock_time_travel_retention_ms: u64,
+
+    /// The interval at which a Hummock version snapshot is taken for time travel.
+    ///
+    /// Larger value indicates less storage overhead but worse query performance.
+    #[serde(default = "default::meta::hummock_time_travel_snapshot_interval")]
+    pub hummock_time_travel_snapshot_interval: u64,
+
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected.
     #[serde(default = "default::meta::min_delta_log_num_for_hummock_version_checkpoint")]
@@ -851,6 +865,9 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::compression")]
     pub compression: String,
 
+    #[serde(default = "default::file_cache::flush_buffer_threshold_mb")]
+    pub flush_buffer_threshold_mb: Option<usize>,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -1278,7 +1295,7 @@ pub mod default {
         }
 
         pub fn vacuum_spin_interval_ms() -> u64 {
-            10
+            200
         }
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
@@ -1287,6 +1304,18 @@ pub mod default {
 
         pub fn enable_hummock_data_archive() -> bool {
             false
+        }
+
+        pub fn enable_hummock_time_travel() -> bool {
+            false
+        }
+
+        pub fn hummock_time_travel_retention_ms() -> u64 {
+            24 * 3600 * 1000
+        }
+
+        pub fn hummock_time_travel_snapshot_interval() -> u64 {
+            100
         }
 
         pub fn min_delta_log_num_for_hummock_version_checkpoint() -> u64 {
@@ -1591,6 +1620,14 @@ pub mod default {
         pub fn table_info_statistic_history_times() -> usize {
             240
         }
+
+        pub fn block_file_cache_flush_buffer_threshold_mb() -> usize {
+            256
+        }
+
+        pub fn meta_file_cache_flush_buffer_threshold_mb() -> usize {
+            64
+        }
     }
 
     pub mod streaming {
@@ -1650,6 +1687,10 @@ pub mod default {
 
         pub fn compression() -> String {
             "none".to_string()
+        }
+
+        pub fn flush_buffer_threshold_mb() -> Option<usize> {
+            None
         }
     }
 
@@ -2123,6 +2164,8 @@ pub struct StorageMemoryConfig {
     pub prefetch_buffer_capacity_mb: usize,
     pub block_cache_eviction_config: EvictionConfig,
     pub meta_cache_eviction_config: EvictionConfig,
+    pub block_file_cache_flush_buffer_threshold_mb: usize,
+    pub meta_file_cache_flush_buffer_threshold_mb: usize,
 }
 
 pub const MAX_META_CACHE_SHARD_BITS: usize = 4;
@@ -2234,6 +2277,17 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
                 }
             });
 
+    let block_file_cache_flush_buffer_threshold_mb = s
+        .storage
+        .data_file_cache
+        .flush_buffer_threshold_mb
+        .unwrap_or(default::storage::block_file_cache_flush_buffer_threshold_mb());
+    let meta_file_cache_flush_buffer_threshold_mb = s
+        .storage
+        .meta_file_cache
+        .flush_buffer_threshold_mb
+        .unwrap_or(default::storage::block_file_cache_flush_buffer_threshold_mb());
+
     StorageMemoryConfig {
         block_cache_capacity_mb,
         block_cache_shard_num,
@@ -2244,6 +2298,8 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
         meta_cache_eviction_config,
+        block_file_cache_flush_buffer_threshold_mb,
+        meta_file_cache_flush_buffer_threshold_mb,
     }
 }
 

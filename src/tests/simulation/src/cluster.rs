@@ -455,7 +455,12 @@ impl Cluster {
                 .create_node()
                 .name(format!("meta-{i}"))
                 .ip([192, 168, 1, i as u8].into())
-                .init(move || risingwave_meta_node::start(opts.clone()))
+                .init(move || {
+                    risingwave_meta_node::start(
+                        opts.clone(),
+                        CancellationToken::new(), // dummy
+                    )
+                })
                 .build();
         }
 
@@ -530,7 +535,12 @@ impl Cluster {
                 .create_node()
                 .name(format!("compactor-{i}"))
                 .ip([192, 168, 4, i as u8].into())
-                .init(move || risingwave_compactor::start(opts.clone()))
+                .init(move || {
+                    risingwave_compactor::start(
+                        opts.clone(),
+                        CancellationToken::new(), // dummy
+                    )
+                })
                 .build();
         }
 

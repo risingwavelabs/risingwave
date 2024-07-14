@@ -1501,6 +1501,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-glue"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b6c34f6f4b9e8f76274a9b309838d670b3bb69b4be6756394de54718aa2ca0a"
+dependencies = [
+ "aws-credential-types",
+ "aws-http",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "http 0.2.9",
+ "regex",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-kinesis"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5022,8 +5044,9 @@ dependencies = [
 
 [[package]]
 name = "etcd-client"
-version = "0.12.1"
-source = "git+https://github.com/risingwavelabs/etcd-client.git?rev=4e84d40#4e84d40a84b35718d814cc2afccc9274c9d78e1e"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ae697f3928e8c89ae6f4dcf788059f49fd01a76dc53e63628f5a33881f5715e"
 dependencies = [
  "http 0.2.9",
  "prost 0.12.1",
@@ -5409,9 +5432,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbfceb28a004d50b6110fd012db1d52d318d15f721dbb5b65eda261b821c1baa"
+checksum = "1b5f358e9b9492a9e9af905934ef4736a97a001fa19232f4a29f42974cf7a24c"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5427,9 +5450,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ce1b903e1e142eafe8cd3183087fcd7ed6452e5dc8dfb5356a607ec2aa1c869"
+checksum = "e109f1fd012cc2f0785db5711c73c388fca2d2ac6e2aabb4eaa3a8af98b4dcdb"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -5449,9 +5472,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-intrusive"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f7883ac7a8a69115f5bd84072a0b98d4ba72feacddf9040c217a5012bb352ff"
+checksum = "2e7ad91ad11f2c94bb4b3b88acd447f3145224415d776f163d2b06a9ed24e63a"
 dependencies = [
  "foyer-common",
  "itertools 0.13.0",
@@ -5459,9 +5482,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9fd7b0ce80867803c6b197db20cc1a49fcecc9d5070d2fb829660ec19acf9e72"
+checksum = "29273589433f89d61347b196754bfa22357420d1adbf815d354c23512106a194"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.5.0",
@@ -5482,9 +5505,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4205359a7ea9d05ff7525f0e55a5257a593c89b4e22ebfa07e06a84c2e163202"
+checksum = "79c20580e456ea337e4bdefa9fba7ff19b42cd87432bda3ef3579ef9e1057c7e"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -8916,38 +8939,6 @@ dependencies = [
 
 [[package]]
 name = "parquet"
-version = "50.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "547b92ebf0c1177e3892f44c8f79757ee62e678d564a9834189725f2c5b7a750"
-dependencies = [
- "ahash 0.8.11",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-cast 50.0.0",
- "arrow-data 50.0.0",
- "arrow-ipc 50.0.0",
- "arrow-schema 50.0.0",
- "arrow-select 50.0.0",
- "base64 0.21.7",
- "brotli 3.5.0",
- "bytes",
- "chrono",
- "flate2",
- "half 2.3.1",
- "hashbrown 0.14.3",
- "lz4_flex",
- "num",
- "num-bigint",
- "paste",
- "seq-macro",
- "snap",
- "thrift",
- "twox-hash",
- "zstd 0.13.0",
-]
-
-[[package]]
-name = "parquet"
 version = "52.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29c3b5322cc1bbf67f11c079c42be41a55949099b78732f7dba9e15edde40eab"
@@ -10694,6 +10685,7 @@ dependencies = [
  "memcomparable",
  "opendal",
  "parking_lot 0.12.1",
+ "parquet 52.0.0",
  "paste",
  "prometheus",
  "prost 0.12.1",
@@ -11153,6 +11145,7 @@ dependencies = [
  "aws-credential-types",
  "aws-msk-iam-sasl-signer",
  "aws-sdk-dynamodb",
+ "aws-sdk-glue",
  "aws-sdk-kinesis",
  "aws-sdk-s3",
  "aws-smithy-http",
@@ -11203,7 +11196,7 @@ dependencies = [
  "opendal",
  "openssl",
  "parking_lot 0.12.1",
- "parquet 50.0.0",
+ "parquet 52.0.0",
  "paste",
  "pg_bigdecimal",
  "postgres-openssl",
@@ -11515,6 +11508,7 @@ dependencies = [
  "base64 0.22.0",
  "bk-tree",
  "bytes",
+ "chrono",
  "clap",
  "downcast-rs",
  "dyn-clone",

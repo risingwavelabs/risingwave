@@ -38,7 +38,6 @@ pub mod pulsar;
 pub mod redis;
 pub mod remote;
 pub mod snowflake;
-pub mod snowflake_connector;
 pub mod sqlserver;
 pub mod starrocks;
 pub mod test_sink;

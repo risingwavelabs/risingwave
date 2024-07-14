@@ -235,7 +235,13 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             E::Protobuf => SinkEncode::Protobuf,
             E::Template => SinkEncode::Template,
             E::Avro => SinkEncode::Avro,
-            e @ (E::Unspecified | E::Native | E::Csv | E::Bytes | E::None | E::Text) => {
+            e @ (E::Unspecified
+            | E::Native
+            | E::Csv
+            | E::Bytes
+            | E::None
+            | E::Text
+            | E::Parquet) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink encode unsupported: {}",
                     e.as_str_name()
@@ -252,6 +258,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             | E::Protobuf
             | E::Template
             | E::Native
+            | E::Parquet
             | E::None) => {
                 return Err(SinkError::Config(anyhow!(
                     "unsupported {} as sink key encode",

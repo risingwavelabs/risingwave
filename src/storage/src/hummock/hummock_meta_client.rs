@@ -18,7 +18,9 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockSstableObjectId, SstObjectIdRange, SyncResult};
-use risingwave_pb::hummock::{HummockSnapshot, SubscribeCompactionEventRequest, VacuumTask};
+use risingwave_pb::hummock::{
+    HummockSnapshot, PbHummockVersion, SubscribeCompactionEventRequest, VacuumTask,
+};
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient, MetaClient};
 use tokio::sync::mpsc::UnboundedSender;
@@ -109,9 +111,13 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
             .await
     }
 
-    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()> {
+    async fn trigger_full_gc(
+        &self,
+        sst_retention_time_sec: u64,
+        prefix: Option<String>,
+    ) -> Result<()> {
         self.meta_client
-            .trigger_full_gc(sst_retention_time_sec)
+            .trigger_full_gc(sst_retention_time_sec, prefix)
             .await
     }
 
@@ -126,5 +132,9 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         BoxStream<'static, CompactionEventItem>,
     )> {
         self.meta_client.subscribe_compaction_event().await
+    }
+
+    async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion> {
+        self.meta_client.get_version_by_epoch(epoch).await
     }
 }

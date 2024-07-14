@@ -469,9 +469,9 @@ impl HummockEventHandler {
         table_ids: HashSet<TableId>,
     ) {
         debug!(
-            "awaiting for epoch to be synced: {}, max_synced_epoch: {}",
             new_sync_epoch,
-            self.uploader.max_synced_epoch()
+            ?table_ids,
+            "awaiting for epoch to be synced",
         );
         self.uploader
             .start_sync_epoch(new_sync_epoch, sync_result_sender, table_ids);
@@ -481,7 +481,6 @@ impl HummockEventHandler {
         info!(
             prev_epoch,
             max_committed_epoch = self.uploader.max_committed_epoch(),
-            max_synced_epoch = self.uploader.max_synced_epoch(),
             "handle clear event"
         );
 
@@ -737,6 +736,9 @@ impl HummockEventHandler {
             }
             HummockEvent::Shutdown => {
                 unreachable!("shutdown is handled specially")
+            }
+            HummockEvent::StartEpoch { epoch, table_ids } => {
+                self.uploader.start_epoch(epoch, table_ids);
             }
             HummockEvent::InitEpoch {
                 instance_id,
@@ -1147,6 +1149,11 @@ mod tests {
             rx.await.unwrap()
         };
 
+        send_event(HummockEvent::StartEpoch {
+            epoch: epoch1,
+            table_ids: HashSet::from_iter([TEST_TABLE_ID]),
+        });
+
         send_event(HummockEvent::InitEpoch {
             instance_id: guard.instance_id,
             init_epoch: epoch1,
@@ -1160,6 +1167,11 @@ mod tests {
         send_event(HummockEvent::ImmToUploader {
             instance_id: guard.instance_id,
             imm: imm1,
+        });
+
+        send_event(HummockEvent::StartEpoch {
+            epoch: epoch2,
+            table_ids: HashSet::from_iter([TEST_TABLE_ID]),
         });
 
         send_event(HummockEvent::LocalSealEpoch {
@@ -1179,6 +1191,10 @@ mod tests {
         });
 
         let epoch3 = epoch2.next_epoch();
+        send_event(HummockEvent::StartEpoch {
+            epoch: epoch3,
+            table_ids: HashSet::from_iter([TEST_TABLE_ID]),
+        });
         send_event(HummockEvent::LocalSealEpoch {
             instance_id: guard.instance_id,
             next_epoch: epoch3,
