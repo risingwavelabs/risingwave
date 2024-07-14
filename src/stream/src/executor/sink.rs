@@ -147,6 +147,12 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             }
         });
 
+        tracing::info!("stream_key:{:?}", stream_key);
+        tracing::info!("pi_indices:{:?}", self.info.pk_indices);
+        tracing::info!(
+            "stream_key_sink_pk_mismatch:{:?}",
+            stream_key_sink_pk_mismatch
+        );
         // When stream key is different from the user defined primary key columns for sinks. The operations could be out of order
         // stream key: a,b
         // sink pk: a
