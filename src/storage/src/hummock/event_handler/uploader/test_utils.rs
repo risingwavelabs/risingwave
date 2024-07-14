@@ -15,7 +15,7 @@
 #![cfg(test)]
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::future::{Future, poll_fn};
+use std::future::{poll_fn, Future};
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
@@ -26,7 +26,6 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use itertools::Itertools;
 use prometheus::core::GenericGauge;
-use spin::Mutex;
 use risingwave_common::catalog::TableId;
 use risingwave_common::must_match;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
@@ -35,6 +34,7 @@ use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{KeyRange, SstableInfo, StateTableInfoDelta};
+use spin::Mutex;
 use tokio::spawn;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::oneshot;
