@@ -125,8 +125,9 @@ message CreateMaterializedViewRequest {
   // For that the controller will create a new compute node, which does backfilling and then is deleted. 
   // May alleviate pressure on the cluster during backfill process. 
   enum BackfillType {
-    REGULAR = 0;
-    SERVERLESS = 1;
+    UNSPECIFIED = 0;
+    REGULAR = 1;
+    SERVERLESS = 2;
   }
   BackfillType backfill = 3;
 }
