@@ -13,7 +13,7 @@ set streaming_rate_limit=1;
 ############## Test drop foreground mv
 onlyif can-use-recover
 system ok
-psql -h localhost -p 4566 -d dev -U root -c 'create materialized view m1 as select * from t;' &
+risedev psql -c 'create materialized view m1 as select * from t;' &
 
 onlyif can-use-recover
 sleep 5s
