@@ -30,6 +30,9 @@ pub enum RpcError {
     #[error(transparent)]
     GrpcStatus(
         #[from]
+        // Typically it does not have a backtrace,
+        // but this is to let `thiserror` generate `provide` implementation to make `Extra` work.
+        // See `risingwave_error::tonic::extra`.
         #[backtrace]
         Box<TonicStatusWrapper>,
     ),

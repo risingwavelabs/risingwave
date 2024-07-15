@@ -565,8 +565,7 @@ fn merge_node_rpc_errors<E: Error + Send + Sync + 'static>(
     // Find the error with the highest score.
     let max_score = errors
         .iter()
-        .map(|(_, e)| request_value::<Score>(e))
-        .flatten()
+        .filter_map(|(_, e)| request_value::<Score>(e))
         .max();
 
     if let Some(max_score) = max_score {

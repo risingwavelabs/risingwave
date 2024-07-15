@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod extra;
+
 use std::borrow::Cow;
 use std::error::Error;
 use std::sync::Arc;
@@ -24,36 +26,8 @@ use tonic::metadata::{MetadataMap, MetadataValue};
 const ERROR_KEY: &str = "risingwave-error-bin";
 
 /// The service name that the error is from. Used to provide better error message.
+// TODO: also make it a field of `Extra`?
 type ServiceName = Cow<'static, str>;
-
-pub mod extra {
-    use serde::{Deserialize, Serialize};
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-    pub struct Score(pub i32);
-
-    #[derive(Debug, Default, Clone, Serialize, Deserialize)]
-    pub(super) struct Extra {
-        pub score: Option<Score>,
-    }
-
-    impl Extra {
-        pub fn new<T>(error: &T) -> Self
-        where
-            T: ?Sized + std::error::Error,
-        {
-            Self {
-                score: std::error::request_value(error),
-            }
-        }
-
-        pub fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
-            if let Some(score) = self.score {
-                request.provide_value(score);
-            }
-        }
-    }
-}
 
 /// The error produced by the gRPC server and sent to the client on the wire.
 #[derive(Debug, Serialize, Deserialize)]
