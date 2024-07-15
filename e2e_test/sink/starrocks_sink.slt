@@ -40,7 +40,7 @@ CREATE TABLE reserved_words (id int primary key, "order" text, "from" text);
 
 statement ok
 CREATE SINK sink_reserved_words
-FROM reserved_words 
+FROM reserved_words
 WITH (
     connector = 'starrocks',
     type = 'upsert',
