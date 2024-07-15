@@ -79,7 +79,7 @@ message WorkerNode {
   // Meta may assign labels to worker nodes to partition workload by label.
   // This is used for serverless backfilling of materialized views.
   // If a WorkerNode has labels set it indicates that this node only accepts certain work.
-  // If a WorkerNode has no labels set it indicates that this node accepts any work.
+  // If a WorkerNode has no labels (empty map or null value) the node accepts any work.
   // The materialized view has to have both a matching key and value to be scheduled on a node.
   // E.g. {"some":"value"} can be scheduled on a node with the labels
   // { 
@@ -87,8 +87,8 @@ message WorkerNode {
   //   "some":"value"
   // }
   // but {"some":"thing"} can not be scheduled on that node.
-  // Worker nodes with an empty node_labels map can host any materialized view or sink or table.
-  map<string, string> node_labels = 10;
+  // Worker nodes with an empty or null node_labels map MVs with an empty or null node_label map.
+  optional map<string, string> node_labels = 10;
 }
 
 message Buffer {

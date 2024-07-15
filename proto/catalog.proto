@@ -408,7 +408,7 @@ message Table {
 
   // If a materialize view, sink, or table has a node_label, its actors can only be scheduled 
   // on compute nodes with that label.
-  // If a it does not have a node_label it can be scheduled on any 
+  // If a it does not have a node_label (empty map or null value) it can be scheduled on any 
   // Compute node without a label. The node has to have both a matching key and value.
   // E.g. {"some":"value"} can be scheduled on a node with the labels
   // { 
@@ -417,8 +417,9 @@ message Table {
   // }
   // but {"some":"thing"} can not be scheduled on that node.
   // A materialized view or sink or table with an empty node_labels map can only be scheduled on nodes with 
-  // empty node_labels map, but a node with empty node_labels can host anything.
-  map<string, string> node_labels = 101;
+  // empty/null node_labels map. 
+  // A node with an empty/null node_labels map can only host streaming jobs with an empty node_labels map. 
+  optional map<string, string> node_labels = 101;
 }
 
 enum HandleConflictBehavior {
