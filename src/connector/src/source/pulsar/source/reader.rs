@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
-use arrow_array_iceberg::{Int32Array, Int64Array, RecordBatch};
+use arrow_array::{Int32Array, Int64Array, RecordBatch};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;

@@ -1239,7 +1239,7 @@ pub async fn extract_iceberg_columns(
     if let ConnectorProperties::Iceberg(properties) = props {
         let iceberg_config: IcebergConfig = properties.to_iceberg_config();
         let table = iceberg_config.load_table().await?;
-        let iceberg_schema: arrow_schema_iceberg::Schema = table
+        let iceberg_schema: arrow_schema::Schema = table
             .current_table_metadata()
             .current_schema()?
             .clone()
@@ -1295,7 +1295,7 @@ pub async fn check_iceberg_source(
 
     let table = iceberg_config.load_table().await?;
 
-    let iceberg_schema: arrow_schema_iceberg::Schema = table
+    let iceberg_schema: arrow_schema::Schema = table
         .current_table_metadata()
         .current_schema()?
         .clone()
@@ -1316,7 +1316,7 @@ pub async fn check_iceberg_source(
         .filter(|f1| schema.fields.iter().any(|f2| f1.name() == &f2.name))
         .cloned()
         .collect::<Vec<_>>();
-    let new_iceberg_schema = arrow_schema_iceberg::Schema::new(new_iceberg_field);
+    let new_iceberg_schema = arrow_schema::Schema::new(new_iceberg_field);
 
     risingwave_connector::sink::iceberg::try_matches_arrow_schema(&schema, &new_iceberg_schema)?;
 

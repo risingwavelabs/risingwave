@@ -121,7 +121,7 @@ aws-smithy-types = { version = "1", default-features = false, features = [
 aws-endpoint = "0.60"
 aws-types = "1"
 axum = "=0.7.4" # TODO: 0.7.5+ does not work with current toolchain
-etcd-client = { package = "madsim-etcd-client", version = "0.4" }
+etcd-client = { package = "madsim-etcd-client", version = "0.5" } # etcd-client v0.13
 futures-async-stream = "0.2.9"
 hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "0.4.1", features = [
@@ -129,36 +129,33 @@ rdkafka = { package = "madsim-rdkafka", version = "0.4.1", features = [
 ] }
 hashbrown = { version = "0.14", features = ["ahash", "inline-more", "nightly"] }
 criterion = { version = "0.5", features = ["async_futures"] }
-tonic = { package = "madsim-tonic", version = "0.4.1" }
+tonic = { package = "madsim-tonic", version = "0.4.2" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
 otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "492c244e0be91feb659c0cd48a624bbd96045a33" }
 prost = { version = "0.12" }
 icelake = { git = "https://github.com/icelake-io/icelake", rev = "07d53893d7788b4e41fc11efad8a6be828405c31", features = [
     "prometheus",
 ] }
-arrow-array-iceberg = { package = "arrow-array", version = "52" }
-arrow-schema-iceberg = { package = "arrow-schema", version = "52" }
-arrow-buffer-iceberg = { package = "arrow-buffer", version = "52" }
-arrow-cast-iceberg = { package = "arrow-cast", version = "52" }
+
 # TODO
 # After apache/iceberg-rust#411 is merged, we move to the upstream version.
 iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0c6e133e6f4655ff9ce4ad57b577dc7f692dd902" }
 iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0c6e133e6f4655ff9ce4ad57b577dc7f692dd902" }
 opendal = "0.47"
-arrow-array = "50"
-arrow-arith = "50"
-arrow-cast = "50"
-arrow-schema = "50"
-arrow-buffer = "50"
-arrow-flight = "50"
-arrow-select = "50"
-arrow-ord = "50"
-arrow-row = "50"
+arrow-array = "52"
+arrow-arith = "52"
+arrow-cast = "52"
+arrow-schema = "52"
+arrow-buffer = "52"
+arrow-flight = "52"
+arrow-select = "52"
+arrow-ord = "52"
+arrow-row = "52"
 arrow-udf-js = "0.3.1"
-arrow-udf-js-deno = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "fa36365" }
+# arrow-udf-js-deno = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "d248f21" }
 arrow-udf-wasm = { version = "0.2.2", features = ["build"] }
 arrow-udf-python = "0.2"
-arrow-udf-flight = "0.1"
+arrow-udf-flight = "0.2"
 arrow-array-deltalake = { package = "arrow-array", version = "48.0.1" }
 arrow-buffer-deltalake = { package = "arrow-buffer", version = "48.0.1" }
 arrow-cast-deltalake = { package = "arrow-cast", version = "48.0.1" }
@@ -331,19 +328,19 @@ debug = 1
 # Patch third-party crates for deterministic simulation.
 quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "948bdc3" }
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
-tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e" }
+tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd10556" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
-# patch to remove preserve_order from serde_json
-deno_core = { git = "https://github.com/bakjos/deno_core", rev = "9b241c6" }
-# patch to user reqwest 0.12.2
-deno_fetch = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_http = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_net = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_tls = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_web = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_websocket = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+# # patch to remove preserve_order from serde_json
+# deno_core = { git = "https://github.com/bakjos/deno_core", rev = "9b241c6" }
+# # patch to user reqwest 0.12.2
+# deno_fetch = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+# deno_http = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+# deno_net = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+# deno_tls = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+# deno_web = { git = "https://github.com/bakjos/deno", rev = "787a232" }
+# deno_websocket = { git = "https://github.com/bakjos/deno", rev = "787a232" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }
 
