@@ -37,7 +37,7 @@ use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, WorkerExtraInfo};
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification,
-    NotificationVersion, StreamingClusterInfo, WorkerId,
+    NotificationVersion, StreamingClusterInfo, StreamingJob, WorkerId,
 };
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::{to_build_actor_info, SplitAssignment};
@@ -836,11 +836,11 @@ impl MetadataManager {
 impl MetadataManager {
     pub(crate) async fn wait_streaming_job_finished(
         &self,
-        id: TableId,
+        job: &StreamingJob,
     ) -> MetaResult<NotificationVersion> {
         match self {
-            MetadataManager::V1(mgr) => mgr.wait_streaming_job_finished(id.table_id).await,
-            MetadataManager::V2(mgr) => mgr.wait_streaming_job_finished(id.table_id as _).await,
+            MetadataManager::V1(mgr) => mgr.wait_streaming_job_finished(job).await,
+            MetadataManager::V2(mgr) => mgr.wait_streaming_job_finished(job.id() as _).await,
         }
     }
 }
@@ -851,8 +851,8 @@ impl MetadataManagerV2 {
         id: ObjectId,
     ) -> MetaResult<NotificationVersion> {
         let mut mgr = self.catalog_controller.get_inner_write_guard().await;
-        if let Some(version) = mgr.table_is_finished(id) {
-            return version;
+        if mgr.streaming_job_is_finished(id).await? {
+            return Ok(self.catalog_controller.current_notification_version().await);
         }
         let (tx, rx) = oneshot::channel();
 
@@ -861,30 +861,30 @@ impl MetadataManagerV2 {
         rx.await.map_err(|e| anyhow!(e))?
     }
 
-    pub(crate) async fn notify_finish_failed(&self, id: u32, err: MetaError) {
+    pub(crate) async fn notify_finish_failed(&self, err: &MetaError) {
         let mut mgr = self.catalog_controller.get_inner_write_guard().await;
-        mgr.notify_finish_failed(id as _, err);
+        mgr.notify_finish_failed(err);
     }
 }
 
 impl MetadataManagerV1 {
     pub(crate) async fn wait_streaming_job_finished(
         &self,
-        id: u32,
+        job: &StreamingJob,
     ) -> MetaResult<NotificationVersion> {
         let mut mgr = self.catalog_manager.get_catalog_core_guard().await;
-        if let Some(version) = mgr.table_is_finished(id) {
-            return version;
+        if mgr.streaming_job_is_finished(job)? {
+            return Ok(self.catalog_manager.current_notification_version().await);
         }
         let (tx, rx) = oneshot::channel();
 
-        mgr.register_finish_notifier(id, tx);
+        mgr.register_finish_notifier(job.id(), tx);
         drop(mgr);
         rx.await.map_err(|e| anyhow!(e))?
     }
 
-    pub(crate) async fn notify_finish_failed(&self, id: u32, err: MetaError) {
+    pub(crate) async fn notify_finish_failed(&self, err: &MetaError) {
         let mut mgr = self.catalog_manager.get_catalog_core_guard().await;
-        mgr.notify_finish_failed(id, err);
+        mgr.notify_finish_failed(err);
     }
 }

@@ -36,7 +36,6 @@ use risingwave_hummock_sdk::table_watermark::{
 };
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_pb::catalog::table::TableType;
-use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{PausedReason, PbRecoveryStatus};
@@ -61,9 +60,8 @@ use crate::hummock::{CommitEpochInfo, HummockManagerRef, NewTableFragmentInfo};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
-    MetadataManager, StreamingJob, SystemParamsManagerImpl, WorkerId,
+    MetadataManager, SystemParamsManagerImpl, WorkerId,
 };
-use crate::model::{ActorId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::stream::{ScaleControllerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -88,12 +86,6 @@ pub(crate) struct TableMap<T> {
     inner: HashMap<TableId, T>,
 }
 
-impl<T> TableMap<T> {
-    pub fn remove(&mut self, table_id: &TableId) -> Option<T> {
-        self.inner.remove(table_id)
-    }
-}
-
 impl<T> From<HashMap<TableId, T>> for TableMap<T> {
     fn from(inner: HashMap<TableId, T>) -> Self {
         Self { inner }
@@ -105,13 +97,6 @@ impl<T> From<TableMap<T>> for HashMap<TableId, T> {
         table_map.inner
     }
 }
-
-pub(crate) type TableActorMap = TableMap<HashSet<ActorId>>;
-pub(crate) type TableUpstreamMvCountMap = TableMap<HashMap<TableId, usize>>;
-pub(crate) type TableDefinitionMap = TableMap<String>;
-pub(crate) type TableFragmentMap = TableMap<TableFragments>;
-pub(crate) type TableStreamJobMap = TableMap<StreamingJob>;
-pub(crate) type TableInternalTableMap = TableMap<Vec<Table>>;
 
 /// The reason why the cluster is recovering.
 enum RecoveryReason {
@@ -803,7 +788,12 @@ impl GlobalBarrierManager {
     }
 
     async fn failure_recovery(&mut self, err: MetaError) {
-        self.context.tracker.lock().await.abort_all(&err).await;
+        self.context
+            .tracker
+            .lock()
+            .await
+            .abort_all(&err, &self.context)
+            .await;
         self.checkpoint_control.clear_on_err(&err).await;
         self.pending_non_checkpoint_barriers.clear();
 
@@ -831,7 +821,12 @@ impl GlobalBarrierManager {
 
     async fn adhoc_recovery(&mut self) {
         let err = MetaErrorInner::AdhocRecovery.into();
-        self.context.tracker.lock().await.abort_all(&err).await;
+        self.context
+            .tracker
+            .lock()
+            .await
+            .abort_all(&err, &self.context)
+            .await;
         self.checkpoint_control.clear_on_err(&err).await;
 
         if self.enable_recovery {
