@@ -488,7 +488,7 @@ service NotificationService {
 message BackfillResponse {
    // holds all materialized views which have completed their backfill operations
    // contains IDs from catalog.Table.id
-   repeated uint32 materializedViewsBackfillsCompleted = 1;
+   repeated uint32 materializedViewsBackfillCompleted = 1;
 }
 
 message BackfillRequest {
@@ -552,7 +552,7 @@ message UpdateStreamingJobRequest {
   // Id of the materialized view, table, or sink which we want to update
   uint32 id = 1;
 
-  oneof streaming_job {
+  oneof streamingJob {
     catalog.Table table = 2;
     catalog.Sink sinks = 3;
   }
