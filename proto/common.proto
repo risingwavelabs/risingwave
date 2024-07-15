@@ -88,7 +88,7 @@ message WorkerNode {
   // }
   // but {"some":"thing"} can not be scheduled on that node.
   // Worker nodes with an empty node_labels map can host any MV/sink/table.
-  map<string, string> node_labels = 11;
+  map<string, string> node_labels = 10;
 }
 
 message Buffer {
