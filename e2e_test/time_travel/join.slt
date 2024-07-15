@@ -1,3 +1,7 @@
+# Set the license key to default. In debug mode, this will set the license key to a paid tier key.
+statement ok
+ALTER SYSTEM SET license_key TO DEFAULT;
+
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
