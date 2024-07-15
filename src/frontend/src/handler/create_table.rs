@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -28,10 +28,10 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
-use risingwave_connector::source;
 use risingwave_connector::source::cdc::external::{
     ExternalTableConfig, ExternalTableImpl, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
+use risingwave_connector::{source, WithOptionsSecResolved};
 use risingwave_pb::catalog::{PbSource, PbTable, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
@@ -486,7 +486,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let with_properties = bind_connector_props(&handler_args, &source_schema, false)?;
 
     let (columns_from_resolve_source, source_info) =
-        bind_columns_from_source(session, &source_schema, &with_properties).await?;
+        bind_columns_from_source(session, &source_schema, Either::Left(&with_properties)).await?;
 
     let (source_catalog, database_id, schema_id) = bind_create_source_or_table_with_connector(
         handler_args.clone(),
@@ -541,6 +541,12 @@ pub(crate) fn gen_create_table_plan(
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
+
+    let (_, secret_refs) = context.with_options().clone().into_parts();
+    if !secret_refs.is_empty() {
+        return Err(crate::error::ErrorCode::InvalidParameterValue("Secret reference is not allowed in options when creating table without external source".to_string()).into());
+    }
+
     gen_create_table_plan_without_source(
         context,
         table_name,
@@ -740,7 +746,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     external_table_name: String,
     mut columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
-    connect_properties: BTreeMap<String, String>,
+    connect_properties: WithOptionsSecResolved,
     mut col_id_gen: ColumnIdGenerator,
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
@@ -786,6 +792,8 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
         .collect();
 
+    let (options, secret_refs) = connect_properties.into_parts();
+
     let cdc_table_desc = CdcTableDesc {
         table_id,
         source_id: source.id.into(), // id of cdc source streaming job
@@ -793,7 +801,8 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         pk: table_pk,
         columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
         stream_key: pk_column_indices,
-        connect_properties: connect_properties.into_iter().collect(),
+        connect_properties: options,
+        secret_refs,
     };
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
@@ -841,9 +850,9 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 }
 
 fn derive_connect_properties(
-    source_with_properties: &BTreeMap<String, String>,
+    source_with_properties: &WithOptionsSecResolved,
     external_table_name: String,
-) -> Result<BTreeMap<String, String>> {
+) -> Result<WithOptionsSecResolved> {
     use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR};
     // we should remove the prefix from `full_table_name`
     let mut connect_properties = source_with_properties.clone();
@@ -1091,12 +1100,13 @@ fn sanity_check_for_cdc_table(
 async fn derive_schema_for_cdc_table(
     column_defs: &Vec<ColumnDef>,
     constraints: &Vec<TableConstraint>,
-    connect_properties: BTreeMap<String, String>,
+    connect_properties: WithOptionsSecResolved,
     need_auto_schema_map: bool,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
     if need_auto_schema_map {
-        let config = ExternalTableConfig::try_from_btreemap(connect_properties)
+        let (options, secret_refs) = connect_properties.into_parts();
+        let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
             .context("failed to extract external table config")?;
 
         let table = ExternalTableImpl::connect(config)
@@ -1205,7 +1215,7 @@ pub fn check_create_table_with_source(
     if cdc_table_info.is_some() {
         return Ok(source_schema);
     }
-    let defined_source = with_options.inner().contains_key(UPSTREAM_SOURCE_KEY);
+    let defined_source = with_options.contains_key(UPSTREAM_SOURCE_KEY);
     if !include_column_options.is_empty() && !defined_source {
         return Err(ErrorCode::InvalidInputSyntax(
             "INCLUDE should be used with a connector".to_owned(),

@@ -3495,6 +3495,18 @@ impl Parser<'_> {
                     Some('\'') => Ok(Value::SingleQuotedString(w.value)),
                     _ => self.expected_at(checkpoint, "A value")?,
                 },
+                Keyword::SECRET => {
+                    let secret_name = self.parse_object_name()?;
+                    let ref_as = if self.parse_keywords(&[Keyword::AS, Keyword::FILE]) {
+                        SecretRefAsType::File
+                    } else {
+                        SecretRefAsType::Text
+                    };
+                    Ok(Value::Ref(SecretRef {
+                        secret_name,
+                        ref_as,
+                    }))
+                }
                 _ => self.expected_at(checkpoint, "a concrete value"),
             },
             Token::Number(ref n) => Ok(Value::Number(n.clone())),
