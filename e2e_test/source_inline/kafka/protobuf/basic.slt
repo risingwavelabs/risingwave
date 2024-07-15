@@ -67,9 +67,9 @@ select min(id), max(id), max((sc).file_name) from sr_pb_test;
 0 19 source/context_019.proto
 
 query TT
-select min(rw_key), max(rw_key) from sr_pb_upsert;
+select convert_from(min(rw_key), 'UTF-8'), convert_from(max(rw_key), 'UTF-8') from sr_pb_upsert;
 ----
-\x7b226964223a20307d \x7b226964223a20397d
+{"id": 0} {"id": 9}
 
 statement ok
 drop table sr_pb_test;
