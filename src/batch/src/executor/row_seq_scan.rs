@@ -500,7 +500,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
 
 pub fn unix_timestamp_sec_to_epoch(ts: i64) -> risingwave_common::util::epoch::Epoch {
     let ts = ts.checked_add(1).unwrap();
-    risingwave_common::util::epoch::Epoch::from_unix_millis(
+    risingwave_common::util::epoch::Epoch::from_unix_millis_or_earliest(
         u64::try_from(ts).unwrap().checked_mul(1000).unwrap(),
     )
 }
