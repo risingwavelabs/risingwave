@@ -417,9 +417,9 @@ message Table {
   // }
   // but {"some":"thing"} can not be scheduled on that node.
   // A materialized view or sink or table with an empty node_labels map can only be scheduled on nodes with 
-  // empty/null node_labels map. 
-  // A node with an empty/null node_labels map can only host streaming jobs with an empty node_labels map. 
-  optional map<string, string> node_labels = 101;
+  // empty node_labels map. 
+  // A node with an empty node_labels map can only host streaming jobs with an empty node_labels map. 
+  map<string, string> node_labels = 101;
 
   // If this is a materialized view: True if backfill is done, else false.
   // If this is a regular table: Always true.

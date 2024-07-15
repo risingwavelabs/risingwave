@@ -87,8 +87,8 @@ message WorkerNode {
   //   "some":"value"
   // }
   // but {"some":"thing"} can not be scheduled on that node.
-  // Worker nodes with an empty or null node_labels map MVs with an empty or null node_label map.
-  optional map<string, string> node_labels = 10;
+  // Worker nodes with an empty node_labels map MVs with an empty or null node_label map.
+  map<string, string> node_labels = 10;
 }
 
 message Buffer {
