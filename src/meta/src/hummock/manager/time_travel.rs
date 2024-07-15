@@ -16,7 +16,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use risingwave_common::license::Feature;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::time_travel::{
@@ -53,11 +52,6 @@ impl HummockManager {
     }
 
     pub(crate) async fn init_time_travel_state(&self) -> Result<()> {
-        if self.env.opts.enable_hummock_time_travel {
-            Feature::TimeTravel
-                .check_available()
-                .map_err(|e| Error::Internal(anyhow::anyhow!(e)))?;
-        }
         if self.env.opts.enable_hummock_time_travel && self.sql_store().is_none() {
             return Err(require_sql_meta_store_err());
         }
