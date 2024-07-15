@@ -288,7 +288,12 @@ pub fn bind_sql_column_constraints(
                     binder.set_clause(Some(Clause::GeneratedColumn));
                     let idx = binder
                         .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
-                    let expr_impl = binder.bind_expr(expr)?;
+                    let expr_impl = binder.bind_expr(expr).with_context(|| {
+                        format!(
+                            "fail to bind expression in generated column \"{}\"",
+                            column.name.real_value()
+                        )
+                    })?;
 
                     check_generated_column_constraints(
                         &column.name.real_value(),
