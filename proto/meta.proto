@@ -486,9 +486,9 @@ service NotificationService {
 }
 
 message BackfillResponse {
-   // holds all MVs which have completed their backfill operations
+   // holds all materialized views which have completed their backfill operations
    // contains IDs from catalog.Table.id
-   repeated uint32 mv_backfills_completed = 1;
+   repeated uint32 materializedViewsBackfillsCompleted = 1;
 }
 
 message BackfillRequest {
