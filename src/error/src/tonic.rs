@@ -26,11 +26,41 @@ const ERROR_KEY: &str = "risingwave-error-bin";
 /// The service name that the error is from. Used to provide better error message.
 type ServiceName = Cow<'static, str>;
 
+pub mod extra {
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+    pub struct Score(pub i32);
+
+    #[derive(Debug, Default, Clone, Serialize, Deserialize)]
+    pub(super) struct Extra {
+        pub score: Option<Score>,
+    }
+
+    impl Extra {
+        pub fn new<T>(error: &T) -> Self
+        where
+            T: ?Sized + std::error::Error,
+        {
+            Self {
+                score: std::error::request_value(error),
+            }
+        }
+
+        pub fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
+            if let Some(score) = self.score {
+                request.provide_value(score);
+            }
+        }
+    }
+}
+
 /// The error produced by the gRPC server and sent to the client on the wire.
 #[derive(Debug, Serialize, Deserialize)]
 struct ServerError {
     error: serde_error::Error,
     service_name: Option<ServiceName>,
+    extra: extra::Extra,
 }
 
 impl std::fmt::Display for ServerError {
@@ -42,6 +72,10 @@ impl std::fmt::Display for ServerError {
 impl std::error::Error for ServerError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         self.error.source()
+    }
+
+    fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
+        self.extra.provide(request);
     }
 }
 
@@ -55,6 +89,7 @@ where
     let source = ServerError {
         error: serde_error::Error::new(error),
         service_name,
+        extra: extra::Extra::new(error),
     };
     let serialized = bincode::serialize(&source).unwrap();
 

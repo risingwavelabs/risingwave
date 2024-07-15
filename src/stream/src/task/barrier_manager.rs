@@ -369,7 +369,7 @@ pub(super) struct LocalBarrierWorker {
     actor_failure_rx: UnboundedReceiver<(ActorId, StreamError)>,
 
     /// Cached result of [`Self::try_find_root_failure`].
-    cached_root_failure: Option<StreamError>,
+    cached_root_failure: Option<ScoredStreamError>,
 }
 
 impl LocalBarrierWorker {
@@ -793,7 +793,10 @@ impl LocalBarrierWorker {
     /// This is similar to [`Self::notify_actor_failure`], but since there's not always an actor failure,
     /// the given `err` will be used if there's no root failure found.
     async fn notify_other_failure(&mut self, err: StreamError, message: impl Into<String>) {
-        let root_err = self.try_find_root_failure().await.unwrap_or(err);
+        let root_err = self
+            .try_find_root_failure()
+            .await
+            .unwrap_or(ScoredStreamError::fallback(err));
 
         self.control_stream_handle.reset_stream_with_err(
             anyhow!(root_err)
@@ -815,7 +818,7 @@ impl LocalBarrierWorker {
     /// Collect actor errors for a while and find the one that might be the root cause.
     ///
     /// Returns `None` if there's no actor error received.
-    async fn try_find_root_failure(&mut self) -> Option<StreamError> {
+    async fn try_find_root_failure(&mut self) -> Option<ScoredStreamError> {
         if self.cached_root_failure.is_some() {
             return self.cached_root_failure.clone();
         }
@@ -935,12 +938,43 @@ impl LocalBarrierManager {
     }
 }
 
+#[derive(Debug, Clone)]
+struct ScoredStreamError {
+    error: StreamError,
+    score: i32,
+}
+
+impl ScoredStreamError {
+    const fn fallback(error: StreamError) -> Self {
+        Self { error, score: 0 }
+    }
+}
+
+impl std::fmt::Display for ScoredStreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+impl std::error::Error for ScoredStreamError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.error.source()
+    }
+
+    fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
+        use risingwave_common::error::tonic::extra::Score;
+
+        self.error.provide(request);
+        request.provide_value(Score(self.score));
+    }
+}
+
 /// Tries to find the root cause of actor failures, based on hard-coded rules.
 ///
 /// Returns `None` if the input is empty.
-pub fn try_find_root_actor_failure<'a>(
+fn try_find_root_actor_failure<'a>(
     actor_errors: impl IntoIterator<Item = &'a StreamError>,
-) -> Option<StreamError> {
+) -> Option<ScoredStreamError> {
     // Explicitly list all error kinds here to notice developers to update this function when
     // there are changes in error kinds.
 
@@ -990,8 +1024,11 @@ pub fn try_find_root_actor_failure<'a>(
 
     actor_errors
         .into_iter()
-        .max_by_key(|&e| stream_error_score(e))
-        .cloned()
+        .map(|e| ScoredStreamError {
+            error: e.clone(),
+            score: stream_error_score(e),
+        })
+        .max_by_key(|e| e.score)
 }
 
 #[cfg(test)]

@@ -536,17 +536,44 @@ where
     Err(results_err)
 }
 
-fn merge_node_rpc_errors<E: Error>(
-    message: &str,
+fn merge_node_rpc_errors<E: Error + Send + Sync + 'static>(
+    message: impl Into<String>,
     errors: impl IntoIterator<Item = (WorkerId, E)>,
 ) -> MetaError {
-    use std::fmt::Write;
+    use risingwave_common::error::tonic::extra::Score;
 
-    let concat: String = errors
-        .into_iter()
-        .fold(format!("{message}:"), |mut s, (w, e)| {
-            write!(&mut s, " worker node {}, {};", w, e.as_report()).unwrap();
-            s
-        });
-    anyhow::anyhow!(concat).into()
+    let errors = errors.into_iter().collect_vec();
+
+    if errors.is_empty() {
+        return anyhow!(message.into()).into();
+    }
+
+    let max_score = errors
+        .iter()
+        .map(|(_, e)| std::error::request_value::<Score>(e))
+        .flatten()
+        .max();
+
+    if let Some(max_score) = max_score {
+        let mut errors = errors;
+        let (worker_id, error) = errors
+            .extract_if(|(_, e)| std::error::request_value::<Score>(e) == Some(max_score))
+            .next()
+            .unwrap();
+
+        anyhow::Error::from(error)
+            .context(format!("failure in worker node {}", worker_id))
+            .context(message.into())
+            .into()
+    } else {
+        use std::fmt::Write;
+
+        let concat: String = errors
+            .into_iter()
+            .fold(message.into() + ":", |mut s, (w, e)| {
+                write!(&mut s, " worker node {}, {};", w, e.as_report()).unwrap();
+                s
+            });
+        anyhow!(concat).into()
+    }
 }
