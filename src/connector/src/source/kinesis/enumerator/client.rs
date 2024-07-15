@@ -69,7 +69,7 @@ impl SplitEnumerator for KinesisSplitEnumerator {
                         next_token = None;
                         continue;
                     }
-                    bail!("Kinesis ListShards service error: {}", e.as_report())
+                    bail!("Kinesis ListShards service error: {:?}", e.as_report())
                 }
             };
             match list_shard_output.shards {
