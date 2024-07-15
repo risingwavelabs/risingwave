@@ -239,6 +239,13 @@ impl std::error::Error for TonicStatusWrapper {
         // Delegate to `self.inner` as if we're transparent.
         self.inner.source()
     }
+
+    fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
+        // The source error, typically a `ServerError`, may provide additional information through `extra`.
+        if let Some(source) = self.source() {
+            source.provide(request);
+        }
+    }
 }
 
 #[cfg(test)]
