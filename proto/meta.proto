@@ -546,16 +546,15 @@ message TableParallelism {
   }
 }
 
-// overwrite the materialized view/table/sink with the given id
-// Change a streaming job in place. You cannot use this to create a new streaming job 
+// Changes a streaming job in place by
+// overwriting the labels of a materialized view/table/sink with the given id
 message UpdateStreamingJobRequest {
   // Id of the materialized view, table, or sink which we want to update
   uint32 id = 1;
 
-  oneof streamingJob {
-    catalog.Table table = 2;
-    catalog.Sink sinks = 3;
-  }
+  // replace the node_labels map of the streaming job with a given id 
+  // with below map
+  map<string, string> node_labels = 2;
 }
 
 // We do not need to add an explicit status field here, we can just use the RPC status
