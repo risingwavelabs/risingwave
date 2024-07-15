@@ -335,13 +335,19 @@ It SHOULD NEVER be used in benchmarks and production environment!!!"
         );
     }
 
+    let meta_stopped = meta
+        .as_ref()
+        .map(|m| m.shutdown.clone())
+        // If there's no meta service, use a dummy token which will never resolve.
+        .unwrap_or_else(|| CancellationToken::new())
+        .cancelled_owned();
+
     // Wait for shutdown signals.
     tokio::select! {
         // Meta service stopped itself, typically due to leadership loss of idleness.
         // Directly exit in this case.
-        _ = meta.as_ref().unwrap().shutdown.cancelled(), if meta.is_some() => {
+        _ = meta_stopped => {
             tracing::info!("meta service is stopped, terminating...");
-            return;
         }
 
         // Shutdown requested by the user.
