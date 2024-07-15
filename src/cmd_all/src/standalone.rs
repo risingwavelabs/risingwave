@@ -339,7 +339,7 @@ It SHOULD NEVER be used in benchmarks and production environment!!!"
         .as_ref()
         .map(|m| m.shutdown.clone())
         // If there's no meta service, use a dummy token which will never resolve.
-        .unwrap_or_else(|| CancellationToken::new())
+        .unwrap_or_else(CancellationToken::new)
         .cancelled_owned();
 
     // Wait for shutdown signals.
