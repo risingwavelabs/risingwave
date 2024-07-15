@@ -546,14 +546,13 @@ message TableParallelism {
   }
 }
 
-// overwrite the MV/table/sink with the given id
+// overwrite the materialized view/table/sink with the given id
 // Change a streaming job in place. You cannot use this to create a new streaming job 
 message UpdateStreamingJobRequest {
-  // Id of the MV or sink which we want to update
+  // Id of the materialized view, table, or sink which we want to update
   uint32 id = 1;
 
   oneof streaming_job {
-    // the new MV or table
     catalog.Table table = 2;
     catalog.Sink sinks = 3;
   }
