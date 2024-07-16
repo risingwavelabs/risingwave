@@ -139,6 +139,7 @@ impl StreamSourceScan {
             .collect_vec();
 
         let source_catalog = self.source_catalog();
+        let (with_properties, secret_refs) = source_catalog.with_properties.clone().into_parts();
         let backfill = SourceBackfillNode {
             upstream_source_id: source_catalog.id,
             source_name: source_catalog.name.clone(),
@@ -155,9 +156,9 @@ impl StreamSourceScan {
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
-            with_properties: source_catalog.with_properties.clone().into_iter().collect(),
+            with_properties,
             rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
-            secret_refs: Default::default(),
+            secret_refs,
         };
 
         let fields = self.schema().to_prost();

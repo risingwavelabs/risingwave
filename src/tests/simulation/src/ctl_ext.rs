@@ -441,5 +441,6 @@ where
 {
     let args = std::iter::once("ctl".into()).chain(args.into_iter().map(|s| s.into()));
     let opts = risingwave_ctl::CliOpts::parse_from(args);
-    risingwave_ctl::start_fallible(opts).await
+    let context = risingwave_ctl::common::CtlContext::default();
+    risingwave_ctl::start_fallible(opts, &context).await
 }

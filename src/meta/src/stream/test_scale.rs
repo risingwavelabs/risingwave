@@ -18,7 +18,7 @@ mod tests {
 
     use itertools::Itertools;
     use maplit::btreeset;
-    use risingwave_common::buffer::Bitmap;
+    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping, VirtualNode};
     use risingwave_pb::common::ParallelUnit;
 

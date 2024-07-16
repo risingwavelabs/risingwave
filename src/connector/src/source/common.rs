@@ -49,7 +49,7 @@ pub(crate) async fn into_chunk_stream(
             for (split_id, msgs) in by_split_id {
                 metrics
                     .partition_input_count
-                    .with_label_values(&[
+                    .with_guarded_label_values(&[
                         &actor_id,
                         &source_id,
                         split_id,
@@ -65,7 +65,7 @@ pub(crate) async fn into_chunk_stream(
 
                 metrics
                     .partition_input_bytes
-                    .with_label_values(&[
+                    .with_guarded_label_values(&[
                         &actor_id,
                         &source_id,
                         split_id,

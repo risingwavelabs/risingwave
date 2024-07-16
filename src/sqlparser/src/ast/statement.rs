@@ -173,6 +173,7 @@ pub enum Encode {
     /// Used internally for schema change
     Native,
     Template,
+    Parquet,
 }
 
 // TODO: unify with `from_keyword`
@@ -190,6 +191,7 @@ impl fmt::Display for Encode {
                 Encode::Native => "NATIVE",
                 Encode::Template => "TEMPLATE",
                 Encode::None => "NONE",
+                Encode::Parquet => "PARQUET",
                 Encode::Text => "TEXT",
             }
         )
@@ -208,8 +210,9 @@ impl Encode {
             "TEMPLATE" => Encode::Template,
             "NATIVE" => Encode::Native,
             "NONE" => Encode::None,
+            "PARQUET" => Encode::Parquet,
             _ => parser_err!(
-                "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE | NONE after Encode"
+                "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE | PARQUET | NONE after Encode"
             ),
         })
     }

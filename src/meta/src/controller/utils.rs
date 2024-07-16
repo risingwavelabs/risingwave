@@ -889,6 +889,24 @@ where
         .collect())
 }
 
+pub async fn get_fragment_ids_by_jobs<C>(
+    db: &C,
+    job_ids: Vec<ObjectId>,
+) -> MetaResult<Vec<FragmentId>>
+where
+    C: ConnectionTrait,
+{
+    let fragment_ids: Vec<FragmentId> = Fragment::find()
+        .select_only()
+        .column(fragment::Column::FragmentId)
+        .filter(fragment::Column::JobId.is_in(job_ids))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    Ok(fragment_ids)
+}
+
 /// `get_fragment_actor_ids` returns the fragment actor ids of the given fragments.
 pub async fn get_fragment_actor_ids<C>(
     db: &C,
