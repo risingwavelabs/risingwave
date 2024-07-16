@@ -106,7 +106,9 @@ def get_commit_after(branch, commit):
     checkout_commit(branch)
     cmd = f"git checkout {commit}"
     subprocess.run([cmd], shell=True)
+
     cmd = f"git log --reverse --ancestry-path  {commit}.. --format=\"%H\" | head -n 1"
+    print(f"cmd: {cmd}")
     result = subprocess.run([cmd], shell=True, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"stderr: {result.stderr}")
