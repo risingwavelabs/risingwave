@@ -32,7 +32,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::stream_graph_visitor::{
     visit_fragment, visit_stream_node, visit_stream_node_cont_mut,
 };
-use risingwave_common::{bail, current_cluster_version};
+use risingwave_common::{bail, current_cluster_version, must_match};
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::cdc::CdcSourceType;
@@ -921,20 +921,22 @@ impl DdlController {
             None => None,
         };
 
+        let stream_job_clone_for_err_handle = stream_job.clone();
+
         // 4. Build and persist stream job.
         let result: MetaResult<_> = try {
             tracing::debug!(id = stream_job.id(), "building stream job");
-            let (mut ctx, table_fragments) = self
+            let (ctx, table_fragments) = self
                 .build_stream_job(
                     stream_ctx,
-                    &stream_job,
+                    stream_job,
                     fragment_graph,
                     affected_table_replace_info,
                 )
                 .await?;
 
             // Do some type-specific work for each type of stream job.
-            match stream_job {
+            match &ctx.streaming_job {
                 StreamingJob::Table(None, ref table, TableJobType::SharedCdcSource) => {
                     Self::validate_cdc_table(table, &table_fragments)
                         .await
@@ -944,20 +946,7 @@ impl DdlController {
                     // Register the source on the connector node.
                     self.source_manager.register_source(source).await?;
                 }
-                StreamingJob::Sink(ref sink, ref mut target_table) => {
-                    // When sinking into table occurs, some variables of the target table may be modified,
-                    // such as `fragment_id` being altered by `prepare_replace_table`.
-                    // At this point, it’s necessary to update the table info carried with the sink.
-                    if let Some((StreamingJob::Table(source, table, _), ..)) =
-                        &ctx.replace_table_job_info
-                    {
-                        *target_table = Some((table.clone(), source.clone()));
-                        if let StreamingJob::Sink(_, ref mut target_table) = &mut ctx.streaming_job
-                        {
-                            *target_table = Some((table.clone(), source.clone()));
-                        }
-                    }
-
+                StreamingJob::Sink(ref sink, _) => {
                     // Validate the sink on the connector node.
                     validate_sink(sink).await?;
                 }
@@ -974,6 +963,7 @@ impl DdlController {
         let (ctx, table_fragments) = match result {
             Ok(r) => r,
             Err(e) => {
+                let stream_job = stream_job_clone_for_err_handle;
                 tracing::error!(error = %e.as_report(), id = stream_job.id(), "failed to create streaming job");
                 self.cancel_stream_job(&stream_job, internal_tables, Some(&e))
                     .await?;
@@ -981,14 +971,13 @@ impl DdlController {
             }
         };
 
-        match (create_type, &stream_job) {
+        match (create_type, &ctx.streaming_job) {
             (CreateType::Foreground, _)
             | (CreateType::Unspecified, _)
             // FIXME(kwannoel): Unify background stream's creation path with MV below.
             | (CreateType::Background, &StreamingJob::Sink(_, _)) => {
                 self.create_streaming_job_inner(
                     mgr,
-                    stream_job,
                     table_fragments,
                     ctx,
                     internal_tables,
@@ -998,12 +987,11 @@ impl DdlController {
             (CreateType::Background, &StreamingJob::MaterializedView(_)) => {
                 let ctrl = self.clone();
                 let mgr = mgr.clone();
-                let stream_job_id = stream_job.id();
+                let stream_job_id = ctx.streaming_job.id();
                 let fut = async move {
                     let result = ctrl
                         .create_streaming_job_inner(
                             &mgr,
-                            stream_job,
                             table_fragments,
                             ctx,
                             internal_tables,
@@ -1022,7 +1010,7 @@ impl DdlController {
                 Ok(IGNORED_NOTIFICATION_VERSION)
             }
             (CreateType::Background, _) => {
-                let d: StreamingJobDiscriminants = stream_job.into();
+                let d: StreamingJobDiscriminants = ctx.streaming_job.into();
                 bail!("background_ddl not supported for: {:?}", d)
             }
         }
@@ -1284,11 +1272,11 @@ impl DdlController {
     async fn create_streaming_job_inner(
         &self,
         mgr: &MetadataManagerV1,
-        stream_job: StreamingJob,
         table_fragments: TableFragments,
         ctx: CreateStreamingJobContext,
         internal_tables: Vec<Table>,
     ) -> MetaResult<NotificationVersion> {
+        let stream_job = ctx.streaming_job.clone();
         let job_id = stream_job.id();
         tracing::debug!(id = job_id, "creating stream job");
 
@@ -1541,7 +1529,7 @@ impl DdlController {
     pub(crate) async fn build_stream_job(
         &self,
         stream_ctx: StreamContext,
-        stream_job: &StreamingJob,
+        mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraph,
         affected_table_replace_info: Option<(StreamingJob, StreamFragmentGraph)>,
     ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
@@ -1571,7 +1559,7 @@ impl DdlController {
         let complete_graph = CompleteStreamFragmentGraph::with_upstreams(
             fragment_graph,
             upstream_root_fragments,
-            stream_job.into(),
+            (&stream_job).into(),
         )?;
 
         // 2. Build the actor graph.
@@ -1589,7 +1577,7 @@ impl DdlController {
             dispatchers,
             merge_updates,
         } = actor_graph_builder
-            .generate_graph(&self.env, stream_job, expr_context)
+            .generate_graph(&self.env, &stream_job, expr_context)
             .await?;
         assert!(merge_updates.is_empty());
 
@@ -1614,7 +1602,7 @@ impl DdlController {
 
         let replace_table_job_info = match affected_table_replace_info {
             Some((streaming_job, fragment_graph)) => {
-                let StreamingJob::Sink(s, _) = stream_job else {
+                let StreamingJob::Sink(s, target_table) = &mut stream_job else {
                     bail!("additional replace table event only occurs when sinking into table");
                 };
 
@@ -1651,6 +1639,13 @@ impl DdlController {
                         fragment_graph,
                     )
                     .await?;
+                // When sinking into table occurs, some variables of the target table may be modified,
+                // such as `fragment_id` being altered by `prepare_replace_table`.
+                // At this point, it’s necessary to update the table info carried with the sink.
+                must_match!(&streaming_job, StreamingJob::Table(source, table, _) => {
+                    // The StreamingJob in ReplaceTableInfo must be StreamingJob::Table
+                    *target_table = Some((table.clone(), source.clone()));
+                });
 
                 Some((streaming_job, context, table_fragments))
             }
@@ -1666,8 +1661,8 @@ impl DdlController {
             definition: stream_job.definition(),
             mv_table_id: stream_job.mv_table(),
             create_type: stream_job.create_type(),
-            ddl_type: stream_job.into(),
-            streaming_job: stream_job.clone(),
+            ddl_type: (&stream_job).into(),
+            streaming_job: stream_job,
             replace_table_job_info,
             option: CreateStreamingJobOption {},
         };
@@ -1676,7 +1671,7 @@ impl DdlController {
         let creating_tables = ctx
             .internal_tables()
             .into_iter()
-            .chain(stream_job.table().cloned())
+            .chain(ctx.streaming_job.table().cloned())
             .collect_vec();
 
         if let MetadataManager::V1(mgr) = &self.metadata_manager {
