@@ -2197,7 +2197,7 @@ async fn test_partition_level() {
         .unwrap());
 
     hummock_manager
-        .split_compaction_group(2, &[100])
+        .split_compaction_group(2, &[100], 0)
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;
@@ -2331,7 +2331,7 @@ async fn test_unregister_moved_table() {
         .unwrap();
 
     let new_group_id = hummock_manager
-        .split_compaction_group(2, &[100])
+        .split_compaction_group(2, &[100], 0)
         .await
         .unwrap();
     assert_ne!(new_group_id, 2);
