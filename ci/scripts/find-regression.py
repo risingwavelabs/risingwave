@@ -49,6 +49,20 @@ YAML'''
     return step
 
 
+def report_step(commit):
+    step = f'''
+cat <<- YAML | buildkite-agent pipeline upload
+steps:
+  - label: "Regressed Commit: {commit}"
+    command: "echo 'Regressed Commit: {commit}'"
+YAML'''
+    print(f"--- reporting regression commit: {commit}")
+    result = subprocess.run(step, shell=True)
+    if result.returncode != 0:
+        print(f"stderr: {result.stderr}")
+        print(f"stdout: {result.stdout}")
+        sys.exit(1)
+
 # Triggers a buildkite job to run the pipeline on the given commit, with the specified tests.
 def run_pipeline(env):
     step = format_step(env)
@@ -168,8 +182,8 @@ def main():
             sys.exit(1)
 
         if env["START_COMMIT"] == env["END_COMMIT"]:
-            print(f"REGRESSION FOUND: {env['START_COMMIT']}")
-            sys.exit(0)
+            report_step(env["START_COMMIT"])
+            return
         else:
             print(f"run next iteration, start: {env['START_COMMIT']}, end: {env['END_COMMIT']}")
             run_pipeline(env)
