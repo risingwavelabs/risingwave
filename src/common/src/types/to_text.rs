@@ -18,11 +18,21 @@ use std::num::FpCategory;
 use super::{DataType, DatumRef, ScalarRefImpl};
 use crate::dispatch_scalar_ref_variants;
 
-/// Converts `ScalarRef` to text format.
-/// This is the implementation for casting to varchar, and pgwire "TEXT" format.
+/// Converts `ScalarRef` to pgwire "TEXT" format.
+///
+/// ## Relationship with casting to varchar
+///
+/// For most types, this is also the implementation for casting to varchar, but there are exceptions.
+/// e.g., The TEXT format for boolean is `t` / `f` while they cast to varchar `true` / `false`.
+/// - <https://github.com/postgres/postgres/blob/REL_16_3/src/include/catalog/pg_cast.dat#L438-L439>
+/// - <https://www.postgresql.org/docs/16/sql-createcast.html#:~:text=A%20small%20number%20of%20the%20built%2Din%20types%20do%20indeed%20have%20different%20behaviors%20for%20conversions%2C%20mostly%20because%20of%20requirements%20of%20the%20SQL%20standard>
+///
+/// ## Relationship with `ToString`/`Display`
 ///
 /// For some types, the implementation diverge from Rust's standard `ToString`/`Display`,
 /// to match PostgreSQL's representation.
+///
+/// ---
 ///
 /// FIXME: `ToText` should depend on a lot of other stuff
 /// but we have not implemented them yet: timezone, date style, interval style, bytea output, etc
