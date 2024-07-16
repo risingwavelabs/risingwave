@@ -154,7 +154,7 @@ impl Distribution {
     /// Create a distribution from a persisted protobuf `Fragment`.
     pub fn from_fragment(
         fragment: &risingwave_pb::meta::table_fragments::Fragment,
-        actor_location: &HashMap<u32, u32>,
+        actor_location: &HashMap<ActorId, WorkerId>,
     ) -> Self {
         match fragment.get_distribution_type().unwrap() {
             FragmentDistributionType::Unspecified => unreachable!(),
