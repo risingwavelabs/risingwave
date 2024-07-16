@@ -28,7 +28,7 @@ For step (2), we need to check its outcome and only run the next step, if the ou
 
 def format_step(env):
     commit = get_bisect_commit(env["START_COMMIT"], env["END_COMMIT"])
-    print(f"Running pipeline on commit: {commit} with steps: {env['BISECT_STEPS']}")
+    print(f"running pipeline on commit: {commit} with steps: {env['BISECT_STEPS']}")
     step=f'''
 cat <<- YAML | buildkite-agent pipeline upload
 steps:
@@ -51,7 +51,7 @@ YAML'''
 # Triggers a buildkite job to run the pipeline on the given commit, with the specified tests.
 def run_pipeline(env):
     step = format_step(env)
-    print(f"Running upload pipeline for step:\n{step}")
+    print(f"--- running upload pipeline for step\n{step}")
     result = subprocess.run(step, shell=True)
     if result.returncode != 0:
         print(f"stderr: {result.stderr}")
