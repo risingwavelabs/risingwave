@@ -152,12 +152,12 @@ pub enum CustomJsonType {
 
 /// How the jsonb type is encoded.
 ///
-/// - `string`: encode jsonb as string. `[1, true, "foo"] -> "[1, true, \"foo\"]"`
-/// - `object`: encode jsonb as json object. `[1, true, "foo"] -> [1, true, "foo"]`
-/// - `custom`: decided by [`CustomJsonType`].
+/// - `String`: encode jsonb as string. `[1, true, "foo"] -> "[1, true, \"foo\"]"`
+/// - `Dynamic`: encode jsonb as json object. `[1, true, "foo"] -> [1, true, "foo"]`
+/// - `Custom`: decided by [`CustomJsonType`].
 pub enum EncodeJsonbMode {
     String,
-    Object,
+    Dynamic,
     Custom,
 }
 
@@ -167,7 +167,7 @@ impl EncodeJsonbMode {
     pub fn from_options(options: &BTreeMap<String, String>) -> Result<Self> {
         match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
             Some("string") | None => Ok(Self::String),
-            Some("object") => Ok(Self::Object),
+            Some("dynamic") => Ok(Self::Dynamic),
             Some(v) => Err(super::SinkError::Config(anyhow::anyhow!(
                 "unrecognized {} value {}",
                 Self::OPTION_KEY,

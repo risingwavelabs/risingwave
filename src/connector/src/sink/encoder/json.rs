@@ -309,7 +309,7 @@ fn datum_to_json_object(
                 EncodeJsonbMode::String => {
                     json!(jsonb_ref.to_string())
                 }
-                EncodeJsonbMode::Object => JsonbVal::from(jsonb_ref).take(),
+                EncodeJsonbMode::Dynamic => JsonbVal::from(jsonb_ref).take(),
                 EncodeJsonbMode::Custom => {
                     return Err(ArrayError::internal(
                         "jsonb type must be encoded as string or object".to_string(),
@@ -718,7 +718,7 @@ mod tests {
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
             custom_json_type: CustomJsonType::None,
-            encode_jsonb_mode: EncodeJsonbMode::Object,
+            encode_jsonb_mode: EncodeJsonbMode::Dynamic,
         };
         let json_value = datum_to_json_object(
             &Field {
