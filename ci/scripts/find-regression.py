@@ -134,15 +134,26 @@ def get_env():
     return env
 
 
+def fetch_branch_commits(branch):
+    cmd = f"git fetch origin {branch}"
+    result = subprocess.run([cmd], shell=True)
+    if result.returncode != 0:
+        print(f"stderr: {result.stderr}")
+        print(f"stdout: {result.stdout}")
+        sys.exit(1)
+
+
 def main():
     cmd = sys.argv[1]
 
     if cmd == "start":
         env = get_env()
+        fetch_branch_commits(env["BISECT_BRANCH"])
         print("start bisecting")
         run_pipeline(env)
     elif cmd == "check":
         env = get_env()
+        fetch_branch_commits(env["BISECT_BRANCH"])
         print("check pipeline outcome")
         commit = get_bisect_commit(env["START_COMMIT"], env["END_COMMIT"])
         step = f"run-{commit}"
