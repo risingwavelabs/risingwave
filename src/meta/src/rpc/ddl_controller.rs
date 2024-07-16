@@ -20,23 +20,18 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
-use rand::{Rng, RngCore};
+use rand::Rng;
 use risingwave_common::bitmap::Bitmap;
-
 use risingwave_common::config::DefaultParallelism;
-use risingwave_common::hash::{ParallelUnitMapping, VirtualNode};
+use risingwave_common::hash::{ActorMapping, VirtualNode};
 use risingwave_common::secret::SecretEncryption;
-
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::stream_graph_visitor::{
     visit_fragment, visit_stream_node, visit_stream_node_cont_mut,
 };
-
-
 use risingwave_common::{bail, current_cluster_version, hash};
-
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::cdc::CdcSourceType;
 use risingwave_connector::source::{
@@ -1197,21 +1192,6 @@ impl DdlController {
             .collect_vec();
 
         let dist_key_indices = table.distribution_key.iter().map(|i| *i as _).collect_vec();
-
-        let mut actor_location = HashMap::new();
-
-        for actor in union_fragment.get_actors() {
-            let worker_id = table_fragments
-                .actor_status
-                .get(&actor.actor_id)
-                .expect("actor status not found")
-                .parallel_unit
-                .as_ref()
-                .expect("parallel unit not found")
-                .worker_node_id;
-
-            actor_location.insert(actor.actor_id as ActorId, worker_id);
-        }
 
         let mapping = match union_fragment.get_distribution_type().unwrap() {
             FragmentDistributionType::Unspecified => unreachable!(),
