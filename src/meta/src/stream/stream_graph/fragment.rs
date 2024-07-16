@@ -38,7 +38,7 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanType,
 };
 
-use crate::manager::{DdlType, IdGenManagerImpl, MetaSrvEnv, StreamingJob};
+use crate::manager::{DdlType, IdGenManagerImpl, MetaSrvEnv, StreamingJob, WorkerId};
 use crate::model::{ActorId, FragmentId};
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
@@ -540,7 +540,7 @@ pub struct CompleteStreamFragmentGraph {
     existing_fragments: HashMap<GlobalFragmentId, Fragment>,
 
     /// The location of the actors in the existing fragments.
-    existing_actor_location: HashMap<u32, u32>,
+    existing_actor_location: HashMap<ActorId, WorkerId>,
 
     /// Extra edges between existing fragments and the building fragments.
     extra_downstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
@@ -553,13 +553,13 @@ pub struct FragmentGraphUpstreamContext {
     /// Root fragment is the root of upstream stream graph, which can be a
     /// mview fragment or source fragment for cdc source job
     upstream_root_fragments: HashMap<TableId, Fragment>,
-    upstream_actor_location: HashMap<ActorId, u32>,
+    upstream_actor_location: HashMap<ActorId, WorkerId>,
 }
 
 pub struct FragmentGraphDownstreamContext {
     original_table_fragment_id: FragmentId,
     downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
-    downstream_actor_location: HashMap<ActorId, u32>,
+    downstream_actor_location: HashMap<ActorId, WorkerId>,
 }
 
 impl CompleteStreamFragmentGraph {
