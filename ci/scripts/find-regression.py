@@ -27,7 +27,7 @@ For step (2), we need to check its outcome and only run the next step, if the ou
 '''
 
 def format_step(env):
-    commit = get_bisect_commit(env["START_COMMIT"], env["END_COMMIT"]),
+    commit = get_bisect_commit(env["START_COMMIT"], env["END_COMMIT"])
     print(f"Running pipeline on commit: {commit} with steps: {env['BISECT_STEPS']}")
     step=f'''
 cat <<- YAML | buildkite-agent pipeline upload
@@ -43,8 +43,7 @@ steps:
   - wait
   - label: 'check'
     command: |
-        START_COMMIT={env['START_COMMIT']} END_COMMIT={env['END_COMMIT']} BISECT_BRANCH={env['BISECT_BRANCH']} BISECT_STEPS={env['BISECT_STEPS']} ci/scripts/find-regression.py check
-        '''
+        START_COMMIT={env['START_COMMIT']} END_COMMIT={env['END_COMMIT']} BISECT_BRANCH={env['BISECT_BRANCH']} BISECT_STEPS={env['BISECT_STEPS']} ci/scripts/find-regression.py check'''
     return step
 
 
@@ -105,8 +104,7 @@ def get_bisect_commit(start, end):
 def get_commit_after(branch, commit):
     checkout_commit(branch)
 
-    cmd = f"git log --reverse --ancestry-path  {commit}.. --format=\"%H\" | head -n 1"
-    print(f"cmd: {cmd}")
+    cmd = f"git log --reverse --ancestry-path {commit}.. --format=\"%H\" | head -n 1"
     result = subprocess.run([cmd], shell=True, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"stderr: {result.stderr}")
@@ -157,7 +155,8 @@ def main():
         print("check pipeline outcome")
         commit = get_bisect_commit(env["START_COMMIT"], env["END_COMMIT"])
         step = f"run-{commit}"
-        outcome = subprocess.run(["buildkite-agent", "step", "get", "outcome", "--step", step], shell=True, capture_output=True, text=True)
+        cmd = f"buildkite-agent step get outcome --step {step}"
+        outcome = subprocess.run(cmd, shell=True, capture_output=True, text=True)
 
         if outcome.returncode != 0:
             print(f"stderr: {outcome.stderr}")
@@ -213,6 +212,37 @@ class Test(unittest.TestCase):
         self.assertEqual(commit2, "72f70960226680e841a8fbdd09c79d74609f27a2")
         commit3 = get_bisect_commit("72f70960226680e841a8fbdd09c79d74609f27a2", "5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0")
         self.assertEqual(commit3, "72f70960226680e841a8fbdd09c79d74609f27a2")
+
+    def test_format_step(self):
+        self.maxDiff = None
+        env = {
+            "START_COMMIT": "72f70960226680e841a8fbdd09c79d74609f27a2",
+            "END_COMMIT": "9ca415a9998a5e04e021c899fb66d93a17931d4f",
+            "BISECT_BRANCH": "kwannoel/find-regress",
+            "BISECT_STEPS": "test"
+        }
+        step = format_step(env)
+        print("============= step")
+        print(step)
+        print("============= step")
+        self.assertEqual(
+            step,
+            '''
+cat <<- YAML | buildkite-agent pipeline upload
+steps:
+  - label: "run-5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0"
+    key: "run-5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0"
+    trigger: "main-cron"
+    build:
+      branch: kwannoel/find-regress
+      commit: 5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0
+      env:
+        CI_STEPS: test
+  - wait
+  - label: 'check'
+    command: |
+        START_COMMIT=72f70960226680e841a8fbdd09c79d74609f27a2 END_COMMIT=9ca415a9998a5e04e021c899fb66d93a17931d4f BISECT_BRANCH=kwannoel/find-regress BISECT_STEPS=test ci/scripts/find-regression.py check'''
+        )
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
