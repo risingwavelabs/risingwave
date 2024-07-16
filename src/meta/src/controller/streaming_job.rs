@@ -49,7 +49,7 @@ use risingwave_pb::meta::{
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::update_mutation::{MergeUpdate, PbMergeUpdate};
+use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::{
     PbDispatcher, PbDispatcherType, PbFragmentTypeFlag, PbStreamActor,
 };
@@ -61,7 +61,7 @@ use sea_orm::{
     TransactionTrait,
 };
 
-use crate::barrier::Reschedule;
+use crate::barrier::{ReplaceTablePlan, Reschedule};
 use crate::controller::catalog::CatalogController;
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
@@ -418,7 +418,7 @@ impl CatalogController {
         job_id: ObjectId,
         is_cancelled: bool,
     ) -> MetaResult<bool> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let cnt = Object::find_by_id(job_id).count(&txn).await?;
@@ -472,6 +472,23 @@ impl CatalogController {
         }
         if let Some(source_id) = associated_source_id {
             Object::delete_by_id(source_id).exec(&txn).await?;
+        }
+
+        for tx in inner
+            .creating_table_finish_notifier
+            .remove(&job_id)
+            .into_iter()
+            .flatten()
+        {
+            let err = if is_cancelled {
+                MetaError::cancelled(format!("stremaing job {job_id} is cancelled"))
+            } else {
+                MetaError::catalog_id_not_found(
+                    "stream job",
+                    format!("streaming job {job_id} failed"),
+                )
+            };
+            let _ = tx.send(Err(err));
         }
         txn.commit().await?;
 
@@ -625,9 +642,9 @@ impl CatalogController {
     pub async fn finish_streaming_job(
         &self,
         job_id: ObjectId,
-        replace_table_job_info: Option<(crate::manager::StreamingJob, Vec<MergeUpdate>, u32)>,
-    ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        replace_table_job_info: Option<ReplaceTablePlan>,
+    ) -> MetaResult<()> {
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let job_type = Object::find_by_id(job_id)
@@ -756,7 +773,12 @@ impl CatalogController {
         let fragment_mapping = get_fragment_mappings(&txn, job_id).await?;
 
         let replace_table_mapping_update = match replace_table_job_info {
-            Some((streaming_job, merge_updates, dummy_id)) => {
+            Some(ReplaceTablePlan {
+                streaming_job,
+                merge_updates,
+                dummy_id,
+                ..
+            }) => {
                 let incoming_sink_id = job_id;
 
                 let (relations, fragment_mapping) = Self::finish_replace_streaming_job_inner(
@@ -797,8 +819,13 @@ impl CatalogController {
                 )
                 .await;
         }
+        if let Some(txs) = inner.creating_table_finish_notifier.remove(&job_id) {
+            for tx in txs {
+                let _ = tx.send(Ok(version));
+            }
+        }
 
-        Ok(version)
+        Ok(())
     }
 
     pub async fn finish_replace_streaming_job(

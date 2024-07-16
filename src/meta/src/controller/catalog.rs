@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::iter;
+use std::mem::take;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -57,7 +58,8 @@ use sea_orm::{
     IntoActiveModel, JoinType, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
     TransactionTrait, Value,
 };
-use tokio::sync::{RwLock, RwLockReadGuard};
+use tokio::sync::oneshot::Sender;
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use super::utils::{check_subscription_name_duplicate, get_fragment_ids_by_jobs};
 use crate::controller::rename::{alter_relation_rename, alter_relation_rename_refs};
@@ -108,6 +110,7 @@ impl CatalogController {
             env,
             inner: RwLock::new(CatalogControllerInner {
                 db: meta_store.conn,
+                creating_table_finish_notifier: HashMap::new(),
             }),
         }
     }
@@ -117,10 +120,20 @@ impl CatalogController {
     pub async fn get_inner_read_guard(&self) -> RwLockReadGuard<'_, CatalogControllerInner> {
         self.inner.read().await
     }
+
+    pub async fn get_inner_write_guard(&self) -> RwLockWriteGuard<'_, CatalogControllerInner> {
+        self.inner.write().await
+    }
 }
 
 pub struct CatalogControllerInner {
     pub(crate) db: DatabaseConnection,
+    /// Registered finish notifiers for creating tables.
+    ///
+    /// `DdlController` will update this map, and pass the `tx` side to `CatalogController`.
+    /// On notifying, we can remove the entry from this map.
+    pub creating_table_finish_notifier:
+        HashMap<ObjectId, Vec<Sender<MetaResult<NotificationVersion>>>>,
 }
 
 impl CatalogController {
@@ -144,6 +157,10 @@ impl CatalogController {
             .notification_manager()
             .notify_frontend_relation_info(operation, relation_info)
             .await
+    }
+
+    pub(crate) async fn current_notification_version(&self) -> NotificationVersion {
+        self.env.notification_manager().current_version().await
     }
 }
 
@@ -3159,6 +3176,42 @@ impl CatalogControllerInner {
             .into_iter()
             .map(|(func, obj)| ObjectModel(func, obj.unwrap()).into())
             .collect())
+    }
+
+    pub(crate) fn register_finish_notifier(
+        &mut self,
+        id: i32,
+        sender: Sender<MetaResult<NotificationVersion>>,
+    ) {
+        self.creating_table_finish_notifier
+            .entry(id)
+            .or_default()
+            .push(sender);
+    }
+
+    pub(crate) async fn streaming_job_is_finished(&mut self, id: i32) -> MetaResult<bool> {
+        let status = StreamingJob::find()
+            .select_only()
+            .column(streaming_job::Column::JobStatus)
+            .filter(streaming_job::Column::JobId.eq(id))
+            .into_tuple::<JobStatus>()
+            .one(&self.db)
+            .await?;
+
+        status
+            .map(|status| status == JobStatus::Created)
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found("streaming job", "may have been cancelled/dropped")
+            })
+    }
+
+    pub(crate) fn notify_finish_failed(&mut self, err: &MetaError) {
+        for tx in take(&mut self.creating_table_finish_notifier)
+            .into_values()
+            .flatten()
+        {
+            let _ = tx.send(Err(err.clone()));
+        }
     }
 }
 

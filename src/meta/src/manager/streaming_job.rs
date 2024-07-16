@@ -241,6 +241,16 @@ impl StreamingJob {
         }
     }
 
+    pub fn job_type_str(&self) -> &'static str {
+        match self {
+            StreamingJob::MaterializedView(_) => "materialized view",
+            StreamingJob::Sink(_, _) => "sink",
+            StreamingJob::Table(_, _, _) => "table",
+            StreamingJob::Index(_, _) => "index",
+            StreamingJob::Source(_) => "source",
+        }
+    }
+
     pub fn definition(&self) -> String {
         match self {
             Self::MaterializedView(table) => table.definition.clone(),
