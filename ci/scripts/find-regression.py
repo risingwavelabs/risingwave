@@ -72,15 +72,6 @@ def run_pipeline(env):
         print(f"stdout: {result.stdout}")
         sys.exit(1)
 
-
-def checkout_prev():
-    cmd = f"git checkout - -q"
-    result = subprocess.run([cmd], shell=True)
-    if result.returncode != 0:
-        print(f"stderr: {result.stderr}")
-        print(f"stdout: {result.stdout}")
-        sys.exit(1)
-
 # Number of commits for [start, end)
 def get_number_of_commits(start, end):
     cmd = f"git rev-list --count {start}..{end}"
@@ -199,6 +190,7 @@ def main():
 # 9ca415a9998a5e04e021c899fb66d93a17931d4f
 class Test(unittest.TestCase):
     def test_get_commit_after(self):
+        fetch_branch_commits("kwannoel/find-regress")
         commit = get_commit_after("kwannoel/find-regress", "72f70960226680e841a8fbdd09c79d74609f27a2")
         self.assertEqual(commit, "5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0")
         commit2 = get_commit_after("kwannoel/find-regress", "617d23ddcac88ced87b96a2454c9217da0fe7915")
@@ -207,6 +199,7 @@ class Test(unittest.TestCase):
         self.assertEqual(commit3, "9ca415a9998a5e04e021c899fb66d93a17931d4f")
 
     def test_get_number_of_commits(self):
+        fetch_branch_commits("kwannoel/find-regress")
         n = get_number_of_commits("72f70960226680e841a8fbdd09c79d74609f27a2", "9ca415a9998a5e04e021c899fb66d93a17931d4f")
         self.assertEqual(n, 2)
         n2 = get_number_of_commits("617d23ddcac88ced87b96a2454c9217da0fe7915", "9ca415a9998a5e04e021c899fb66d93a17931d4f")
@@ -215,6 +208,7 @@ class Test(unittest.TestCase):
         self.assertEqual(n3, 1)
 
     def test_get_bisect_commit(self):
+        fetch_branch_commits("kwannoel/find-regress")
         commit = get_bisect_commit("72f70960226680e841a8fbdd09c79d74609f27a2", "9ca415a9998a5e04e021c899fb66d93a17931d4f")
         self.assertEqual(commit, "5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0")
         commit2 = get_bisect_commit("617d23ddcac88ced87b96a2454c9217da0fe7915", "9ca415a9998a5e04e021c899fb66d93a17931d4f")
@@ -223,6 +217,7 @@ class Test(unittest.TestCase):
         self.assertEqual(commit3, "72f70960226680e841a8fbdd09c79d74609f27a2")
 
     def test_format_step(self):
+        fetch_branch_commits("kwannoel/find-regress")
         self.maxDiff = None
         env = {
             "START_COMMIT": "72f70960226680e841a8fbdd09c79d74609f27a2",
@@ -231,9 +226,6 @@ class Test(unittest.TestCase):
             "BISECT_STEPS": "test"
         }
         step = format_step(env)
-        print("============= step")
-        print(step)
-        print("============= step")
         self.assertEqual(
             step,
             '''
