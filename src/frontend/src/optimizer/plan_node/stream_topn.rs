@@ -21,7 +21,7 @@ use super::stream::prelude::*;
 use super::utils::{plan_node_name, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Distribution, MonotonicityMap, Order};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
@@ -48,7 +48,7 @@ impl StreamTopN {
             false,
             false,
             watermark_columns,
-            Default::default(),
+            MonotonicityMap::new(),
         );
         StreamTopN { base, core }
     }

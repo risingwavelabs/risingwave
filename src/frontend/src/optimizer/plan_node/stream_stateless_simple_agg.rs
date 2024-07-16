@@ -22,7 +22,7 @@ use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::RequiredDist;
+use crate::optimizer::property::{MonotonicityMap, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// Streaming stateless simple agg.
@@ -57,7 +57,7 @@ impl StreamStatelessSimpleAgg {
             input.append_only(),
             input.emit_on_window_close(),
             watermark_columns,
-            Default::default(),
+            MonotonicityMap::new(),
         );
         StreamStatelessSimpleAgg { base, core }
     }

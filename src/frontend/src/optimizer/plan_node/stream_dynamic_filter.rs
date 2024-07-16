@@ -27,7 +27,7 @@ use super::{generic, ExprRewritable, PlanTreeNodeUnary};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, MonotonicityMap};
 use crate::optimizer::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -77,7 +77,7 @@ impl StreamDynamicFilter {
             out_append_only,
             false, // TODO(rc): decide EOWC property
             Self::derive_watermark_columns(&core),
-            Default::default(),
+            MonotonicityMap::new(), // TODO: derive monotonicity
         );
         let cleaned_by_watermark = Self::cleaned_by_watermark(&core);
         Self {

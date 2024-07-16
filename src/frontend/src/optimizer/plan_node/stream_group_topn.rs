@@ -22,7 +22,7 @@ use super::utils::{plan_node_name, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
-use crate::optimizer::property::Order;
+use crate::optimizer::property::{MonotonicityMap, Order};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
@@ -79,7 +79,7 @@ impl StreamGroupTopN {
             // TODO: https://github.com/risingwavelabs/risingwave/issues/8348
             false,
             watermark_columns,
-            Default::default(),
+            MonotonicityMap::new(), // TODO: derive monotonicity
         );
         StreamGroupTopN {
             base,

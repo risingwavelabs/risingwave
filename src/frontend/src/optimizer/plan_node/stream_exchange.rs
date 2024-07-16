@@ -20,7 +20,7 @@ use super::stream::prelude::*;
 use super::utils::{childless_record, plan_node_name, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{Distribution, DistributionDisplay};
+use crate::optimizer::property::{Distribution, DistributionDisplay, MonotonicityMap};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamExchange` imposes a particular distribution on its input
@@ -44,7 +44,7 @@ impl StreamExchange {
             input.append_only(),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
-            input.columns_monotonicity().clone(),
+            MonotonicityMap::new(), // we lost monotonicity information when shuffling
         );
         StreamExchange {
             base,

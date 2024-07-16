@@ -21,6 +21,7 @@ use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::property::MonotonicityMap;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -62,7 +63,7 @@ impl StreamHopWindow {
             input.append_only(),
             input.emit_on_window_close(),
             internal2output.rewrite_bitset(&watermark_columns),
-            Default::default(), // hop window start/end jumps, so monotonicity is not propagated
+            MonotonicityMap::new(), /* hop window start/end jumps, so monotonicity is not propagated */
         );
         Self {
             base,

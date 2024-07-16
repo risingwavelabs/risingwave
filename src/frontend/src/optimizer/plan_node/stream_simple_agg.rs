@@ -23,7 +23,7 @@ use super::utils::{childless_record, plan_node_name, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, MonotonicityMap};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -56,7 +56,7 @@ impl StreamSimpleAgg {
             false,
             false,
             watermark_columns,
-            Default::default(),
+            MonotonicityMap::new(),
         );
         StreamSimpleAgg {
             base,

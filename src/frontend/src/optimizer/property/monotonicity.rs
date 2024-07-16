@@ -46,7 +46,7 @@ impl MonotonicityDerivation {
 }
 
 /// Represents the monotonicity of a column. `NULL`s are considered largest when analyzing monotonicity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Monotonicity {
     Constant,
     NonDecreasing,
@@ -55,6 +55,24 @@ pub enum Monotonicity {
 }
 
 impl Monotonicity {
+    pub fn is_constant(self) -> bool {
+        matches!(self, Monotonicity::Constant)
+    }
+
+    pub fn is_non_decreasing(self) -> bool {
+        // we don't use `EnumAsInner` here because we need to include `Constant`
+        matches!(self, Monotonicity::NonDecreasing | Monotonicity::Constant)
+    }
+
+    pub fn is_non_increasing(self) -> bool {
+        // similar to `is_non_decreasing`
+        matches!(self, Monotonicity::NonIncreasing | Monotonicity::Constant)
+    }
+
+    pub fn is_unknown(self) -> bool {
+        matches!(self, Monotonicity::Unknown)
+    }
+
     pub fn inverse(self) -> Self {
         use Monotonicity::*;
         match self {

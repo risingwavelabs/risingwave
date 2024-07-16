@@ -79,7 +79,7 @@ impl StreamProjectSet {
             input.append_only(),
             input.emit_on_window_close(),
             out_watermark_columns,
-            MonotonicityMap::new(),
+            MonotonicityMap::new(), // TODO: derive monotonicity
         );
         StreamProjectSet {
             base,
