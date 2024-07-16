@@ -58,7 +58,6 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         Arc::new(SysCatalogReaderImpl::new(
             self.session.env().catalog_reader().clone(),
             self.session.env().user_info_reader().clone(),
-            self.session.env().worker_node_manager_ref(),
             self.session.env().meta_client_ref(),
             self.session.auth_context(),
             self.session.shared_config(),

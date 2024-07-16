@@ -55,7 +55,6 @@ mod rw_user_secrets;
 mod rw_users;
 mod rw_views;
 mod rw_worker_nodes;
-mod rw_worker_slots;
 
 mod rw_actor_id_to_ddl;
 mod rw_fragment_id_to_ddl;
