@@ -43,7 +43,7 @@ steps:
   - wait
   - label: 'check'
     command: |
-        START_COMMIT={env['START_COMMIT']} END_COMMIT={env['END_COMMIT']} BISECT_BRANCH={env['BISECT_BRANCH']} BISECT_STEPS={env['BISECT_STEPS']} ci/scripts/find-regression.py check'''
+        START_COMMIT={env['START_COMMIT']} END_COMMIT={env['END_COMMIT']} BISECT_BRANCH={env['BISECT_BRANCH']} BISECT_STEPS=\'{env['BISECT_STEPS']}\' ci/scripts/find-regression.py check'''
     return step
 
 
@@ -58,7 +58,7 @@ def run_pipeline(env):
         sys.exit(1)
 
 
-def checkout_commit(branch):
+def checkout_branch(branch):
     cmd = f"git checkout {branch} -q"
     result = subprocess.run([cmd], shell=True)
     if result.returncode != 0:
@@ -102,7 +102,8 @@ def get_bisect_commit(start, end):
 
 
 def get_commit_after(branch, commit):
-    checkout_commit(branch)
+    print(f"Getting commit after {commit} in branch {branch}")
+    checkout_branch(branch)
 
     cmd = f"git log --reverse --ancestry-path {commit}.. --format=\"%H\" | head -n 1"
     result = subprocess.run([cmd], shell=True, capture_output=True, text=True)
@@ -165,11 +166,14 @@ def main():
 
         outcome = outcome.stdout.strip()
         if outcome == "hard_failed":
+            print(f"commit {commit} failed")
             env["END_COMMIT"] = commit
         elif outcome == "passed":
+            print(f"commit {commit} passed")
             env["START_COMMIT"] = get_commit_after(env["BISECT_BRANCH"], commit)
         else:
             print("Invalid outcome")
+            sys.exit(1)
 
         if env["START_COMMIT"] == env["END_COMMIT"]:
             print(f"REGRESSION FOUND: {env['START_COMMIT']}")
@@ -241,7 +245,7 @@ steps:
   - wait
   - label: 'check'
     command: |
-        START_COMMIT=72f70960226680e841a8fbdd09c79d74609f27a2 END_COMMIT=9ca415a9998a5e04e021c899fb66d93a17931d4f BISECT_BRANCH=kwannoel/find-regress BISECT_STEPS=test ci/scripts/find-regression.py check'''
+        START_COMMIT=72f70960226680e841a8fbdd09c79d74609f27a2 END_COMMIT=9ca415a9998a5e04e021c899fb66d93a17931d4f BISECT_BRANCH=kwannoel/find-regress BISECT_STEPS='test' ci/scripts/find-regression.py check'''
         )
 
 if __name__ == "__main__":
