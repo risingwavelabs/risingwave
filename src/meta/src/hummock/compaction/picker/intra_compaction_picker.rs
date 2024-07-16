@@ -317,10 +317,6 @@ impl WholeLevelCompactionPicker {
             return None;
         }
         for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if idx == l0.sub_levels.len() - 1 {
-                break;
-            }
-
             if level.level_type() != LevelType::Nonoverlapping
                 || level.vnode_partition_count == partition_count
             {
@@ -361,7 +357,8 @@ impl WholeLevelCompactionPicker {
                     table_infos: next_level.table_infos.clone(),
                 });
             }
-            if !select_level_inputs.is_empty() {
+
+            if select_level_inputs.len() > 1 {
                 let vnode_partition_count =
                     if select_input_size > self.config.sub_level_max_compaction_bytes / 2 {
                         partition_count
