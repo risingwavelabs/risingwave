@@ -23,14 +23,14 @@ use regex::Regex;
 pub const RW_INTERNAL_TABLE_FUNCTION_NAME: &str = "rw_table";
 
 pub fn generate_internal_table_name_with_type(
-    mview_name: &str,
+    job_name: &str,
     fragment_id: u32,
     table_id: u32,
     table_type: &str,
 ) -> String {
     format!(
         "__internal_{}_{}_{}_{}",
-        mview_name,
+        job_name,
         fragment_id,
         table_type.to_lowercase(),
         table_id

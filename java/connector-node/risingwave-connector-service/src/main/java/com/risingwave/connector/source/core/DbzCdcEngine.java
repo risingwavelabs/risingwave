@@ -17,7 +17,7 @@ package com.risingwave.connector.source.core;
 import static io.debezium.config.CommonConnectorConfig.TOPIC_PREFIX;
 import static io.debezium.schema.AbstractTopicNamingStrategy.*;
 
-import com.risingwave.connector.api.source.CdcEngine;
+import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.debezium.embedded.Connect;
 import io.debezium.engine.DebeziumEngine;
@@ -25,15 +25,16 @@ import java.util.Properties;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 
-public class DbzCdcEngine implements CdcEngine {
+public class DbzCdcEngine implements Runnable {
     static final int DEFAULT_QUEUE_CAPACITY = 16;
 
     private final DebeziumEngine<?> engine;
-    private final DbzCdcEventConsumer consumer;
+    private final DbzChangeEventConsumer changeEventConsumer;
     private final long id;
 
     /** If config is not valid will throw exceptions */
     public DbzCdcEngine(
+            SourceTypeE connector,
             long sourceId,
             Properties config,
             DebeziumEngine.CompletionCallback completionCallback) {
@@ -41,7 +42,8 @@ public class DbzCdcEngine implements CdcEngine {
         var topicPrefix = config.getProperty(TOPIC_PREFIX.name());
         var transactionTopic = String.format("%s.%s", topicPrefix, DEFAULT_TRANSACTION_TOPIC);
         var consumer =
-                new DbzCdcEventConsumer(
+                new DbzChangeEventConsumer(
+                        connector,
                         sourceId,
                         heartbeatTopicPrefix,
                         transactionTopic,
@@ -49,7 +51,7 @@ public class DbzCdcEngine implements CdcEngine {
 
         // Builds a debezium engine but not start it
         this.id = sourceId;
-        this.consumer = consumer;
+        this.changeEventConsumer = consumer;
         this.engine =
                 DebeziumEngine.create(Connect.class)
                         .using(config)
@@ -64,7 +66,6 @@ public class DbzCdcEngine implements CdcEngine {
         engine.run();
     }
 
-    @Override
     public long getId() {
         return id;
     }
@@ -73,8 +74,11 @@ public class DbzCdcEngine implements CdcEngine {
         engine.close();
     }
 
-    @Override
     public BlockingQueue<ConnectorServiceProto.GetEventStreamResponse> getOutputChannel() {
-        return consumer.getOutputChannel();
+        return changeEventConsumer.getOutputChannel();
+    }
+
+    public DbzChangeEventConsumer getChangeEventConsumer() {
+        return changeEventConsumer;
     }
 }

@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
-use risingwave_common::monitor::connection::{EndpointExt, TcpConfig};
+use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
@@ -30,7 +30,7 @@ use tonic::transport::Endpoint;
 
 use crate::error::{Result, RpcError};
 use crate::tracing::{Channel, TracingInjectedChannelExt};
-use crate::{rpc_client_method_impl, RpcClient, RpcClientPool, UnboundedBidiStreamHandle};
+use crate::{stream_rpc_client_method_impl, RpcClient, RpcClientPool, UnboundedBidiStreamHandle};
 
 #[derive(Clone)]
 pub struct StreamClient(StreamServiceClient<Channel>);
@@ -79,7 +79,7 @@ macro_rules! for_all_stream_rpc {
 }
 
 impl StreamClient {
-    for_all_stream_rpc! { rpc_client_method_impl }
+    for_all_stream_rpc! { stream_rpc_client_method_impl }
 }
 
 pub type StreamingControlHandle =
@@ -98,8 +98,8 @@ impl StreamClient {
                 client
                     .streaming_control_stream(UnboundedReceiverStream::new(rx))
                     .await
-                    .map(|response| response.into_inner().map_err(RpcError::from))
-                    .map_err(RpcError::from)
+                    .map(|response| response.into_inner().map_err(RpcError::from_stream_status))
+                    .map_err(RpcError::from_stream_status)
             })
             .await?;
         match first_rsp {

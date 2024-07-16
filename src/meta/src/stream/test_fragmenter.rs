@@ -74,6 +74,7 @@ fn make_sum_aggcall(idx: u32) -> AggCall {
         order_by: vec![],
         filter: None,
         direct_args: vec![],
+        udf: None,
     }
 }
 
@@ -344,9 +345,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
                 make_inputref(0),
                 make_inputref(1),
             ],
-            watermark_input_cols: vec![],
-            watermark_output_cols: vec![],
-            nondecreasing_exprs: vec![],
+            ..Default::default()
         })),
         fields: vec![], // TODO: fill this later
         input: vec![simple_agg_node_1],
@@ -452,7 +451,7 @@ fn make_cluster_info() -> StreamingClusterInfo {
 #[tokio::test]
 #[cfg(not(madsim))]
 async fn test_graph_builder() -> MetaResult<()> {
-    let env = MetaSrvEnv::for_test().await;
+    let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
     let parallel_degree = 4;
     let job = StreamingJob::Table(None, make_materialize_table(888), TableJobType::General);
 
@@ -475,7 +474,13 @@ async fn test_graph_builder() -> MetaResult<()> {
 
     let table_fragments = TableFragments::for_test(TableId::default(), graph);
     let actors = table_fragments.actors();
-    let barrier_inject_actor_ids = table_fragments.barrier_inject_actor_ids();
+    let barrier_inject_actor_ids = table_fragments
+        .fragments
+        .values()
+        .filter(|fragment| TableFragments::is_injectable(fragment.fragment_type_mask))
+        .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
+        .sorted()
+        .collect_vec();
     let mview_actor_ids = table_fragments.mview_actor_ids();
 
     assert_eq!(actors.len(), 9);

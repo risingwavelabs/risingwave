@@ -19,13 +19,12 @@ use risingwave_common::bail;
 use super::simd_json_parser::DebeziumJsonAccessBuilder;
 use super::{DebeziumAvroAccessBuilder, DebeziumAvroParserConfig};
 use crate::error::ConnectorResult;
-use crate::extract_key_config;
 use crate::parser::unified::debezium::DebeziumChangeEvent;
+use crate::parser::unified::json::TimestamptzHandling;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
-    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, JsonProperties,
-    ParseResult, ParserFormat, ProtocolProperties, SourceStreamChunkRowWriter,
-    SpecificParserConfig,
+    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParseResult,
+    ParserFormat, ProtocolProperties, SourceStreamChunkRowWriter, SpecificParserConfig,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -69,8 +68,12 @@ async fn build_accessor_builder(
                 DebeziumAvroAccessBuilder::new(config, encoding_type)?,
             ))
         }
-        EncodingProperties::Json(_) => Ok(AccessBuilderImpl::DebeziumJson(
-            DebeziumJsonAccessBuilder::new()?,
+        EncodingProperties::Json(json_config) => Ok(AccessBuilderImpl::DebeziumJson(
+            DebeziumJsonAccessBuilder::new(
+                json_config
+                    .timestamptz_handling
+                    .unwrap_or(TimestamptzHandling::GuessNumberUnit),
+            )?,
         )),
         EncodingProperties::Protobuf(_) => {
             Ok(AccessBuilderImpl::new_default(config, encoding_type).await?)
@@ -85,8 +88,8 @@ impl DebeziumParser {
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> ConnectorResult<Self> {
-        let (key_config, key_type) = extract_key_config!(props);
-        let key_builder = build_accessor_builder(key_config, key_type).await?;
+        let key_builder =
+            build_accessor_builder(props.encoding_config.clone(), EncodingType::Key).await?;
         let payload_builder =
             build_accessor_builder(props.encoding_config, EncodingType::Value).await?;
         let debezium_props = if let ProtocolProperties::Debezium(props) = props.protocol_config {
@@ -107,14 +110,16 @@ impl DebeziumParser {
     }
 
     pub async fn new_for_test(rw_columns: Vec<SourceColumnDesc>) -> ConnectorResult<Self> {
+        use crate::parser::JsonProperties;
+
         let props = SpecificParserConfig {
-            key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
+                timestamptz_handling: None,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
-        Self::new(props, rw_columns, Default::default()).await
+        Self::new(props, rw_columns, SourceContext::dummy().into()).await
     }
 
     pub async fn parse_inner(
@@ -191,9 +196,14 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+    use risingwave_common::row::Row;
+    use risingwave_common::types::Timestamptz;
+    use risingwave_pb::plan_common::{
+        additional_column, AdditionalColumn, AdditionalColumnTimestamp,
+    };
 
     use super::*;
-    use crate::parser::{SourceStreamChunkBuilder, TransactionControl};
+    use crate::parser::{JsonProperties, SourceStreamChunkBuilder, TransactionControl};
     use crate::source::{ConnectorProperties, DataType};
 
     #[tokio::test]
@@ -213,15 +223,15 @@ mod tests {
             .collect::<Vec<_>>();
 
         let props = SpecificParserConfig {
-            key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
+                timestamptz_handling: None,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
         let source_ctx = SourceContext {
             connector_props: ConnectorProperties::PostgresCdc(Box::default()),
-            ..Default::default()
+            ..SourceContext::dummy()
         };
         let mut parser = DebeziumParser::new(props, columns.clone(), Arc::new(source_ctx))
             .await
@@ -254,6 +264,68 @@ mod tests {
         match res {
             Ok(ParseResult::TransactionControl(TransactionControl::Commit { id })) => {
                 assert_eq!(id.deref(), "35352");
+            }
+            _ => panic!("unexpected parse result: {:?}", res),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_parse_additional_columns() {
+        let columns = vec![
+            ColumnDesc::named("O_ORDERKEY", ColumnId::new(1), DataType::Int64),
+            ColumnDesc::named("O_CUSTKEY", ColumnId::new(2), DataType::Int64),
+            ColumnDesc::named("O_ORDERSTATUS", ColumnId::new(3), DataType::Varchar),
+            ColumnDesc::named("O_TOTALPRICE", ColumnId::new(4), DataType::Decimal),
+            ColumnDesc::named("O_ORDERDATE", ColumnId::new(5), DataType::Date),
+            ColumnDesc::named_with_additional_column(
+                "commit_ts",
+                ColumnId::new(6),
+                DataType::Timestamptz,
+                AdditionalColumn {
+                    column_type: Some(additional_column::ColumnType::Timestamp(
+                        AdditionalColumnTimestamp {},
+                    )),
+                },
+            ),
+        ];
+
+        let columns = columns
+            .iter()
+            .map(SourceColumnDesc::from)
+            .collect::<Vec<_>>();
+
+        let props = SpecificParserConfig {
+            encoding_config: EncodingProperties::Json(JsonProperties {
+                use_schema_registry: false,
+                timestamptz_handling: None,
+            }),
+            protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
+        };
+        let source_ctx = SourceContext {
+            connector_props: ConnectorProperties::PostgresCdc(Box::default()),
+            ..SourceContext::dummy()
+        };
+        let mut parser = DebeziumParser::new(props, columns.clone(), Arc::new(source_ctx))
+            .await
+            .unwrap();
+        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
+
+        let payload = r#"{ "payload": { "before": null, "after": { "O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null }, "op": "c", "ts_ms": 1695277757017, "transaction": null } }"#;
+
+        let res = parser
+            .parse_one_with_txn(
+                None,
+                Some(payload.as_bytes().to_vec()),
+                builder.row_writer(),
+            )
+            .await;
+        match res {
+            Ok(ParseResult::Rows) => {
+                let chunk = builder.finish();
+                for (_, row) in chunk.rows() {
+                    let commit_ts = row.datum_at(5).unwrap().into_timestamptz();
+                    assert_eq!(commit_ts, Timestamptz::from_millis(1695277757000).unwrap());
+                }
             }
             _ => panic!("unexpected parse result: {:?}", res),
         }

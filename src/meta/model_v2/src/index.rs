@@ -15,10 +15,11 @@
 use risingwave_pb::catalog::PbIndex;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
+use serde::{Deserialize, Serialize};
 
-use crate::{ExprNodeArray, IndexId, TableId};
+use crate::{ExprNodeArray, IndexColumnPropertiesArray, IndexId, TableId};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "index")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -27,6 +28,7 @@ pub struct Model {
     pub index_table_id: TableId,
     pub primary_table_id: TableId,
     pub index_items: ExprNodeArray,
+    pub index_column_properties: IndexColumnPropertiesArray,
     pub index_columns_len: i32,
 }
 
@@ -75,6 +77,7 @@ impl From<PbIndex> for ActiveModel {
             primary_table_id: Set(pb_index.primary_table_id as _),
             index_items: Set(pb_index.index_item.into()),
             index_columns_len: Set(pb_index.index_columns_len as _),
+            index_column_properties: Set(pb_index.index_column_properties.into()),
         }
     }
 }

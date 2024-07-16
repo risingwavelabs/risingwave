@@ -12,7 +12,7 @@
 
 //! This module defines
 //! 1) a list of constants for every keyword that
-//! can appear in [crate::tokenizer::Word::keyword]:
+//!    can appear in [crate::tokenizer::Word::keyword]:
 //!    pub const KEYWORD = "KEYWORD"
 //! 2) an `ALL_KEYWORDS` array with every keyword in it
 //!     This is not a list of *reserved* keywords: some of these can be
@@ -22,7 +22,7 @@
 //!     As a matter of fact, most of these keywords are not used at all
 //!     and could be removed.
 //! 3) a `RESERVED_FOR_TABLE_ALIAS` array with keywords reserved in a
-//! "table alias" context.
+//!    "table alias" context.
 
 use core::fmt;
 
@@ -59,7 +59,7 @@ macro_rules! define_keywords {
         ];
 
         $(kw_def!($ident $(= $string_keyword)?);)*
-        pub const ALL_KEYWORDS: &[&str] = &[
+        pub const ALL_KEYWORDS: &[&'static str] = &[
             $($ident),*
         ];
     };
@@ -89,6 +89,7 @@ define_keywords!(
     ASC,
     ASENSITIVE,
     ASYMMETRIC,
+    ASYNC,
     AT,
     ATOMIC,
     AUTHORIZATION,
@@ -140,6 +141,7 @@ define_keywords!(
     COMMITTED,
     CONCURRENTLY,
     CONDITION,
+    CONFLICT,
     CONFLUENT,
     CONNECT,
     CONNECTION,
@@ -193,6 +195,7 @@ define_keywords!(
     DESCRIBE,
     DETERMINISTIC,
     DIRECTORY,
+    DISCARD,
     DISCONNECT,
     DISTINCT,
     DISTRIBUTED,
@@ -227,6 +230,7 @@ define_keywords!(
     EXTRACT,
     FALSE,
     FETCH,
+    FILE,
     FILTER,
     FIRST,
     FIRST_VALUE,
@@ -245,6 +249,8 @@ define_keywords!(
     FUNCTION,
     FUNCTIONS,
     FUSION,
+    GAP,
+    GENERATOR,
     GET,
     GLOBAL,
     GRANT,
@@ -366,6 +372,7 @@ define_keywords!(
     OVER,
     OVERLAPS,
     OVERLAY,
+    OVERWRITE,
     OWNER,
     PARALLELISM,
     PARAMETER,
@@ -400,14 +407,13 @@ define_keywords!(
     READ,
     READS,
     REAL,
+    RECOVER,
     RECURSIVE,
     REF,
     REFERENCES,
     REFERENCING,
     REFRESH,
-    REGCLASS,
     REGISTRY,
-    REGPROC,
     REGR_AVGX,
     REGR_AVGY,
     REGR_COUNT,
@@ -435,6 +441,7 @@ define_keywords!(
     ROWID,
     ROWS,
     ROW_NUMBER,
+    RUNTIME,
     SAVEPOINT,
     SCALAR,
     SCHEMA,
@@ -443,6 +450,8 @@ define_keywords!(
     SCROLL,
     SEARCH,
     SECOND,
+    SECRET,
+    SECRETS,
     SELECT,
     SENSITIVE,
     SEQUENCE,
@@ -456,6 +465,7 @@ define_keywords!(
     SETS,
     SHOW,
     SIMILAR,
+    SINCE,
     SINK,
     SINKS,
     SMALLINT,
@@ -479,6 +489,7 @@ define_keywords!(
     STDDEV_SAMP,
     STDIN,
     STORED,
+    STREAMING_RATE_LIMIT,
     STRING,
     STRUCT,
     SUBMULTISET,
@@ -549,6 +560,7 @@ define_keywords!(
     VAR_POP,
     VAR_SAMP,
     VERBOSE,
+    VERSION,
     VERSIONING,
     VIEW,
     VIEWS,
@@ -641,7 +653,7 @@ pub const RESERVED_FOR_COLUMN_ALIAS: &[Keyword] = &[
 /// Can't be used as a column or table name in PostgreSQL.
 ///
 /// This list is taken from the following table, for all "reserved" words in the PostgreSQL column,
-/// includinhg "can be function or type" and "requires AS". <https://www.postgresql.org/docs/14/sql-keywords-appendix.html#KEYWORDS-TABLE>
+/// including "can be function or type" and "requires AS". <https://www.postgresql.org/docs/14/sql-keywords-appendix.html#KEYWORDS-TABLE>
 ///
 /// `SELECT` and `WITH` were commented out because the following won't parse:
 /// `SELECT (SELECT 1)` or `SELECT (WITH a AS (SELECT 1) SELECT 1)`

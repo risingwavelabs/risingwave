@@ -17,6 +17,7 @@
 use std::sync::Arc;
 
 pub use anyhow::anyhow;
+use parquet::errors::ParquetError;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::BoxedError;
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
@@ -29,6 +30,8 @@ use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use thiserror_ext::Construct;
 use tonic::Status;
+
+use crate::worker_manager::worker_node_manager::FragmentId;
 
 pub type Result<T> = std::result::Result<T, BatchError>;
 /// Batch result with shared error.
@@ -114,7 +117,14 @@ pub enum BatchError {
     Iceberg(
         #[from]
         #[backtrace]
-        icelake::Error,
+        iceberg::Error,
+    ),
+
+    #[error(transparent)]
+    Parquet(
+        #[from]
+        #[backtrace]
+        ParquetError,
     ),
 
     // Make the ref-counted type to be a variant for easier code structuring.
@@ -124,6 +134,32 @@ pub enum BatchError {
         #[from]
         #[backtrace]
         Arc<Self>,
+    ),
+
+    #[error("Empty workers found")]
+    EmptyWorkerNodes,
+
+    #[error("Serving vnode mapping not found for fragment {0}")]
+    ServingVnodeMappingNotFound(FragmentId),
+
+    #[error("Streaming vnode mapping not found for fragment {0}")]
+    StreamingVnodeMappingNotFound(FragmentId),
+
+    #[error("Not enough memory to run this query, batch memory limit is {0} bytes")]
+    OutOfMemory(u64),
+
+    #[error("Failed to spill out to disk")]
+    Spill(
+        #[from]
+        #[backtrace]
+        opendal::Error,
+    ),
+
+    #[error("Failed to execute time travel query")]
+    TimeTravel(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
     ),
 }
 
@@ -136,13 +172,6 @@ impl From<memcomparable::Error> for BatchError {
 impl From<ValueEncodingError> for BatchError {
     fn from(e: ValueEncodingError) -> Self {
         Self::Serde(e.into())
-    }
-}
-
-impl From<tonic::Status> for BatchError {
-    fn from(status: tonic::Status) -> Self {
-        // Always wrap the status into a `RpcError`.
-        Self::from(RpcError::from(status))
     }
 }
 

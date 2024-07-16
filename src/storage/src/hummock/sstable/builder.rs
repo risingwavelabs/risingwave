@@ -34,6 +34,7 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{
     Block, BlockHolder, BlockIterator, HummockResult, MemoryLimiter, Xor16FilterBuilder,
 };
+use crate::monitor::CompactorMetrics;
 use crate::opts::StorageOpts;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
@@ -85,11 +86,8 @@ impl Default for SstableBuilderOptions {
 
 pub struct SstableBuilderOutput<WO> {
     pub sst_info: LocalSstableInfo,
-    pub bloom_filter_size: usize,
     pub writer_output: WO,
-    pub avg_key_size: usize,
-    pub avg_value_size: usize,
-    pub epoch_count: usize,
+    pub stats: SstableBuilderOutputStats,
 }
 
 pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
@@ -122,6 +120,8 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
 
     epoch_set: BTreeSet<u64>,
     memory_limiter: Option<Arc<MemoryLimiter>>,
+
+    block_size_vec: Vec<usize>, // for statistics
 }
 
 impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
@@ -167,6 +167,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             last_table_stats: Default::default(),
             epoch_set: BTreeSet::default(),
             memory_limiter,
+            block_size_vec: Vec::new(),
         }
     }
 
@@ -524,15 +525,20 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             self.epoch_set.len()
         );
         let bloom_filter_size = meta.bloom_filter.len();
+        let sstable_file_size = sst_info.get_file_size() as usize;
 
         let writer_output = self.writer.finish(meta).await?;
         Ok(SstableBuilderOutput::<W::Output> {
-            sst_info: LocalSstableInfo::with_stats(sst_info, self.table_stats),
-            bloom_filter_size,
+            sst_info: LocalSstableInfo::new(sst_info, self.table_stats),
             writer_output,
-            avg_key_size,
-            avg_value_size,
-            epoch_count: self.epoch_set.len(),
+            stats: SstableBuilderOutputStats {
+                bloom_filter_size,
+                avg_key_size,
+                avg_value_size,
+                epoch_count: self.epoch_set.len(),
+                block_size_vec: self.block_size_vec,
+                sstable_file_size,
+            },
         })
     }
 
@@ -560,6 +566,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             });
         let block = self.block_builder.build();
         self.writer.write_block(block, block_meta).await?;
+        self.block_size_vec.push(block.len());
         self.filter_builder
             .switch_block(self.memory_limiter.clone());
         let data_len = utils::checked_into_u32(self.writer.data_len()).unwrap_or_else(|_| {
@@ -608,6 +615,53 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     }
 }
 
+pub struct SstableBuilderOutputStats {
+    bloom_filter_size: usize,
+    avg_key_size: usize,
+    avg_value_size: usize,
+    epoch_count: usize,
+    block_size_vec: Vec<usize>, // for statistics
+    sstable_file_size: usize,
+}
+
+impl SstableBuilderOutputStats {
+    pub fn report_stats(&self, metrics: &Arc<CompactorMetrics>) {
+        if self.bloom_filter_size != 0 {
+            metrics
+                .sstable_bloom_filter_size
+                .observe(self.bloom_filter_size as _);
+        }
+
+        if self.sstable_file_size != 0 {
+            metrics
+                .sstable_file_size
+                .observe(self.sstable_file_size as _);
+        }
+
+        if self.avg_key_size != 0 {
+            metrics.sstable_avg_key_size.observe(self.avg_key_size as _);
+        }
+
+        if self.avg_value_size != 0 {
+            metrics
+                .sstable_avg_value_size
+                .observe(self.avg_value_size as _);
+        }
+
+        if self.epoch_count != 0 {
+            metrics
+                .sstable_distinct_epoch_count
+                .observe(self.epoch_count as _);
+        }
+
+        if !self.block_size_vec.is_empty() {
+            for block_size in &self.block_size_vec {
+                metrics.sstable_block_size.observe(*block_size as _);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 pub(super) mod tests {
     use std::collections::Bound;
@@ -626,9 +680,7 @@ pub(super) mod tests {
         default_builder_opt_for_test, gen_test_sstable_impl, mock_sst_writer, test_key_of,
         test_value_of, TEST_KEYS_COUNT,
     };
-    use crate::hummock::{
-        CachePolicy, Sstable, SstableWriterOptions, Xor16FilterBuilder, Xor8FilterBuilder,
-    };
+    use crate::hummock::{CachePolicy, Sstable, SstableWriterOptions, Xor8FilterBuilder};
     use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]
@@ -690,7 +742,7 @@ pub(super) mod tests {
         };
 
         // build remote table
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         let sst_info = gen_test_sstable_impl::<Vec<u8>, F>(
             opts,
             0,
@@ -734,7 +786,7 @@ pub(super) mod tests {
     async fn test_no_bloom_filter_block() {
         let opts = SstableBuilderOptions::default();
         // build remote table
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         let writer_opts = SstableWriterOptions::default();
         let object_id = 1;
         let writer = sstable_store

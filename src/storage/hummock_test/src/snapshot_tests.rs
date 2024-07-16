@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 // Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,24 +16,23 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use foyer::memory::CacheContext;
+use foyer::CacheContext;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::hummock::CachePolicy;
+use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, SealCurrentEpochOptions,
-    WriteOptions,
+    StateStoreRead, WriteOptions,
 };
+use risingwave_storage::StateStore;
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
-use crate::test_utils::{
-    gen_key_from_bytes, with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch,
-};
+use crate::test_utils::{gen_key_from_bytes, with_hummock_storage_v2, TestIngestBatch};
 
 macro_rules! assert_count_range_scan {
     ($storage:expr, $vnode:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
@@ -104,7 +104,7 @@ macro_rules! assert_count_backward_range_scan {
 }
 
 async fn test_snapshot_inner(
-    hummock_storage: impl HummockStateStoreTestTrait,
+    hummock_storage: HummockStorage,
     mock_hummock_meta_client: Arc<MockHummockMetaClient>,
     enable_sync: bool,
     enable_commit: bool,
@@ -114,6 +114,7 @@ async fn test_snapshot_inner(
         .await;
 
     let epoch1 = test_epoch(1);
+    hummock_storage.start_epoch(epoch1, HashSet::from_iter([Default::default()]));
     local.init_for_test(epoch1).await.unwrap();
     local
         .ingest_batch(
@@ -135,16 +136,13 @@ async fn test_snapshot_inner(
         .await
         .unwrap();
     let epoch2 = epoch1.next_epoch();
+    hummock_storage.start_epoch(epoch2, HashSet::from_iter([Default::default()]));
     local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     if enable_sync {
-        let ssts = hummock_storage
-            .seal_and_sync_epoch(epoch1)
-            .await
-            .unwrap()
-            .uncommitted_ssts;
+        let res = hummock_storage.seal_and_sync_epoch(epoch1).await.unwrap();
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch1, ssts)
+                .commit_epoch(epoch1, res)
                 .await
                 .unwrap();
             hummock_storage
@@ -179,16 +177,13 @@ async fn test_snapshot_inner(
         .await
         .unwrap();
     let epoch3 = epoch2.next_epoch();
+    hummock_storage.start_epoch(epoch3, HashSet::from_iter([Default::default()]));
     local.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
     if enable_sync {
-        let ssts = hummock_storage
-            .seal_and_sync_epoch(epoch2)
-            .await
-            .unwrap()
-            .uncommitted_ssts;
+        let res = hummock_storage.seal_and_sync_epoch(epoch2).await.unwrap();
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch2, ssts)
+                .commit_epoch(epoch2, res)
                 .await
                 .unwrap();
             hummock_storage
@@ -225,14 +220,10 @@ async fn test_snapshot_inner(
         .unwrap();
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     if enable_sync {
-        let ssts = hummock_storage
-            .seal_and_sync_epoch(epoch3)
-            .await
-            .unwrap()
-            .uncommitted_ssts;
+        let res = hummock_storage.seal_and_sync_epoch(epoch3).await.unwrap();
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch3, ssts)
+                .commit_epoch(epoch3, res)
                 .await
                 .unwrap();
             hummock_storage
@@ -247,7 +238,7 @@ async fn test_snapshot_inner(
 }
 
 async fn test_snapshot_range_scan_inner(
-    hummock_storage: impl HummockStateStoreTestTrait,
+    hummock_storage: HummockStorage,
     mock_hummock_meta_client: Arc<MockHummockMetaClient>,
     enable_sync: bool,
     enable_commit: bool,
@@ -256,6 +247,7 @@ async fn test_snapshot_range_scan_inner(
     let mut local = hummock_storage
         .new_local(NewLocalOptions::for_test(Default::default()))
         .await;
+    hummock_storage.start_epoch(epoch, HashSet::from_iter([Default::default()]));
     local.init_for_test(epoch).await.unwrap();
 
     local
@@ -287,14 +279,10 @@ async fn test_snapshot_range_scan_inner(
         .unwrap();
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     if enable_sync {
-        let ssts = hummock_storage
-            .seal_and_sync_epoch(epoch)
-            .await
-            .unwrap()
-            .uncommitted_ssts;
+        let res = hummock_storage.seal_and_sync_epoch(epoch).await.unwrap();
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch, ssts)
+                .commit_epoch(epoch, res)
                 .await
                 .unwrap();
             hummock_storage

@@ -100,7 +100,7 @@ impl Binder {
         Ok(literal)
     }
 
-    fn bind_date_time_field(field: AstDateTimeField) -> DateTimeField {
+    pub(crate) fn bind_date_time_field(field: AstDateTimeField) -> DateTimeField {
         // This is a binder function rather than `impl From<AstDateTimeField> for DateTimeField`,
         // so that the `sqlparser` crate and the `common` crate are kept independent.
         match field {
@@ -221,13 +221,12 @@ impl Binder {
 #[cfg(test)]
 mod tests {
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_prost;
     use risingwave_sqlparser::ast::Value::Number;
 
     use super::*;
     use crate::binder::test_utils::mock_binder;
-    use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall};
+    use crate::expr::Expr;
 
     #[tokio::test]
     async fn test_bind_value() {

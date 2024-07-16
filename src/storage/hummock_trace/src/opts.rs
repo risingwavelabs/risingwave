@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use bincode::{Decode, Encode};
-use foyer::memory::CacheContext;
-use risingwave_common::buffer::Bitmap;
+use foyer::CacheContext;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::EpochPair;
@@ -33,7 +33,6 @@ pub struct TracedPrefetchOptions {
 pub enum TracedCachePolicy {
     Disable,
     Fill(TracedCachePriority),
-    FileFileCache,
     NotFill,
 }
 
@@ -65,7 +64,7 @@ impl From<CacheContext> for TracedCachePriority {
     fn from(value: CacheContext) -> Self {
         match value {
             CacheContext::Default => Self::High,
-            CacheContext::LruPriorityLow => Self::Low,
+            CacheContext::LowPriority => Self::Low,
         }
     }
 }
@@ -74,7 +73,7 @@ impl From<TracedCachePriority> for CacheContext {
     fn from(value: TracedCachePriority) -> Self {
         match value {
             TracedCachePriority::High => Self::Default,
-            TracedCachePriority::Low => Self::LruPriorityLow,
+            TracedCachePriority::Low => Self::LowPriority,
         }
     }
 }
@@ -110,6 +109,7 @@ pub struct TracedReadOptions {
     pub retention_seconds: Option<u32>,
     pub table_id: TracedTableId,
     pub read_version_from_backup: bool,
+    pub read_version_from_time_travel: bool,
 }
 
 impl TracedReadOptions {
@@ -124,7 +124,8 @@ impl TracedReadOptions {
             cache_policy: TracedCachePolicy::Disable,
             retention_seconds: None,
             table_id: TracedTableId { table_id },
-            read_version_from_backup: true,
+            read_version_from_backup: false,
+            read_version_from_time_travel: false,
         }
     }
 }
@@ -196,6 +197,7 @@ pub enum TracedHummockReadEpoch {
     Current(TracedHummockEpoch),
     NoWait(TracedHummockEpoch),
     Backup(TracedHummockEpoch),
+    TimeTravel(TracedHummockEpoch),
 }
 
 impl From<HummockReadEpoch> for TracedHummockReadEpoch {
@@ -205,6 +207,7 @@ impl From<HummockReadEpoch> for TracedHummockReadEpoch {
             HummockReadEpoch::Current(epoch) => Self::Current(epoch),
             HummockReadEpoch::NoWait(epoch) => Self::NoWait(epoch),
             HummockReadEpoch::Backup(epoch) => Self::Backup(epoch),
+            HummockReadEpoch::TimeTravel(epoch) => Self::TimeTravel(epoch),
         }
     }
 }
@@ -216,6 +219,7 @@ impl From<TracedHummockReadEpoch> for HummockReadEpoch {
             TracedHummockReadEpoch::Current(epoch) => Self::Current(epoch),
             TracedHummockReadEpoch::NoWait(epoch) => Self::NoWait(epoch),
             TracedHummockReadEpoch::Backup(epoch) => Self::Backup(epoch),
+            TracedHummockReadEpoch::TimeTravel(epoch) => Self::TimeTravel(epoch),
         }
     }
 }

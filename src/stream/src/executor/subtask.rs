@@ -12,16 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use await_tree::InstrumentAwait;
-use futures::{Future, StreamExt};
+use futures::Future;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::actor::spawn_blocking_drop_stream;
-use super::{Execute, Executor, Message, MessageStreamItem};
-use crate::task::ActorId;
+use crate::executor::prelude::*;
 
 /// Handle used to drive the subtask.
 pub type SubtaskHandle = impl Future<Output = ()> + Send + 'static;

@@ -33,7 +33,7 @@ tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- starting risingwave cluster"
 mkdir -p .risingwave/log
-cargo make ci-start ci-iceberg-test
+risedev ci-start ci-iceberg-test
 sleep 1
 
 # prepare minio iceberg sink
@@ -49,7 +49,7 @@ spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
     --conf spark.sql.catalog.demo.hadoop.fs.s3a.endpoint=http://127.0.0.1:9301 \
     --conf spark.sql.catalog.demo.hadoop.fs.s3a.access.key=hummockadmin \
     --conf spark.sql.catalog.demo.hadoop.fs.s3a.secret.key=hummockadmin \
-    --S --e "CREATE TABLE demo.demo_db.demo_table(v1 int, v2 bigint, v3 string) TBLPROPERTIES ('format-version'='2');"
+    --S --e "CREATE TABLE demo.demo_db.e2e_demo_table(v1 int, v2 bigint, v3 string) TBLPROPERTIES ('format-version'='2');"
 
 echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/iceberg_sink.slt'
@@ -63,7 +63,7 @@ spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
     --conf spark.sql.catalog.demo.hadoop.fs.s3a.endpoint=http://127.0.0.1:9301 \
     --conf spark.sql.catalog.demo.hadoop.fs.s3a.access.key=hummockadmin \
     --conf spark.sql.catalog.demo.hadoop.fs.s3a.secret.key=hummockadmin \
-    --S --e "INSERT OVERWRITE DIRECTORY './spark-output' USING CSV SELECT * FROM demo.demo_db.demo_table;"
+    --S --e "INSERT OVERWRITE DIRECTORY './spark-output' USING CSV SELECT * FROM demo.demo_db.e2e_demo_table;"
 
 # check sink destination using shell
 if cat ./spark-output/*.csv | sort | awk -F "," '{
@@ -81,5 +81,15 @@ else
   exit 1
 fi
 
+spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
+    --conf spark.sql.catalog.demo=org.apache.iceberg.spark.SparkCatalog \
+    --conf spark.sql.catalog.demo.type=hadoop \
+    --conf spark.sql.catalog.demo.warehouse=s3a://iceberg/ \
+    --conf spark.sql.catalog.demo.hadoop.fs.s3a.endpoint=http://127.0.0.1:9301 \
+    --conf spark.sql.catalog.demo.hadoop.fs.s3a.access.key=hummockadmin \
+    --conf spark.sql.catalog.demo.hadoop.fs.s3a.secret.key=hummockadmin \
+    --S --e "drop table demo.demo_db.e2e_demo_table;"
+
+
 echo "--- Kill cluster"
-cargo make ci-kill
+risedev ci-kill

@@ -20,6 +20,9 @@ use std::task::{Context, Poll};
 
 use futures::Stream;
 use pgwire::pg_server::{BoxedError, Session, SessionId};
+use risingwave_batch::worker_manager::worker_node_manager::{
+    WorkerNodeManagerRef, WorkerNodeSelector,
+};
 use risingwave_common::array::DataChunk;
 use risingwave_common::session_config::QueryMode;
 use risingwave_pb::batch_plan::TaskOutputId;
@@ -31,7 +34,6 @@ use super::stats::DistributedQueryMetrics;
 use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
-use crate::scheduler::worker_node_manager::{WorkerNodeManagerRef, WorkerNodeSelector};
 use crate::scheduler::{ExecutionContextRef, SchedulerResult};
 
 pub struct DistributedQueryStream {
@@ -48,6 +50,7 @@ impl DistributedQueryStream {
 }
 
 impl Stream for DistributedQueryStream {
+    // TODO(error-handling): use a concrete error type.
     type Item = Result<DataChunk, BoxedError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

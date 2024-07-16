@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::ops::{Bound, Deref, RangeBounds};
+use std::ops::{Bound, Deref};
 use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
@@ -19,7 +19,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prometheus::Histogram;
 use risingwave_common::array::DataChunk;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Schema};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
@@ -28,10 +28,11 @@ use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, PbScanRange};
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_pb::plan_common::StorageTableDesc;
+use risingwave_pb::plan_common::as_of::AsOfType;
+use risingwave_pb::plan_common::{as_of, PbAsOf, StorageTableDesc};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::{collect_data_chunk, TableDistribution};
+use risingwave_storage::table::TableDistribution;
 use risingwave_storage::{dispatch_state_store, StateStore};
 
 use crate::error::{BatchError, Result};
@@ -55,6 +56,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     ordered: bool,
     epoch: BatchQueryEpoch,
     limit: Option<u64>,
+    as_of: Option<AsOf>,
 }
 
 /// Range for batch scan.
@@ -66,12 +68,37 @@ pub struct ScanRange {
     pub next_col_bounds: (Bound<Datum>, Bound<Datum>),
 }
 
-impl ScanRange {
-    fn is_full_range<T>(bounds: &impl RangeBounds<T>) -> bool {
-        matches!(bounds.start_bound(), Bound::Unbounded)
-            && matches!(bounds.end_bound(), Bound::Unbounded)
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AsOf {
+    pub timestamp: i64,
+}
 
+impl TryFrom<&PbAsOf> for AsOf {
+    type Error = BatchError;
+
+    fn try_from(pb: &PbAsOf) -> std::result::Result<Self, Self::Error> {
+        match pb.as_of_type.as_ref().unwrap() {
+            AsOfType::Timestamp(ts) => Ok(Self {
+                timestamp: ts.timestamp,
+            }),
+            AsOfType::ProcessTime(_) | AsOfType::Version(_) => Err(BatchError::TimeTravel(
+                anyhow::anyhow!("batch query does not support as of process time or version"),
+            )),
+        }
+    }
+}
+
+impl From<&AsOf> for PbAsOf {
+    fn from(v: &AsOf) -> Self {
+        PbAsOf {
+            as_of_type: Some(AsOfType::Timestamp(as_of::Timestamp {
+                timestamp: v.timestamp,
+            })),
+        }
+    }
+}
+
+impl ScanRange {
     /// Create a scan range from the prost representation.
     pub fn new(
         scan_range: PbScanRange,
@@ -139,6 +166,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         identity: String,
         limit: Option<u64>,
         metrics: Option<BatchMetricsWithTaskLabels>,
+        as_of: Option<AsOf>,
     ) -> Self {
         Self {
             chunk_size,
@@ -149,6 +177,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             ordered,
             epoch,
             limit,
+            as_of,
         }
     }
 }
@@ -177,7 +206,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .copied()
             .map(ColumnId::from)
             .collect();
-
         let vnodes = match &seq_scan_node.vnode_bitmap {
             Some(vnodes) => Some(Bitmap::from(vnodes).into()),
             // This is possible for dml. vnode_bitmap is not filled by scheduler.
@@ -211,6 +239,11 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
 
         let epoch = source.epoch.clone();
         let limit = seq_scan_node.limit;
+        let as_of = seq_scan_node
+            .as_of
+            .as_ref()
+            .map(AsOf::try_from)
+            .transpose()?;
         let chunk_size = if let Some(limit) = seq_scan_node.limit {
             (limit as u32).min(source.context.get_config().developer.chunk_size as u32)
         } else {
@@ -229,6 +262,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 source.plan_node().get_identity().clone(),
                 limit,
                 metrics,
+                as_of,
             )))
         })
     }
@@ -260,8 +294,21 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             ordered,
             epoch,
             limit,
+            as_of,
         } = *self;
         let table = Arc::new(table);
+        // as_of takes precedence
+        let query_epoch = as_of
+            .map(|a| {
+                let epoch = unix_timestamp_sec_to_epoch(a.timestamp).0;
+                tracing::debug!(epoch, identity, "time travel");
+                risingwave_pb::common::BatchQueryEpoch {
+                    epoch: Some(risingwave_pb::common::batch_query_epoch::Epoch::TimeTravel(
+                        epoch,
+                    )),
+                }
+            })
+            .unwrap_or_else(|| epoch);
 
         // Create collector.
         let histogram = metrics.as_ref().map(|metrics| {
@@ -294,7 +341,8 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         for point_get in point_gets {
             let table = table.clone();
             if let Some(row) =
-                Self::execute_point_get(table, point_get, epoch.clone(), histogram.clone()).await?
+                Self::execute_point_get(table, point_get, query_epoch.clone(), histogram.clone())
+                    .await?
             {
                 if let Some(chunk) = data_chunk_builder.append_one_row(row) {
                     returned += chunk.cardinality() as u64;
@@ -325,7 +373,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 table.clone(),
                 range,
                 ordered,
-                epoch.clone(),
+                query_epoch.clone(),
                 chunk_size,
                 limit,
                 histogram.clone(),
@@ -393,7 +441,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         // Range Scan.
         assert!(pk_prefix.len() < table.pk_indices().len());
         let iter = table
-            .batch_iter_with_pk_bounds(
+            .batch_chunk_iter_with_pk_bounds(
                 epoch.into(),
                 &pk_prefix,
                 (
@@ -425,6 +473,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     },
                 ),
                 ordered,
+                chunk_size,
                 PrefetchOptions::new(limit.is_none(), true),
             )
             .await?;
@@ -433,9 +482,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         loop {
             let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
 
-            let chunk = collect_data_chunk(&mut iter, table.schema(), Some(chunk_size))
-                .await
-                .map_err(BatchError::from)?;
+            let chunk = iter.next().await.transpose().map_err(BatchError::from)?;
 
             if let Some(timer) = timer {
                 timer.observe_duration()
@@ -448,4 +495,11 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             }
         }
     }
+}
+
+pub fn unix_timestamp_sec_to_epoch(ts: i64) -> risingwave_common::util::epoch::Epoch {
+    let ts = ts.checked_add(1).unwrap();
+    risingwave_common::util::epoch::Epoch::from_unix_millis_or_earliest(
+        u64::try_from(ts).unwrap_or(0).checked_mul(1000).unwrap(),
+    )
 }

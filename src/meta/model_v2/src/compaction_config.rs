@@ -14,7 +14,6 @@
 
 use risingwave_pb::hummock::CompactionConfig as PbCompactionConfig;
 use sea_orm::entity::prelude::*;
-use sea_orm::FromJsonQueryResult;
 use serde::{Deserialize, Serialize};
 
 use crate::CompactionGroupId;
@@ -32,4 +31,4 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
-crate::derive_from_json_struct!(CompactionConfig, PbCompactionConfig);
+crate::derive_from_blob!(CompactionConfig, PbCompactionConfig);

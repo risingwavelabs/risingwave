@@ -18,6 +18,7 @@ use std::marker::PhantomData;
 use aws_sdk_s3::types::Object;
 use risingwave_common::types::{JsonbVal, Timestamptz};
 use serde::{Deserialize, Serialize};
+use strum::Display;
 
 use super::opendal_source::OpendalSource;
 use crate::error::ConnectorResult;
@@ -55,8 +56,8 @@ impl SplitMetaData for FsSplit {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
-        let offset = start_offset.parse().unwrap();
+    fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
+        let offset = last_seen_offset.parse().unwrap();
         self.offset = offset;
         Ok(())
     }
@@ -106,8 +107,8 @@ impl<Src: OpendalSource> SplitMetaData for OpendalFsSplit<Src> {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
-        let offset = start_offset.parse().unwrap();
+    fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
+        let offset = last_seen_offset.parse().unwrap();
         self.offset = offset;
         Ok(())
     }
@@ -141,3 +142,12 @@ pub struct FsPageItem {
 }
 
 pub type FsPage = Vec<FsPageItem>;
+
+#[derive(Debug, Default, Clone, PartialEq, Display, Deserialize)]
+pub enum CompressionFormat {
+    #[default]
+    None,
+
+    #[serde(rename = "gzip", alias = "gz")]
+    Gzip,
+}

@@ -53,11 +53,15 @@ pub enum WireFormatError {
     ParseMessageIndexes,
 }
 
-/// extract the magic number and `schema_id` at the front of payload
+/// Returns `(schema_id, payload)`
 ///
-/// 0 -> magic number
-/// 1-4 -> schema id
-/// 5-... -> message payload
+/// Refer to [Confluent schema registry wire format](https://docs.confluent.io/platform/7.6/schema-registry/fundamentals/serdes-develop/index.html#wire-format)
+///
+/// | Bytes | Area        | Description                                                                                        |
+/// |-------|-------------|----------------------------------------------------------------------------------------------------|
+/// | 0     | Magic Byte  | Confluent serialization format version number; currently always `0`.                               |
+/// | 1-4   | Schema ID   | 4-byte schema ID as returned by Schema Registry.                                                   |
+/// | 5-... | Data        | Serialized data for the specified schema format (for example, binary encoding for Avro or Protobuf.|
 pub(crate) fn extract_schema_id(payload: &[u8]) -> Result<(i32, &[u8]), WireFormatError> {
     use byteorder::{BigEndian, ReadBytesExt as _};
 
@@ -150,6 +154,7 @@ pub struct Subject {
 #[derive(Debug, Deserialize)]
 pub struct SchemaReference {
     /// The name of the reference.
+    #[allow(dead_code)]
     pub name: String,
     /// The subject that the referenced schema belongs to
     pub subject: String,

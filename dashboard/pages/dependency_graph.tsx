@@ -27,6 +27,7 @@ import Title from "../components/Title"
 import useFetch from "../lib/api/fetch"
 import {
   Relation,
+  getRelationDependencies,
   getRelations,
   relationIsStreamingJob,
 } from "../lib/api/streaming"
@@ -34,7 +35,10 @@ import { RelationPoint } from "../lib/layout"
 
 const SIDEBAR_WIDTH = "200px"
 
-function buildDependencyAsEdges(list: Relation[]): RelationPoint[] {
+function buildDependencyAsEdges(
+  list: Relation[],
+  relation_deps: Map<number, number[]>
+): RelationPoint[] {
   const edges = []
   const relationSet = new Set(list.map((r) => r.id))
   for (const r of reverse(sortBy(list, "id"))) {
@@ -42,9 +46,12 @@ function buildDependencyAsEdges(list: Relation[]): RelationPoint[] {
       id: r.id.toString(),
       name: r.name,
       parentIds: relationIsStreamingJob(r)
-        ? r.dependentRelations
-            .filter((r) => relationSet.has(r))
-            .map((r) => r.toString())
+        ? relation_deps.has(r.id)
+          ? relation_deps
+              .get(r.id)
+              ?.filter((r) => relationSet.has(r))
+              .map((r) => r.toString())
+          : []
         : [],
       order: r.id,
       width: nodeRadius * 2,
@@ -52,20 +59,22 @@ function buildDependencyAsEdges(list: Relation[]): RelationPoint[] {
       relation: r,
     })
   }
-  return edges
+  return edges as RelationPoint[]
 }
 
 export default function StreamingGraph() {
   const { response: relationList } = useFetch(getRelations)
+  // Since dependentRelations will be deprecated, we need to use getRelationDependencies here to separately obtain the dependency relationship.
+  const { response: relationDeps } = useFetch(getRelationDependencies)
   const [selectedId, setSelectedId] = useQueryState("id", parseAsInteger)
 
   const relationDependencyCallback = useCallback(() => {
-    if (relationList) {
-      return buildDependencyAsEdges(relationList)
+    if (relationList && relationDeps) {
+      return buildDependencyAsEdges(relationList, relationDeps)
     } else {
       return undefined
     }
-  }, [relationList])
+  }, [relationList, relationDeps])
 
   const relationDependency = relationDependencyCallback()
 

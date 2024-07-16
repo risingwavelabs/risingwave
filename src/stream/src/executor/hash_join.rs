@@ -11,42 +11,32 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::collections::{BTreeMap, HashSet};
-use std::sync::Arc;
+use std::num::NonZeroU32;
+use std::sync::LazyLock;
 use std::time::Duration;
 
-use await_tree::InstrumentAwait;
-use futures::{pin_mut, Stream, StreamExt};
-use futures_async_stream::try_stream;
+use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use multimap::MultiMap;
-use risingwave_common::array::{Op, RowRef, StreamChunk};
+use risingwave_common::array::Op;
 use risingwave_common::hash::{HashKey, NullBitmap};
-use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, DefaultOrd, ToOwnedDatum};
+use risingwave_common::log::LogSuppresser;
+use risingwave_common::types::{DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_expr::ExprError;
-use risingwave_storage::StateStore;
 use tokio::time::Instant;
 
 use self::builder::JoinChunkBuilder;
 use super::barrier_align::*;
-use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::join::hash_join::*;
 use super::join::row::JoinRow;
-use super::join::{JoinTypePrimitive, SideTypePrimitive, *};
-use super::monitor::StreamingMetrics;
+use super::join::*;
 use super::watermark::*;
-use super::{
-    ActorContextRef, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message, Watermark,
-};
-use crate::common::table::state_table::StateTable;
-use crate::executor::expect_first_barrier_from_aligned_stream;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
-use crate::task::AtomicU64Ref;
+use crate::executor::prelude::*;
 
 /// Evict the cache every n rows.
 const EVICT_EVERY_N_ROWS: u32 = 16;
@@ -170,6 +160,8 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
 
     /// watermark column index -> `BufferedWatermarks`
     watermark_buffers: BTreeMap<usize, BufferedWatermarks<SideTypePrimitive>>,
+
+    high_join_amplification_threshold: usize,
 }
 
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
@@ -206,6 +198,7 @@ struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
     append_only_optimize: bool,
     chunk_size: usize,
     cnt_rows_received: &'a mut u32,
+    high_join_amplification_threshold: usize,
 }
 
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, S, T> {
@@ -229,6 +222,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
+        high_join_amplification_threshold: usize,
     ) -> Self {
         let side_l_column_n = input_l.schema().len();
 
@@ -275,8 +269,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .collect_vec();
 
         // If pk is contained in join key.
-        let pk_contained_in_jk_l = is_subset(state_pk_indices_l, state_join_key_indices_l.clone());
-        let pk_contained_in_jk_r = is_subset(state_pk_indices_r, state_join_key_indices_r.clone());
+        let pk_contained_in_jk_l =
+            is_subset(state_pk_indices_l.clone(), state_join_key_indices_l.clone());
+        let pk_contained_in_jk_r =
+            is_subset(state_pk_indices_r.clone(), state_join_key_indices_r.clone());
 
         // check whether join key contains pk in both side
         let append_only_optimize = is_append_only && pk_contained_in_jk_l && pk_contained_in_jk_r;
@@ -457,6 +453,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             chunk_size,
             cnt_rows_received: 0,
             watermark_buffers,
+            high_join_amplification_threshold,
         }
     }
 
@@ -470,6 +467,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             self.ctx.id,
             self.ctx.fragment_id,
             self.metrics.clone(),
+            "Join",
         );
         pin_mut!(aligned_stream);
 
@@ -549,6 +547,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         append_only_optimize: self.append_only_optimize,
                         chunk_size: self.chunk_size,
                         cnt_rows_received: &mut self.cnt_rows_received,
+                        high_join_amplification_threshold: self.high_join_amplification_threshold,
                     }) {
                         left_time += left_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -573,6 +572,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         append_only_optimize: self.append_only_optimize,
                         chunk_size: self.chunk_size,
                         cnt_rows_received: &mut self.cnt_rows_received,
+                        high_join_amplification_threshold: self.high_join_amplification_threshold,
                     }) {
                         right_time += right_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -596,10 +596,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         }
                         self.side_r.ht.update_vnode_bitmap(vnode_bitmap);
                     }
-
-                    // Update epoch for managed cache.
-                    self.side_l.ht.update_epoch(barrier.epoch.curr);
-                    self.side_r.ht.update_epoch(barrier.epoch.curr);
 
                     // Report metrics of cached join rows/entries
                     for (join_cached_entry_count, ht) in [
@@ -787,6 +783,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             append_only_optimize,
             chunk_size,
             cnt_rows_received,
+            high_join_amplification_threshold,
             ..
         } = args;
 
@@ -842,6 +839,27 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
             if let Some(rows) = &matched_rows {
                 join_matched_join_keys.observe(rows.len() as _);
+                if rows.len() > high_join_amplification_threshold {
+                    static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(|| {
+                        LogSuppresser::new(RateLimiter::direct(Quota::per_minute(
+                            NonZeroU32::new(1).unwrap(),
+                        )))
+                    });
+                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                        let join_key_data_types = side_update.ht.join_key_data_types();
+                        let key = key.deserialize(join_key_data_types)?;
+                        tracing::warn!(target: "high_join_amplification",
+                            suppressed_count,
+                            matched_rows_len = rows.len(),
+                            update_table_id = side_update.ht.table_id(),
+                            match_table_id = side_match.ht.table_id(),
+                            join_key = ?key,
+                            actor_id = ctx.id,
+                            fragment_id = ctx.fragment_id,
+                            "large rows matched for join key"
+                        );
+                    }
+                }
             } else {
                 join_matched_join_keys.observe(0.0)
             }
@@ -1064,20 +1082,16 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 mod tests {
     use std::sync::atomic::AtomicU64;
 
-    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::*;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
     use risingwave_common::hash::{Key128, Key64};
-    use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
-    use crate::common::table::state_table::StateTable;
     use crate::executor::test_utils::expr::build_from_pretty;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
-    use crate::executor::{ActorContext, Barrier, EpochPair};
 
     async fn create_in_memory_state_table(
         mem_state: MemoryStateStore,
@@ -1205,6 +1219,7 @@ mod tests {
             false,
             Arc::new(StreamingMetrics::unused()),
             1024,
+            2048,
         );
         (tx_l, tx_r, executor.boxed().execute())
     }
@@ -1297,6 +1312,7 @@ mod tests {
             true,
             Arc::new(StreamingMetrics::unused()),
             1024,
+            2048,
         );
         (tx_l, tx_r, executor.boxed().execute())
     }
@@ -2987,8 +3003,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 "  I I I I
-                U- 2 5 . .
-                U+ 2 5 2 7
+                U-  2 5 . .
+                U+  2 5 2 7
                 +  . . 4 8
                 +  . . 6 9"
             )
@@ -3003,6 +3019,67 @@ mod tests {
                 " I I I I
                 + . . 5 10
                 - . . 5 10"
+            )
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_streaming_hash_full_outer_join_update() -> StreamExecutorResult<()> {
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_classical_executor::<{ JoinType::FullOuter }>(false, false, None).await;
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
+        hash_join.next_unwrap_ready_barrier()?;
+
+        tx_l.push_chunk(StreamChunk::from_pretty(
+            "  I I
+             + 1 1
+            ",
+        ));
+        let chunk = hash_join.next_unwrap_ready_chunk()?;
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I I I
+                + 1 1 . ."
+            )
+        );
+
+        tx_r.push_chunk(StreamChunk::from_pretty(
+            "  I I
+             + 1 1
+            ",
+        ));
+        let chunk = hash_join.next_unwrap_ready_chunk()?;
+
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I I I
+                U- 1 1 . .
+                U+ 1 1 1 1"
+            )
+        );
+
+        tx_l.push_chunk(StreamChunk::from_pretty(
+            "   I I
+              - 1 1
+              + 1 2
+            ",
+        ));
+        let chunk = hash_join.next_unwrap_ready_chunk()?;
+        let chunk = chunk.compact();
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I I I
+                - 1 1 1 1
+                + 1 2 1 1
+                "
             )
         );
 
@@ -3079,8 +3156,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 "  I I I I
-                U- 2 5 . .
-                U+ 2 5 2 6
+                U-  2 5 . .
+                U+  2 5 2 6
                 +  . . 4 8
                 +  . . 3 4" /* regression test (#2420): 3 4 should be forwarded only once
                              * despite matching on eq join on 2

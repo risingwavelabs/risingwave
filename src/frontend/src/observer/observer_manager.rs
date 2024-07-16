@@ -17,20 +17,23 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::CatalogVersion;
-use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::hash::WorkerSlotMapping;
+use risingwave_common::secret::LocalSecretManager;
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
-use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
+use risingwave_common_service::ObserverState;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{FragmentParallelUnitMapping, MetaSnapshot, SubscribeResponse};
+use risingwave_pb::meta::{FragmentWorkerSlotMapping, MetaSnapshot, SubscribeResponse};
+use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::watch::Sender;
 
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::FragmentId;
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
+use crate::catalog::{FragmentId, SecretId};
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::UserInfoVersion;
@@ -43,10 +46,14 @@ pub struct FrontendObserverNode {
     user_info_updated_tx: Sender<UserInfoVersion>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     system_params_manager: LocalSystemParamsManagerRef,
+    session_params: Arc<RwLock<SessionConfig>>,
+    compute_client_pool: ComputeClientPoolRef,
 }
 
 impl ObserverState for FrontendObserverNode {
-    type SubscribeType = SubscribeFrontend;
+    fn subscribe_type() -> risingwave_pb::meta::SubscribeType {
+        risingwave_pb::meta::SubscribeType::Frontend
+    }
 
     fn handle_notification(&mut self, resp: SubscribeResponse) {
         let Some(info) = resp.info.as_ref() else {
@@ -62,13 +69,16 @@ impl ObserverState for FrontendObserverNode {
             | Info::Connection(_) => {
                 self.handle_catalog_notification(resp);
             }
+            Info::Secret(_) => {
+                self.handle_catalog_notification(resp.clone());
+                self.handle_secret_notification(resp);
+            }
             Info::Node(node) => {
                 self.update_worker_node_manager(resp.operation(), node);
             }
             Info::User(_) => {
                 self.handle_user_notification(resp);
             }
-            Info::ParallelUnitMapping(_) => self.handle_fragment_mapping_notification(resp),
             Info::Snapshot(_) => {
                 panic!(
                     "receiving a snapshot in the middle is unsupported now {:?}",
@@ -90,11 +100,21 @@ impl ObserverState for FrontendObserverNode {
             Info::SystemParams(p) => {
                 self.system_params_manager.try_set_params(p);
             }
+            Info::SessionParam(p) => {
+                self.session_params
+                    .write()
+                    .set(&p.param, p.value().to_string(), &mut ())
+                    .unwrap();
+            }
             Info::HummockStats(stats) => {
                 self.handle_table_stats_notification(stats);
             }
-            Info::ServingParallelUnitMappings(m) => {
-                self.handle_fragment_serving_mapping_notification(m.mappings, resp.operation());
+            Info::StreamingWorkerSlotMapping(_) => self.handle_fragment_mapping_notification(resp),
+            Info::ServingWorkerSlotMappings(m) => {
+                self.handle_fragment_serving_mapping_notification(m.mappings, resp.operation())
+            }
+            Info::Recovery(_) => {
+                self.compute_client_pool.invalidate_all();
             }
         }
     }
@@ -120,14 +140,16 @@ impl ObserverState for FrontendObserverNode {
             functions,
             connections,
             users,
-            parallel_unit_mappings,
-            serving_parallel_unit_mappings,
             nodes,
             hummock_snapshot,
             hummock_version: _,
             meta_backup_manifest_id: _,
             hummock_write_limits: _,
+            streaming_worker_slot_mappings,
+            serving_worker_slot_mappings,
+            session_params,
             version,
+            secrets,
         } = snapshot;
 
         for db in databases {
@@ -160,13 +182,17 @@ impl ObserverState for FrontendObserverNode {
         for connection in connections {
             catalog_guard.create_connection(&connection)
         }
+        for secret in &secrets {
+            catalog_guard.create_secret(secret)
+        }
         for user in users {
             user_guard.create_user(user)
         }
+
         self.worker_node_manager.refresh(
             nodes,
-            convert_pu_mapping(&parallel_unit_mappings),
-            convert_pu_mapping(&serving_parallel_unit_mappings),
+            convert_worker_slot_mapping(&streaming_worker_slot_mappings),
+            convert_worker_slot_mapping(&serving_worker_slot_mappings),
         );
         self.hummock_snapshot_manager
             .update(hummock_snapshot.unwrap());
@@ -180,6 +206,9 @@ impl ObserverState for FrontendObserverNode {
         self.user_info_updated_tx
             .send(snapshot_version.catalog_version)
             .unwrap();
+        *self.session_params.write() =
+            serde_json::from_str(&session_params.unwrap().params).unwrap();
+        LocalSecretManager::global().init_secrets(secrets);
     }
 }
 
@@ -192,6 +221,8 @@ impl FrontendObserverNode {
         user_info_updated_tx: Sender<UserInfoVersion>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         system_params_manager: LocalSystemParamsManagerRef,
+        session_params: Arc<RwLock<SessionConfig>>,
+        compute_client_pool: ComputeClientPoolRef,
     ) -> Self {
         Self {
             worker_node_manager,
@@ -201,6 +232,8 @@ impl FrontendObserverNode {
             user_info_updated_tx,
             hummock_snapshot_manager,
             system_params_manager,
+            session_params,
+            compute_client_pool,
         }
     }
 
@@ -243,7 +276,7 @@ impl FrontendObserverNode {
                             ),
                             Operation::Update => {
                                 let old_fragment_id = catalog_guard
-                                    .get_table_by_id(&table.id.into())
+                                    .get_any_table_by_id(&table.id.into())
                                     .unwrap()
                                     .fragment_id;
                                 catalog_guard.update_table(table);
@@ -325,6 +358,21 @@ impl FrontendObserverNode {
                 Operation::Update => catalog_guard.update_connection(connection),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
+            Info::Secret(secret) => {
+                let mut secret = secret.clone();
+                // The secret value should not be revealed to users. So mask it in the frontend catalog.
+                secret.value = "SECRET VALUE SHOULD NOT BE REVEALED".as_bytes().to_vec();
+                match resp.operation() {
+                    Operation::Add => catalog_guard.create_secret(&secret),
+                    Operation::Delete => catalog_guard.drop_secret(
+                        secret.database_id,
+                        secret.schema_id,
+                        SecretId::new(secret.id),
+                    ),
+                    Operation::Update => catalog_guard.update_secret(&secret),
+                    _ => panic!("receive an unsupported notify {:?}", resp),
+                }
+            }
             _ => unreachable!(),
         }
         assert!(
@@ -367,11 +415,11 @@ impl FrontendObserverNode {
             return;
         };
         match info {
-            Info::ParallelUnitMapping(parallel_unit_mapping) => {
-                let fragment_id = parallel_unit_mapping.fragment_id;
+            Info::StreamingWorkerSlotMapping(streaming_worker_slot_mapping) => {
+                let fragment_id = streaming_worker_slot_mapping.fragment_id;
                 let mapping = || {
-                    ParallelUnitMapping::from_protobuf(
-                        parallel_unit_mapping.mapping.as_ref().unwrap(),
+                    WorkerSlotMapping::from_protobuf(
+                        streaming_worker_slot_mapping.mapping.as_ref().unwrap(),
                     )
                 };
 
@@ -397,20 +445,20 @@ impl FrontendObserverNode {
 
     fn handle_fragment_serving_mapping_notification(
         &mut self,
-        mappings: Vec<FragmentParallelUnitMapping>,
+        mappings: Vec<FragmentWorkerSlotMapping>,
         op: Operation,
     ) {
         match op {
             Operation::Add | Operation::Update => {
                 self.worker_node_manager
-                    .upsert_serving_fragment_mapping(convert_pu_mapping(&mappings));
+                    .upsert_serving_fragment_mapping(convert_worker_slot_mapping(&mappings));
             }
             Operation::Delete => self.worker_node_manager.remove_serving_fragment_mapping(
                 &mappings.into_iter().map(|m| m.fragment_id).collect_vec(),
             ),
             Operation::Snapshot => {
                 self.worker_node_manager
-                    .set_serving_fragment_mapping(convert_pu_mapping(&mappings));
+                    .set_serving_fragment_mapping(convert_worker_slot_mapping(&mappings));
             }
             _ => panic!("receive an unsupported notify {:?}", op),
         }
@@ -433,6 +481,24 @@ impl FrontendObserverNode {
         }
     }
 
+    fn handle_secret_notification(&mut self, resp: SubscribeResponse) {
+        let resp_op = resp.operation();
+        let Some(Info::Secret(secret)) = resp.info else {
+            unreachable!();
+        };
+        match resp_op {
+            Operation::Add => {
+                LocalSecretManager::global().add_secret(secret.id, secret.value);
+            }
+            Operation::Delete => {
+                LocalSecretManager::global().remove_secret(secret.id);
+            }
+            _ => {
+                panic!("error type notification");
+            }
+        }
+    }
+
     /// `update_worker_node_manager` is called in `start` method.
     /// It calls `add_worker_node` and `remove_worker_node` of `WorkerNodeManager`.
     fn update_worker_node_manager(&self, operation: Operation, node: WorkerNode) {
@@ -450,17 +516,17 @@ impl FrontendObserverNode {
     }
 }
 
-fn convert_pu_mapping(
-    parallel_unit_mappings: &[FragmentParallelUnitMapping],
-) -> HashMap<FragmentId, ParallelUnitMapping> {
-    parallel_unit_mappings
+fn convert_worker_slot_mapping(
+    worker_slot_mappings: &[FragmentWorkerSlotMapping],
+) -> HashMap<FragmentId, WorkerSlotMapping> {
+    worker_slot_mappings
         .iter()
         .map(
-            |FragmentParallelUnitMapping {
+            |FragmentWorkerSlotMapping {
                  fragment_id,
                  mapping,
              }| {
-                let mapping = ParallelUnitMapping::from_protobuf(mapping.as_ref().unwrap());
+                let mapping = WorkerSlotMapping::from_protobuf(mapping.as_ref().unwrap());
                 (*fragment_id, mapping)
             },
         )

@@ -25,9 +25,6 @@ use risingwave_pb::hummock::SstableInfo;
 pub mod block_cache;
 pub use block_cache::*;
 
-pub mod file_cache;
-pub use file_cache::*;
-
 pub mod sstable;
 pub use sstable::*;
 
@@ -53,7 +50,11 @@ mod validator;
 pub mod value;
 pub mod write_limiter;
 
+pub mod recent_filter;
+pub use recent_filter::*;
+
 pub mod block_stream;
+mod time_travel_version_cache;
 
 pub use error::*;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};

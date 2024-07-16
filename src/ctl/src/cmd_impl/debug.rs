@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod fix_table_fragments;
 mod meta_store;
 
+pub use fix_table_fragments::*;
 pub use meta_store::*;

@@ -16,7 +16,7 @@ use std::future::Future;
 
 use anyhow::anyhow;
 use futures::{Stream, TryStreamExt};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::connector_service::coordinate_request::{
     CommitRequest, StartCoordinationRequest,
 };
@@ -67,8 +67,12 @@ impl CoordinatorStreamHandle {
             move |rx| async move {
                 init_stream(rx)
                     .await
-                    .map(|response| response.into_inner().map_err(RpcError::from))
-                    .map_err(RpcError::from)
+                    .map(|response| {
+                        response
+                            .into_inner()
+                            .map_err(RpcError::from_connector_status)
+                    })
+                    .map_err(RpcError::from_connector_status)
             },
         )
         .await?;

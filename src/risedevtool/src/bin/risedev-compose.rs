@@ -19,7 +19,7 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use console::style;
-use fs_err::{self, File};
+use fs_err::File;
 use itertools::Itertools;
 use risedev::{
     compose_deploy, generate_risedev_env, Compose, ComposeConfig, ComposeDeployConfig, ComposeFile,
@@ -123,6 +123,7 @@ fn main() -> Result<()> {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
+            ServiceConfig::Sqlite(_) => continue,
             ServiceConfig::Prometheus(c) => {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
@@ -200,9 +201,6 @@ fn main() -> Result<()> {
             ServiceConfig::Pubsub(_) => {
                 return Err(anyhow!("not supported, please use redpanda instead"))
             }
-            ServiceConfig::ZooKeeper(_) => {
-                return Err(anyhow!("not supported, please use redpanda instead"))
-            }
             ServiceConfig::Opendal(_) => continue,
             ServiceConfig::AwsS3(_) => continue,
             ServiceConfig::RedPanda(c) => {
@@ -221,7 +219,10 @@ fn main() -> Result<()> {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
-            ServiceConfig::Redis(_) => return Err(anyhow!("not supported")),
+            ServiceConfig::Redis(_)
+            | ServiceConfig::MySql(_)
+            | ServiceConfig::Postgres(_)
+            | ServiceConfig::SchemaRegistry(_) => return Err(anyhow!("not supported")),
         };
         compose.container_name = service.id().to_string();
         if opts.deploy {
@@ -244,7 +245,6 @@ fn main() -> Result<()> {
                 }
             });
             let compose_file = ComposeFile {
-                version: "3".into(),
                 services: services.clone(),
                 volumes: node_volumes,
                 name: format!("risingwave-{}", opts.profile),
@@ -302,7 +302,6 @@ fn main() -> Result<()> {
             }
         }
         let compose_file = ComposeFile {
-            version: "3".into(),
             services,
             volumes,
             name: format!("risingwave-{}", opts.profile),

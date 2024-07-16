@@ -16,20 +16,23 @@ use std::collections::HashMap;
 use std::default::Default;
 use std::vec;
 
+use anyhow::anyhow;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ConflictBehavior, Field, FieldDisplay, Schema, OBJECT_ID_PLACEHOLDER,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Field, FieldDisplay, Schema,
+    StreamJobStatus, OBJECT_ID_PLACEHOLDER,
 };
 use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
 };
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
-use crate::catalog::table_catalog::{CreateType, TableType};
+use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, TableCatalog, TableId};
 use crate::optimizer::property::{Cardinality, Order, RequiredDist};
+use crate::optimizer::StreamScanType;
 use crate::utils::{Condition, IndexSet};
 
 #[derive(Default)]
@@ -40,7 +43,6 @@ pub struct TableCatalogBuilder {
     value_indices: Option<Vec<usize>>,
     vnode_col_idx: Option<usize>,
     column_names: HashMap<String, i32>,
-    read_prefix_len_hint: usize,
     watermark_columns: Option<FixedBitSet>,
     dist_key_in_pk: Option<Vec<usize>>,
 }
@@ -104,11 +106,6 @@ impl TableCatalogBuilder {
         self.value_indices = Some(value_indices);
     }
 
-    #[allow(dead_code)]
-    pub fn set_watermark_columns(&mut self, watermark_columns: FixedBitSet) {
-        self.watermark_columns = Some(watermark_columns);
-    }
-
     pub fn set_dist_key_in_pk(&mut self, dist_key_in_pk: Vec<usize>) {
         self.dist_key_in_pk = Some(dist_key_in_pk);
     }
@@ -135,7 +132,7 @@ impl TableCatalogBuilder {
     /// anticipated read prefix pattern (number of fields) for the table, which can be utilized for
     /// implementing the table's bloom filter or other storage optimization techniques.
     pub fn build(self, distribution_key: Vec<usize>, read_prefix_len_hint: usize) -> TableCatalog {
-        assert!(self.read_prefix_len_hint <= self.pk.len());
+        assert!(read_prefix_len_hint <= self.pk.len());
         let watermark_columns = match self.watermark_columns {
             Some(w) => w,
             None => FixedBitSet::with_capacity(self.columns.len()),
@@ -163,6 +160,7 @@ impl TableCatalogBuilder {
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
             definition: "".into(),
             conflict_behavior: ConflictBehavior::NoCheck,
+            version_column_index: None,
             read_prefix_len_hint,
             version: None, // the internal table is not versioned and can't be schema changed
             watermark_columns,
@@ -174,6 +172,7 @@ impl TableCatalogBuilder {
             // NOTE(kwannoel): This may not match the create type of the materialized table.
             // It should be ignored for internal tables.
             create_type: CreateType::Foreground,
+            stream_job_status: StreamJobStatus::Creating,
             description: None,
             incoming_sinks: vec![],
             initialized_at_cluster_version: None,
@@ -232,21 +231,22 @@ pub(crate) fn watermark_pretty<'a>(
     watermark_columns: &FixedBitSet,
     schema: &Schema,
 ) -> Option<Pretty<'a>> {
-    if watermark_columns.count_ones(..) > 0 {
-        Some(watermark_fields_pretty(watermark_columns.ones(), schema))
-    } else {
-        None
-    }
+    iter_fields_pretty(watermark_columns.ones(), schema)
 }
-pub(crate) fn watermark_fields_pretty<'a>(
-    watermark_columns: impl Iterator<Item = usize>,
+
+pub(crate) fn iter_fields_pretty<'a>(
+    columns: impl Iterator<Item = usize>,
     schema: &Schema,
-) -> Pretty<'a> {
-    let arr = watermark_columns
+) -> Option<Pretty<'a>> {
+    let arr = columns
         .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
         .map(|d| Pretty::display(&d))
-        .collect();
-    Pretty::Array(arr)
+        .collect::<Vec<_>>();
+    if arr.is_empty() {
+        None
+    } else {
+        Some(Pretty::Array(arr))
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -294,6 +294,7 @@ pub(crate) fn sum_affected_row(dml: PlanRef) -> Result<PlanRef> {
         order_by: vec![],
         filter: Condition::true_cond(),
         direct_args: vec![],
+        user_defined: None,
     };
     let agg = Agg::new(vec![sum_agg], IndexSet::empty(), dml);
     let batch_agg = BatchSimpleAgg::new(agg);
@@ -320,12 +321,16 @@ macro_rules! plan_node_name {
     };
 }
 pub(crate) use plan_node_name;
-use risingwave_common::types::DataType;
+use risingwave_common::license::Feature;
+use risingwave_common::types::{DataType, Interval};
 use risingwave_expr::aggregate::AggKind;
+use risingwave_pb::plan_common::as_of::AsOfType;
+use risingwave_pb::plan_common::{as_of, PbAsOf};
+use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
 use super::pretty_config;
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 use crate::expr::InputRef;
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
@@ -353,17 +358,7 @@ pub fn infer_kv_log_store_table_catalog_inner(
 
     let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
 
-    let payload_indices = table_catalog_builder.extend_columns(
-        &columns
-            .iter()
-            .map(|column| {
-                // make payload hidden column visible in kv log store batch query
-                let mut column = column.clone();
-                column.is_hidden = false;
-                column
-            })
-            .collect_vec(),
-    );
+    let payload_indices = table_catalog_builder.extend_columns(columns);
 
     value_indices.extend(payload_indices);
     table_catalog_builder.set_value_indices(value_indices);
@@ -377,4 +372,69 @@ pub fn infer_kv_log_store_table_catalog_inner(
         .collect_vec();
 
     table_catalog_builder.build(dist_key, read_prefix_len_hint)
+}
+
+/// Check that all leaf nodes must be stream table scan,
+/// since that plan node maps to `backfill` executor, which supports recovery.
+pub(crate) fn plan_has_backfill_leaf_nodes(plan: &PlanRef) -> bool {
+    if plan.inputs().is_empty() {
+        if let Some(scan) = plan.as_stream_table_scan() {
+            scan.stream_scan_type() == StreamScanType::Backfill
+                || scan.stream_scan_type() == StreamScanType::ArrangementBackfill
+        } else {
+            false
+        }
+    } else {
+        assert!(!plan.inputs().is_empty());
+        plan.inputs().iter().all(plan_has_backfill_leaf_nodes)
+    }
+}
+
+pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
+    let Some(ref a) = a else {
+        return Ok(None);
+    };
+    Feature::TimeTravel
+        .check_available()
+        .map_err(|e| anyhow::anyhow!(e))?;
+    let as_of_type = match a {
+        AsOf::ProcessTime => {
+            return Err(ErrorCode::NotSupported(
+                "do not support as of proctime".to_string(),
+                "please use as of timestamp".to_string(),
+            )
+            .into());
+        }
+        AsOf::TimestampNum(ts) => AsOfType::Timestamp(as_of::Timestamp { timestamp: *ts }),
+        AsOf::TimestampString(ts) => {
+            let date_time = speedate::DateTime::parse_str_rfc3339(ts)
+                .map_err(|_e| anyhow!("fail to parse timestamp"))?;
+            AsOfType::Timestamp(as_of::Timestamp {
+                timestamp: date_time.timestamp_tz(),
+            })
+        }
+        AsOf::VersionNum(_) | AsOf::VersionString(_) => {
+            return Err(ErrorCode::NotSupported(
+                "do not support as of version".to_string(),
+                "please use as of timestamp".to_string(),
+            )
+            .into());
+        }
+        AsOf::ProcessTimeWithInterval((value, leading_field)) => {
+            let interval = Interval::parse_with_fields(
+                value,
+                Some(crate::Binder::bind_date_time_field(leading_field.clone())),
+            )
+            .map_err(|_| anyhow!("fail to parse interval"))?;
+            let interval_sec = (interval.epoch_in_micros() / 1_000_000) as i64;
+            let timestamp = chrono::Utc::now()
+                .timestamp()
+                .checked_sub(interval_sec)
+                .ok_or_else(|| anyhow!("invalid timestamp"))?;
+            AsOfType::Timestamp(as_of::Timestamp { timestamp })
+        }
+    };
+    Ok(Some(PbAsOf {
+        as_of_type: Some(as_of_type),
+    }))
 }

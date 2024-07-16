@@ -1,20 +1,13 @@
-FROM ubuntu:22.04 AS base
+FROM ubuntu:24.04 AS base
 
 ENV LANG en_US.utf8
 
 RUN apt-get update \
-  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-11-jdk
-
-# Install Python 3.12
-RUN apt-get -y install software-properties-common
-RUN add-apt-repository ppa:deadsnakes/ppa -y && \
-    apt-get update -yy && \
-    DEBIAN_FRONTEND=noninteractive apt-get install python3.12 python3.12-dev -yy
-ENV PYO3_PYTHON=python3.12
+  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-17-jdk software-properties-common python3.12 python3.12-dev openssl pkg-config
 
 FROM base AS rust-base
 
-RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip
+RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip rsync
 
 # Install Node.js as dependency for building the dashboard.
 # Bump version together with `dashboard/.node-version`.
@@ -74,9 +67,10 @@ COPY ./ /risingwave
 WORKDIR /risingwave
 
 ENV ENABLE_BUILD_DASHBOARD=1
+ENV OPENSSL_STATIC=1
 
 RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --release --features "rw-static-link" --features embedded-python-udf && \
+  cargo build -p risingwave_cmd_all --release --features "rw-static-link" --features all-udf && \
   mkdir -p /risingwave/bin && \
     mv /risingwave/target/release/risingwave /risingwave/bin/ && \
     mv /risingwave/target/release/risingwave.dwp /risingwave/bin/ && \
@@ -125,8 +119,13 @@ LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwa
 RUN apt-get update && apt-get -y install linux-tools-generic \
     && ln -s "$(find /usr/lib/linux-tools/*/perf | head -1)" /usr/local/bin/perf
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install gdb libpam-krb5 krb5-user telnet kafkacat \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install gdb libpam-krb5 krb5-user telnet kafkacat rustup \
   && rm -rf /var/lib/{apt,dpkg,cache,log}/
+
+# Set default Rust toolchain but don't install it to keep the image size small
+# The toolchain will be installed when it is first used
+# Do not use `rustup default stable` because it will install immediately
+RUN rustup show && sed -i '1s/^/default_toolchain = "stable"\n/' ~/.rustup/settings.toml
 
 RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 
@@ -143,4 +142,4 @@ ENV CONNECTOR_LIBS_PATH /risingwave/bin/connector-node/libs
 ENV IN_CONTAINER=1
 
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
-CMD [ "playground" ]
+CMD [ "single_node" ]

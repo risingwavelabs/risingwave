@@ -1,7 +1,13 @@
 import subprocess
 from time import sleep
 
-sleep(60)
+def run_query(file):
+    with open(query_output_file_name, 'w') as f:
+        subprocess.run(
+            ["docker", "compose", "exec", "spark", "bash", "/spark-script/run-sql-file.sh", file],
+            check=True, stdout=f)
+
+
 
 query_sql = open("spark-script/query-table.sql").read()
 
@@ -9,22 +15,21 @@ print("querying deltalake with sql: %s" % query_sql)
 
 query_output_file_name = "query_output.txt"
 
-query_output_file = open(query_output_file_name, "wb")
-
-subprocess.run(
-    ["docker", "compose", "exec", "spark", "bash", "/spark-script/run-sql-file.sh", "query-table"],
-    check=True, stdout=query_output_file)
-query_output_file.close()
-
+run_query('query-table')
 with open(query_output_file_name, 'r') as file:
     all_lines = file.readlines()
+    last_three_lines = all_lines[-3:]
 
-last_three_lines = all_lines[-3:]
+    print("result", last_three_lines)
+    line1, line2, line3 = last_three_lines
+    assert line1.strip() == '1\ta'
+    assert line2.strip() == '2\tb'
+    assert line3.strip() == '3\tc'
 
-print("result", last_three_lines)
 
-line1, line2, line3 = last_three_lines
-
-assert line1.strip() == '1\ta'
-assert line2.strip() == '2\tb'
-assert line3.strip() == '3\tc'
+run_query('data-types-query')
+with open(query_output_file_name, 'r') as f:
+    all_lines = f.readlines()
+    last_line = all_lines[-1]
+    print("rows of data_types: ", last_line)
+    assert last_line.strip() == '3'

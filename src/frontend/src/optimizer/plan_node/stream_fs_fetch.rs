@@ -97,26 +97,30 @@ impl StreamNode for StreamFsFetch {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
         // `StreamFsFetch` is same as source in proto def, so the following code is the same as `StreamSource`
         let source_catalog = self.source_catalog();
-        let source_inner = source_catalog.map(|source_catalog| PbStreamFsFetch {
-            source_id: source_catalog.id,
-            source_name: source_catalog.name.clone(),
-            state_table: Some(
-                // `StreamFsSource` will do range scan according to assigned vnodes, so we need to set
-                // the key for distributing data to different vnodes.
-                generic::Source::infer_internal_table_catalog(true)
-                    .with_id(state.gen_table_id_wrapped())
-                    .to_internal_table_prost(),
-            ),
-            info: Some(source_catalog.info.clone()),
-            row_id_index: self.core.row_id_index.map(|index| index as _),
-            columns: self
-                .core
-                .column_catalog
-                .iter()
-                .map(|c| c.to_protobuf())
-                .collect_vec(),
-            with_properties: source_catalog.with_properties.clone().into_iter().collect(),
-            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+
+        let source_inner = source_catalog.map(|source_catalog| {
+            let (with_properties, secret_refs) =
+                source_catalog.with_properties.clone().into_parts();
+            PbStreamFsFetch {
+                source_id: source_catalog.id,
+                source_name: source_catalog.name.clone(),
+                state_table: Some(
+                    generic::Source::infer_internal_table_catalog(true)
+                        .with_id(state.gen_table_id_wrapped())
+                        .to_internal_table_prost(),
+                ),
+                info: Some(source_catalog.info.clone()),
+                row_id_index: self.core.row_id_index.map(|index| index as _),
+                columns: self
+                    .core
+                    .column_catalog
+                    .iter()
+                    .map(|c| c.to_protobuf())
+                    .collect_vec(),
+                with_properties,
+                rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+                secret_refs,
+            }
         });
         NodeBody::StreamFsFetch(StreamFsFetchNode {
             node_inner: source_inner,

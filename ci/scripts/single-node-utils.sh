@@ -7,11 +7,17 @@ export PREFIX_BIN=./target/debug
 export PREFIX_LOG=$RW_PREFIX/log
 
 # You can fill up this section by consulting
-# .risingwave/log/risedev.log, after calling ./risedev d full.
+# .risingwave/log/risedev.log, after calling `risedev d full`.
 # It is expected that minio, etcd will be started after this is called.
 start_single_node() {
   mkdir -p "$HOME/.risingwave/state_store"
   mkdir -p "$HOME/.risingwave/meta_store"
+  mkdir -p .risingwave/config
+  cat <<EOF > .risingwave/config/risedev-env
+RW_META_ADDR="http://127.0.0.1:5690"
+RISEDEV_RW_FRONTEND_LISTEN_ADDRESS="127.0.0.1"
+RISEDEV_RW_FRONTEND_PORT="4566"
+EOF
   RUST_BACKTRACE=1 "$PREFIX_BIN"/risingwave >"$1" 2>&1
 }
 

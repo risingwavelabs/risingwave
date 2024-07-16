@@ -15,7 +15,7 @@ byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2.9"
-parking_lot = "0.12"
+parking_lot = { workspace = true }
 prost = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
@@ -23,10 +23,10 @@ risingwave_pb = { workspace = true }
 thiserror = "1.0"
 tokio = { version = "0.2", package = "madsim-tokio" }
 tracing = "0.1"
-foyer ={ workspace = true }
+foyer = { workspace = true }
 
 [dev-dependencies]
-itertools = "0.12"
+itertools = { workspace = true }
 mockall = "0.11.4"
 risingwave_hummock_sdk = { workspace = true }
 

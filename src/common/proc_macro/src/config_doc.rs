@@ -54,6 +54,14 @@ fn extract_comment(attrs: &Vec<Attribute>) -> String {
             }
             None
         })
+        .filter_map(|comment| {
+            let trimmed = comment.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
         .join(" ")
 }
 

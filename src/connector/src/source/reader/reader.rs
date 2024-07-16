@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -26,7 +25,6 @@ use risingwave_common::catalog::ColumnId;
 use rw_futures_util::select_all;
 use thiserror_ext::AsReport as _;
 
-use crate::dispatch_source_prop;
 use crate::error::ConnectorResult;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
@@ -36,8 +34,9 @@ use crate::source::filesystem::opendal_source::{
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{
     create_split_reader, BoxChunkSourceStream, BoxTryStream, Column, ConnectorProperties,
-    ConnectorState, SourceColumnDesc, SourceContext, SplitReader,
+    ConnectorState, SourceColumnDesc, SourceContext, SplitReader, WaitCheckpointTask,
 };
+use crate::{dispatch_source_prop, WithOptionsSecResolved};
 
 #[derive(Clone, Debug)]
 pub struct SourceReader {
@@ -49,7 +48,7 @@ pub struct SourceReader {
 
 impl SourceReader {
     pub fn new(
-        properties: HashMap<String, String>,
+        properties: WithOptionsSecResolved,
         columns: Vec<SourceColumnDesc>,
         connector_message_buffer_size: usize,
         parser_config: SpecificParserConfig,
@@ -105,7 +104,22 @@ impl SourceReader {
         }
     }
 
-    pub async fn to_stream(
+    /// Refer to `WaitCheckpointWorker` for more details.
+    pub async fn create_wait_checkpoint_task(&self) -> ConnectorResult<Option<WaitCheckpointTask>> {
+        Ok(match &self.config {
+            ConnectorProperties::PostgresCdc(_prop) => {
+                Some(WaitCheckpointTask::CommitCdcOffset(None))
+            }
+            ConnectorProperties::GooglePubsub(prop) => Some(WaitCheckpointTask::AckPubsubMessage(
+                prop.subscription_client().await?,
+                vec![],
+            )),
+            _ => None,
+        })
+    }
+
+    /// Build `SplitReader`s and then `BoxChunkSourceStream` from the given `ConnectorState` (`SplitImpl`s).
+    pub async fn build_stream(
         &self,
         state: ConnectorState,
         column_ids: Vec<ColumnId>,
@@ -150,7 +164,7 @@ impl SourceReader {
             } else {
                 let to_reader_splits = splits.into_iter().map(|split| vec![split]);
                 try_join_all(to_reader_splits.into_iter().map(|splits| {
-                    tracing::debug!(?splits, ?prop, "spawning connector split reader");
+                    tracing::debug!(?splits, "spawning connector split reader");
                     let props = prop.clone();
                     let data_gen_columns = data_gen_columns.clone();
                     let parser_config = parser_config.clone();

@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 pub mod enumerator;
-
 use std::collections::HashMap;
 
 pub use enumerator::S3SplitEnumerator;
+
+use crate::source::filesystem::file_common::CompressionFormat;
 mod source;
 use serde::Deserialize;
 pub use source::S3FileReader;
 
-use crate::common::AwsAuthProps;
+use crate::connector_common::AwsAuthProps;
 use crate::source::filesystem::FsSplit;
 use crate::source::{SourceProperties, UnknownFields};
 
@@ -41,6 +42,8 @@ pub struct S3PropertiesCommon {
     pub secret: Option<String>,
     #[serde(rename = "s3.endpoint_url")]
     pub endpoint_url: Option<String>,
+    #[serde(rename = "compression_format", default = "Default::default")]
+    pub compression_format: CompressionFormat,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]

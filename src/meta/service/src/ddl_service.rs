@@ -25,7 +25,7 @@ use risingwave_pb::catalog::connection::private_link_service::{
 };
 use risingwave_pb::catalog::connection::PbPrivateLinkService;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{connection, Comment, Connection, CreateType};
+use risingwave_pb::catalog::{connection, Comment, Connection, CreateType, Secret};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
@@ -82,6 +82,7 @@ impl DdlServiceImpl {
     }
 
     fn extract_replace_table_info(change: ReplaceTablePlan) -> ReplaceTableInfo {
+        let job_type = change.get_job_type().unwrap_or_default();
         let mut source = change.source;
         let mut fragment_graph = change.fragment_graph.unwrap();
         let mut table = change.table.unwrap();
@@ -89,20 +90,14 @@ impl DdlServiceImpl {
             table.optional_associated_source_id
         {
             source.as_mut().unwrap().id = source_id;
-            fill_table_stream_graph_info(
-                &mut source,
-                &mut table,
-                TableJobType::General,
-                &mut fragment_graph,
-            );
+            fill_table_stream_graph_info(&mut source, &mut table, job_type, &mut fragment_graph);
         }
         let table_col_index_mapping = change
             .table_col_index_mapping
             .as_ref()
             .map(ColIndexMapping::from_protobuf);
 
-        let stream_job = StreamingJob::Table(source, table, TableJobType::General);
-
+        let stream_job = StreamingJob::Table(source, table, job_type);
         ReplaceTableInfo {
             streaming_job: stream_job,
             fragment_graph,
@@ -146,6 +141,41 @@ impl DdlService for DdlServiceImpl {
             status: None,
             version,
         }))
+    }
+
+    async fn create_secret(
+        &self,
+        request: Request<CreateSecretRequest>,
+    ) -> Result<Response<CreateSecretResponse>, Status> {
+        let req = request.into_inner();
+        let pb_secret = Secret {
+            id: 0,
+            name: req.get_name().clone(),
+            database_id: req.get_database_id(),
+            value: req.get_value().clone(),
+            owner: req.get_owner_id(),
+            schema_id: req.get_schema_id(),
+        };
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::CreateSecret(pb_secret))
+            .await?;
+
+        Ok(Response::new(CreateSecretResponse { version }))
+    }
+
+    async fn drop_secret(
+        &self,
+        request: Request<DropSecretRequest>,
+    ) -> Result<Response<DropSecretResponse>, Status> {
+        let req = request.into_inner();
+        let secret_id = req.get_secret_id();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::DropSecret(secret_id))
+            .await?;
+
+        Ok(Response::new(DropSecretResponse { version }))
     }
 
     async fn create_schema(
@@ -320,16 +350,7 @@ impl DdlService for DdlServiceImpl {
         let req = request.into_inner();
 
         let subscription = req.get_subscription()?.clone();
-        let fragment_graph = req.get_fragment_graph()?.clone();
-
-        let stream_job = StreamingJob::Subscription(subscription);
-
-        let command = DdlCommand::CreateStreamingJob(
-            stream_job,
-            fragment_graph,
-            CreateType::Foreground,
-            None,
-        );
+        let command = DdlCommand::CreateSubscription(subscription);
 
         let version = self.ddl_controller.run_command(command).await?;
 
@@ -347,11 +368,7 @@ impl DdlService for DdlServiceImpl {
         let subscription_id = request.subscription_id;
         let drop_mode = DropMode::from_request_setting(request.cascade);
 
-        let command = DdlCommand::DropStreamingJob(
-            StreamingJobId::Subscription(subscription_id),
-            drop_mode,
-            None,
-        );
+        let command = DdlCommand::DropSubscription(subscription_id, drop_mode);
 
         let version = self.ddl_controller.run_command(command).await?;
 

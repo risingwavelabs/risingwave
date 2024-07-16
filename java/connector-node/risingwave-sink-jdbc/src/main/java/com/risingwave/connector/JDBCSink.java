@@ -23,6 +23,7 @@ import com.risingwave.proto.Data;
 import io.grpc.Status;
 import java.sql.*;
 import java.util.*;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,26 +53,33 @@ public class JDBCSink implements SinkWriter {
         this.config = config;
         try {
             conn = JdbcUtils.getConnection(config.getJdbcUrl());
-            // Retrieve primary keys and column type mappings from the database
-            this.pkColumnNames =
-                    getPkColumnNames(conn, config.getTableName(), config.getSchemaName());
+            // Table schema has been validated before, so we get the PK from it directly
+            this.pkColumnNames = tableSchema.getPrimaryKeys();
             // column name -> java.sql.Types
             Map<String, Integer> columnTypeMapping =
                     getColumnTypeMapping(conn, config.getTableName(), config.getSchemaName());
-            // create an array that each slot corresponding to each column in TableSchema
-            var columnSqlTypes = new int[tableSchema.getNumColumns()];
-            for (int columnIdx = 0; columnIdx < tableSchema.getNumColumns(); columnIdx++) {
-                var columnName = tableSchema.getColumnNames()[columnIdx];
-                columnSqlTypes[columnIdx] = columnTypeMapping.get(columnName);
-            }
+
+            // A vector of upstream column types
+            List<Integer> columnSqlTypes =
+                    Arrays.stream(tableSchema.getColumnNames())
+                            .map(columnTypeMapping::get)
+                            .collect(Collectors.toList());
+
+            List<Integer> pkIndices =
+                    tableSchema.getPrimaryKeys().stream()
+                            .map(tableSchema::getColumnIndex)
+                            .collect(Collectors.toList());
+
             LOG.info(
-                    "schema = {}, table = {}: columnSqlTypes = {}",
+                    "schema = {}, table = {}, tableSchema = {}, columnSqlTypes = {}, pkIndices = {}",
                     config.getSchemaName(),
                     config.getTableName(),
-                    Arrays.toString(columnSqlTypes));
+                    tableSchema,
+                    columnSqlTypes,
+                    pkIndices);
 
             if (factory.isPresent()) {
-                this.jdbcDialect = factory.get().create(columnSqlTypes);
+                this.jdbcDialect = factory.get().create(columnSqlTypes, pkIndices);
             } else {
                 throw Status.INVALID_ARGUMENT
                         .withDescription("Unsupported jdbc url: " + jdbcUrl)
@@ -81,6 +89,8 @@ public class JDBCSink implements SinkWriter {
                     "JDBC connection: autoCommit = {}, trxn = {}",
                     conn.getAutoCommit(),
                     conn.getTransactionIsolation());
+            // Commit the `getTransactionIsolation`
+            conn.commit();
 
             jdbcStatements = new JdbcStatements(conn);
         } catch (SQLException e) {
@@ -115,28 +125,6 @@ public class JDBCSink implements SinkWriter {
                 tableName,
                 columnTypeMap);
         return columnTypeMap;
-    }
-
-    private static List<String> getPkColumnNames(
-            Connection conn, String tableName, String schemaName) {
-        List<String> pkColumnNames = new ArrayList<>();
-        try {
-            var pks = conn.getMetaData().getPrimaryKeys(null, schemaName, tableName);
-            while (pks.next()) {
-                pkColumnNames.add(pks.getString(JDBC_COLUMN_NAME_KEY));
-            }
-        } catch (SQLException e) {
-            throw Status.INTERNAL
-                    .withDescription(
-                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
-                    .asRuntimeException();
-        }
-        LOG.info(
-                "schema = {}, table = {}: detected pk column = {}",
-                schemaName,
-                tableName,
-                pkColumnNames);
-        return pkColumnNames;
     }
 
     @Override
@@ -266,10 +254,7 @@ public class JDBCSink implements SinkWriter {
                         break;
                     case UPDATE_INSERT:
                         if (!updateFlag) {
-                            throw Status.FAILED_PRECONDITION
-                                    .withDescription(
-                                            "an UPDATE_DELETE should precede an UPDATE_INSERT")
-                                    .asRuntimeException();
+                            LOG.warn("Missing an UPDATE_DELETE precede an UPDATE_INSERT");
                         }
                         jdbcDialect.bindUpsertStatement(upsertStatement, conn, tableSchema, row);
                         updateFlag = false;
@@ -303,11 +288,7 @@ public class JDBCSink implements SinkWriter {
                         .asRuntimeException();
             }
             try {
-                int placeholderIdx = 1;
-                for (String primaryKey : pkColumnNames) {
-                    Object fromRow = tableSchema.getFromRow(primaryKey, row);
-                    deleteStatement.setObject(placeholderIdx++, fromRow);
-                }
+                jdbcDialect.bindDeleteStatement(deleteStatement, tableSchema, row);
                 deleteStatement.addBatch();
             } catch (SQLException e) {
                 throw Status.INTERNAL
@@ -380,10 +361,7 @@ public class JDBCSink implements SinkWriter {
     @Override
     public Optional<ConnectorServiceProto.SinkMetadata> barrier(boolean isCheckpoint) {
         if (updateFlag) {
-            throw Status.FAILED_PRECONDITION
-                    .withDescription(
-                            "expected UPDATE_INSERT to complete an UPDATE operation, got `sync`")
-                    .asRuntimeException();
+            LOG.warn("expect an UPDATE_INSERT to complete an UPDATE operation, got `sync`");
         }
         return Optional.empty();
     }

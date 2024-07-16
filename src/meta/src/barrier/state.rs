@@ -76,10 +76,9 @@ impl BarrierManagerState {
     /// Returns the inflight actor infos that have included the newly added actors in the given command. The dropped actors
     /// will be removed from the state after the info get resolved.
     pub fn apply_command(&mut self, command: &Command) -> InflightActorInfo {
-        let changes = command.actor_changes();
-        self.inflight_actor_infos.pre_apply(changes.clone());
+        self.inflight_actor_infos.pre_apply(command);
         let info = self.inflight_actor_infos.clone();
-        self.inflight_actor_infos.post_apply(changes);
+        self.inflight_actor_infos.post_apply(command);
 
         info
     }

@@ -18,6 +18,7 @@ import "bootstrap-icons/font/bootstrap-icons.css"
 import "../styles/global.css"
 
 import { ChakraProvider } from "@chakra-ui/react"
+import { loader as monacoLoader } from "@monaco-editor/react"
 import type { AppProps } from "next/app"
 import { useRouter } from "next/router"
 import { useEffect, useState } from "react"
@@ -38,6 +39,11 @@ function App({ Component, pageProps }: AppProps) {
     router.events.on("routeChangeComplete", () => setIsLoading(false))
     router.events.on("routeChangeError", () => setIsLoading(false))
   }, [router.events])
+
+  useEffect(() => {
+    // Use vendored assets to get rid of fetching from CDN.
+    monacoLoader.config({ paths: { vs: "/monaco" } })
+  })
 
   return (
     <ChakraProvider>

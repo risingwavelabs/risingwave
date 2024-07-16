@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
@@ -21,7 +21,10 @@ use itertools::Itertools;
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_hummock_backend, add_tempo_endpoint, HummockInMemoryStrategy, MetaNodeConfig};
+use crate::{
+    add_hummock_backend, add_tempo_endpoint, Application, HummockInMemoryStrategy, MetaBackend,
+    MetaNodeConfig,
+};
 
 pub struct MetaNodeService {
     config: MetaNodeConfig,
@@ -76,21 +79,88 @@ impl MetaNodeService {
         }
 
         let mut is_persistent_meta_store = false;
-        match config.provide_etcd_backend.as_ref().unwrap().as_slice() {
-            [] => {
-                cmd.arg("--backend").arg("mem");
+
+        match &config.meta_backend {
+            MetaBackend::Memory => {
+                cmd.arg("--backend")
+                    .arg("sql")
+                    .arg("--sql-endpoint")
+                    .arg("sqlite::memory:");
             }
-            etcds => {
+            MetaBackend::Etcd => {
+                let etcd_config = config.provide_etcd_backend.as_ref().unwrap();
+                assert!(!etcd_config.is_empty());
                 is_persistent_meta_store = true;
+
                 cmd.arg("--backend")
                     .arg("etcd")
                     .arg("--etcd-endpoints")
                     .arg(
-                        etcds
+                        etcd_config
                             .iter()
                             .map(|etcd| format!("{}:{}", etcd.address, etcd.port))
                             .join(","),
                     );
+            }
+            MetaBackend::Sqlite => {
+                let sqlite_config = config.provide_sqlite_backend.as_ref().unwrap();
+                assert_eq!(sqlite_config.len(), 1);
+                is_persistent_meta_store = true;
+
+                let prefix_data = env::var("PREFIX_DATA")?;
+                let file_path = PathBuf::from(&prefix_data)
+                    .join(&sqlite_config[0].id)
+                    .join(&sqlite_config[0].file);
+                cmd.arg("--backend")
+                    .arg("sqlite")
+                    .arg("--sql-endpoint")
+                    .arg(file_path);
+            }
+            MetaBackend::Postgres => {
+                let pg_config = config.provide_postgres_backend.as_ref().unwrap();
+                let pg_store_config = pg_config
+                    .iter()
+                    .filter(|c| c.application == Application::Metastore)
+                    .exactly_one()
+                    .expect("more than one or no pg store config found for metastore");
+                is_persistent_meta_store = true;
+
+                cmd.arg("--backend")
+                    .arg("postgres")
+                    .arg("--sql-endpoint")
+                    .arg(format!(
+                        "{}:{}",
+                        pg_store_config.address, pg_store_config.port,
+                    ))
+                    .arg("--sql-username")
+                    .arg(&pg_store_config.user)
+                    .arg("--sql-password")
+                    .arg(&pg_store_config.password)
+                    .arg("--sql-database")
+                    .arg(&pg_store_config.database);
+            }
+            MetaBackend::Mysql => {
+                let mysql_config = config.provide_mysql_backend.as_ref().unwrap();
+                let mysql_store_config = mysql_config
+                    .iter()
+                    .filter(|c| c.application == Application::Metastore)
+                    .exactly_one()
+                    .expect("more than one or no mysql store config found for metastore");
+                is_persistent_meta_store = true;
+
+                cmd.arg("--backend")
+                    .arg("mysql")
+                    .arg("--sql-endpoint")
+                    .arg(format!(
+                        "{}:{}",
+                        mysql_store_config.address, mysql_store_config.port,
+                    ))
+                    .arg("--sql-username")
+                    .arg(&mysql_store_config.user)
+                    .arg("--sql-password")
+                    .arg(&mysql_store_config.password)
+                    .arg("--sql-database")
+                    .arg(&mysql_store_config.database);
             }
         }
 
@@ -166,7 +236,9 @@ impl Task for MetaNodeService {
 
         let mut cmd = self.meta_node()?;
 
-        cmd.env("RUST_BACKTRACE", "1");
+        if crate::util::is_enable_backtrace() {
+            cmd.env("RUST_BACKTRACE", "1");
+        }
 
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(

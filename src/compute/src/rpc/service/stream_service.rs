@@ -26,8 +26,8 @@ use tonic::{Request, Response, Status, Streaming};
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {
-    mgr: LocalStreamManager,
-    env: StreamEnvironment,
+    pub mgr: LocalStreamManager,
+    pub env: StreamEnvironment,
 }
 
 impl StreamServiceImpl {

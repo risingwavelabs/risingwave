@@ -38,10 +38,16 @@ impl Planner {
 
         let extra_order_exprs_len = extra_order_exprs.len();
         let mut plan = self.plan_set_expr(body, extra_order_exprs, &order)?;
-        let order = Order {
+        let mut order = Order {
             column_orders: order,
         };
+
         if limit.is_some() || offset.is_some() {
+            // Optimize order key if using it for TopN / Limit.
+            // Both are singleton dist, so we can leave dist_key_indices as empty.
+            let func_dep = plan.functional_dependency();
+            order = func_dep.minimize_order_key(order, &[]);
+
             let limit = limit.unwrap_or(LIMIT_ALL_COUNT);
             let offset = offset.unwrap_or_default();
             plan = if order.column_orders.is_empty() {
@@ -62,7 +68,8 @@ impl Planner {
             // Do not output projected_row_id hidden column.
             out_fields.set(0, false);
         }
-        let root = PlanRoot::new(plan, RequiredDist::Any, order, out_fields, out_names);
+        let root =
+            PlanRoot::new_with_logical_plan(plan, RequiredDist::Any, order, out_fields, out_names);
         Ok(root)
     }
 }

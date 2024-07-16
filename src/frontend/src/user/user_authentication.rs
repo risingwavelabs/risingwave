@@ -35,9 +35,8 @@ pub const OAUTH_ISSUER_KEY: &str = "issuer";
 /// Build `AuthInfo` for `OAuth`.
 #[inline(always)]
 pub fn build_oauth_info(options: &Vec<SqlOption>) -> Option<AuthInfo> {
-    let metadata: HashMap<String, String> = WithOptions::try_from(options.as_slice())
+    let metadata: HashMap<String, String> = WithOptions::oauth_options_to_map(options.as_slice())
         .ok()?
-        .into_inner()
         .into_iter()
         .collect();
     if !metadata.contains_key(OAUTH_JWKS_URL_KEY) || !metadata.contains_key(OAUTH_ISSUER_KEY) {
