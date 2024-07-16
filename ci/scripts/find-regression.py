@@ -256,7 +256,7 @@ YAML'''
         )
 
 if __name__ == "__main__":
-    # You can run tests by just doing ./find-regression.py
+    # You can run tests by just doing ./ci/scripts/find-regression.py
     if len(sys.argv) == 1:
         unittest.main()
     else:
