@@ -67,6 +67,7 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
             watermark_derivations,
             nondecreasing_expr_indices,
             materialize_selectivity_threshold,
+            node.noop_update_hint,
         );
         Ok((params.info, exec).into())
     }

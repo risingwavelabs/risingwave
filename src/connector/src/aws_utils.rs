@@ -20,7 +20,7 @@ use aws_config::timeout::TimeoutConfig;
 use aws_sdk_s3::{client as s3_client, config as s3_config};
 use url::Url;
 
-use crate::common::AwsAuthProps;
+use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
 
 const AWS_CUSTOM_CONFIG_KEY: [&str; 3] = ["retry_times", "conn_timeout", "read_timeout"];

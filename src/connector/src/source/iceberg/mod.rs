@@ -12,12 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod parquet_file_reader;
+
 use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use icelake::types::DataContentType;
+use futures::StreamExt;
+use iceberg::spec::{DataContentType, ManifestList};
 use itertools::Itertools;
+pub use parquet_file_reader::*;
 use risingwave_common::bail;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
@@ -38,11 +42,11 @@ pub struct IcebergProperties {
     pub catalog_type: Option<String>,
     #[serde(rename = "s3.region")]
     pub region: Option<String>,
-    #[serde(rename = "s3.endpoint", default)]
-    pub endpoint: String,
-    #[serde(rename = "s3.access.key", default)]
+    #[serde(rename = "s3.endpoint")]
+    pub endpoint: Option<String>,
+    #[serde(rename = "s3.access.key")]
     pub s3_access: String,
-    #[serde(rename = "s3.secret.key", default)]
+    #[serde(rename = "s3.secret.key")]
     pub s3_secret: String,
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: String,
@@ -82,7 +86,7 @@ impl IcebergProperties {
             catalog_type: self.catalog_type.clone(),
             uri: self.catalog_uri.clone(),
             path: self.warehouse_path.clone(),
-            endpoint: Some(self.endpoint.clone()),
+            endpoint: self.endpoint.clone(),
             access_key: self.s3_access.clone(),
             secret_key: self.s3_secret.clone(),
             region: self.region.clone(),
@@ -126,7 +130,7 @@ impl SplitMetaData for IcebergSplit {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn update_with_offset(&mut self, _start_offset: String) -> ConnectorResult<()> {
+    fn update_offset(&mut self, _last_seen_offset: String) -> ConnectorResult<()> {
         unimplemented!()
     }
 }
@@ -157,22 +161,78 @@ impl SplitEnumerator for IcebergSplitEnumerator {
     }
 }
 
+pub enum IcebergTimeTravelInfo {
+    Version(i64),
+    TimestampMs(i64),
+}
+
 impl IcebergSplitEnumerator {
     pub async fn list_splits_batch(
         &self,
+        time_traval_info: Option<IcebergTimeTravelInfo>,
         batch_parallelism: usize,
     ) -> ConnectorResult<Vec<IcebergSplit>> {
         if batch_parallelism == 0 {
             bail!("Batch parallelism is 0. Cannot split the iceberg files.");
         }
-        let table = self.config.load_table().await?;
-        let snapshot_id = table.current_table_metadata().current_snapshot_id.unwrap();
-        let mut files = vec![];
-        for file in table.current_data_files().await? {
-            if file.content != DataContentType::Data {
-                bail!("Reading iceberg table with delete files is unsupported. Please try to compact the table first.");
+        let table = self.config.load_table_v2().await?;
+        let snapshot_id = match time_traval_info {
+            Some(IcebergTimeTravelInfo::Version(version)) => {
+                let Some(snapshot) = table.metadata().snapshot_by_id(version) else {
+                    bail!("Cannot find the snapshot id in the iceberg table.");
+                };
+                snapshot.snapshot_id()
             }
-            files.push(file.file_path);
+            Some(IcebergTimeTravelInfo::TimestampMs(timestamp)) => {
+                let snapshot = table
+                    .metadata()
+                    .snapshots()
+                    .filter(|snapshot| snapshot.timestamp().timestamp_millis() <= timestamp)
+                    .max_by_key(|snapshot| snapshot.timestamp().timestamp_millis());
+                match snapshot {
+                    Some(snapshot) => snapshot.snapshot_id(),
+                    None => {
+                        // convert unix time to human readable time
+                        let time = chrono::DateTime::from_timestamp_millis(timestamp);
+                        if time.is_some() {
+                            bail!("Cannot find a snapshot older than {}", time.unwrap());
+                        } else {
+                            bail!("Cannot find a snapshot");
+                        }
+                    }
+                }
+            }
+            None => match table.metadata().current_snapshot() {
+                Some(snapshot) => snapshot.snapshot_id(),
+                None => bail!("Cannot find the current snapshot id in the iceberg table."),
+            },
+        };
+        let mut files = vec![];
+
+        let snapshot = table
+            .metadata()
+            .snapshot_by_id(snapshot_id)
+            .expect("snapshot must exist");
+
+        let manifest_list: ManifestList = snapshot
+            .load_manifest_list(table.file_io(), table.metadata())
+            .await
+            .map_err(|e| anyhow!(e))?;
+        for entry in manifest_list.entries() {
+            let manifest = entry
+                .load_manifest(table.file_io())
+                .await
+                .map_err(|e| anyhow!(e))?;
+            let mut manifest_entries_stream =
+                futures::stream::iter(manifest.entries().iter().filter(|e| e.is_alive()));
+
+            while let Some(manifest_entry) = manifest_entries_stream.next().await {
+                let file = manifest_entry.data_file();
+                if file.content_type() != DataContentType::Data {
+                    bail!("Reading iceberg table with delete files is unsupported. Please try to compact the table first.");
+                }
+                files.push(file.file_path().to_string());
+            }
         }
         let split_num = batch_parallelism;
         // evenly split the files into splits based on the parallelism.

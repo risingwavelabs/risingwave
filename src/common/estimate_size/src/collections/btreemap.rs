@@ -92,7 +92,11 @@ where
 
         // [ left, [mid], right ]
         let mut mid_right = self.inner.split_off(start);
-        let mid_right_split_key = mid_right.lower_bound(Bound::Excluded(end)).key().cloned();
+        let mid_right_split_key = mid_right
+            .lower_bound(Bound::Excluded(end))
+            .peek_next()
+            .map(|(k, _)| k)
+            .cloned();
         let right = if let Some(ref mid_right_split_key) = mid_right_split_key {
             mid_right.split_off(mid_right_split_key)
         } else {

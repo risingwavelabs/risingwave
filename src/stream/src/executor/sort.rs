@@ -12,19 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
-use risingwave_common::catalog::Schema;
-use risingwave_storage::StateStore;
 
 use super::sort_buffer::SortBuffer;
-use super::{
-    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
-    StreamExecutorError, Watermark,
-};
-use crate::common::table::state_table::StateTable;
-use crate::common::StreamChunkBuilder;
+use crate::executor::prelude::*;
 
 pub struct SortExecutor<S: StateStore> {
     input: Executor,
@@ -152,16 +143,13 @@ impl<S: StateStore> SortExecutor<S> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
-    use risingwave_common::types::DataType;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
-    use crate::executor::{ActorContext, BoxedMessageStream, Execute};
 
     async fn create_executor<S: StateStore>(
         sort_column_index: usize,

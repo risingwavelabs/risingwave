@@ -129,10 +129,6 @@ impl RisingWave {
                 tracing::error!("postgres connection error: {e}");
             }
         });
-        // for recovery
-        client
-            .simple_query("SET RW_IMPLICIT_FLUSH TO true;")
-            .await?;
         // replay all SET statements
         for stmt in SetStmtsIterator::new(set_stmts) {
             client.simple_query(&stmt).await?;
@@ -224,9 +220,7 @@ impl sqllogictest::AsyncDB for RisingWave {
         tokio::time::sleep(dur).await
     }
 
-    async fn run_command(
-        _command: std::process::Command,
-    ) -> std::io::Result<std::process::ExitStatus> {
+    async fn run_command(_command: std::process::Command) -> std::io::Result<std::process::Output> {
         unimplemented!("spawning process is not supported in simulation mode")
     }
 }

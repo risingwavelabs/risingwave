@@ -80,4 +80,13 @@ fn main() {
     let _ = anyhow!("some error occurred: {}", err.as_report());
     let _ = anyhow!("{:?}", anyhow_err.as_report());
     let _ = anyhow!("some error occurred: {:?}", anyhow_err.as_report());
+
+    let box_dyn_err_1: Box<dyn Error> = Box::new(err.clone());
+    let box_dyn_err_2: Box<dyn Error + Send> = Box::new(err.clone());
+    let box_dyn_err_3: Box<dyn Error + Send + Sync> = Box::new(err.clone());
+
+    // TODO: fail to lint
+    let _ = format!("{}", box_dyn_err_1);
+    info!("{}", box_dyn_err_2);
+    let _ = box_dyn_err_3.to_string();
 }

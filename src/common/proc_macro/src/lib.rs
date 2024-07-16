@@ -258,6 +258,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
 /// `flags` options include
 /// - `SETTER`: to manually write a `set_your_parameter_name` function, in which you should call `set_your_parameter_name_inner`.
 /// - `REPORT`: to report the parameter through `ConfigReporter`
+/// - `NO_ALTER_SYS`: disallow the parameter to be set by `alter system set`
 #[proc_macro_derive(SessionConfig, attributes(parameter))]
 #[proc_macro_error]
 pub fn session_config(input: TokenStream) -> TokenStream {

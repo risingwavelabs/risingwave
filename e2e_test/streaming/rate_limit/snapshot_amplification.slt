@@ -18,11 +18,17 @@ statement ok
 flush;
 
 statement ok
+SET BACKGROUND_DDL=true;
+
+statement ok
 CREATE SINK sink AS
     SELECT x.i1 as i1 FROM table x
         JOIN table s1 ON x.i1 = s1.i1
             JOIN table s2 ON x.i1 = s2.i1
     WITH (connector = 'blackhole');
+
+statement ok
+SET BACKGROUND_DDL=false;
 
 # Let sink amplify...
 skipif in-memory

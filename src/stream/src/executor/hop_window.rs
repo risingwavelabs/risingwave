@@ -14,17 +14,13 @@
 
 use std::num::NonZeroUsize;
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::types::Interval;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_expr::ExprError;
 
-use super::error::StreamExecutorError;
-use super::{ActorContextRef, Execute, Executor, Message};
-use crate::common::StreamChunkBuilder;
+use crate::executor::prelude::*;
 
 pub struct HopWindowExecutor {
     _ctx: ActorContextRef,
@@ -230,17 +226,13 @@ impl HopWindowExecutor {
 
 #[cfg(test)]
 mod tests {
-    use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::{DataType, Interval};
     use risingwave_expr::expr::test_utils::make_hop_window_expression;
-    use risingwave_expr::expr::NonStrictExpression;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{ActorContext, Execute, StreamChunk};
 
     const CHUNK_SIZE: usize = 256;
 

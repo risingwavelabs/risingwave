@@ -16,10 +16,10 @@ normal = ["workspace-hack"]
 
 [dependencies]
 bytes = "1"
-educe = "0.5"
+educe = "0.6"
 ethnum = { version = "1", features = ["serde"] }
 fixedbitset = "0.5"
-jsonbb = "0.1.2"
+jsonbb = { workspace = true }
 lru = { workspace = true }
 risingwave_common_proc_macro = { workspace = true }
 rust_decimal = "1"

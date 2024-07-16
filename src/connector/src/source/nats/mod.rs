@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 use with_options::WithOptions;
 
-use crate::common::NatsCommon;
+use crate::connector_common::NatsCommon;
 use crate::source::nats::enumerator::NatsSplitEnumerator;
 use crate::source::nats::source::{NatsSplit, NatsSplitReader};
 use crate::source::SourceProperties;

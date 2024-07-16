@@ -21,11 +21,14 @@ use risingwave_common::row::Row;
 use crate::sink::Result;
 
 mod avro;
+mod bson;
 mod json;
 mod proto;
 pub mod template;
+pub mod text;
 
 pub use avro::{AvroEncoder, AvroHeader};
+pub use bson::BsonEncoder;
 pub use json::JsonEncoder;
 pub use proto::{ProtoEncoder, ProtoHeader};
 
@@ -57,7 +60,7 @@ pub trait RowEncoder {
 /// * an json object
 /// * a protobuf message
 /// * an avro record
-/// into
+///   into
 /// * string (required by kinesis key)
 /// * bytes
 ///
@@ -139,13 +142,11 @@ pub enum CustomJsonType {
     // Doris's json need date is string.
     // The internal order of the struct should follow the insertion order.
     // The decimal needs verification and calibration.
-    Doris(HashMap<String, (u8, u8)>),
+    Doris(HashMap<String, u8>),
     // Es's json need jsonb is struct
     Es,
     // starrocks' need jsonb is struct
-    StarRocks(HashMap<String, (u8, u8)>),
-    // bigquery need null array -> []
-    BigQuery,
+    StarRocks,
     None,
 }
 

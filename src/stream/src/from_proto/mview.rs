@@ -46,6 +46,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
         let conflict_behavior =
             ConflictBehavior::from_protobuf(&table.handle_pk_conflict_behavior());
+        let version_column_index = table.version_column_index;
 
         macro_rules! new_executor {
             ($SD:ident) => {
@@ -59,6 +60,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                     table,
                     params.watermark_epoch,
                     conflict_behavior,
+                    version_column_index,
                     params.executor_stats.clone(),
                 )
                 .await
@@ -102,6 +104,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let conflict_behavior =
             ConflictBehavior::from_protobuf(&table.handle_pk_conflict_behavior());
+        let version_column_index = table.version_column_index;
         let exec = MaterializeExecutor::<_, BasicSerde>::new(
             input,
             params.info.schema.clone(),
@@ -112,6 +115,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             table,
             params.watermark_epoch,
             conflict_behavior,
+            version_column_index,
             params.executor_stats.clone(),
         )
         .await;

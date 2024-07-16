@@ -26,12 +26,12 @@ shift $((OPTIND -1))
 download_and_prepare_rw "$profile" common
 
 echo "--- starting risingwave cluster with connector node"
-cargo make ci-start ci-3cn-3fe-opendal-fs-backend
+risedev ci-start ci-3cn-3fe-opendal-fs-backend
 
 echo "--- Run test"
-python3 -m pip install minio psycopg2-binary
-python3 e2e_test/s3/$script
+python3 -m pip install --break-system-packages minio psycopg2-binary
+python3 e2e_test/s3/"$script"
 
 echo "--- Kill cluster"
 rm -rf /tmp/rw_ci
-cargo make ci-kill
+risedev ci-kill

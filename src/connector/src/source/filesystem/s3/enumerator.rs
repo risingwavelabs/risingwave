@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use aws_sdk_s3::client::Client;
 
 use crate::aws_utils::{default_conn_config, s3_client};
-use crate::common::AwsAuthProps;
+use crate::connector_common::AwsAuthProps;
 use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::s3::S3Properties;
 use crate::source::{FsListInner, SourceEnumeratorContextRef, SplitEnumerator};
@@ -126,6 +126,7 @@ mod tests {
     }
 
     use super::*;
+    use crate::source::filesystem::file_common::CompressionFormat;
     use crate::source::filesystem::s3::S3PropertiesCommon;
     use crate::source::SourceEnumeratorContext;
     #[tokio::test]
@@ -138,9 +139,10 @@ mod tests {
             access: None,
             secret: None,
             endpoint_url: None,
+            compression_format: CompressionFormat::None,
         };
         let mut enumerator =
-            S3SplitEnumerator::new(props.into(), SourceEnumeratorContext::default().into())
+            S3SplitEnumerator::new(props.into(), SourceEnumeratorContext::dummy().into())
                 .await
                 .unwrap();
         let splits = enumerator.list_splits().await.unwrap();

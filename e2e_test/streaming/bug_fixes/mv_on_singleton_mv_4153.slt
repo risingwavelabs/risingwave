@@ -4,6 +4,9 @@ create table t (v int);
 statement ok
 insert into t values (666), (233), (233);
 
+statement ok
+flush;
+
 # Create singleton mview
 statement ok
 create materialized view mv as select v from t order by v limit 10;

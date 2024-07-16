@@ -13,7 +13,9 @@ export RUST_LOG="risingwave_meta::barrier::recovery=debug,\
 risingwave_meta::manager::catalog=debug,\
 risingwave_meta::rpc::ddl_controller=debug,\
 risingwave_meta::barrier::mod=debug,\
-risingwave_simulation=debug"
+risingwave_simulation=debug,\
+risingwave_meta::stream::stream_manager=debug,\
+risingwave_meta::barrier::progress=debug"
 
 # Extra logs you can enable if the existing trace does not give enough info.
 #risingwave_stream::executor::backfill=trace,
@@ -36,14 +38,14 @@ mkdir -p $LOGDIR
 filter_stack_trace_for_all_logs() {
   # Defined in `common.sh`
   for log in "${LOGDIR}"/*.log; do
-    filter_stack_trace $log
+    filter_stack_trace "$log"
   done
 }
 
 trap filter_stack_trace_for_all_logs ERR
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, background_ddl"
-seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
+seq "$TEST_NUM" | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
 --kill \
 --kill-rate=${KILL_RATE} \
 ${USE_ARRANGEMENT_BACKFILL:-} \
@@ -51,7 +53,7 @@ ${USE_ARRANGEMENT_BACKFILL:-} \
 2> $LOGDIR/recovery-background-ddl-{}.log && rm $LOGDIR/recovery-background-ddl-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, ddl"
-seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
+seq "$TEST_NUM" | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
 --kill \
 --kill-rate=${KILL_RATE} \
 --background-ddl-rate=${BACKGROUND_DDL_RATE} \
@@ -59,7 +61,7 @@ ${USE_ARRANGEMENT_BACKFILL:-} \
 ./e2e_test/ddl/\*\*/\*.slt 2> $LOGDIR/recovery-ddl-{}.log && rm $LOGDIR/recovery-ddl-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, streaming"
-seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
+seq "$TEST_NUM" | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
 --kill \
 --kill-rate=${KILL_RATE} \
 --background-ddl-rate=${BACKGROUND_DDL_RATE} \
@@ -67,7 +69,7 @@ ${USE_ARRANGEMENT_BACKFILL:-} \
 ./e2e_test/streaming/\*\*/\*.slt 2> $LOGDIR/recovery-streaming-{}.log && rm $LOGDIR/recovery-streaming-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, batch"
-seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
+seq "$TEST_NUM" | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
 --kill \
 --kill-rate=${KILL_RATE} \
 --background-ddl-rate=${BACKGROUND_DDL_RATE} \
@@ -75,7 +77,7 @@ ${USE_ARRANGEMENT_BACKFILL:-} \
 ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/recovery-batch-{}.log && rm $LOGDIR/recovery-batch-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, kafka source,sink"
-seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
+seq "$TEST_NUM" | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
 --kill \
 --kill-rate=${KILL_RATE} \
 --kafka-datadir=./scripts/source/test_data \

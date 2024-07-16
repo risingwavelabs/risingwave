@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use bytes::{Buf, Bytes};
 use chrono::offset::Utc;
 use chrono::DateTime;
@@ -59,6 +58,8 @@ pub struct SstDumpArgs {
     print_table: bool,
     #[clap(short = 'd')]
     data_dir: Option<String>,
+    #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
+    use_new_object_prefix_strategy: bool,
 }
 
 pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result<()> {
@@ -72,7 +73,10 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
     if args.print_level {
         // Level information is retrieved from meta service
         let hummock = context
-            .hummock_store(HummockServiceOpts::from_env(args.data_dir.clone())?)
+            .hummock_store(HummockServiceOpts::from_env(
+                args.data_dir.clone(),
+                args.use_new_object_prefix_strategy,
+            )?)
             .await?;
         let version = hummock.inner().get_pinned_version().version().clone();
         let sstable_store = hummock.sstable_store();
@@ -108,16 +112,17 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
         }
     } else {
         // Object information is retrieved from object store. Meta service is not required.
-        let hummock_service_opts = HummockServiceOpts::from_env(args.data_dir.clone())?;
-        let sstable_store = hummock_service_opts.create_sstable_store().await?;
+        let hummock_service_opts = HummockServiceOpts::from_env(
+            args.data_dir.clone(),
+            args.use_new_object_prefix_strategy,
+        )?;
+        let sstable_store = hummock_service_opts
+            .create_sstable_store(args.use_new_object_prefix_strategy)
+            .await?;
         if let Some(obj_id) = &args.object_id {
             let obj_store = sstable_store.store();
             let obj_path = sstable_store.get_sst_data_path(*obj_id);
-            let mut obj_metadata_iter = obj_store.list(&obj_path).await?;
-            let obj = obj_metadata_iter
-                .try_next()
-                .await?
-                .ok_or_else(|| anyhow!(format!("object {obj_path} doesn't exist")))?;
+            let obj = obj_store.metadata(&obj_path).await?;
             print_object(&obj);
             let meta_offset = get_meta_offset_from_object(&obj, obj_store.as_ref()).await?;
             let obj_id = SstableStore::get_object_id_from_path(&obj.key);
@@ -132,7 +137,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
             .await?;
         } else {
             let mut metadata_iter = sstable_store
-                .list_object_metadata_from_object_store()
+                .list_object_metadata_from_object_store(None)
                 .await?;
             while let Some(obj) = metadata_iter.try_next().await? {
                 print_object(&obj);

@@ -3,7 +3,7 @@ module github.com/risingwave/risingwave-test/client-library-test/go
 go 1.20
 
 require (
-	github.com/jackc/pgx/v5 v5.4.3
+	github.com/jackc/pgx/v5 v5.5.4
 	github.com/stretchr/testify v1.8.4
 )
 

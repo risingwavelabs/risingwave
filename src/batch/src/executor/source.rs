@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::StreamExt;
@@ -28,6 +27,7 @@ use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
     ConnectorProperties, SourceColumnDesc, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
+use risingwave_connector::WithOptionsSecResolved;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::Executor;
@@ -49,7 +49,7 @@ pub struct SourceExecutor {
     schema: Schema,
     identity: String,
 
-    source_ctrl_opts: SourceCtrlOpts,
+    chunk_size: usize,
 }
 
 #[async_trait::async_trait]
@@ -65,24 +65,21 @@ impl BoxedExecutorBuilder for SourceExecutor {
         )?;
 
         // prepare connector source
-        let source_props: HashMap<String, String> =
-            HashMap::from_iter(source_node.with_properties.clone());
-        let config =
-            ConnectorProperties::extract(source_props, false).map_err(BatchError::connector)?;
+        let options_with_secret = WithOptionsSecResolved::new(
+            source_node.with_properties.clone(),
+            source_node.secret_refs.clone(),
+        );
+        let config = ConnectorProperties::extract(options_with_secret.clone(), false)
+            .map_err(BatchError::connector)?;
 
         let info = source_node.get_info().unwrap();
-        let parser_config = SpecificParserConfig::new(info, &source_node.with_properties)?;
+        let parser_config = SpecificParserConfig::new(info, &options_with_secret)?;
 
         let columns: Vec<_> = source_node
             .columns
             .iter()
             .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
             .collect();
-
-        let source_ctrl_opts = SourceCtrlOpts {
-            chunk_size: source.context().get_config().developer.chunk_size,
-            rate_limit: None,
-        };
 
         let column_ids: Vec<_> = source_node
             .columns
@@ -144,7 +141,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
                 split_list,
                 schema,
                 identity: source.plan_node().get_identity().clone(),
-                source_ctrl_opts,
+                chunk_size: source.context().get_config().developer.chunk_size,
             }))
         }
     }
@@ -171,15 +168,17 @@ impl SourceExecutor {
             u32::MAX,
             self.source_id,
             u32::MAX,
-            self.metrics,
-            self.source_ctrl_opts.clone(),
-            None,
-            ConnectorProperties::default(),
             "NA".to_owned(), // source name was not passed in batch plan
+            self.metrics,
+            SourceCtrlOpts {
+                chunk_size: self.chunk_size,
+                rate_limit: None,
+            },
+            ConnectorProperties::default(),
         ));
         let stream = self
             .source
-            .to_stream(Some(self.split_list), self.column_ids, source_ctx)
+            .build_stream(Some(self.split_list), self.column_ids, source_ctx)
             .await?;
 
         #[for_await]

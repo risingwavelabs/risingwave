@@ -141,7 +141,6 @@ mod tests {
 
     use super::*;
     use crate::parser::SourceStreamChunkBuilder;
-    use crate::source::SourceColumnDesc;
 
     #[tokio::test]
     async fn test_data_types() {
@@ -158,7 +157,7 @@ mod tests {
         ];
         let parser = CanalJsonParser::new(
             descs.clone(),
-            Default::default(),
+            SourceContext::dummy().into(),
             &JsonProperties::default(),
         )
         .unwrap();
@@ -229,7 +228,7 @@ mod tests {
 
         let parser = CanalJsonParser::new(
             descs.clone(),
-            Default::default(),
+            SourceContext::dummy().into(),
             &JsonProperties::default(),
         )
         .unwrap();
@@ -283,7 +282,7 @@ mod tests {
 
         let parser = CanalJsonParser::new(
             descs.clone(),
-            Default::default(),
+            SourceContext::dummy().into(),
             &JsonProperties::default(),
         )
         .unwrap();

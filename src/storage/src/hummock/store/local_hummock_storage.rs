@@ -13,39 +13,45 @@
 // limitations under the License.
 
 use std::future::Future;
+use std::iter::once;
 use std::ops::Bound;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{is_empty_key_range, vnode_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
+use risingwave_pb::hummock::SstableInfo;
 use tracing::{warn, Instrument};
 
 use super::version::{StagingData, VersionUpdate};
 use crate::error::StorageResult;
 use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
 use crate::hummock::event_handler::{HummockEvent, HummockReadVersionRef, LocalInstanceGuard};
+use crate::hummock::iterator::change_log::ChangeLogIterator;
 use crate::hummock::iterator::{
-    ConcatIteratorInner, Forward, HummockIteratorUnion, MergeIterator, UserIterator,
+    Backward, BackwardUserIterator, ConcatIteratorInner, Forward, HummockIteratorUnion,
+    IteratorFactory, MergeIterator, UserIterator,
 };
 use crate::hummock::shared_buffer::shared_buffer_batch::{
-    SharedBufferBatch, SharedBufferBatchIterator,
+    SharedBufferBatch, SharedBufferBatchIterator, SharedBufferBatchOldValues, SharedBufferItem,
+    SharedBufferValue,
 };
 use crate::hummock::store::version::{read_filter_for_version, HummockVersionReader};
 use crate::hummock::utils::{
-    do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, wait_for_epoch,
-    ENABLE_SANITY_CHECK,
+    do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, sanity_check_enabled,
+    wait_for_epoch,
 };
 use crate::hummock::write_limiter::WriteLimiterRef;
-use crate::hummock::{MemoryLimiter, SstableIterator};
-use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator};
+use crate::hummock::{
+    BackwardSstableIterator, MemoryLimiter, SstableIterator, SstableIteratorReadOptions,
+    SstableStoreRef,
+};
+use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator, MemTableHummockRevIterator};
 use crate::monitor::{HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic};
-use crate::panic_store::PanicStateStoreIter;
-use crate::storage_value::StorageValue;
 use crate::store::*;
 
 /// `LocalHummockStorage` is a handle for a state table shard to access data from and write data to
@@ -151,8 +157,36 @@ impl LocalHummockStorage {
             .await
     }
 
+    pub async fn rev_iter_flushed(
+        &self,
+        table_key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> StorageResult<HummockStorageRevIterator> {
+        let (table_key_range, read_snapshot) = read_filter_for_version(
+            epoch,
+            read_options.table_id,
+            table_key_range,
+            &self.read_version,
+        )?;
+
+        let table_key_range = table_key_range;
+
+        self.hummock_version_reader
+            .rev_iter(table_key_range, epoch, read_options, read_snapshot, None)
+            .await
+    }
+
     fn mem_table_iter(&self) -> MemTableHummockIterator<'_> {
         MemTableHummockIterator::new(
+            &self.mem_table.buffer,
+            EpochWithGap::new(self.epoch(), self.spill_offset),
+            self.table_id,
+        )
+    }
+
+    fn mem_table_rev_iter(&self) -> MemTableHummockRevIterator<'_> {
+        MemTableHummockRevIterator::new(
             &self.mem_table.buffer,
             EpochWithGap::new(self.epoch(), self.spill_offset),
             self.table_id,
@@ -178,36 +212,40 @@ impl LocalHummockStorage {
                 epoch,
                 read_options,
                 read_snapshot,
-                self.mem_table_iter(),
+                Some(self.mem_table_iter()),
             )
             .await
     }
 
-    pub async fn may_exist_inner(
+    pub async fn rev_iter_all(
         &self,
-        key_range: TableKeyRange,
+        table_key_range: TableKeyRange,
+        epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<bool> {
-        if self.mem_table.iter(key_range.clone()).next().is_some() {
-            return Ok(true);
-        }
-
-        let (key_range, read_snapshot) = read_filter_for_version(
-            HummockEpoch::MAX, // Use MAX epoch to make sure we read from latest
+    ) -> StorageResult<LocalHummockStorageRevIterator<'_>> {
+        let (table_key_range, read_snapshot) = read_filter_for_version(
+            epoch,
             read_options.table_id,
-            key_range,
+            table_key_range,
             &self.read_version,
         )?;
 
         self.hummock_version_reader
-            .may_exist(key_range, read_options, read_snapshot)
+            .rev_iter(
+                table_key_range,
+                epoch,
+                read_options,
+                read_snapshot,
+                Some(self.mem_table_rev_iter()),
+            )
             .await
     }
 }
 
 impl StateStoreRead for LocalHummockStorage {
-    type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
+    type ChangeLogIter = ChangeLogIterator;
     type Iter = HummockStorageIterator;
+    type RevIter = HummockStorageRevIterator;
 
     fn get(
         &self,
@@ -230,26 +268,35 @@ impl StateStoreRead for LocalHummockStorage {
             .instrument(tracing::trace_span!("hummock_iter"))
     }
 
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
+        assert!(epoch <= self.epoch());
+        self.rev_iter_flushed(key_range, epoch, read_options)
+            .instrument(tracing::trace_span!("hummock_rev_iter"))
+    }
+
     async fn iter_log(
         &self,
-        _epoch_range: (u64, u64),
-        _key_range: TableKeyRange,
-        _options: ReadLogOptions,
+        epoch_range: (u64, u64),
+        key_range: TableKeyRange,
+        options: ReadLogOptions,
     ) -> StorageResult<Self::ChangeLogIter> {
-        unimplemented!()
+        let version = self.read_version.read().committed().clone();
+        let iter = self
+            .hummock_version_reader
+            .iter_log(version, epoch_range, key_range, options)
+            .await?;
+        Ok(iter)
     }
 }
 
 impl LocalStateStore for LocalHummockStorage {
     type Iter<'a> = LocalHummockStorageIterator<'a>;
-
-    fn may_exist(
-        &self,
-        key_range: TableKeyRange,
-        read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
-        self.may_exist_inner(key_range, read_options)
-    }
+    type RevIter<'a> = LocalHummockStorageRevIterator<'a>;
 
     async fn get(
         &self,
@@ -282,6 +329,23 @@ impl LocalStateStore for LocalHummockStorage {
             .await
     }
 
+    async fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        read_options: ReadOptions,
+    ) -> StorageResult<Self::RevIter<'_>> {
+        let (l_vnode_inclusive, r_vnode_exclusive) = vnode_range(&key_range);
+        assert_eq!(
+            r_vnode_exclusive - l_vnode_inclusive,
+            1,
+            "read range {:?} for table {} iter contains more than one vnode",
+            key_range,
+            read_options.table_id
+        );
+        self.rev_iter_all(key_range.clone(), self.epoch(), read_options)
+            .await
+    }
+
     fn insert(
         &mut self,
         key: TableKey<Bytes>,
@@ -305,13 +369,18 @@ impl LocalStateStore for LocalHummockStorage {
     async fn flush(&mut self) -> StorageResult<usize> {
         let buffer = self.mem_table.drain().into_parts();
         let mut kv_pairs = Vec::with_capacity(buffer.len());
+        let mut old_values = if self.is_flush_old_value() {
+            Some(Vec::with_capacity(buffer.len()))
+        } else {
+            None
+        };
         for (key, key_op) in buffer {
             match key_op {
                 // Currently, some executors do not strictly comply with these semantics. As
                 // a workaround you may call disable the check by initializing the
                 // state store with `is_consistent_op=false`.
                 KeyOp::Insert(value) => {
-                    if ENABLE_SANITY_CHECK {
+                    if sanity_check_enabled() {
                         do_insert_sanity_check(
                             &key,
                             &value,
@@ -323,10 +392,13 @@ impl LocalStateStore for LocalHummockStorage {
                         )
                         .await?;
                     }
-                    kv_pairs.push((key, StorageValue::new_put(value)));
+                    kv_pairs.push((key, SharedBufferValue::Insert(value)));
+                    if let Some(old_values) = &mut old_values {
+                        old_values.push(Bytes::new());
+                    }
                 }
                 KeyOp::Delete(old_value) => {
-                    if ENABLE_SANITY_CHECK {
+                    if sanity_check_enabled() {
                         do_delete_sanity_check(
                             &key,
                             &old_value,
@@ -338,10 +410,13 @@ impl LocalStateStore for LocalHummockStorage {
                         )
                         .await?;
                     }
-                    kv_pairs.push((key, StorageValue::new_delete()));
+                    kv_pairs.push((key, SharedBufferValue::Delete));
+                    if let Some(old_values) = &mut old_values {
+                        old_values.push(old_value);
+                    }
                 }
                 KeyOp::Update((old_value, new_value)) => {
-                    if ENABLE_SANITY_CHECK {
+                    if sanity_check_enabled() {
                         do_update_sanity_check(
                             &key,
                             &old_value,
@@ -354,12 +429,16 @@ impl LocalStateStore for LocalHummockStorage {
                         )
                         .await?;
                     }
-                    kv_pairs.push((key, StorageValue::new_put(new_value)));
+                    kv_pairs.push((key, SharedBufferValue::Update(new_value)));
+                    if let Some(old_values) = &mut old_values {
+                        old_values.push(old_value);
+                    }
                 }
             }
         }
         self.flush_inner(
             kv_pairs,
+            old_values,
             WriteOptions {
                 epoch: self.epoch(),
                 table_id: self.table_id,
@@ -405,6 +484,14 @@ impl LocalStateStore for LocalHummockStorage {
             "local state store of table id {:?} is init for more than once",
             self.table_id
         );
+        if !self.is_replicated {
+            self.event_sender
+                .send(HummockEvent::InitEpoch {
+                    instance_id: self.instance_id(),
+                    init_epoch: options.epoch.curr,
+                })
+                .expect("should succeed");
+        }
         Ok(())
     }
 
@@ -436,14 +523,15 @@ impl LocalStateStore for LocalHummockStorage {
                 });
             }
         }
-        self.event_sender
-            .send(HummockEvent::LocalSealEpoch {
-                instance_id: self.instance_id(),
-                table_id: self.table_id,
-                epoch: prev_epoch,
-                opts,
-            })
-            .expect("should be able to send")
+        if !self.is_replicated {
+            self.event_sender
+                .send(HummockEvent::LocalSealEpoch {
+                    instance_id: self.instance_id(),
+                    next_epoch,
+                    opts,
+                })
+                .expect("should be able to send");
+        }
     }
 
     fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
@@ -458,7 +546,8 @@ impl LocalStateStore for LocalHummockStorage {
 impl LocalHummockStorage {
     async fn flush_inner(
         &mut self,
-        kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
+        sorted_items: Vec<SharedBufferItem>,
+        old_values: Option<Vec<Bytes>>,
         write_options: WriteOptions,
     ) -> StorageResult<usize> {
         let epoch = write_options.epoch;
@@ -468,16 +557,17 @@ impl LocalHummockStorage {
         self.stats
             .write_batch_tuple_counts
             .with_label_values(&[table_id_label.as_str()])
-            .inc_by(kv_pairs.len() as _);
+            .inc_by(sorted_items.len() as _);
         let timer = self
             .stats
             .write_batch_duration
             .with_label_values(&[table_id_label.as_str()])
             .start_timer();
 
-        let imm_size = if !kv_pairs.is_empty() {
-            let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
-            let size = SharedBufferBatch::measure_batch_size(&sorted_items);
+        let imm_size = if !sorted_items.is_empty() {
+            let (size, old_value_size) =
+                SharedBufferBatch::measure_batch_size(&sorted_items, old_values.as_deref());
+
             self.write_limiter.wait_permission(self.table_id).await;
             let limiter = self.memory_limiter.as_ref();
             let tracker = if let Some(tracker) = limiter.try_require_memory(size as u64) {
@@ -503,14 +593,22 @@ impl LocalHummockStorage {
                 tracker
             };
 
+            let old_values = old_values.map(|old_values| {
+                SharedBufferBatchOldValues::new(
+                    old_values,
+                    old_value_size,
+                    self.stats.old_value_size.clone(),
+                )
+            });
+
             let instance_id = self.instance_guard.instance_id;
             let imm = SharedBufferBatch::build_shared_buffer_batch(
                 epoch,
                 self.spill_offset,
                 sorted_items,
+                old_values,
                 size,
                 table_id,
-                instance_id,
                 Some(tracker),
             );
             self.spill_offset += 1;
@@ -520,7 +618,7 @@ impl LocalHummockStorage {
             // insert imm to uploader
             if !self.is_replicated {
                 self.event_sender
-                    .send(HummockEvent::ImmToUploader(imm))
+                    .send(HummockEvent::ImmToUploader { instance_id, imm })
                     .unwrap();
             }
             imm_size
@@ -584,10 +682,23 @@ impl LocalHummockStorage {
     pub fn instance_id(&self) -> u64 {
         self.instance_guard.instance_id
     }
+
+    fn is_flush_old_value(&self) -> bool {
+        matches!(
+            &self.op_consistency_level,
+            OpConsistencyLevel::ConsistentOldValue {
+                is_log_store: true,
+                ..
+            }
+        )
+    }
 }
 
 pub type StagingDataIterator = MergeIterator<
     HummockIteratorUnion<Forward, SharedBufferBatchIterator<Forward>, SstableIterator>,
+>;
+pub type StagingDataRevIterator = MergeIterator<
+    HummockIteratorUnion<Backward, SharedBufferBatchIterator<Backward>, BackwardSstableIterator>,
 >;
 pub type HummockStorageIteratorPayloadInner<'a> = MergeIterator<
     HummockIteratorUnion<
@@ -599,8 +710,20 @@ pub type HummockStorageIteratorPayloadInner<'a> = MergeIterator<
     >,
 >;
 
+pub type StorageRevIteratorPayloadInner<'a> = MergeIterator<
+    HummockIteratorUnion<
+        Backward,
+        StagingDataRevIterator,
+        BackwardSstableIterator,
+        ConcatIteratorInner<BackwardSstableIterator>,
+        MemTableHummockRevIterator<'a>,
+    >,
+>;
+
 pub type HummockStorageIterator = HummockStorageIteratorInner<'static>;
+pub type HummockStorageRevIterator = HummockStorageRevIteratorInner<'static>;
 pub type LocalHummockStorageIterator<'a> = HummockStorageIteratorInner<'a>;
+pub type LocalHummockStorageRevIterator<'a> = HummockStorageRevIteratorInner<'a>;
 
 pub struct HummockStorageIteratorInner<'a> {
     inner: UserIterator<HummockStorageIteratorPayloadInner<'a>>,
@@ -630,8 +753,13 @@ impl<'a> HummockStorageIteratorInner<'a> {
         inner: UserIterator<HummockStorageIteratorPayloadInner<'a>>,
         metrics: Arc<HummockStateStoreMetrics>,
         table_id: TableId,
-        local_stats: StoreLocalStatistic,
+        mut local_stats: StoreLocalStatistic,
     ) -> Self {
+        local_stats.found_key = inner.is_valid();
+        local_stats.sub_iter_count = local_stats.staging_imm_iter_count
+            + local_stats.staging_sst_iter_count
+            + local_stats.overlapping_iter_count
+            + local_stats.non_overlapping_iter_count;
         Self {
             inner,
             initial_read: false,
@@ -644,5 +772,189 @@ impl<'a> Drop for HummockStorageIteratorInner<'a> {
     fn drop(&mut self) {
         self.inner
             .collect_local_statistic(&mut self.stats_guard.local_stats);
+    }
+}
+
+#[derive(Default)]
+pub struct ForwardIteratorFactory {
+    non_overlapping_iters: Vec<ConcatIteratorInner<SstableIterator>>,
+    overlapping_iters: Vec<SstableIterator>,
+    staging_iters:
+        Vec<HummockIteratorUnion<Forward, SharedBufferBatchIterator<Forward>, SstableIterator>>,
+}
+
+impl ForwardIteratorFactory {
+    pub fn build(
+        self,
+        mem_table: Option<MemTableHummockIterator<'_>>,
+    ) -> HummockStorageIteratorPayloadInner<'_> {
+        // 3. build user_iterator
+        let staging_iter = StagingDataIterator::new(self.staging_iters);
+        MergeIterator::new(
+            once(HummockIteratorUnion::First(staging_iter))
+                .chain(
+                    self.overlapping_iters
+                        .into_iter()
+                        .map(HummockIteratorUnion::Second),
+                )
+                .chain(
+                    self.non_overlapping_iters
+                        .into_iter()
+                        .map(HummockIteratorUnion::Third),
+                )
+                .chain(mem_table.into_iter().map(HummockIteratorUnion::Fourth)),
+        )
+    }
+}
+
+pub struct HummockStorageRevIteratorInner<'a> {
+    inner: BackwardUserIterator<StorageRevIteratorPayloadInner<'a>>,
+    initial_read: bool,
+    stats_guard: IterLocalMetricsGuard,
+}
+
+impl<'a> StateStoreIter for HummockStorageRevIteratorInner<'a> {
+    async fn try_next<'b>(&'b mut self) -> StorageResult<Option<StateStoreIterItemRef<'b>>> {
+        let iter = &mut self.inner;
+        if !self.initial_read {
+            self.initial_read = true;
+        } else {
+            iter.next().await?;
+        }
+
+        if iter.is_valid() {
+            Ok(Some((iter.key(), iter.value())))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl<'a> HummockStorageRevIteratorInner<'a> {
+    pub fn new(
+        inner: BackwardUserIterator<StorageRevIteratorPayloadInner<'a>>,
+        metrics: Arc<HummockStateStoreMetrics>,
+        table_id: TableId,
+        mut local_stats: StoreLocalStatistic,
+    ) -> Self {
+        local_stats.found_key = inner.is_valid();
+        local_stats.sub_iter_count = local_stats.staging_imm_iter_count
+            + local_stats.staging_sst_iter_count
+            + local_stats.overlapping_iter_count
+            + local_stats.non_overlapping_iter_count;
+        Self {
+            inner,
+            initial_read: false,
+            stats_guard: IterLocalMetricsGuard::new(metrics, table_id, local_stats),
+        }
+    }
+}
+
+impl<'a> Drop for HummockStorageRevIteratorInner<'a> {
+    fn drop(&mut self) {
+        self.inner
+            .collect_local_statistic(&mut self.stats_guard.local_stats);
+    }
+}
+
+impl IteratorFactory for ForwardIteratorFactory {
+    type Direction = Forward;
+    type SstableIteratorType = SstableIterator;
+
+    fn add_batch_iter(&mut self, batch: SharedBufferBatch) {
+        self.staging_iters
+            .push(HummockIteratorUnion::First(batch.into_forward_iter()));
+    }
+
+    fn add_staging_sst_iter(&mut self, iter: Self::SstableIteratorType) {
+        self.staging_iters.push(HummockIteratorUnion::Second(iter));
+    }
+
+    fn add_overlapping_sst_iter(&mut self, iter: Self::SstableIteratorType) {
+        self.overlapping_iters.push(iter);
+    }
+
+    fn add_concat_sst_iter(
+        &mut self,
+        tables: Vec<SstableInfo>,
+        sstable_store: SstableStoreRef,
+        read_options: Arc<SstableIteratorReadOptions>,
+    ) {
+        self.non_overlapping_iters
+            .push(ConcatIteratorInner::<Self::SstableIteratorType>::new(
+                tables,
+                sstable_store,
+                read_options,
+            ));
+    }
+}
+
+#[derive(Default)]
+pub struct BackwardIteratorFactory {
+    non_overlapping_iters: Vec<ConcatIteratorInner<BackwardSstableIterator>>,
+    overlapping_iters: Vec<BackwardSstableIterator>,
+    staging_iters: Vec<
+        HummockIteratorUnion<
+            Backward,
+            SharedBufferBatchIterator<Backward>,
+            BackwardSstableIterator,
+        >,
+    >,
+}
+
+impl BackwardIteratorFactory {
+    pub fn build(
+        self,
+        mem_table: Option<MemTableHummockRevIterator<'_>>,
+    ) -> StorageRevIteratorPayloadInner<'_> {
+        // 3. build user_iterator
+        let staging_iter = StagingDataRevIterator::new(self.staging_iters);
+        MergeIterator::new(
+            once(HummockIteratorUnion::First(staging_iter))
+                .chain(
+                    self.overlapping_iters
+                        .into_iter()
+                        .map(HummockIteratorUnion::Second),
+                )
+                .chain(
+                    self.non_overlapping_iters
+                        .into_iter()
+                        .map(HummockIteratorUnion::Third),
+                )
+                .chain(mem_table.into_iter().map(HummockIteratorUnion::Fourth)),
+        )
+    }
+}
+
+impl IteratorFactory for BackwardIteratorFactory {
+    type Direction = Backward;
+    type SstableIteratorType = BackwardSstableIterator;
+
+    fn add_batch_iter(&mut self, batch: SharedBufferBatch) {
+        self.staging_iters
+            .push(HummockIteratorUnion::First(batch.into_backward_iter()));
+    }
+
+    fn add_staging_sst_iter(&mut self, iter: Self::SstableIteratorType) {
+        self.staging_iters.push(HummockIteratorUnion::Second(iter));
+    }
+
+    fn add_overlapping_sst_iter(&mut self, iter: Self::SstableIteratorType) {
+        self.overlapping_iters.push(iter);
+    }
+
+    fn add_concat_sst_iter(
+        &mut self,
+        mut tables: Vec<SstableInfo>,
+        sstable_store: SstableStoreRef,
+        read_options: Arc<SstableIteratorReadOptions>,
+    ) {
+        tables.reverse();
+        self.non_overlapping_iters
+            .push(ConcatIteratorInner::<Self::SstableIteratorType>::new(
+                tables,
+                sstable_store,
+                read_options,
+            ));
     }
 }

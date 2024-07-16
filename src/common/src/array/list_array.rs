@@ -29,7 +29,7 @@ use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, BoolArray, PrimitiveArray,
     PrimitiveArrayItemType, RowRef, Utf8Array,
 };
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::row::Row;
 use crate::types::{
     hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, ScalarRefImpl,
@@ -237,6 +237,11 @@ impl ListArray {
             ArrayImpl::List(inner) => inner.flatten(),
             a => a.clone(),
         }
+    }
+
+    /// Return the inner array of the list array.
+    pub fn values(&self) -> &ArrayImpl {
+        &self.value
     }
 
     pub fn from_protobuf(array: &PbArray) -> ArrayResult<ArrayImpl> {

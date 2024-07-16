@@ -17,6 +17,8 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
+use crate::optimizer::property::Order;
+
 /// [`FunctionalDependency`] represent a dependency of from --> to.
 ///
 /// For columns ABCD, the FD AC --> B is represented as {0, 2} --> {1} using `FixedBitset`.
@@ -233,6 +235,9 @@ impl FunctionalDependencySet {
         ))
     }
 
+    /// O(d), where `d` is the number of functional dependencies.
+    /// The call to `is_subset` is technically O(n),
+    /// but we can consider it O(1) since the constant factor is 1/usize.
     fn get_closure(&self, columns: &FixedBitSet) -> FixedBitSet {
         let mut closure = columns.clone();
         let mut no_updates;
@@ -252,10 +257,13 @@ impl FunctionalDependencySet {
     }
 
     /// Return `true` if the dependency determinant -> dependant exists.
+    /// O(d), where the dominant cost is from `Self::get_closure`, which has O(d) complexity.
     pub fn is_determined_by(&self, determinant: &FixedBitSet, dependant: &FixedBitSet) -> bool {
         self.get_closure(determinant).is_superset(dependant)
     }
 
+    /// This just checks if the columns specified by the `columns` bitset
+    /// determines each other column.
     fn is_key_inner(&self, columns: &FixedBitSet) -> bool {
         let all_columns = {
             let mut tmp = columns.clone();
@@ -272,6 +280,17 @@ impl FunctionalDependencySet {
         self.is_key_inner(&key_bitset)
     }
 
+    /// This is just a wrapper around `Self::minimize_key_bitset` to minimize `key_indices`.
+    pub fn minimize_key(&self, key_indices: &[usize]) -> Vec<usize> {
+        let mut key_bitset = FixedBitSet::from_iter(key_indices.iter().copied());
+        key_bitset.grow(self.column_count);
+        let res = self.minimize_key_bitset(key_bitset);
+        res.ones().collect_vec()
+    }
+
+    /// -------
+    /// Overview
+    /// -------
     /// Remove redundant columns from the given set.
     ///
     /// Redundant columns can be functionally determined by other columns so there is no need to
@@ -283,17 +302,14 @@ impl FunctionalDependencySet {
     ///
     /// This algorithm may not necessarily find the key with the least number of columns.
     /// But it will ensure that no redundant columns will be preserved.
-    pub fn minimize_key(&self, key_indices: &[usize]) -> Vec<usize> {
-        let mut key_bitset = FixedBitSet::from_iter(key_indices.iter().copied());
-        key_bitset.grow(self.column_count);
-        let res = self.minimize_key_inner(key_bitset);
-        res.ones().collect_vec()
-    }
-
+    ///
+    /// ---------
+    /// Algorithm
+    /// ---------
     /// This algorithm removes columns one by one and check
     /// whether the remaining columns can form a key or not. If the remaining columns can form a
     /// key, then this column can be removed.
-    fn minimize_key_inner(&self, key: FixedBitSet) -> FixedBitSet {
+    fn minimize_key_bitset(&self, key: FixedBitSet) -> FixedBitSet {
         assert!(
             self.is_key_inner(&key),
             "{:?} is not a key!",
@@ -307,6 +323,59 @@ impl FunctionalDependencySet {
             }
         }
         new_key
+    }
+
+    /// Wrapper around `Self::minimize_order_key_bitset` to minimize `order_key`.
+    /// View the documentation of `Self::minimize_order_key_bitset` for more information.
+    /// In the process of minimizing the order key,
+    /// we must ensure that if the indices are part of
+    /// distribution key, they must not be pruned.
+    pub fn minimize_order_key(&self, order_key: Order, dist_key_indices: &[usize]) -> Order {
+        let dist_key_bitset = FixedBitSet::from_iter(dist_key_indices.iter().copied());
+        let order_key_indices = order_key
+            .column_orders
+            .iter()
+            .map(|o| o.column_index)
+            .collect();
+        let min_bitset = self.minimize_order_key_bitset(order_key_indices);
+        let order = order_key
+            .column_orders
+            .iter()
+            .filter(|o| {
+                min_bitset.contains(o.column_index) || dist_key_bitset.contains(o.column_index)
+            })
+            .cloned()
+            .collect_vec();
+        Order::new(order)
+    }
+
+    /// 1. Iterate over the prefixes of the order key.
+    /// 2. If some continuous subset of columns and the next
+    ///    column of the order key form a functional dependency,
+    ///    we can prune that column.
+    /// 3. This function has O(dn) complexity, where:
+    ///    i.  `d` is the number of functional dependencies,
+    ///        because each iteration in the loop calls `Self::is_determined_by`.
+    ///    ii. `n` is the number of columns.
+    fn minimize_order_key_bitset(&self, order_key: Vec<usize>) -> FixedBitSet {
+        if order_key.is_empty() {
+            return FixedBitSet::new();
+        }
+
+        // Initialize current_prefix.
+        let mut prefix = FixedBitSet::with_capacity(self.column_count);
+
+        // Grow current_prefix.
+        for i in order_key {
+            let mut next = FixedBitSet::with_capacity(self.column_count);
+            next.set(i, true);
+
+            // Check if prefix -> next_column
+            if !self.is_determined_by(&prefix, &next) {
+                prefix.set(i, true);
+            }
+        }
+        prefix
     }
 }
 
@@ -396,5 +465,85 @@ mod tests {
         let from = FixedBitSet::from_iter([1usize, 2usize]);
         let to = FixedBitSet::from_iter([4usize]);
         assert!(fd.is_determined_by(&from, &to)); // (1, 2) --> (4) holds
+    }
+
+    // (1, 2) -> (0)
+    // [1, 2, 0] -> [1, 2] (prune, since 0 is after continuous (1, 2))
+    #[test]
+    fn test_minimize_order_by_prefix() {
+        let mut fd = FunctionalDependencySet::new(5);
+        fd.add_functional_dependency_by_column_indices(&[1, 2], &[0]); // (1, 2) --> (0)
+        let order_key = vec![1usize, 2usize, 0usize];
+        let actual_key = fd.minimize_order_key_bitset(order_key);
+        let mut expected_key = FixedBitSet::with_capacity(5);
+        expected_key.set(1, true);
+        expected_key.set(2, true);
+        println!("{:b}", actual_key);
+        println!("{:b}", expected_key);
+        assert_eq!(actual_key, expected_key);
+    }
+
+    // (1, 2) -> (0)
+    // [3, 1, 2, 0] -> [3, 1, 2] (prune, since 0 is after continuous (1, 2))
+    #[test]
+    fn test_minimize_order_by_tail_subset_prefix() {
+        let mut fd = FunctionalDependencySet::new(5);
+        fd.add_functional_dependency_by_column_indices(&[1, 2], &[0]); // (1, 2) --> (0)
+        let order_key = vec![3usize, 1usize, 2usize, 0usize];
+        let actual_key = fd.minimize_order_key_bitset(order_key);
+        let mut expected_key = FixedBitSet::with_capacity(5);
+        expected_key.set(1, true);
+        expected_key.set(2, true);
+        expected_key.set(3, true);
+        println!("{:b}", actual_key);
+        println!("{:b}", expected_key);
+        assert_eq!(actual_key, expected_key);
+    }
+
+    // (1, 2) -> (0)
+    // [3, 1, 2, 4, 0] -> [3, 1, 2, 4] (prune, since continuous (1, 2) is before 0)
+    #[test]
+    fn test_minimize_order_by_middle_subset_prefix() {
+        let mut fd = FunctionalDependencySet::new(5);
+        fd.add_functional_dependency_by_column_indices(&[1, 2], &[0]); // (1, 2) --> (0)
+        let order_key = vec![3usize, 1usize, 2usize, 4usize, 0usize];
+        let actual_key = fd.minimize_order_key_bitset(order_key);
+        let mut expected_key = FixedBitSet::with_capacity(5);
+        expected_key.set(1, true);
+        expected_key.set(2, true);
+        expected_key.set(3, true);
+        expected_key.set(4, true);
+        println!("{:b}", actual_key);
+        println!("{:b}", expected_key);
+        assert_eq!(actual_key, expected_key);
+    }
+
+    // (1, 2) -> (0)
+    // [0, 1, 2] -> [0, 1, 2] (no pruning)
+    #[test]
+    fn test_minimize_order_by_suffix_cant_prune_prefix() {
+        let mut fd = FunctionalDependencySet::new(5);
+        fd.add_functional_dependency_by_column_indices(&[1, 2], &[0]); // (1, 2) --> (0)
+        let order_key = vec![0usize, 1usize, 2usize];
+        let actual_key = fd.minimize_order_key_bitset(order_key);
+        let mut expected_key = FixedBitSet::with_capacity(5);
+        expected_key.set(0, true);
+        expected_key.set(1, true);
+        expected_key.set(2, true);
+        println!("{:b}", actual_key);
+        println!("{:b}", expected_key);
+        assert_eq!(actual_key, expected_key);
+    }
+
+    #[test]
+    fn test_minimize_order_by_with_empty_key() {
+        let mut fd = FunctionalDependencySet::new(5);
+        fd.add_functional_dependency_by_column_indices(&[], &[0]); // () --> (0)
+        let order_key = vec![0];
+        let actual_key = fd.minimize_order_key_bitset(order_key);
+        let expected_key = FixedBitSet::with_capacity(5);
+        println!("{:b}", actual_key);
+        println!("{:b}", expected_key);
+        assert_eq!(actual_key, expected_key);
     }
 }

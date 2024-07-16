@@ -13,6 +13,9 @@ statement ok
 insert into RightTable values (timestamp '2020-04-15 12:01', 2, 'R2'), (timestamp '2020-04-15 12:04', 3, 'R3'), (timestamp '2020-04-15 12:05', 4, 'R4');
 
 statement ok
+flush;
+
+statement ok
 CREATE MATERIALIZED VIEW mv_window_join AS
 SELECT L.num AS L_Num, L.id AS L_Id, R.num AS R_Num, R.id AS R_Id,
     COALESCE(L.window_start, R.window_start) AS window_start,
@@ -21,9 +24,6 @@ FROM TUMBLE(LeftTable, row_time, interval '5' minute) AS L
 FULL JOIN
 TUMBLE(RightTable, row_time, interval '5' minute) AS R
 ON L.num = R.num AND L.window_start = R.window_start AND L.window_end = R.window_end;
-
-statement ok
-flush;
 
 query ITITTT rowsort
 SELECT * FROM mv_window_join;

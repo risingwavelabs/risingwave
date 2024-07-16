@@ -8,10 +8,15 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [features]
+default = ["rw-static-link"]
 rw-static-link = ["workspace-config/rw-static-link"]
 rw-dynamic-link = ["workspace-config/rw-dynamic-link"]
-embedded-python-udf = ["risingwave_expr/embedded-python-udf"]
-default = ["rw-static-link"]
+all-udf = ["external-udf", "wasm-udf", "js-udf", "deno-udf", "python-udf"]
+external-udf = ["risingwave_expr_impl/external-udf"]
+wasm-udf = ["risingwave_expr_impl/wasm-udf"]
+js-udf = ["risingwave_expr_impl/js-udf"]
+deno-udf = ["risingwave_expr_impl/deno-udf"]
+python-udf = ["risingwave_expr_impl/python-udf"]
 
 [package.metadata.cargo-machete]
 ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
@@ -21,7 +26,7 @@ ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
 
 [dependencies]
 anyhow = "1"
-clap = { version = "4", features = ["cargo", "derive"] }
+clap = { workspace = true }
 console = "0.15"
 const-str = "0.5"
 home = "0.5"
@@ -31,13 +36,12 @@ risingwave_common = { workspace = true }
 risingwave_compactor = { workspace = true }
 risingwave_compute = { workspace = true }
 risingwave_ctl = { workspace = true }
-risingwave_expr = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
 risingwave_meta_node = { workspace = true }
 risingwave_rt = { workspace = true }
 shell-words = "1.1.0"
-strum = "0.25"
+strum = "0.26"
 strum_macros = "0.26"
 tempfile = "3"
 tikv-jemallocator = { workspace = true, features = [
@@ -66,9 +70,6 @@ vergen = { version = "8", default-features = false, features = [
     "git",
     "gitcl",
 ] }
-
-[target.'cfg(enable_task_local_alloc)'.dependencies]
-task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
 [[bin]]
 name = "risingwave"

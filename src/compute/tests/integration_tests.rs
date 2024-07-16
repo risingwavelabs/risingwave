@@ -21,14 +21,14 @@ use std::sync::Arc;
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use maplit::{convert_args, hashmap};
+use maplit::{btreemap, convert_args};
 use risingwave_batch::error::BatchError;
 use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanRange,
 };
 use risingwave_common::array::{Array, DataChunk, F64Array, SerialArray};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
 };
@@ -40,8 +40,6 @@ use risingwave_common::util::epoch::{test_epoch, EpochExt, EpochPair};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
-use risingwave_connector::source::SourceCtrlOpts;
-use risingwave_connector::ConnectorParams;
 use risingwave_dml::dml_manager::DmlManager;
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
@@ -54,7 +52,7 @@ use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::dml::DmlExecutor;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
-use risingwave_stream::executor::source_executor::SourceExecutor;
+use risingwave_stream::executor::source::SourceExecutor;
 use risingwave_stream::executor::{
     ActorContext, Barrier, Execute, Executor, ExecutorInfo, MaterializeExecutor, Message, PkIndices,
 };
@@ -116,7 +114,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         row_format: PbRowFormatType::Json as i32,
         ..Default::default()
     };
-    let properties = convert_args!(hashmap!(
+    let properties = convert_args!(btreemap!(
         "connector" => "datagen",
         "fields.v1.min" => "1",
         "fields.v1.max" => "1000",
@@ -174,8 +172,8 @@ async fn test_table_materialize() -> StreamResult<()> {
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            SourceCtrlOpts::default(),
-            ConnectorParams::default(),
+            None,
+            false,
         )
         .boxed(),
     );
@@ -269,6 +267,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         "RowSeqExecutor2".to_string(),
         None,
         None,
+        None,
     ));
     let mut stream = scan.execute();
     let result = stream.next().await;
@@ -337,6 +336,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         to_committed_batch_query_epoch(u64::MAX),
         1024,
         "RowSeqScanExecutor2".to_string(),
+        None,
         None,
         None,
     ));
@@ -418,6 +418,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         "RowSeqScanExecutor2".to_string(),
         None,
         None,
+        None,
     ));
 
     let mut stream = scan.execute();
@@ -487,6 +488,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         to_committed_batch_query_epoch(u64::MAX),
         1,
         "RowSeqScanExecutor2".to_string(),
+        None,
         None,
         None,
     ));

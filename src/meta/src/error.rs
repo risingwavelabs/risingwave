@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::error::BoxedError;
+use risingwave_common::hash::ParallelUnitError;
+use risingwave_common::session_config::SessionConfigError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
 use risingwave_pb::PbFieldNotFound;
@@ -25,8 +27,10 @@ use crate::storage::MetaStoreError;
 
 pub type MetaResult<T> = std::result::Result<T, MetaError>;
 
-#[derive(thiserror::Error, Debug, thiserror_ext::Arc, thiserror_ext::Construct)]
-#[thiserror_ext(newtype(name = MetaError, backtrace, report_debug))]
+#[derive(
+    thiserror::Error, thiserror_ext::ReportDebug, thiserror_ext::Arc, thiserror_ext::Construct,
+)]
+#[thiserror_ext(newtype(name = MetaError, backtrace))]
 pub enum MetaErrorInner {
     #[error("MetaStore transaction error: {0}")]
     TransactionError(
@@ -88,6 +92,13 @@ pub enum MetaErrorInner {
     #[error("SystemParams error: {0}")]
     SystemParams(String),
 
+    #[error("SessionParams error: {0}")]
+    SessionConfig(
+        #[from]
+        #[backtrace]
+        SessionConfigError,
+    ),
+
     #[error(transparent)]
     Connector(
         #[from]
@@ -110,6 +121,17 @@ pub enum MetaErrorInner {
         #[from]
         #[backtrace]
         anyhow::Error,
+    ),
+
+    // Indicates that recovery was triggered manually.
+    #[error("adhoc recovery triggered")]
+    AdhocRecovery,
+
+    #[error("ParallelUnit error: {0}")]
+    ParallelUnit(
+        #[from]
+        #[backtrace]
+        ParallelUnitError,
     ),
 }
 

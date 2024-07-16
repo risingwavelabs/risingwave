@@ -15,12 +15,10 @@
 use async_trait::async_trait;
 use futures::channel::mpsc;
 use futures::future::{join_all, select, Either};
-use futures::{FutureExt, SinkExt, StreamExt};
-use futures_async_stream::try_stream;
+use futures::{FutureExt, SinkExt};
 use itertools::Itertools;
 
-use super::error::StreamExecutorError;
-use super::{Barrier, BoxedMessageStream, Execute, Executor, Message};
+use crate::executor::prelude::*;
 
 /// Merges data from multiple inputs with order. If `order = [2, 1, 0]`, then
 /// it will first pipe data from the third input; after the third input gets a barrier, it will then
@@ -122,10 +120,8 @@ impl LookupUnionExecutor {
 #[cfg(test)]
 mod tests {
     use futures::TryStreamExt;
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::catalog::Field;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
 
     use super::*;

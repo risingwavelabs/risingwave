@@ -12,42 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use axum::http::{header, StatusCode, Uri};
-use axum::response::{IntoResponse as _, Response};
 use axum::Router;
+use axum_embed::ServeEmbed;
 use rust_embed::RustEmbed;
 
-#[derive(RustEmbed)]
+#[derive(RustEmbed, Clone)]
 #[folder = "$OUT_DIR/assets"]
 struct Assets;
 
-// TODO: switch to `axum-embed` for better robustness after bumping to axum 0.7.
-async fn static_handler(uri: Uri) -> Response {
-    let path = {
-        if uri.path().ends_with('/') {
-            // Append `index.html` to directory paths.
-            format!("{}index.html", uri.path())
-        } else {
-            uri.path().to_owned()
-        }
-    };
-    let path = path.trim_start_matches('/');
-
-    match Assets::get(path) {
-        Some(file) => {
-            let mime = file.metadata.mimetype();
-
-            let mut res = file.data.into_response();
-            res.headers_mut()
-                .insert(header::CONTENT_TYPE, mime.parse().unwrap());
-            res
-        }
-
-        None => (StatusCode::NOT_FOUND, "Not Found").into_response(),
-    }
-}
-
 /// Router for embedded assets.
 pub(crate) fn router() -> Router {
-    Router::new().fallback(static_handler)
+    Router::new().nest_service("/", ServeEmbed::<Assets>::new())
 }

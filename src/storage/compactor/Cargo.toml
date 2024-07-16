@@ -17,8 +17,8 @@ normal = ["workspace-hack"]
 [dependencies]
 async-trait = "0.1"
 await-tree = { workspace = true }
-clap = { version = "4", features = ["derive"] }
-parking_lot = "0.12"
+clap = { workspace = true }
+parking_lot = { workspace = true }
 prost = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }

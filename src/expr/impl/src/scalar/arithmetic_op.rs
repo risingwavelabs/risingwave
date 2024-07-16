@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::convert::TryInto;
 use std::fmt::Debug;
 
 use chrono::{Duration, NaiveDateTime};
@@ -443,9 +442,7 @@ mod tests {
 
     use num_traits::Float;
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::{
-        Date, Decimal, Int256, Int256Ref, Interval, Scalar, Timestamp, F32, F64,
-    };
+    use risingwave_common::types::{Int256, Int256Ref, Scalar, F32};
 
     use super::*;
 

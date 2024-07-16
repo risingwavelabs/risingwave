@@ -15,8 +15,6 @@
 use std::hash::Hasher;
 
 use super::*;
-use crate::array::list_array::{ListRef, ListValue};
-use crate::array::struct_array::{StructRef, StructValue};
 use crate::{dispatch_scalar_ref_variants, dispatch_scalar_variants, for_all_native_types};
 
 /// `ScalarPartialOrd` allows comparison between `Scalar` and `ScalarRef`.

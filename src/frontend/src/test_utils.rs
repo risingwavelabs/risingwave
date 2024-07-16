@@ -28,20 +28,21 @@ use risingwave_common::catalog::{
     FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
 };
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbSubscription,
-    PbTable, PbView, Table,
+    PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbStreamJobStatus,
+    PbSubscription, PbTable, PbView, Table,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
     alter_set_schema_request, create_connection_request, DdlProgress, PbTableJobType,
-    ReplaceTablePlan,
+    ReplaceTablePlan, TableJobType,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -54,7 +55,9 @@ use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistributi
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::{EventLog, PbTableParallelism, SystemParams};
+use risingwave_pb::meta::{
+    EventLog, PbTableParallelism, PbThrottleTarget, RecoveryStatus, SystemParams,
+};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -63,7 +66,7 @@ use tempfile::{Builder, NamedTempFile};
 
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::{ConnectionId, DatabaseId, SchemaId};
+use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId};
 use crate::error::{ErrorCode, Result};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
@@ -194,6 +197,7 @@ impl LocalFrontend {
                 6666,
             ))
             .into(),
+            Default::default(),
         ))
     }
 }
@@ -263,6 +267,7 @@ impl CatalogWriter for MockCatalogWriter {
         _graph: StreamFragmentGraph,
     ) -> Result<()> {
         table.id = self.gen_id();
+        table.stream_job_status = PbStreamJobStatus::Created as _;
         self.catalog.write().create_table(&table);
         self.add_table_or_source_id(table.id, table.schema_id, table.database_id);
         Ok(())
@@ -294,10 +299,12 @@ impl CatalogWriter for MockCatalogWriter {
     async fn replace_table(
         &self,
         _source: Option<PbSource>,
-        table: PbTable,
+        mut table: PbTable,
         _graph: StreamFragmentGraph,
         _mapping: ColIndexMapping,
+        _job_type: TableJobType,
     ) -> Result<()> {
+        table.stream_job_status = PbStreamJobStatus::Created as _;
         self.catalog.write().update_table(&table);
         Ok(())
     }
@@ -323,12 +330,8 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_sink_inner(sink, graph)
     }
 
-    async fn create_subscription(
-        &self,
-        subscription: PbSubscription,
-        graph: StreamFragmentGraph,
-    ) -> Result<()> {
-        self.create_subscription_inner(subscription, graph)
+    async fn create_subscription(&self, subscription: PbSubscription) -> Result<()> {
+        self.create_subscription_inner(subscription)
     }
 
     async fn create_index(
@@ -338,6 +341,7 @@ impl CatalogWriter for MockCatalogWriter {
         _graph: StreamFragmentGraph,
     ) -> Result<()> {
         index_table.id = self.gen_id();
+        index_table.stream_job_status = PbStreamJobStatus::Created as _;
         self.catalog.write().create_table(&index_table);
         self.add_table_or_index_id(
             index_table.id,
@@ -362,6 +366,17 @@ impl CatalogWriter for MockCatalogWriter {
         _schema_id: u32,
         _owner_id: u32,
         _connection: create_connection_request::Payload,
+    ) -> Result<()> {
+        unreachable!()
+    }
+
+    async fn create_secret(
+        &self,
+        _secret_name: String,
+        _database_id: u32,
+        _schema_id: u32,
+        _owner_id: u32,
+        _payload: Vec<u8>,
     ) -> Result<()> {
         unreachable!()
     }
@@ -523,6 +538,10 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
+    async fn drop_secret(&self, _secret_id: SecretId) -> Result<()> {
+        unreachable!()
+    }
+
     async fn drop_database(&self, database_id: u32) -> Result<()> {
         self.catalog.write().drop_database(database_id);
         Ok(())
@@ -556,7 +575,9 @@ impl CatalogWriter for MockCatalogWriter {
             for schema in database.iter_schemas() {
                 match object {
                     Object::TableId(table_id) => {
-                        if let Some(table) = schema.get_table_by_id(&TableId::from(table_id)) {
+                        if let Some(table) =
+                            schema.get_created_table_by_id(&TableId::from(table_id))
+                        {
                             let mut pb_table = table.to_prost(schema.id(), database.id());
                             pb_table.owner = owner_id;
                             self.catalog.write().update_table(&pb_table);
@@ -582,7 +603,7 @@ impl CatalogWriter for MockCatalogWriter {
                 let database_id = self.get_database_id_by_schema(schema_id);
                 let pb_table = {
                     let reader = self.catalog.read();
-                    let table = reader.get_table_by_id(&table_id.into())?.to_owned();
+                    let table = reader.get_any_table_by_id(&table_id.into())?.to_owned();
                     table.to_prost(new_schema_id, database_id)
                 };
                 self.catalog.write().update_table(&pb_table);
@@ -771,11 +792,7 @@ impl MockCatalogWriter {
         Ok(())
     }
 
-    fn create_subscription_inner(
-        &self,
-        mut subscription: PbSubscription,
-        _graph: StreamFragmentGraph,
-    ) -> Result<()> {
+    fn create_subscription_inner(&self, mut subscription: PbSubscription) -> Result<()> {
         subscription.id = self.gen_id();
         self.catalog.write().create_subscription(&subscription);
         self.add_table_or_subscription_id(
@@ -910,6 +927,8 @@ pub struct MockFrontendMetaClient {}
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for MockFrontendMetaClient {
+    async fn try_unregister(&self) {}
+
     async fn pin_snapshot(&self) -> RpcResult<HummockSnapshot> {
         Ok(HummockSnapshot {
             committed_epoch: 0,
@@ -986,6 +1005,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(Some(SystemParams::default().into()))
     }
 
+    async fn get_session_params(&self) -> RpcResult<SessionConfig> {
+        Ok(Default::default())
+    }
+
+    async fn set_session_param(&self, _param: String, _value: Option<String>) -> RpcResult<String> {
+        Ok("".to_string())
+    }
+
     async fn list_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {
         Ok(vec![])
     }
@@ -1043,6 +1070,32 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_compact_task_progress(&self) -> RpcResult<Vec<CompactTaskProgress>> {
+        unimplemented!()
+    }
+
+    async fn recover(&self) -> RpcResult<()> {
+        unimplemented!()
+    }
+
+    async fn apply_throttle(
+        &self,
+        _kind: PbThrottleTarget,
+        _id: u32,
+        _rate_limit: Option<u32>,
+    ) -> RpcResult<()> {
+        unimplemented!()
+    }
+
+    async fn get_cluster_recovery_status(&self) -> RpcResult<RecoveryStatus> {
+        Ok(RecoveryStatus::StatusRunning)
+    }
+
+    async fn list_change_log_epochs(
+        &self,
+        _table_id: u32,
+        _min_epoch: u64,
+        _max_count: u32,
+    ) -> RpcResult<Vec<u64>> {
         unimplemented!()
     }
 }

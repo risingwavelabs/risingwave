@@ -53,8 +53,8 @@ mod utils;
 pub use agg_call::AggCall;
 pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef, Depth};
 pub use expr_mutator::ExprMutator;
-pub use expr_rewriter::ExprRewriter;
-pub use expr_visitor::ExprVisitor;
+pub use expr_rewriter::{default_rewrite_expr, ExprRewriter};
+pub use expr_visitor::{default_visit_expr, ExprVisitor};
 pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
 pub use function_call_with_lambda::FunctionCallWithLambda;
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
@@ -74,6 +74,10 @@ pub use user_defined_function::UserDefinedFunction;
 pub use utils::*;
 pub use window_function::WindowFunction;
 
+const EXPR_DEPTH_THRESHOLD: usize = 30;
+const EXPR_TOO_DEEP_NOTICE: &str = "Some expression is too complicated. \
+Consider simplifying or splitting the query if you encounter any issues.";
+
 /// the trait of bound expressions
 pub trait Expr: Into<ExprImpl> {
     /// Get the return type of the expr
@@ -88,6 +92,14 @@ macro_rules! impl_expr_impl {
         #[derive(Clone, Eq, PartialEq, Hash, EnumAsInner)]
         pub enum ExprImpl {
             $($t(Box<$t>),)*
+        }
+
+        impl ExprImpl {
+            pub fn variant_name(&self) -> &'static str {
+                match self {
+                    $(ExprImpl::$t(_) => stringify!($t),)*
+                }
+            }
         }
 
         $(
@@ -200,6 +212,20 @@ impl ExprImpl {
         )
         .unwrap()
         .into()
+    }
+
+    /// Create a new expression by merging the given expressions by `And`.
+    ///
+    /// If `exprs` is empty, return a literal `true`.
+    pub fn and(exprs: impl IntoIterator<Item = ExprImpl>) -> Self {
+        merge_expr_by_logical(exprs, ExprType::And, ExprImpl::literal_bool(true))
+    }
+
+    /// Create a new expression by merging the given expressions by `Or`.
+    ///
+    /// If `exprs` is empty, return a literal `false`.
+    pub fn or(exprs: impl IntoIterator<Item = ExprImpl>) -> Self {
+        merge_expr_by_logical(exprs, ExprType::Or, ExprImpl::literal_bool(false))
     }
 
     /// Collect all `InputRef`s' indexes in the expression.
@@ -395,7 +421,7 @@ macro_rules! impl_has_variant {
     };
 }
 
-impl_has_variant! {InputRef, Literal, FunctionCall, FunctionCallWithLambda, AggCall, Subquery, TableFunction, WindowFunction}
+impl_has_variant! {InputRef, Literal, FunctionCall, FunctionCallWithLambda, AggCall, Subquery, TableFunction, WindowFunction, Now}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InequalityInputPair {
@@ -647,10 +673,11 @@ impl ExprImpl {
                 fn is_short_circuit(&self, func_call: &FunctionCall) -> bool {
                     /// evaluate the first parameter of `Or` or `And` function call
                     fn eval_first(e: &ExprImpl, expect: bool) -> bool {
-                        let Some(Ok(Some(scalar))) = e.try_fold_const() else {
-                            return false;
-                        };
-                        scalar == ScalarImpl::Bool(expect)
+                        if let ExprImpl::Literal(l) = e {
+                            *l.get_data() == Some(ScalarImpl::Bool(expect))
+                        } else {
+                            false
+                        }
                     }
 
                     match func_call.func_type {
@@ -1035,11 +1062,7 @@ impl ExprImpl {
 
 impl From<Condition> for ExprImpl {
     fn from(c: Condition) -> Self {
-        merge_expr_by_binary(
-            c.conjunctions.into_iter(),
-            ExprType::And,
-            ExprImpl::literal_bool(true),
-        )
+        ExprImpl::and(c.conjunctions)
     }
 }
 

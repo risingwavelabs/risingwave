@@ -25,14 +25,17 @@ use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_batch::executor::{Executor as BatchExecutor, RowSeqScanExecutor, ScanRange};
-use risingwave_common::array::{Array, ArrayBuilder, DataChunk, Op, StreamChunk, Utf8ArrayBuilder};
+use risingwave_common::array::{
+    Array, ArrayBuilder, DataChunk, DataChunkTestExt, Op, StreamChunk, Utf8ArrayBuilder,
+};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::types::{Datum, JsonbVal};
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::cdc::external::mock_external_table::MockExternalTableReader;
+use risingwave_connector::source::cdc::external::mysql::MySqlOffset;
 use risingwave_connector::source::cdc::external::{
-    DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, MySqlOffset, SchemaTableName,
+    DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, SchemaTableName,
 };
 use risingwave_connector::source::cdc::DebeziumCdcSplit;
 use risingwave_connector::source::SplitImpl;
@@ -45,8 +48,8 @@ use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::test_utils::MockSource;
 use risingwave_stream::executor::{
     expect_first_barrier, ActorContext, AddMutation, Barrier, BoxedMessageStream,
-    CdcBackfillExecutor, Execute, Executor as StreamExecutor, ExecutorInfo, ExternalStorageTable,
-    MaterializeExecutor, Message, Mutation, StreamExecutorError,
+    CdcBackfillExecutor, CdcScanOptions, Execute, Executor as StreamExecutor, ExecutorInfo,
+    ExternalStorageTable, MaterializeExecutor, Message, Mutation, StreamExecutorError,
 };
 
 // mock upstream binlog offset starting from "1.binlog, pos=0"
@@ -167,7 +170,10 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         MySqlOffset::new(binlog_file.clone(), 10),
     ];
 
-    let table_name = SchemaTableName::new("mock_table".to_string(), "public".to_string());
+    let table_name = SchemaTableName {
+        schema_name: "public".to_string(),
+        table_name: "mock_table".to_string(),
+    };
     let table_schema = Schema::new(vec![
         Field::with_name(DataType::Int64, "id"), // primary key
         Field::with_name(DataType::Float64, "price"),
@@ -177,15 +183,16 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let external_table = ExternalStorageTable::new(
         TableId::new(1234),
         table_name,
+        "mydb".to_string(),
         ExternalTableReaderImpl::Mock(MockExternalTableReader::new(binlog_watermarks)),
         table_schema.clone(),
         table_pk_order_types,
         table_pk_indices.clone(),
-        vec![0, 1],
     );
 
     let actor_id = 0x1a;
 
+    // create state table
     let state_schema = Schema::new(vec![
         Field::with_name(DataType::Varchar, "split_id"),
         Field::with_name(DataType::Int64, "id"), // pk
@@ -211,6 +218,11 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     )
     .await;
 
+    let output_columns = vec![
+        ColumnDesc::named("id", ColumnId::new(1), DataType::Int64), // primary key
+        ColumnDesc::named("price", ColumnId::new(2), DataType::Float64),
+    ];
+
     let cdc_backfill = StreamExecutor::new(
         ExecutorInfo {
             schema: table_schema.clone(),
@@ -222,11 +234,16 @@ async fn test_cdc_backfill() -> StreamResult<()> {
             external_table,
             mock_offset_executor,
             vec![0, 1],
+            output_columns,
             None,
             Arc::new(StreamingMetrics::unused()),
             state_table,
-            4, // 4 rows in a snapshot chunk
-            false,
+            Some(4), // limit a snapshot chunk to have <= 4 rows by rate limit
+            CdcScanOptions {
+                disable_backfill: false,
+                snapshot_interval: 1,
+                snapshot_batch_size: 4,
+            },
         )
         .boxed(),
     );
@@ -246,9 +263,10 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     .boxed()
     .execute();
 
+    // construct upstream chunks
     let chunk1_payload = vec![
         r#"{ "payload": { "before": null, "after": { "id": 1, "price": 10.01}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
-        r#"{ "payload": { "before": null, "after": { "id": 2, "price": 2.02}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 2, "price": 22.22}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
         r#"{ "payload": { "before": null, "after": { "id": 3, "price": 3.03}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
         r#"{ "payload": { "before": null, "after": { "id": 4, "price": 4.04}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
         r#"{ "payload": { "before": null, "after": { "id": 5, "price": 5.05}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
@@ -256,6 +274,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     ];
 
     let chunk2_payload = vec![
+        r#"{ "payload": { "before": null, "after": { "id": 1, "price": 11.11}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
         r#"{ "payload": { "before": null, "after": { "id": 6, "price": 10.08}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
         r#"{ "payload": { "before": null, "after": { "id": 199, "price": 40.5}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
         r#"{ "payload": { "before": null, "after": { "id": 978, "price": 72.6}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
@@ -311,11 +330,22 @@ async fn test_cdc_backfill() -> StreamResult<()> {
 
     // ingest data and barrier
     let interval = Duration::from_millis(10);
-    tx.push_chunk(stream_chunk1);
-    tokio::time::sleep(interval).await;
+
+    // send a dummy barrier to trigger the backfill, since
+    // cdc backfill will wait for a barrier before start
     curr_epoch.inc_epoch();
     tx.push_barrier(curr_epoch, false);
 
+    // first chunk
+    tx.push_chunk(stream_chunk1);
+
+    tokio::time::sleep(interval).await;
+
+    // barrier to trigger emit buffered events
+    curr_epoch.inc_epoch();
+    tx.push_barrier(curr_epoch, false);
+
+    // second chunk
     tx.push_chunk(stream_chunk2);
 
     tokio::time::sleep(interval).await;
@@ -351,10 +381,27 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         "RowSeqExecutor2".to_string(),
         None,
         None,
+        None,
     ));
+
+    // check result
     let mut stream = scan.execute();
     while let Some(message) = stream.next().await {
-        println!("[scan] chunk: {:#?}", message.unwrap());
+        let chunk = message.expect("scan a chunk");
+        let expect = DataChunk::from_pretty(
+            "I F
+                1 11.11
+                2 22.22
+                3 3.03
+                4 4.04
+                5 5.05
+                6 10.08
+                8 1.0008
+                134 41.7
+                199 40.5
+                978 72.6",
+        );
+        assert_eq!(expect, chunk);
     }
 
     mview_handle.await.unwrap()?;

@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, Criterion};
-use foyer::memory::CacheContext;
+use foyer::CacheContext;
 use futures::pin_mut;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::TableKey;
@@ -32,7 +32,6 @@ use risingwave_storage::hummock::test_utils::default_opts_for_test;
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
-use risingwave_storage::StateStore;
 
 fn gen_interleave_shared_buffer_batch_iter(
     batch_size: usize,
@@ -57,7 +56,6 @@ fn gen_interleave_shared_buffer_batch_iter(
 fn criterion_benchmark(c: &mut Criterion) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let batches = gen_interleave_shared_buffer_batch_iter(10000, 100);
-    let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         runtime.block_on(setup_compute_env(8080));
@@ -67,6 +65,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     ));
 
     let global_hummock_storage = runtime.block_on(async {
+        let sstable_store = mock_sstable_store().await;
         HummockStorage::for_test(
             hummock_options,
             sstable_store,

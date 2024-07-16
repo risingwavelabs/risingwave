@@ -43,11 +43,11 @@
   - stream_error
 - name: Temporal join append only test
   sql: |
-    create table stream(id1 int, a1 int, b1 int);
+    create table stream(id1 int, a1 int, b1 int) append only;
     create table version(id2 int, a2 int, b2 int, primary key (id2));
     select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2 where a2 < 10;
   expected_outputs:
-  - stream_error
+  - stream_plan
 - name: Temporal join type test
   sql: |
     create table stream(id1 int, a1 int, b1 int);
@@ -57,7 +57,7 @@
   - stream_error
 - name: multi-way temporal join with the same key
   sql: |
-    create table stream(k int, a1 int, b1 int) APPEND ONLY;
+    create table stream(k int, a1 int, b1 int);
     create table version1(k int, x1 int, y2 int, primary key (k));
     create table version2(k int, x2 int, y2 int, primary key (k));
     select stream.k, x1, x2, a1, b1
@@ -68,7 +68,7 @@
   - stream_plan
 - name: multi-way temporal join with different keys
   sql: |
-    create table stream(id1 int, id2 int, a1 int, b1 int) APPEND ONLY;
+    create table stream(id1 int, id2 int, a1 int, b1 int);
     create table version1(id1 int, x1 int, y2 int, primary key (id1));
     create table version2(id2 int, x2 int, y2 int, primary key (id2));
     select stream.id1, x1, stream.id2, x2, a1, b1
@@ -79,7 +79,7 @@
   - stream_plan
 - name: multi-way temporal join with different keys
   sql: |
-    create table stream(id1 int, id2 int, a1 int, b1 int) APPEND ONLY;
+    create table stream(id1 int, id2 int, a1 int, b1 int);
     create table version1(id1 int, x1 int, y2 int, primary key (id1));
     create table version2(id2 int, x2 int, y2 int, primary key (id2));
     select stream.id1, x1, stream.id2, x2, a1, b1
@@ -90,7 +90,7 @@
   - stream_plan
 - name: temporal join with an index (distribution key size = 1)
   sql: |
-    create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
+    create table stream(id1 int, a1 int, b1 int);
     create table version(id2 int, a2 int, b2 int, primary key (id2));
     create index idx2 on version (a2, b2) distributed by (a2);
     select id1, a1, id2, a2 from stream left join idx2 FOR SYSTEM_TIME AS OF PROCTIME() on a1 = a2 and b1 = b2;
@@ -98,7 +98,7 @@
   - stream_plan
 - name: temporal join with an index (distribution key size = 2)
   sql: |
-    create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
+    create table stream(id1 int, a1 int, b1 int);
     create table version(id2 int, a2 int, b2 int, primary key (id2));
     create index idx2 on version (a2, b2);
     select id1, a1, id2, a2 from stream left join idx2 FOR SYSTEM_TIME AS OF PROCTIME() on a1 = a2 and b1 = b2;
@@ -106,7 +106,7 @@
   - stream_plan
 - name: temporal join with an index (index column size = 1)
   sql: |
-    create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
+    create table stream(id1 int, a1 int, b1 int);
     create table version(id2 int, a2 int, b2 int, primary key (id2));
     create index idx2 on version (b2);
     select id1, a1, id2, a2 from stream left join idx2 FOR SYSTEM_TIME AS OF PROCTIME() on a1 = a2 and b1 = b2;
@@ -114,14 +114,14 @@
   - stream_plan
 - name: temporal join with singleton table
   sql: |
-    create table t (a int) append only;
+    create table t (a int);
     create materialized view v as select count(*) from t;
     select * from t left join v FOR SYSTEM_TIME AS OF PROCTIME() on a = count;
   expected_outputs:
   - stream_plan
 - name: index selection for temporal join (with one index).
   sql: |
-    create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
+    create table stream(id1 int, a1 int, b1 int);
     create table version(id2 int, a2 int, b2 int, primary key (id2));
     create index idx on version (a2, b2);
     select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on a1 = a2 and b1 = b2;
@@ -129,7 +129,7 @@
     - stream_plan
 - name: index selection for temporal join (with two indexes) and should choose the index with a longer prefix..
   sql: |
-    create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
+    create table stream(id1 int, a1 int, b1 int);
     create table version(id2 int, a2 int, b2 int, primary key (id2));
     create index idx1 on version (a2);
     create index idx2 on version (a2, b2);
@@ -138,7 +138,7 @@
     - stream_plan
 - name: index selection for temporal join (with three indexes) and should choose primary table.
   sql: |
-    create table stream(id1 int, a1 int, b1 int, c1 int) APPEND ONLY;
+    create table stream(id1 int, a1 int, b1 int, c1 int);
     create table version(id2 int, a2 int, b2 int, c2 int, primary key (id2));
     create index idx1 on version (a2);
     create index idx2 on version (b2);
@@ -148,7 +148,7 @@
     - stream_plan
 - name: index selection for temporal join (two index) and no one matches.
   sql: |
-    create table stream(id1 int, a1 int, b1 int, c1 int) APPEND ONLY;
+    create table stream(id1 int, a1 int, b1 int, c1 int);
     create table version(id2 int, a2 int, b2 int, c2 int, primary key (id2));
     create index idx1 on version (a2);
     create index idx2 on version (a2, b2);

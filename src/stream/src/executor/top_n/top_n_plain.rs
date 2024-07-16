@@ -12,19 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::array::Op;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_storage::StateStore;
 
 use super::utils::*;
 use super::{ManagedTopNState, TopNCache, TopNCacheTrait};
-use crate::common::table::state_table::StateTable;
-use crate::error::StreamResult;
-use crate::executor::error::StreamExecutorResult;
-use crate::executor::{ActorContextRef, Executor, PkIndices, Watermark};
+use crate::executor::prelude::*;
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.
@@ -190,7 +185,6 @@ where
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
@@ -206,7 +200,7 @@ mod tests {
         use risingwave_common::util::epoch::test_epoch;
 
         use super::*;
-        use crate::executor::{ActorContext, Execute};
+
         fn create_stream_chunks() -> Vec<StreamChunk> {
             let chunk1 = StreamChunk::from_pretty(
                 "  I I
@@ -690,8 +684,6 @@ mod tests {
 
         use super::*;
         use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
-        use crate::executor::{ActorContext, Execute};
-
         fn create_source_new() -> Executor {
             let mut chunks = vec![
                 StreamChunk::from_pretty(
@@ -1007,7 +999,6 @@ mod tests {
 
         use super::*;
         use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
-        use crate::executor::{ActorContext, Execute};
 
         fn create_source() -> Executor {
             let mut chunks = vec![

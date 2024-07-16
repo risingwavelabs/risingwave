@@ -12,30 +12,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Formatter;
+use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use either::Either;
-use futures::{StreamExt, TryStreamExt};
-use futures_async_stream::try_stream;
-use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
+use futures::TryStreamExt;
+use itertools::Itertools;
+use risingwave_common::array::ArrayRef;
+use risingwave_common::metrics::{LabelGuardedIntCounter, GLOBAL_ERROR_METRICS};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
+use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
-    BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitMetaData,
+    BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
+    SplitMetaData, WaitCheckpointTask,
 };
-use risingwave_connector::ConnectorParams;
-use risingwave_storage::StateStore;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
-use crate::executor::monitor::StreamingMetrics;
+use super::{
+    apply_rate_limit, barrier_to_message_stream, get_split_offset_col_idx,
+    get_split_offset_mapping_from_chunk, prune_additional_cols,
+};
+use crate::common::rate_limit::limited_chunk_size;
+use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::*;
+use crate::executor::{AddMutation, UpdateMutation};
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
@@ -56,23 +65,21 @@ pub struct SourceExecutor<S: StateStore> {
     /// System parameter reader to read barrier interval
     system_params: SystemParamsReaderRef,
 
-    // control options for connector level
-    source_ctrl_opts: SourceCtrlOpts,
+    /// Rate limit in rows/s.
+    rate_limit_rps: Option<u32>,
 
-    // config for the connector node
-    connector_params: ConnectorParams,
+    is_shared: bool,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
         stream_source_core: Option<StreamSourceCore<S>>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
-        source_ctrl_opts: SourceCtrlOpts,
-        connector_params: ConnectorParams,
+        rate_limit_rps: Option<u32>,
+        is_shared: bool,
     ) -> Self {
         Self {
             actor_ctx,
@@ -80,9 +87,29 @@ impl<S: StateStore> SourceExecutor<S> {
             metrics,
             barrier_receiver: Some(barrier_receiver),
             system_params,
-            source_ctrl_opts,
-            connector_params,
+            rate_limit_rps,
+            is_shared,
         }
+    }
+
+    async fn spawn_wait_checkpoint_worker(
+        core: &StreamSourceCore<S>,
+        source_reader: SourceReader,
+    ) -> StreamExecutorResult<Option<WaitCheckpointTaskBuilder>> {
+        let Some(initial_task) = source_reader.create_wait_checkpoint_task().await? else {
+            return Ok(None);
+        };
+        let (wait_checkpoint_tx, wait_checkpoint_rx) = mpsc::unbounded_channel();
+        let wait_checkpoint_worker = WaitCheckpointWorker {
+            wait_checkpoint_rx,
+            state_store: core.split_state_store.state_table.state_store().clone(),
+        };
+        tokio::spawn(wait_checkpoint_worker.run());
+        Ok(Some(WaitCheckpointTaskBuilder {
+            wait_checkpoint_tx,
+            source_reader,
+            building_task: initial_task,
+        }))
     }
 
     pub async fn build_stream_source_reader(
@@ -99,21 +126,25 @@ impl<S: StateStore> SourceExecutor<S> {
             self.actor_ctx.id,
             self.stream_source_core.as_ref().unwrap().source_id,
             self.actor_ctx.fragment_id,
-            source_desc.metrics.clone(),
-            self.source_ctrl_opts.clone(),
-            self.connector_params.connector_client.clone(),
-            source_desc.source.config.clone(),
             self.stream_source_core
                 .as_ref()
                 .unwrap()
                 .source_name
                 .clone(),
+            source_desc.metrics.clone(),
+            SourceCtrlOpts {
+                chunk_size: limited_chunk_size(self.rate_limit_rps),
+                rate_limit: self.rate_limit_rps,
+            },
+            source_desc.source.config.clone(),
         );
-        source_desc
+        let stream = source_desc
             .source
-            .to_stream(state, column_ids, Arc::new(source_ctx))
+            .build_stream(state, column_ids, Arc::new(source_ctx))
             .await
-            .map_err(StreamExecutorError::connector_error)
+            .map_err(StreamExecutorError::connector_error);
+
+        Ok(apply_rate_limit(stream?, self.rate_limit_rps).boxed())
     }
 
     /// `source_id | source_name | actor_id | fragment_id`
@@ -149,17 +180,9 @@ impl<S: StateStore> SourceExecutor<S> {
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
         split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
         should_trim_state: bool,
+        source_split_change_count_metrics: &LabelGuardedIntCounter<4>,
     ) -> StreamExecutorResult<()> {
-        self.metrics
-            .source_split_change_count
-            .with_label_values(
-                &self
-                    .get_metric_labels()
-                    .iter()
-                    .map(AsRef::as_ref)
-                    .collect::<Vec<&str>>(),
-            )
-            .inc();
+        source_split_change_count_metrics.inc();
         if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
             if self
                 .update_state_if_changed(target_splits, should_trim_state)
@@ -234,11 +257,11 @@ impl<S: StateStore> SourceExecutor<S> {
             );
 
             core.updated_splits_in_epoch
-                .retain(|split_id, _| target_state.get(split_id).is_some());
+                .retain(|split_id, _| target_state.contains_key(split_id));
 
             let dropped_splits = core
                 .latest_split_info
-                .extract_if(|split_id, _| target_state.get(split_id).is_none())
+                .extract_if(|split_id, _| !target_state.contains_key(split_id))
                 .map(|(_, split)| split)
                 .collect_vec();
 
@@ -305,7 +328,7 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn persist_state_and_clear_cache(
         &mut self,
         epoch: EpochPair,
-    ) -> StreamExecutorResult<()> {
+    ) -> StreamExecutorResult<HashMap<SplitId, SplitImpl>> {
         let core = self.stream_source_core.as_mut().unwrap();
 
         let cache = core
@@ -320,16 +343,19 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         // commit anyway, even if no message saved
-        core.split_state_store.state_store.commit(epoch).await?;
+        core.split_state_store.state_table.commit(epoch).await?;
+
+        let updated_splits = core.updated_splits_in_epoch.clone();
+
         core.updated_splits_in_epoch.clear();
 
-        Ok(())
+        Ok(updated_splits)
     }
 
     /// try mem table spill
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
-        core.split_state_store.state_store.try_flush().await?;
+        core.split_state_store.state_table.try_flush().await?;
 
         Ok(())
     }
@@ -361,29 +387,30 @@ impl<S: StateStore> SourceExecutor<S> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
+        let mut wait_checkpoint_task_builder =
+            Self::spawn_wait_checkpoint_worker(&core, source_desc.source.clone()).await?;
+
         let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
         };
 
         let mut boot_state = Vec::default();
-        if let Some(mutation) = barrier.mutation.as_deref() {
-            match mutation {
-                Mutation::Add(AddMutation { splits, .. })
-                | Mutation::Update(UpdateMutation {
-                    actor_splits: splits,
-                    ..
-                }) => {
-                    if let Some(splits) = splits.get(&self.actor_ctx.id) {
-                        tracing::debug!(
-                            "source exector: actor {:?} boot with splits: {:?}",
-                            self.actor_ctx.id,
-                            splits
-                        );
-                        boot_state.clone_from(splits);
-                    }
-                }
-                _ => {}
+        if let Some(
+            Mutation::Add(AddMutation { splits, .. })
+            | Mutation::Update(UpdateMutation {
+                actor_splits: splits,
+                ..
+            }),
+        ) = barrier.mutation.as_deref()
+        {
+            if let Some(splits) = splits.get(&self.actor_ctx.id) {
+                tracing::debug!(
+                    "source exector: actor {:?} boot with splits: {:?}",
+                    self.actor_ctx.id,
+                    splits
+                );
+                boot_state.clone_from(splits);
             }
         }
 
@@ -396,11 +423,30 @@ impl<S: StateStore> SourceExecutor<S> {
                 .await?
             {
                 *ele = recover_state;
+            } else {
+                // This is a new split, not in state table.
+                if self.is_shared {
+                    // For shared source, we start from latest and let the downstream SourceBackfillExecutors to read historical data.
+                    // It's highly probable that the work of scanning historical data cannot be shared,
+                    // so don't waste work on it.
+                    // For more details, see https://github.com/risingwavelabs/risingwave/issues/16576#issuecomment-2095413297
+                    if ele.is_cdc_split() {
+                        // shared CDC source already starts from latest.
+                        continue;
+                    }
+                    match ele {
+                        SplitImpl::Kafka(split) => {
+                            split.seek_to_latest_offset();
+                        }
+                        _ => unreachable!("only kafka source can be shared, got {:?}", ele),
+                    }
+                }
             }
         }
 
         // init in-memory split states with persisted state if any
         core.init_split_state(boot_state.clone());
+        let mut is_uninitialized = self.actor_ctx.initial_dispatch_num == 0;
 
         // Return the ownership of `stream_source_core` to the source executor.
         self.stream_source_core = Some(core);
@@ -419,11 +465,16 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut stream =
             StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_chunk_reader);
 
-        // If the first barrier requires us to pause on startup, pause the stream.
-        if barrier.is_pause_on_startup() {
+        // - For shared source, pause until there's a MV.
+        // - If the first barrier requires us to pause on startup, pause the stream.
+        if (self.is_shared && is_uninitialized) || barrier.is_pause_on_startup() {
+            tracing::info!(
+                is_shared = self.is_shared,
+                is_uninitialized = is_uninitialized,
+                "source paused on startup"
+            );
             stream.pause_stream();
         }
-        // TODO: for backfill-able source, pause until there's a MV.
 
         yield Message::Barrier(barrier);
 
@@ -433,6 +484,16 @@ impl<S: StateStore> SourceExecutor<S> {
             self.system_params.load().barrier_interval_ms() as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
+
+        let source_output_row_count = self
+            .metrics
+            .source_output_row_count
+            .with_guarded_label_values(&self.get_metric_labels().each_ref().map(AsRef::as_ref));
+
+        let source_split_change_count = self
+            .metrics
+            .source_split_change_count
+            .with_guarded_label_values(&self.get_metric_labels().each_ref().map(AsRef::as_ref));
 
         while let Some(msg) = stream.next().await {
             let Ok(msg) = msg else {
@@ -454,8 +515,17 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     let epoch = barrier.epoch;
 
+                    if self.is_shared
+                        && is_uninitialized
+                        && barrier.has_more_downstream_fragments(self.actor_ctx.id)
+                    {
+                        stream.resume_stream();
+                        is_uninitialized = false;
+                    }
+
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
+                            // XXX: Is it possible that the stream is self_paused, and we have pause mutation now? In this case, it will panic.
                             Mutation::Pause => stream.pause_stream(),
                             Mutation::Resume => stream.resume_stream(),
                             Mutation::SourceChangeSplit(actor_splits) => {
@@ -470,6 +540,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                     &mut stream,
                                     actor_splits,
                                     true,
+                                    &source_split_change_count,
                                 )
                                 .await?;
                             }
@@ -480,14 +551,35 @@ impl<S: StateStore> SourceExecutor<S> {
                                     &mut stream,
                                     actor_splits,
                                     false,
+                                    &source_split_change_count,
                                 )
                                 .await?;
+                            }
+                            Mutation::Throttle(actor_to_apply) => {
+                                if let Some(new_rate_limit) = actor_to_apply.get(&self.actor_ctx.id)
+                                    && *new_rate_limit != self.rate_limit_rps
+                                {
+                                    self.rate_limit_rps = *new_rate_limit;
+                                    // recreate from latest_split_info
+                                    self.rebuild_stream_reader(&source_desc, &mut stream)
+                                        .await?;
+                                }
                             }
                             _ => {}
                         }
                     }
 
-                    self.persist_state_and_clear_cache(epoch).await?;
+                    let updated_splits = self.persist_state_and_clear_cache(epoch).await?;
+
+                    // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
+                    if barrier.kind.is_checkpoint()
+                        && let Some(task_builder) = &mut wait_checkpoint_task_builder
+                    {
+                        task_builder.update_task_on_checkpoint(updated_splits);
+
+                        tracing::debug!("epoch to wait {:?}", epoch);
+                        task_builder.send(Epoch(epoch.prev)).await?
+                    }
 
                     yield Message::Barrier(barrier);
                 }
@@ -498,6 +590,10 @@ impl<S: StateStore> SourceExecutor<S> {
                 }
 
                 Either::Right(chunk) => {
+                    if let Some(task_builder) = &mut wait_checkpoint_task_builder {
+                        let offset_col = chunk.column_at(offset_idx);
+                        task_builder.update_task_on_chunk(offset_col.clone());
+                    }
                     // TODO: confirm when split_offset_mapping is None
                     let split_offset_mapping =
                         get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx);
@@ -547,16 +643,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             .extend(state);
                     }
 
-                    self.metrics
-                        .source_output_row_count
-                        .with_label_values(
-                            &self
-                                .get_metric_labels()
-                                .iter()
-                                .map(AsRef::as_ref)
-                                .collect::<Vec<&str>>(),
-                        )
-                        .inc_by(chunk.cardinality() as u64);
+                    source_output_row_count.inc_by(chunk.cardinality() as u64);
                     let chunk =
                         prune_additional_cols(&chunk, split_idx, offset_idx, &source_desc.columns);
                     yield Message::Chunk(chunk);
@@ -618,17 +705,130 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
     }
 }
 
+struct WaitCheckpointTaskBuilder {
+    wait_checkpoint_tx: UnboundedSender<(Epoch, WaitCheckpointTask)>,
+    source_reader: SourceReader,
+    building_task: WaitCheckpointTask,
+}
+
+impl WaitCheckpointTaskBuilder {
+    fn update_task_on_chunk(&mut self, offset_col: ArrayRef) {
+        #[expect(clippy::single_match)]
+        match &mut self.building_task {
+            WaitCheckpointTask::AckPubsubMessage(_, arrays) => {
+                arrays.push(offset_col);
+            }
+            _ => {}
+        }
+    }
+
+    fn update_task_on_checkpoint(&mut self, updated_splits: HashMap<SplitId, SplitImpl>) {
+        #[expect(clippy::single_match)]
+        match &mut self.building_task {
+            WaitCheckpointTask::CommitCdcOffset(offsets) => {
+                if !updated_splits.is_empty() {
+                    // cdc source only has one split
+                    assert_eq!(1, updated_splits.len());
+                    for (split_id, split_impl) in updated_splits {
+                        if split_impl.is_cdc_split() {
+                            *offsets = Some((split_id, split_impl.get_cdc_split_offset()));
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Send and reset the building task to a new one.
+    async fn send(&mut self, epoch: Epoch) -> Result<(), anyhow::Error> {
+        let new_task = self
+            .source_reader
+            .create_wait_checkpoint_task()
+            .await?
+            .expect("wait checkpoint task should be created");
+        self.wait_checkpoint_tx
+            .send((epoch, std::mem::replace(&mut self.building_task, new_task)))
+            .expect("wait_checkpoint_tx send should succeed");
+        Ok(())
+    }
+}
+
+/// A worker used to do some work after each checkpoint epoch is committed.
+///
+/// # Usage Cases
+///
+/// Typically there are 2 issues related with ack on checkpoint:
+///
+/// 1. Correctness (at-least-once), or don't let upstream clean uncommitted data.
+///    For message queueing semantics (delete after ack), we should ack to avoid redelivery,
+///    and only ack after checkpoint to avoid data loss.
+///
+/// 2. Allow upstream to clean data after commit.
+///
+/// See also <https://github.com/risingwavelabs/risingwave/issues/16736#issuecomment-2109379790>
+///
+/// ## CDC
+///
+/// Commit last consumed offset to upstream DB, so that old data can be discarded.
+///
+/// ## Google Pub/Sub
+///
+/// Due to queueing semantics.
+/// Although Pub/Sub supports `retain_acked_messages` and `seek` functionality,
+/// it's quite limited unlike Kafka.
+///
+/// See also <https://cloud.google.com/pubsub/docs/subscribe-best-practices#process-messages>
+struct WaitCheckpointWorker<S: StateStore> {
+    wait_checkpoint_rx: UnboundedReceiver<(Epoch, WaitCheckpointTask)>,
+    state_store: S,
+}
+
+impl<S: StateStore> WaitCheckpointWorker<S> {
+    pub async fn run(mut self) {
+        tracing::debug!("wait epoch worker start success");
+        loop {
+            // poll the rx and wait for the epoch commit
+            match self.wait_checkpoint_rx.recv().await {
+                Some((epoch, task)) => {
+                    tracing::debug!("start to wait epoch {}", epoch.0);
+                    let ret = self
+                        .state_store
+                        .try_wait_epoch(HummockReadEpoch::Committed(epoch.0))
+                        .await;
+
+                    match ret {
+                        Ok(()) => {
+                            tracing::debug!(epoch = epoch.0, "wait epoch success");
+                            task.run().await;
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                            error = %e.as_report(),
+                            "wait epoch {} failed", epoch.0
+                            );
+                        }
+                    }
+                }
+                None => {
+                    tracing::error!("wait epoch rx closed");
+                    break;
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::collections::HashSet;
 
-    use futures::StreamExt;
-    use maplit::{convert_args, hashmap};
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+    use maplit::{btreemap, convert_args, hashmap};
+    use risingwave_common::catalog::{ColumnId, Field, TableId};
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
@@ -639,7 +839,7 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::executor::ActorContext;
+    use crate::executor::source::{default_source_internal_table, SourceStateTableHandler};
 
     const MOCK_SOURCE_NAME: &str = "mock_source";
 
@@ -658,7 +858,7 @@ mod tests {
         let column_ids = vec![0].into_iter().map(ColumnId::from).collect();
 
         // This datagen will generate 3 rows at one time.
-        let properties: HashMap<String, String> = convert_args!(hashmap!(
+        let properties = convert_args!(btreemap!(
             "connector" => "datagen",
             "datagen.rows.per.second" => "3",
             "fields.sequence_int.kind" => "sequence",
@@ -690,8 +890,8 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            SourceCtrlOpts::default(),
-            ConnectorParams::default(),
+            None,
+            false,
         );
         let mut executor = executor.boxed().execute();
 
@@ -742,7 +942,7 @@ mod tests {
             row_format: PbRowFormatType::Native as i32,
             ..Default::default()
         };
-        let properties = convert_args!(hashmap!(
+        let properties = convert_args!(btreemap!(
             "connector" => "datagen",
             "fields.v1.kind" => "sequence",
             "fields.v1.start" => "11",
@@ -779,8 +979,8 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            SourceCtrlOpts::default(),
-            ConnectorParams::default(),
+            None,
+            false,
         );
         let mut handler = executor.boxed().execute();
 

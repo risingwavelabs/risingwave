@@ -2,7 +2,7 @@ import json
 import subprocess
 import sys
 
-relations = ['rwctest.bqtest.bq_sink']
+relations = ['rwctest.bqtest.bq_sink', 'rwctest.bqtest.bq_sink_data_types']
 
 failed_cases = []
 for rel in relations:

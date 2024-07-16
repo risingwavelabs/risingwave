@@ -35,7 +35,7 @@ pub struct UserManager {
 
 impl UserManager {
     pub async fn new(env: MetaSrvEnv, database: &DatabaseManager) -> MetaResult<Self> {
-        let users = UserInfo::list(env.meta_store_checked()).await?;
+        let users = UserInfo::list(env.meta_store().as_kv()).await?;
         let user_info = BTreeMap::from_iter(users.into_iter().map(|user| (user.id, user)));
 
         let mut user_manager = Self {
@@ -67,6 +67,13 @@ impl UserManager {
                     .map(|table| table.owner),
             )
             .chain(database.views.values().map(|view| view.owner))
+            .chain(database.functions.values().map(|function| function.owner))
+            .chain(
+                database
+                    .connections
+                    .values()
+                    .map(|connection| connection.owner),
+            )
             .for_each(|owner_id| user_manager.increase_ref(owner_id));
 
         Ok(user_manager)
@@ -148,7 +155,7 @@ mod tests {
 
     use super::*;
     use crate::manager::{commit_meta, CatalogManager};
-    use crate::model::{BTreeMapTransaction, ValTransaction};
+    use crate::model::BTreeMapTransaction;
     use crate::storage::Transaction;
 
     fn make_test_user(id: u32, name: &str) -> UserInfo {
@@ -209,14 +216,12 @@ mod tests {
             owner: DEFAULT_SUPER_USER_ID,
             ..Default::default()
         };
-        catalog_manager
-            .start_create_table_procedure(&table, vec![])
-            .await?;
+        catalog_manager.start_create_table_procedure(&table).await?;
         catalog_manager
             .finish_create_table_procedure(vec![], table)
             .await?;
         catalog_manager
-            .start_create_table_procedure(&other_table, vec![])
+            .start_create_table_procedure(&other_table)
             .await?;
         catalog_manager
             .finish_create_table_procedure(vec![], other_table)

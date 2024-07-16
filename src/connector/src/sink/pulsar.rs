@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::time::Duration;
 
@@ -22,13 +22,14 @@ use pulsar::producer::{Message, SendFuture};
 use pulsar::{Producer, ProducerOptions, Pulsar, TokioExecutor};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam, SinkWriterParam};
-use crate::common::{AwsAuthProps, PulsarCommon, PulsarOauthCommon};
+use crate::connector_common::{AwsAuthProps, PulsarCommon, PulsarOauthCommon};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::encoder::SerTo;
 use crate::sink::formatter::{SinkFormatter, SinkFormatterImpl};
@@ -126,7 +127,7 @@ pub struct PulsarConfig {
 }
 
 impl PulsarConfig {
-    pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         let config = serde_json::from_value::<PulsarConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
@@ -149,7 +150,7 @@ impl TryFrom<SinkParam> for PulsarSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = PulsarConfig::from_hashmap(param.properties)?;
+        let config = PulsarConfig::from_btreemap(param.properties)?;
         Ok(Self {
             config,
             schema,
@@ -169,8 +170,11 @@ impl Sink for PulsarSink {
 
     const SINK_NAME: &'static str = PULSAR_SINK;
 
-    fn default_sink_decouple(desc: &SinkDesc) -> bool {
-        desc.sink_type.is_append_only()
+    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Disable => Ok(false),
+        }
     }
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
@@ -219,6 +223,7 @@ impl Sink for PulsarSink {
 
 pub struct PulsarSinkWriter {
     formatter: SinkFormatterImpl,
+    #[expect(dead_code)]
     pulsar: Pulsar<TokioExecutor>,
     producer: Producer<TokioExecutor>,
     config: PulsarConfig,
@@ -281,7 +286,7 @@ impl<'w> PulsarPayloadWriter<'w> {
             if retry_num > 0 {
                 tracing::warn!("Failed to send message, at retry no. {retry_num}");
             }
-            match self.producer.send(message.clone()).await {
+            match self.producer.send_non_blocking(message.clone()).await {
                 // If the message is sent successfully,
                 // a SendFuture holding the message receipt
                 // or error after sending is returned

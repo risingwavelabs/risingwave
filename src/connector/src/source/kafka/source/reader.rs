@@ -31,15 +31,15 @@ use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::kafka::{
-    KafkaProperties, KafkaSplit, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL,
+    KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext, KAFKA_ISOLATION_LEVEL,
 };
 use crate::source::{
-    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef, SplitId,
-    SplitMetaData, SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, SourceContextRef, SplitId, SplitMetaData,
+    SplitReader,
 };
 
 pub struct KafkaSplitReader {
-    consumer: StreamConsumer<PrivateLinkConsumerContext>,
+    consumer: StreamConsumer<RwConsumerContext>,
     offsets: HashMap<SplitId, (Option<i64>, Option<i64>)>,
     bytes_per_second: usize,
     max_num_messages: usize,
@@ -66,8 +66,6 @@ impl SplitReader for KafkaSplitReader {
 
         // disable partition eof
         config.set("enable.partition.eof", "false");
-        // change to `RdKafkaPropertiesConsumer::enable_auto_commit` to enable auto commit
-        // config.set("enable.auto.commit", "false");
         config.set("auto.offset.reset", "smallest");
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         config.set("bootstrap.servers", bootstrap_servers);
@@ -77,13 +75,10 @@ impl SplitReader for KafkaSplitReader {
 
         config.set(
             "group.id",
-            format!(
-                "rw-consumer-{}-{}",
-                source_ctx.fragment_id, source_ctx.actor_id
-            ),
+            format!("rw-consumer-{}", source_ctx.fragment_id),
         );
 
-        let client_ctx = PrivateLinkConsumerContext::new(
+        let ctx_common = KafkaContextCommon::new(
             broker_rewrite_map,
             Some(format!(
                 "fragment-{}-source-{}-actor-{}",
@@ -92,8 +87,13 @@ impl SplitReader for KafkaSplitReader {
             // thread consumer will keep polling in the background, we don't need to call `poll`
             // explicitly
             Some(source_ctx.metrics.rdkafka_native_metric.clone()),
-        )?;
-        let consumer: StreamConsumer<PrivateLinkConsumerContext> = config
+            properties.aws_auth_props,
+            properties.common.is_aws_msk_iam(),
+        )
+        .await?;
+
+        let client_ctx = RwConsumerContext::new(ctx_common);
+        let consumer: StreamConsumer<RwConsumerContext> = config
             .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(client_ctx)
             .await
@@ -106,7 +106,9 @@ impl SplitReader for KafkaSplitReader {
         for split in splits {
             offsets.insert(split.id(), (split.start_offset, split.stop_offset));
 
-            if let Some(offset) = split.start_offset {
+            if split.hack_seek_to_latest {
+                tpl.add_partition_offset(split.topic.as_str(), split.partition, Offset::End)?;
+            } else if let Some(offset) = split.start_offset {
                 tpl.add_partition_offset(
                     split.topic.as_str(),
                     split.partition,
@@ -147,7 +149,7 @@ impl SplitReader for KafkaSplitReader {
     fn into_stream(self) -> BoxChunkSourceStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
-        into_chunk_stream(self, parser_config, source_context)
+        into_chunk_stream(self.into_data_stream(), parser_config, source_context)
     }
 }
 
@@ -156,7 +158,7 @@ impl KafkaSplitReader {
         self.source_ctx
             .metrics
             .latest_message_id
-            .with_label_values(&[
+            .with_guarded_label_values(&[
                 // source name is not available here
                 &self.source_ctx.source_id.to_string(),
                 &self.source_ctx.actor_id.to_string(),
@@ -166,7 +168,7 @@ impl KafkaSplitReader {
     }
 }
 
-impl CommonSplitReader for KafkaSplitReader {
+impl KafkaSplitReader {
     #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
         if self.offsets.values().all(|(start_offset, stop_offset)| {

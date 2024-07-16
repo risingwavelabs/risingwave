@@ -16,9 +16,8 @@ use fixedbitset::FixedBitSet;
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::generic::{DistillUnit, GenericPlanRef, TopNLimit};
+use super::generic::{DistillUnit, TopNLimit};
 use super::stream::prelude::*;
-use super::stream::StreamPlanRef;
 use super::utils::{plan_node_name, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -43,6 +42,8 @@ impl StreamGroupTopN {
         let input = &core.input;
         let schema = input.schema().clone();
 
+        // FIXME(rc): Actually only watermark messages on the first group-by column are propagated
+        // acccoring to the current GroupTopN implementation. This should be fixed.
         let watermark_columns = if input.append_only() {
             input.watermark_columns().clone()
         } else {

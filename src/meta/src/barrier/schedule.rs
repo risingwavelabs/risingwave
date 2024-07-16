@@ -90,7 +90,7 @@ impl ScheduledQueue {
         if let QueueStatus::Blocked(reason) = &self.status
             && !matches!(
                 scheduled.command,
-                Command::DropStreamingJobs(_) | Command::CancelStreamingJob(_)
+                Command::DropStreamingJobs { .. } | Command::CancelStreamingJob(_)
             )
         {
             return Err(MetaError::unavailable(reason));
@@ -259,16 +259,14 @@ impl BarrierScheduler {
         for command in commands {
             let (started_tx, started_rx) = oneshot::channel();
             let (collect_tx, collect_rx) = oneshot::channel();
-            let (finish_tx, finish_rx) = oneshot::channel();
 
-            contexts.push((started_rx, collect_rx, finish_rx));
+            contexts.push((started_rx, collect_rx));
             scheduleds.push(self.inner.new_scheduled(
                 command.need_checkpoint(),
                 command,
                 once(Notifier {
                     started: Some(started_tx),
                     collected: Some(collect_tx),
-                    finished: Some(finish_tx),
                 }),
             ));
         }
@@ -277,19 +275,18 @@ impl BarrierScheduler {
 
         let mut infos = Vec::with_capacity(contexts.len());
 
-        for (injected_rx, collect_rx, finish_rx) in contexts {
+        for (injected_rx, collect_rx) in contexts {
             // Wait for this command to be injected, and record the result.
+            tracing::trace!("waiting for injected_rx");
             let info = injected_rx.await.ok().context("failed to inject barrier")?;
             infos.push(info);
 
+            tracing::trace!("waiting for collect_rx");
             // Throw the error if it occurs when collecting this barrier.
             collect_rx
                 .await
                 .ok()
                 .context("failed to collect barrier")??;
-
-            // Wait for this command to be finished.
-            finish_rx.await.ok().context("failed to finish command")??;
         }
 
         Ok(infos)
@@ -316,9 +313,13 @@ impl BarrierScheduler {
     ///
     /// Returns the barrier info of the actual command.
     pub async fn run_command(&self, command: Command) -> MetaResult<BarrierInfo> {
-        self.run_multiple_commands(vec![command])
+        tracing::trace!("run_command: {:?}", command);
+        let ret = self
+            .run_multiple_commands(vec![command])
             .await
-            .map(|i| i[0])
+            .map(|i| i[0]);
+        tracing::trace!("run_command finished");
+        ret
     }
 
     /// Flush means waiting for the next barrier to collect.
@@ -423,15 +424,15 @@ impl ScheduledBarriers {
     pub(super) fn pre_apply_drop_cancel_scheduled(&self) -> (Vec<ActorId>, HashSet<TableId>) {
         let mut queue = self.inner.queue.lock();
         assert_matches!(queue.status, QueueStatus::Blocked(_));
-        let (mut drop_table_ids, mut cancel_table_ids) = (vec![], HashSet::new());
+        let (mut dropped_actors, mut cancel_table_ids) = (vec![], HashSet::new());
 
         while let Some(Scheduled {
             notifiers, command, ..
         }) = queue.queue.pop_front()
         {
             match command {
-                Command::DropStreamingJobs(actor_ids) => {
-                    drop_table_ids.extend(actor_ids);
+                Command::DropStreamingJobs { actors, .. } => {
+                    dropped_actors.extend(actors);
                 }
                 Command::CancelStreamingJob(table_fragments) => {
                     let table_id = table_fragments.table_id();
@@ -441,12 +442,11 @@ impl ScheduledBarriers {
                     unreachable!("only drop and cancel streaming jobs should be buffered");
                 }
             }
-            notifiers.into_iter().for_each(|mut notify| {
+            notifiers.into_iter().for_each(|notify| {
                 notify.notify_collected();
-                notify.notify_finished();
             });
         }
-        (drop_table_ids, cancel_table_ids)
+        (dropped_actors, cancel_table_ids)
     }
 
     /// Whether the barrier(checkpoint = true) should be injected.

@@ -15,10 +15,11 @@
 use std::sync::Arc;
 
 use anyhow::Context;
+use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::catalog::{max_column_id, ColumnCatalog};
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
@@ -37,6 +38,7 @@ use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result};
 use crate::session::SessionImpl;
+use crate::utils::resolve_secret_ref_in_with_options;
 use crate::{Binder, WithOptions};
 
 fn format_type_to_format(from: FormatType) -> Option<Format> {
@@ -63,18 +65,25 @@ fn encode_type_to_encode(from: EncodeType) -> Option<Encode> {
         EncodeType::Json => Encode::Json,
         EncodeType::Bytes => Encode::Bytes,
         EncodeType::Template => Encode::Template,
+        EncodeType::Parquet => Encode::Parquet,
         EncodeType::None => Encode::None,
+        EncodeType::Text => Encode::Text,
     })
 }
 
-/// Returns the columns in `columns_a` but not in `columns_b`,
-/// where the comparison is done by name and data type,
-/// and hidden columns are ignored.
+/// Returns the columns in `columns_a` but not in `columns_b`.
+///
+/// Note:
+/// - The comparison is done by name and data type, without checking `ColumnId`.
+/// - Hidden columns and `INCLUDE ... AS ...` columns are ignored. Because it's only for the special handling of alter sr.
+///   For the newly resolved `columns_from_resolve_source` (created by [`bind_columns_from_source`]), it doesn't contain hidden columns (`_row_id`) and `INCLUDE ... AS ...` columns.
+///   This is fragile and we should really refactor it later.
 fn columns_minus(columns_a: &[ColumnCatalog], columns_b: &[ColumnCatalog]) -> Vec<ColumnCatalog> {
     columns_a
         .iter()
         .filter(|col_a| {
             !col_a.is_hidden()
+                && !col_a.is_connector_additional_column()
                 && !columns_b.iter().any(|col_b| {
                     col_a.name() == col_b.name() && col_a.data_type() == col_b.data_type()
                 })
@@ -147,11 +156,7 @@ pub async fn refresh_sr_and_get_columns_diff(
     connector_schema: &ConnectorSchema,
     session: &Arc<SessionImpl>,
 ) -> Result<(StreamSourceInfo, Vec<ColumnCatalog>, Vec<ColumnCatalog>)> {
-    let mut with_properties = original_source
-        .with_properties
-        .clone()
-        .into_iter()
-        .collect();
+    let mut with_properties = original_source.with_properties.clone();
     validate_compatibility(connector_schema, &mut with_properties)?;
 
     if with_properties.is_cdc_connector() {
@@ -159,14 +164,27 @@ pub async fn refresh_sr_and_get_columns_diff(
     }
 
     let (Some(columns_from_resolve_source), source_info) =
-        bind_columns_from_source(session, connector_schema, &with_properties).await?
+        bind_columns_from_source(session, connector_schema, Either::Right(&with_properties))
+            .await?
     else {
         // Source without schema registry is rejected.
         unreachable!("source without schema registry is rejected")
     };
 
-    let added_columns = columns_minus(&columns_from_resolve_source, &original_source.columns);
+    let mut added_columns = columns_minus(&columns_from_resolve_source, &original_source.columns);
+    // The newly resolved columns' column IDs also starts from 1. They cannot be used directly.
+    let mut next_col_id = max_column_id(&original_source.columns).next();
+    for col in &mut added_columns {
+        col.column_desc.column_id = next_col_id;
+        next_col_id = next_col_id.next();
+    }
     let dropped_columns = columns_minus(&original_source.columns, &columns_from_resolve_source);
+    tracing::debug!(
+        ?added_columns,
+        ?dropped_columns,
+        ?columns_from_resolve_source,
+        original_source = ?original_source.columns
+    );
 
     Ok((source_info, added_columns, dropped_columns))
 }
@@ -239,11 +257,20 @@ pub async fn handle_alter_source_with_sr(
     source.definition =
         alter_definition_format_encode(&source.definition, connector_schema.row_options.clone())?;
 
-    let format_encode_options = WithOptions::try_from(connector_schema.row_options())?.into_inner();
+    let (format_encode_options, format_encode_secret_ref) = resolve_secret_ref_in_with_options(
+        WithOptions::try_from(connector_schema.row_options())?,
+        session.as_ref(),
+    )?
+    .into_parts();
     source
         .info
         .format_encode_options
         .extend(format_encode_options);
+
+    source
+        .info
+        .format_encode_secret_refs
+        .extend(format_encode_secret_ref);
 
     let mut pb_source = source.to_prost(schema_id, database_id);
 

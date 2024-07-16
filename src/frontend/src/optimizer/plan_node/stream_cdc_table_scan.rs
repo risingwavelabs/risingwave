@@ -131,6 +131,7 @@ impl StreamNode for StreamCdcTableScan {
 }
 
 impl StreamCdcTableScan {
+    /// plan: merge -> filter -> exchange(simple) -> `stream_scan`
     pub fn adhoc_to_stream_prost(
         &self,
         state: &mut BuildFragmentGraphState,
@@ -240,12 +241,13 @@ impl StreamCdcTableScan {
             .collect_vec();
 
         tracing::debug!(
-            "output_column_ids: {:?}, upstream_column_ids: {:?}, output_indices: {:?}",
-            self.core.output_column_ids(),
-            upstream_column_ids,
-            output_indices
+            output_column_ids=?self.core.output_column_ids(),
+            ?upstream_column_ids,
+            ?output_indices,
+            "stream cdc table scan output indices"
         );
 
+        let options = self.core.options.to_proto();
         let stream_scan_body = PbNodeBody::StreamCdcScan(StreamCdcScanNode {
             table_id: upstream_source_id,
             upstream_column_ids,
@@ -254,7 +256,8 @@ impl StreamCdcTableScan {
             state_table: Some(catalog),
             cdc_table_desc: Some(self.core.cdc_table_desc.to_protobuf()),
             rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
-            disable_backfill: self.core.disable_backfill,
+            disable_backfill: options.disable_backfill,
+            options: Some(options),
         });
 
         // plan: merge -> filter -> exchange(simple) -> stream_scan
