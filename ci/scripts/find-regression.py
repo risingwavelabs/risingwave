@@ -25,9 +25,10 @@ We won't run the entire pipeline, only steps specified by the BISECT_STEPS envir
 For step (2), we need to check its outcome and only run the next step, if the outcome is successful.
 '''
 
+
 def format_step(env):
     commit = get_bisect_commit(env["START_COMMIT"], env["END_COMMIT"])
-    step=f'''
+    step = f'''
 cat <<- YAML | buildkite-agent pipeline upload
 steps:
   - label: "run-{commit}"
@@ -61,6 +62,7 @@ YAML'''
         print(f"stdout: {result.stdout}")
         sys.exit(1)
 
+
 # Triggers a buildkite job to run the pipeline on the given commit, with the specified tests.
 def run_pipeline(env):
     step = format_step(env)
@@ -70,6 +72,7 @@ def run_pipeline(env):
         print(f"stderr: {result.stderr}")
         print(f"stdout: {result.stdout}")
         sys.exit(1)
+
 
 # Number of commits for [start, end)
 def get_number_of_commits(start, end):
@@ -197,20 +200,26 @@ class Test(unittest.TestCase):
 
     def test_get_number_of_commits(self):
         fetch_branch_commits("kwannoel/find-regress")
-        n = get_number_of_commits("72f70960226680e841a8fbdd09c79d74609f27a2", "9ca415a9998a5e04e021c899fb66d93a17931d4f")
+        n = get_number_of_commits("72f70960226680e841a8fbdd09c79d74609f27a2",
+                                  "9ca415a9998a5e04e021c899fb66d93a17931d4f")
         self.assertEqual(n, 2)
-        n2 = get_number_of_commits("617d23ddcac88ced87b96a2454c9217da0fe7915", "9ca415a9998a5e04e021c899fb66d93a17931d4f")
+        n2 = get_number_of_commits("617d23ddcac88ced87b96a2454c9217da0fe7915",
+                                   "9ca415a9998a5e04e021c899fb66d93a17931d4f")
         self.assertEqual(n2, 3)
-        n3 = get_number_of_commits("72f70960226680e841a8fbdd09c79d74609f27a2", "5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0")
+        n3 = get_number_of_commits("72f70960226680e841a8fbdd09c79d74609f27a2",
+                                   "5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0")
         self.assertEqual(n3, 1)
 
     def test_get_bisect_commit(self):
         fetch_branch_commits("kwannoel/find-regress")
-        commit = get_bisect_commit("72f70960226680e841a8fbdd09c79d74609f27a2", "9ca415a9998a5e04e021c899fb66d93a17931d4f")
+        commit = get_bisect_commit("72f70960226680e841a8fbdd09c79d74609f27a2",
+                                   "9ca415a9998a5e04e021c899fb66d93a17931d4f")
         self.assertEqual(commit, "5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0")
-        commit2 = get_bisect_commit("617d23ddcac88ced87b96a2454c9217da0fe7915", "9ca415a9998a5e04e021c899fb66d93a17931d4f")
+        commit2 = get_bisect_commit("617d23ddcac88ced87b96a2454c9217da0fe7915",
+                                    "9ca415a9998a5e04e021c899fb66d93a17931d4f")
         self.assertEqual(commit2, "72f70960226680e841a8fbdd09c79d74609f27a2")
-        commit3 = get_bisect_commit("72f70960226680e841a8fbdd09c79d74609f27a2", "5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0")
+        commit3 = get_bisect_commit("72f70960226680e841a8fbdd09c79d74609f27a2",
+                                    "5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0")
         self.assertEqual(commit3, "72f70960226680e841a8fbdd09c79d74609f27a2")
 
     def test_format_step(self):
@@ -243,6 +252,7 @@ steps:
         START_COMMIT=72f70960226680e841a8fbdd09c79d74609f27a2 END_COMMIT=9ca415a9998a5e04e021c899fb66d93a17931d4f BISECT_BRANCH=kwannoel/find-regress BISECT_STEPS='test' ci/scripts/find-regression.py check
 YAML'''
         )
+
 
 if __name__ == "__main__":
     # You can run tests by just doing ./ci/scripts/find-regression.py
