@@ -52,8 +52,8 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
 
     cluster
         .reschedule(format!(
-            "{id}-[{}]",
-            all_workers.iter().map(|w| format!("{w}:1")).join(",")
+            "{id}:[{}]",
+            all_workers.iter().map(|w| format!("{w}:-1")).join(",")
         ))
         .await?;
     sleep(Duration::from_secs(3)).await;
@@ -96,7 +96,7 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
 
     cluster
         .reschedule(format!(
-            "{id}+[{}]",
+            "{id}:[{}]",
             all_workers.iter().map(|w| format!("{w}:1")).join(",")
         ))
         .await?;
@@ -163,8 +163,8 @@ async fn test_diamond_cascade_materialized_view() -> Result<()> {
 
     cluster
         .reschedule(format!(
-            "{id}-[{}]",
-            all_workers.iter().map(|w| format!("{w}:1")).join(",")
+            "{id}:[{}]",
+            all_workers.iter().map(|w| format!("{w}:-1")).join(",")
         ))
         .await?;
 
@@ -188,7 +188,7 @@ async fn test_diamond_cascade_materialized_view() -> Result<()> {
 
     cluster
         .reschedule(format!(
-            "{id}+[{}]",
+            "{id}:[{}]",
             all_workers.iter().map(|w| format!("{w}:1")).join(",")
         ))
         .await?;

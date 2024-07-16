@@ -18,7 +18,7 @@ use std::process::exit;
 use anyhow::{anyhow, Result};
 use inquire::Confirm;
 use itertools::Itertools;
-use regex::{Match, Regex};
+use regex::Regex;
 use risingwave_meta::manager::WorkerId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::table_fragments::ActorStatus;
@@ -39,11 +39,8 @@ pub struct ReschedulePayload {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct WorkerReschedulePlan {
-    #[serde(rename = "increased_actor_count")]
-    pub increased_actor_count: HashMap<WorkerId, usize>,
-
-    #[serde(rename = "decreased_actor_count")]
-    pub decreased_actor_count: HashMap<WorkerId, usize>,
+    #[serde(rename = "actor_count_diff")]
+    pub actor_count_diff: HashMap<WorkerId, i32>,
 }
 
 #[derive(Debug)]
@@ -54,17 +51,10 @@ pub enum RescheduleInput {
 
 impl From<WorkerReschedulePlan> for PbWorkerReschedule {
     fn from(value: WorkerReschedulePlan) -> Self {
-        let WorkerReschedulePlan {
-            increased_actor_count,
-            decreased_actor_count,
-        } = value;
+        let WorkerReschedulePlan { actor_count_diff } = value;
 
         PbWorkerReschedule {
-            increased_actor_count: increased_actor_count
-                .into_iter()
-                .map(|(k, v)| (k as _, v as _))
-                .collect(),
-            decreased_actor_count: decreased_actor_count
+            worker_actor_diff: actor_count_diff
                 .into_iter()
                 .map(|(k, v)| (k as _, v as _))
                 .collect(),
@@ -75,16 +65,11 @@ impl From<WorkerReschedulePlan> for PbWorkerReschedule {
 impl From<PbWorkerReschedule> for WorkerReschedulePlan {
     fn from(value: PbWorkerReschedule) -> Self {
         let PbWorkerReschedule {
-            increased_actor_count,
-            decreased_actor_count,
+            worker_actor_diff: actor_count_diff,
         } = value;
 
         WorkerReschedulePlan {
-            increased_actor_count: increased_actor_count
-                .into_iter()
-                .map(|(k, v)| (k as _, v as _))
-                .collect(),
-            decreased_actor_count: decreased_actor_count
+            actor_count_diff: actor_count_diff
                 .into_iter()
                 .map(|(k, v)| (k as _, v as _))
                 .collect(),
@@ -92,10 +77,6 @@ impl From<PbWorkerReschedule> for WorkerReschedulePlan {
     }
 }
 
-const RESCHEDULE_MATCH_REGEXP: &str = r"^(?P<fragment>\d+)(?:-\[(?P<decreased>(?:\d+:\d+,?)+)])?(?:\+\[(?P<increased>(?:\d+:\d+,?)+)])?$";
-const RESCHEDULE_FRAGMENT_KEY: &str = "fragment";
-const RESCHEDULE_DECREASED_KEY: &str = "decreased";
-const RESCHEDULE_INCREASED_KEY: &str = "increased";
 pub async fn reschedule(
     context: &CtlContext,
     plan: Option<String>,
@@ -127,14 +108,14 @@ pub async fn reschedule(
         _ => unreachable!(),
     };
 
+    if reschedules.is_empty() {
+        return Ok(());
+    }
+
     for (fragment_id, reschedule) in &reschedules {
         println!("For fragment #{}", fragment_id);
-        if !reschedule.decreased_actor_count.is_empty() {
-            println!("\tDecreased: {:?}", reschedule.decreased_actor_count);
-        }
-
-        if !reschedule.increased_actor_count.is_empty() {
-            println!("\tIncreased: {:?}", reschedule.increased_actor_count);
+        if !reschedule.get_worker_actor_diff().is_empty() {
+            println!("\tChange: {:?}", reschedule.get_worker_actor_diff());
         }
 
         println!();
@@ -161,62 +142,44 @@ pub async fn reschedule(
     Ok(())
 }
 
-fn parse_plan(plan: String) -> Result<HashMap<u32, PbWorkerReschedule>> {
+fn parse_plan(mut plan: String) -> Result<HashMap<u32, PbWorkerReschedule>> {
     let mut reschedules = HashMap::new();
-
-    let regex = Regex::new(RESCHEDULE_MATCH_REGEXP)?;
-
-    let mut plan = plan;
-
+    let regex = Regex::new(r"^(\d+):\[((?:\d+:[+-]?\d+,?)+)]$")?;
     plan.retain(|c| !c.is_whitespace());
 
     for fragment_reschedule_plan in plan.split(';') {
+        if fragment_reschedule_plan.is_empty() {
+            continue;
+        }
+
         let captures = regex
             .captures(fragment_reschedule_plan)
             .ok_or_else(|| anyhow!("plan \"{}\" format illegal", fragment_reschedule_plan))?;
 
         let fragment_id = captures
-            .name(RESCHEDULE_FRAGMENT_KEY)
+            .get(1)
             .and_then(|mat| mat.as_str().parse::<u32>().ok())
             .ok_or_else(|| anyhow!("plan \"{}\" does not have a valid fragment id", plan))?;
 
-        let split_fn = |mat: Match<'_>| {
-            let mut result = HashMap::new();
-            for id_str in mat.as_str().split(',') {
-                let (worker_id, count) = id_str
-                    .split(':')
-                    .map(|v| v.parse::<u32>().unwrap())
-                    .collect_tuple::<(_, _)>()
-                    .unwrap();
+        let worker_changes: Vec<&str> = captures[2].split(',').collect();
 
-                if let Some(dup_count) = result.insert(worker_id, count) {
-                    println!(
-                        "duplicate worker id {} in plan, prev {} -> {}",
-                        worker_id, worker_id, dup_count
-                    );
-                    exit(1);
-                }
+        let mut worker_actor_diff = HashMap::new();
+        for worker_change in &worker_changes {
+            let (worker_id, count) = worker_change
+                .split(':')
+                .map(|v| v.parse::<i32>().unwrap())
+                .collect_tuple::<(_, _)>()
+                .unwrap();
+
+            if let Some(dup_change) = worker_actor_diff.insert(worker_id as u32, count) {
+                anyhow::bail!(
+                    "duplicate worker id {worker_id} in plan, prev {worker_id} -> {dup_change}",
+                );
             }
+        }
 
-            result
-        };
-
-        let decreased_actor_count = captures
-            .name(RESCHEDULE_DECREASED_KEY)
-            .map(split_fn)
-            .unwrap_or_default();
-        let increased_actor_count = captures
-            .name(RESCHEDULE_INCREASED_KEY)
-            .map(split_fn)
-            .unwrap_or_default();
-        if !(decreased_actor_count.is_empty() && increased_actor_count.is_empty()) {
-            reschedules.insert(
-                fragment_id,
-                PbWorkerReschedule {
-                    increased_actor_count,
-                    decreased_actor_count,
-                },
-            );
+        if !worker_actor_diff.is_empty() {
+            reschedules.insert(fragment_id, PbWorkerReschedule { worker_actor_diff });
         }
     }
     Ok(reschedules)
