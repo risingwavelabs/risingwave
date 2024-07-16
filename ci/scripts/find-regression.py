@@ -138,14 +138,14 @@ def main():
     cmd = sys.argv[1]
 
     if cmd == "start":
+        print("--- start bisecting")
         env = get_env()
         fetch_branch_commits(env["BISECT_BRANCH"])
-        print("start bisecting")
         run_pipeline(env)
     elif cmd == "check":
+        print("--- check pipeline outcome")
         env = get_env()
         fetch_branch_commits(env["BISECT_BRANCH"])
-        print("check pipeline outcome")
         commit = get_bisect_commit(env["START_COMMIT"], env["END_COMMIT"])
         step = f"run-{commit}"
         cmd = f"buildkite-agent step get outcome --step {step}"
@@ -229,6 +229,7 @@ steps:
   - label: "run-5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0"
     key: "run-5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0"
     trigger: "main-cron"
+    soft_fail: true
     build:
       branch: kwannoel/find-regress
       commit: 5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0
