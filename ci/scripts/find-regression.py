@@ -5,6 +5,25 @@ import os
 import sys
 from common import *
 
+'''
+This script is used to find the commit that introduced a regression in the codebase.
+It uses binary search to find the regressed commit.
+It works as follows:
+1. Use the start (inclusive) and end (exclusive) bounds, find the middle commit.
+   e.g. given commit 0->1(start)->2->3->4(bad), start will be 1, end will be 4. Then the middle commit is (1+4)//2 = 2
+        given commit 0->1(start)->2->3(bad)->4, start will be 1, end will be 3. Then the middle commit is (1+3)//2 = 2
+        given commit 0->1(start)->2(bad), start will be 1, end will be 2. Then the middle commit is (1+2)//2 = 1.
+        given commit 0->1(start,bad), start will be 1, end will be 1. We just return the bad commit (1) immediately.
+2. Run the pipeline on the middle commit.
+3. If the pipeline fails, the regression is in the first half of the commits. Recurse (start, mid)
+4. If the pipeline passes, the regression is in the second half of the commits. Recurse (mid+1, end)
+5. If start>=end, return start as the regressed commit.
+
+We won't run the entire pipeline, only steps specified by the BISECT_STEPS environment variable.
+
+For step (2), we need to check its outcome and only run the next step, if the outcome is successful.
+'''
+
 def format_step(env, branch, commit, steps):
     print(f"Running pipeline on commit: {commit} with steps: {steps}")
     step=f'''
