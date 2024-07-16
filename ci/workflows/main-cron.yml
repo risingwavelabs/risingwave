@@ -8,6 +8,8 @@ steps:
   - label: "build"
     command: "ci/scripts/build.sh -p ci-release"
     key: "build"
+    if: |
+      build.env("CI_STEPS") !~ /(^|,)disable-build(,|$$)/
     plugins:
       - docker-compose#v5.1.0:
           run: rw-build-env
@@ -19,6 +21,8 @@ steps:
   - label: "build other components"
     command: "ci/scripts/build-other.sh"
     key: "build-other"
+    if: |
+      build.env("CI_STEPS") !~ /(^|,)disable-build(,|$$)/
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
@@ -35,6 +39,8 @@ steps:
   - label: "build simulation test"
     command: "ci/scripts/build-simulation.sh"
     key: "build-simulation"
+    if: |
+      build.env("CI_STEPS") !~ /(^|,)disable-build(,|$$)/
     plugins:
       - docker-compose#v5.1.0:
           run: rw-build-env
@@ -46,6 +52,8 @@ steps:
   - label: "docslt"
     command: "ci/scripts/docslt.sh"
     key: "docslt"
+    if: |
+      build.env("CI_STEPS") !~ /(^|,)disable-build(,|$$)/
     plugins:
       - docker-compose#v5.1.0:
           run: rw-build-env
