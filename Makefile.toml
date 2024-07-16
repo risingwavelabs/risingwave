@@ -28,6 +28,8 @@ env_scripts = [
 
   set_env ENABLE_TELEMETRY "false"
   set_env RW_TELEMETRY_TYPE "test"
+  set_env RW_SECRET_STORE_PRIVATE_KEY_HEX "0123456789abcdef"
+  set_env RW_TEMP_SECRET_FILE_DIR "${PREFIX_SECRET}"
 
   is_sanitizer_enabled = get_env ENABLE_SANITIZER
   is_hdfs_backend = get_env ENABLE_HDFS
@@ -144,6 +146,7 @@ rm -rf "${PREFIX_DATA}"
 rm -rf "${PREFIX_LOG}"
 rm -rf "${PREFIX_CONFIG}"
 rm -rf "${PREFIX_PROFILING}"
+rm -rf "${PREFIX_SECRET}"
 '''
 
 [tasks.reset-rw]

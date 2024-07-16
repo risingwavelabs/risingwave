@@ -111,8 +111,6 @@ impl HummockManager {
             res.rows_affected
         );
         let earliest_valid_version = hummock_time_travel_version::Entity::find()
-            .select_only()
-            .column(hummock_time_travel_version::Column::VersionId)
             .filter(
                 hummock_time_travel_version::Column::VersionId.lte(version_watermark.version_id),
             )

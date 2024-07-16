@@ -383,9 +383,6 @@ pub struct MetaConfig {
     /// Whether compactor should rewrite row to remove dropped column.
     #[serde(default = "default::meta::enable_dropped_column_reclaim")]
     pub enable_dropped_column_reclaim: bool,
-
-    #[serde(default = "default::meta::secret_store_private_key")]
-    pub secret_store_private_key: Vec<u8>,
 }
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -1424,10 +1421,6 @@ pub mod default {
 
         pub fn enable_dropped_column_reclaim() -> bool {
             false
-        }
-
-        pub fn secret_store_private_key() -> Vec<u8> {
-            "demo-secret-private-key".as_bytes().to_vec()
         }
     }
 

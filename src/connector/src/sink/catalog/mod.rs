@@ -120,7 +120,7 @@ pub struct SinkFormatDesc {
     pub format: SinkFormat,
     pub encode: SinkEncode,
     pub options: BTreeMap<String, String>,
-
+    pub secret_refs: BTreeMap<String, PbSecretRef>,
     pub key_encode: Option<SinkEncode>,
 }
 
@@ -170,6 +170,7 @@ impl SinkFormatDesc {
             format,
             encode,
             options: Default::default(),
+            secret_refs: Default::default(),
             key_encode: None,
         }))
     }
@@ -203,7 +204,7 @@ impl SinkFormatDesc {
             encode: encode.into(),
             options,
             key_encode,
-            secret_refs: Default::default(),
+            secret_refs: self.secret_refs.clone(),
         }
     }
 }
@@ -266,13 +267,13 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
                 )))
             }
         };
-        let options = value.options.into_iter().collect();
 
         Ok(Self {
             format,
             encode,
-            options,
+            options: value.options,
             key_encode,
+            secret_refs: value.secret_refs,
         })
     }
 }

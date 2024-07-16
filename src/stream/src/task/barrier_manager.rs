@@ -960,7 +960,8 @@ pub fn try_find_root_actor_failure<'a>(
             | ErrorKind::Storage(_)
             | ErrorKind::Expression(_)
             | ErrorKind::Array(_)
-            | ErrorKind::Sink(_) => 1000,
+            | ErrorKind::Sink(_)
+            | ErrorKind::Secret(_) => 1000,
         }
     }
 

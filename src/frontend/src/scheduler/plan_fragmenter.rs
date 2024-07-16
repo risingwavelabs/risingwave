@@ -1011,10 +1011,8 @@ impl BatchPlanFragmenter {
             let batch_kafka_scan: &BatchKafkaScan = batch_kafka_node;
             let source_catalog = batch_kafka_scan.source_catalog();
             if let Some(source_catalog) = source_catalog {
-                let property = ConnectorProperties::extract(
-                    source_catalog.with_properties.clone().into_iter().collect(),
-                    false,
-                )?;
+                let property =
+                    ConnectorProperties::extract(source_catalog.with_properties.clone(), false)?;
                 let timestamp_bound = batch_kafka_scan.kafka_timestamp_range_value();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
                     connector: property,
@@ -1026,10 +1024,8 @@ impl BatchPlanFragmenter {
             let batch_iceberg_scan: &BatchIcebergScan = batch_iceberg_scan;
             let source_catalog = batch_iceberg_scan.source_catalog();
             if let Some(source_catalog) = source_catalog {
-                let property = ConnectorProperties::extract(
-                    source_catalog.with_properties.clone().into_iter().collect(),
-                    false,
-                )?;
+                let property =
+                    ConnectorProperties::extract(source_catalog.with_properties.clone(), false)?;
                 let as_of = batch_iceberg_scan.as_of();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
                     connector: property,
@@ -1042,10 +1038,8 @@ impl BatchPlanFragmenter {
             let source_node: &BatchSource = source_node;
             let source_catalog = source_node.source_catalog();
             if let Some(source_catalog) = source_catalog {
-                let property = ConnectorProperties::extract(
-                    source_catalog.with_properties.clone().into_iter().collect(),
-                    false,
-                )?;
+                let property =
+                    ConnectorProperties::extract(source_catalog.with_properties.clone(), false)?;
                 let as_of = source_node.as_of();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
                     connector: property,

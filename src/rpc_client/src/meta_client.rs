@@ -114,6 +114,7 @@ pub struct MetaClient {
     host_addr: HostAddr,
     inner: GrpcMetaClient,
     meta_config: MetaConfig,
+    cluster_id: String,
 }
 
 impl MetaClient {
@@ -127,6 +128,10 @@ impl MetaClient {
 
     pub fn worker_type(&self) -> WorkerType {
         self.worker_type
+    }
+
+    pub fn cluster_id(&self) -> &str {
+        &self.cluster_id
     }
 
     /// Subscribe to notification from meta.
@@ -270,6 +275,7 @@ impl MetaClient {
             host_addr: addr.clone(),
             inner: grpc_meta_client,
             meta_config: meta_config.to_owned(),
+            cluster_id: add_worker_resp.cluster_id,
         };
 
         static REPORT_PANIC: std::sync::Once = std::sync::Once::new();

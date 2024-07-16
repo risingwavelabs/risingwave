@@ -463,3 +463,8 @@ message Secret {
   uint32 owner = 5;
   uint32 schema_id = 6;
 }
+
+message OptionsWithSecret {
+  map<string, string> options = 1;
+  map<string, secret.SecretRef> secret_refs = 2;
+}

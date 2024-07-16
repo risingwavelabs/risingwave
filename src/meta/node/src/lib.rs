@@ -21,6 +21,7 @@ mod server;
 use std::time::Duration;
 
 use clap::Parser;
+use educe::Educe;
 pub use error::{MetaError, MetaResult};
 use redact::Secret;
 use risingwave_common::config::OverrideConfig;
@@ -37,7 +38,8 @@ pub use server::started::get as is_server_started;
 
 use crate::manager::MetaOpts;
 
-#[derive(Debug, Clone, Parser, OverrideConfig)]
+#[derive(Educe, Clone, Parser, OverrideConfig)]
+#[educe(Debug)]
 #[command(version, about = "The central metadata management service")]
 pub struct MetaNodeOpts {
     // TODO: use `SocketAddr`
@@ -184,6 +186,20 @@ pub struct MetaNodeOpts {
     #[deprecated = "connector node has been deprecated."]
     #[clap(long, hide = true, env = "RW_CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
+
+    /// 128-bit AES key for secret store in HEX format.
+    #[educe(Debug(ignore))]
+    #[clap(long, hide = true, env = "RW_SECRET_STORE_PRIVATE_KEY_HEX")]
+    pub secret_store_private_key_hex: Option<String>,
+
+    /// The path of the temp secret file directory.
+    #[clap(
+        long,
+        hide = true,
+        env = "RW_TEMP_SECRET_FILE_DIR",
+        default_value = "./secrets"
+    )]
+    pub temp_secret_file_dir: String,
 }
 
 impl risingwave_common::opts::Opts for MetaNodeOpts {
@@ -283,6 +299,9 @@ pub fn start(
         // Run a background heap profiler
         heap_profiler.start();
 
+        let secret_store_private_key = opts
+            .secret_store_private_key_hex
+            .map(|key| hex::decode(key).unwrap());
         let max_heartbeat_interval =
             Duration::from_secs(config.meta.max_heartbeat_interval_secs as u64);
         let max_idle_ms = config.meta.dangerous_max_idle_secs.unwrap_or(0) * 1000;
@@ -430,7 +449,8 @@ pub fn start(
                     .developer
                     .max_trivial_move_task_count_per_loop,
                 max_get_task_probe_times: config.meta.developer.max_get_task_probe_times,
-                secret_store_private_key: config.meta.secret_store_private_key,
+                secret_store_private_key,
+                temp_secret_file_dir: opts.temp_secret_file_dir,
                 table_info_statistic_history_times: config
                     .storage
                     .table_info_statistic_history_times,
