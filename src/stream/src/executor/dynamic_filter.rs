@@ -16,7 +16,6 @@ use std::ops::Bound::{self, *};
 
 use futures::stream;
 use risingwave_common::array::{Array, ArrayImpl, Op};
-use risingwave_common::bail;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, once, OwnedRow as RowData};
@@ -52,10 +51,6 @@ pub struct DynamicFilterExecutor<S: StateStore, const USE_WATERMARK_CACHE: bool>
     metrics: Arc<StreamingMetrics>,
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
-    /// If the right side's change always make the condition more relaxed.
-    /// In other words, make more record in the left side satisfy the condition.
-    /// In that case, there are only records which does not satisfy the condition in the table.
-    condition_always_relax: bool,
     cleaned_by_watermark: bool,
 }
 
@@ -73,7 +68,6 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         state_table_r: StateTable<S>,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
-        condition_always_relax: bool,
         cleaned_by_watermark: bool,
     ) -> Self {
         Self {
@@ -88,7 +82,6 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
             right_table: state_table_r,
             metrics,
             chunk_size,
-            condition_always_relax,
             cleaned_by_watermark,
         }
     }
@@ -357,6 +350,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                     // Reuse the logic from `FilterExecutor`
                     let chunk = chunk.compact(); // Is this unnecessary work?
 
+                    // The condition is `None` if it is always false by virtue of a NULL right
                     // input, so we save evaluating it on the datachunk.
                     let filter_condition =
                         build_cond(self.comparator, committed_rhs_value.clone().flatten())
@@ -438,13 +432,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                     if prev != curr {
                         let (range, _latest_is_lower, is_insert) = self.get_range(&curr, prev);
 
-                        if !is_insert && self.condition_always_relax {
-                            bail!("The optimizer inferred that the right side's change always make the condition more relaxed.\
-                                But the right changes make the conditions stricter.");
-                        }
-
                         let range = (Self::to_row_bound(range.0), Self::to_row_bound(range.1));
-
                         // TODO: prefetching for append-only case.
                         let streams = futures::future::try_join_all(
                             self.left_table.vnodes().iter_vnodes().map(|vnode| {
@@ -462,11 +450,6 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         #[for_await]
                         for res in stream::select_all(streams) {
                             let row = res?;
-
-                            if self.condition_always_relax && !self.cleaned_by_watermark {
-                                staging_state_watermark.clone_from(&row[self.key_l])
-                            }
-
                             if let Some(chunk) = stream_chunk_builder.append_row(
                                 // All rows have a single identity at this point
                                 if is_insert { Op::Insert } else { Op::Delete },
@@ -482,7 +465,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                     }
 
                     if let Some(watermark) = staging_state_watermark.take() {
-                        self.left_table.update_watermark(watermark);
+                        self.left_table.update_watermark(watermark.clone());
                     };
 
                     if let Some(watermark) = watermark_to_propagate.take() {
@@ -608,7 +591,6 @@ mod tests {
             mem_state_r,
             Arc::new(StreamingMetrics::unused()),
             1024,
-            always_relax,
             false,
         );
         (tx_l, tx_r, executor.boxed().execute())
