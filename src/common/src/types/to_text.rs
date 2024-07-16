@@ -18,7 +18,14 @@ use std::num::FpCategory;
 use super::{DataType, DatumRef, ScalarRefImpl};
 use crate::dispatch_scalar_ref_variants;
 
-// Used to convert ScalarRef to text format
+/// Converts `ScalarRef` to text format.
+/// This is the implementation for casting to varchar, and pgwire "TEXT" format.
+///
+/// For some types, the implementation diverge from Rust's standard `ToString`/`Display`,
+/// to match PostgreSQL's representation.
+///
+/// FIXME: `ToText` should depend on a lot of other stuff
+/// but we have not implemented them yet: timezone, date style, interval style, bytea output, etc
 pub trait ToText {
     /// Write the text to the writer *regardless* of its data type
     ///
@@ -39,26 +46,10 @@ pub trait ToText {
     /// text. E.g. for Int64, it will convert to text as a Int64 type.
     /// We should prefer to use `to_text_with_type` because it's more clear and readable.
     ///
-    /// Following is the relationship between scalar and default type:
-    /// - `ScalarRefImpl::Int16` -> `DataType::Int16`
-    /// - `ScalarRefImpl::Int32` -> `DataType::Int32`
-    /// - `ScalarRefImpl::Int64` -> `DataType::Int64`
-    /// - `ScalarRefImpl::Int256` -> `DataType::Int256`
-    /// - `ScalarRefImpl::Float32` -> `DataType::Float32`
-    /// - `ScalarRefImpl::Float64` -> `DataType::Float64`
-    /// - `ScalarRefImpl::Decimal` -> `DataType::Decimal`
-    /// - `ScalarRefImpl::Bool` -> `DataType::Boolean`
-    /// - `ScalarRefImpl::Utf8` -> `DataType::Varchar`
-    /// - `ScalarRefImpl::Bytea` -> `DataType::Bytea`
-    /// - `ScalarRefImpl::Date` -> `DataType::Date`
-    /// - `ScalarRefImpl::Time` -> `DataType::Time`
-    /// - `ScalarRefImpl::Timestamp` -> `DataType::Timestamp`
-    /// - `ScalarRefImpl::Timestamptz` -> `DataType::Timestamptz`
-    /// - `ScalarRefImpl::Interval` -> `DataType::Interval`
-    /// - `ScalarRefImpl::Jsonb` -> `DataType::Jsonb`
-    /// - `ScalarRefImpl::List` -> `DataType::List`
-    /// - `ScalarRefImpl::Struct` -> `DataType::Struct`
-    /// - `ScalarRefImpl::Serial` -> `DataType::Serial`
+    /// Note: currently the `DataType` param is actually unnecessary.
+    /// Previously, Timestamptz is also represented as int64, and we need the data type to distinguish them.
+    /// Now we have 1-1 mapping, and it happens to be the case that PostgreSQL default `ToText` format does
+    /// not need additional metadata like field names contained in `DataType`.
     fn to_text(&self) -> String {
         let mut s = String::new();
         self.write(&mut s).unwrap();
