@@ -18,7 +18,7 @@ normal = ["workspace-hack"]
 anyhow = "1"
 arc-swap = "1"
 arrow-schema = { workspace = true }
-arrow-udf-wasm = { workspace = true }
+arrow-schema-iceberg = { workspace = true }
 async-recursion = "1.1.0"
 async-trait = "0.1"
 auto_enums = { workspace = true }
@@ -26,11 +26,12 @@ auto_impl = "1"
 base64 = "0.22"
 bk-tree = "0.5.0"
 bytes = "1"
+chrono = { version = "0.4", default-features = false }
 clap = { workspace = true }
 downcast-rs = "1.2"
 dyn-clone = "1.0.14"
 easy-ext = "1"
-educe = "0.5"
+educe = "0.6"
 either = "1"
 enum-as-inner = "0.6"
 fancy-regex = "0.13.0"
@@ -38,9 +39,10 @@ fixedbitset = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 iana-time-zone = "0.1"
+iceberg = { workspace = true }
 icelake = { workspace = true }
 itertools = { workspace = true }
-jsonbb = "0.1.2"
+jsonbb = { workspace = true }
 linkme = { version = "0.3", features = ["used_linker"] }
 maplit = "1"
 md5 = "0.7.0"
@@ -72,7 +74,6 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 risingwave_storage = { workspace = true }
-risingwave_udf = { workspace = true }
 risingwave_variables = { workspace = true }
 rw_futures_util = { workspace = true }
 serde = { version = "1", features = ["derive"] }

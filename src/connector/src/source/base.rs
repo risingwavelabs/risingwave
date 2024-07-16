@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -26,6 +26,7 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
@@ -42,29 +43,31 @@ use super::nexmark::source::message::NexmarkMeta;
 use super::{GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
-pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
 use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc};
 use crate::with_options::WithOptions;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
-    impl_split, match_source_name_str,
+    impl_split, match_source_name_str, WithOptionsSecResolved,
 };
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
 const SPLIT_INFO_FIELD: &str = "split_info";
 pub const UPSTREAM_SOURCE_KEY: &str = "connector";
 
-pub trait TryFromHashmap: Sized + UnknownFields {
+pub trait TryFromBTreeMap: Sized + UnknownFields {
     /// Used to initialize the source properties from the raw untyped `WITH` options.
-    fn try_from_hashmap(props: HashMap<String, String>, deny_unknown_fields: bool) -> Result<Self>;
+    fn try_from_btreemap(
+        props: BTreeMap<String, String>,
+        deny_unknown_fields: bool,
+    ) -> Result<Self>;
 }
 
 /// Represents `WITH` options for sources.
 ///
 /// Each instance should add a `#[derive(with_options::WithOptions)]` marker.
-pub trait SourceProperties: TryFromHashmap + Clone + WithOptions {
+pub trait SourceProperties: TryFromBTreeMap + Clone + WithOptions {
     const SOURCE_NAME: &'static str;
     type Split: SplitMetaData
         + TryFrom<SplitImpl, Error = crate::error::ConnectorError>
@@ -84,8 +87,11 @@ pub trait UnknownFields {
     fn unknown_fields(&self) -> HashMap<String, String>;
 }
 
-impl<P: DeserializeOwned + UnknownFields> TryFromHashmap for P {
-    fn try_from_hashmap(props: HashMap<String, String>, deny_unknown_fields: bool) -> Result<Self> {
+impl<P: DeserializeOwned + UnknownFields> TryFromBTreeMap for P {
+    fn try_from_btreemap(
+        props: BTreeMap<String, String>,
+        deny_unknown_fields: bool,
+    ) -> Result<Self> {
         let json_value = serde_json::to_value(props)?;
         let res = serde_json::from_value::<P>(json_value)?;
 
@@ -131,8 +137,7 @@ pub const MAX_CHUNK_SIZE: usize = 1024;
 
 #[derive(Debug, Clone)]
 pub struct SourceCtrlOpts {
-    // comes from developer::stream_chunk_size in stream scenario and developer::batch_chunk_size
-    // in batch scenario
+    /// The max size of a chunk yielded by source stream.
     pub chunk_size: usize,
     /// Rate limit of source
     pub rate_limit: Option<u32>,
@@ -239,6 +244,7 @@ pub enum SourceEncode {
     Protobuf,
     Json,
     Bytes,
+    Parquet,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -291,6 +297,9 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
         (PbFormatType::Maxwell, PbEncodeType::Json) => (SourceFormat::Maxwell, SourceEncode::Json),
         (PbFormatType::Canal, PbEncodeType::Json) => (SourceFormat::Canal, SourceEncode::Json),
         (PbFormatType::Plain, PbEncodeType::Csv) => (SourceFormat::Plain, SourceEncode::Csv),
+        (PbFormatType::Plain, PbEncodeType::Parquet) => {
+            (SourceFormat::Plain, SourceEncode::Parquet)
+        }
         (PbFormatType::Native, PbEncodeType::Native) => {
             (SourceFormat::Native, SourceEncode::Native)
         }
@@ -315,10 +324,19 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
     Ok(SourceStruct::new(format, encode))
 }
 
+/// Stream of [`SourceMessage`].
 pub type BoxSourceStream = BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
 
-pub trait ChunkSourceStream =
-    Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static;
+// Manually expand the trait alias to improve IDE experience.
+pub trait ChunkSourceStream:
+    Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static
+{
+}
+impl<T> ChunkSourceStream for T where
+    T: Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static
+{
+}
+
 pub type BoxChunkSourceStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
 pub type BoxTryStream<M> = BoxStream<'static, crate::error::ConnectorResult<M>>;
 
@@ -365,21 +383,24 @@ impl ConnectorProperties {
 impl ConnectorProperties {
     /// Creates typed source properties from the raw `WITH` properties.
     ///
-    /// It checks the `connector` field, and them dispatches to the corresponding type's `try_from_hashmap` method.
+    /// It checks the `connector` field, and them dispatches to the corresponding type's `try_from_btreemap` method.
     ///
     /// `deny_unknown_fields`: Since `WITH` options are persisted in meta, we do not deny unknown fields when restoring from
     /// existing data to avoid breaking backwards compatibility. We only deny unknown fields when creating new sources.
     pub fn extract(
-        mut with_properties: HashMap<String, String>,
+        with_properties: WithOptionsSecResolved,
         deny_unknown_fields: bool,
     ) -> Result<Self> {
-        let connector = with_properties
+        let (options, secret_refs) = with_properties.into_parts();
+        let mut options_with_secret =
+            LocalSecretManager::global().fill_secrets(options, secret_refs)?;
+        let connector = options_with_secret
             .remove(UPSTREAM_SOURCE_KEY)
             .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
         match_source_name_str!(
             connector.to_lowercase().as_str(),
             PropType,
-            PropType::try_from_hashmap(with_properties, deny_unknown_fields)
+            PropType::try_from_btreemap(options_with_secret, deny_unknown_fields)
                 .map(ConnectorProperties::from),
             |other| bail!("connector '{}' is not supported", other)
         )
@@ -544,6 +565,19 @@ pub struct SourceMessage {
     pub meta: SourceMeta,
 }
 
+impl SourceMessage {
+    /// Create a dummy `SourceMessage` with all fields unset for testing purposes.
+    pub fn dummy() -> Self {
+        Self {
+            key: None,
+            payload: None,
+            offset: "".to_string(),
+            split_id: "".into(),
+            meta: SourceMeta::Empty,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum SourceMeta {
     Kafka(KafkaMeta),
@@ -654,13 +688,15 @@ mod tests {
 
     #[test]
     fn test_extract_nexmark_config() {
-        let props: HashMap<String, String> = convert_args!(hashmap!(
+        let props = convert_args!(btreemap!(
             "connector" => "nexmark",
             "nexmark.table.type" => "Person",
             "nexmark.split.num" => "1",
         ));
 
-        let props = ConnectorProperties::extract(props, true).unwrap();
+        let props =
+            ConnectorProperties::extract(WithOptionsSecResolved::without_secrets(props), true)
+                .unwrap();
 
         if let ConnectorProperties::Nexmark(props) = props {
             assert_eq!(props.table_type, Some(EventType::Person));
@@ -672,7 +708,7 @@ mod tests {
 
     #[test]
     fn test_extract_kafka_config() {
-        let props: HashMap<String, String> = convert_args!(hashmap!(
+        let props = convert_args!(btreemap!(
             "connector" => "kafka",
             "properties.bootstrap.server" => "b1,b2",
             "topic" => "test",
@@ -680,13 +716,15 @@ mod tests {
             "broker.rewrite.endpoints" => r#"{"b-1:9092":"dns-1", "b-2:9092":"dns-2"}"#,
         ));
 
-        let props = ConnectorProperties::extract(props, true).unwrap();
+        let props =
+            ConnectorProperties::extract(WithOptionsSecResolved::without_secrets(props), true)
+                .unwrap();
         if let ConnectorProperties::Kafka(k) = props {
-            let hashmap: HashMap<String, String> = hashmap! {
+            let btreemap = btreemap! {
                 "b-1:9092".to_string() => "dns-1".to_string(),
                 "b-2:9092".to_string() => "dns-2".to_string(),
             };
-            assert_eq!(k.privatelink_common.broker_rewrite_map, Some(hashmap));
+            assert_eq!(k.privatelink_common.broker_rewrite_map, Some(btreemap));
         } else {
             panic!("extract kafka config failed");
         }
@@ -694,7 +732,7 @@ mod tests {
 
     #[test]
     fn test_extract_cdc_properties() {
-        let user_props_mysql: HashMap<String, String> = convert_args!(hashmap!(
+        let user_props_mysql = convert_args!(btreemap!(
             "connector" => "mysql-cdc",
             "database.hostname" => "127.0.0.1",
             "database.port" => "3306",
@@ -704,7 +742,7 @@ mod tests {
             "table.name" => "products",
         ));
 
-        let user_props_postgres: HashMap<String, String> = convert_args!(hashmap!(
+        let user_props_postgres = convert_args!(btreemap!(
             "connector" => "postgres-cdc",
             "database.hostname" => "127.0.0.1",
             "database.port" => "5432",
@@ -715,7 +753,11 @@ mod tests {
             "table.name" => "orders",
         ));
 
-        let conn_props = ConnectorProperties::extract(user_props_mysql, true).unwrap();
+        let conn_props = ConnectorProperties::extract(
+            WithOptionsSecResolved::without_secrets(user_props_mysql),
+            true,
+        )
+        .unwrap();
         if let ConnectorProperties::MysqlCdc(c) = conn_props {
             assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
             assert_eq!(c.properties.get("database.port").unwrap(), "3306");
@@ -727,7 +769,11 @@ mod tests {
             panic!("extract cdc config failed");
         }
 
-        let conn_props = ConnectorProperties::extract(user_props_postgres, true).unwrap();
+        let conn_props = ConnectorProperties::extract(
+            WithOptionsSecResolved::without_secrets(user_props_postgres),
+            true,
+        )
+        .unwrap();
         if let ConnectorProperties::PostgresCdc(c) = conn_props {
             assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
             assert_eq!(c.properties.get("database.port").unwrap(), "5432");

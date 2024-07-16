@@ -69,25 +69,28 @@ message IntraLevelDelta {
 enum CompatibilityVersion {
   VERSION_UNSPECIFIED = 0;
   NO_TRIVIAL_SPLIT = 1;
+  NO_MEMBER_TABLE_IDS = 2;
 }
 
 message GroupConstruct {
   CompactionConfig group_config = 1;
   // If parent_group_id is not 0, it means parent_group_id splits into parent_group_id and this group, so this group is not empty initially.
   uint64 parent_group_id = 2;
-  repeated uint32 table_ids = 3;
+  repeated uint32 table_ids = 3 [deprecated = true];
   uint64 group_id = 4;
   uint64 new_sst_start_id = 5;
   CompatibilityVersion version = 6;
 }
 
 message GroupMetaChange {
-  repeated uint32 table_ids_add = 1;
-  repeated uint32 table_ids_remove = 2;
+  option deprecated = true;
+  repeated uint32 table_ids_add = 1 [deprecated = true];
+  repeated uint32 table_ids_remove = 2 [deprecated = true];
 }
 
 message GroupTableChange {
-  repeated uint32 table_ids = 1;
+  option deprecated = true;
+  repeated uint32 table_ids = 1 [deprecated = true];
   uint64 target_group_id = 2;
   uint64 origin_group_id = 3;
   uint64 new_sst_start_id = 4;
@@ -101,8 +104,8 @@ message GroupDelta {
     IntraLevelDelta intra_level = 1;
     GroupConstruct group_construct = 2;
     GroupDestroy group_destroy = 3;
-    GroupMetaChange group_meta_change = 4;
-    GroupTableChange group_table_change = 5;
+    GroupMetaChange group_meta_change = 4 [deprecated = true];
+    GroupTableChange group_table_change = 5 [deprecated = true];
   }
 }
 
@@ -149,13 +152,25 @@ message TableChangeLog {
   repeated EpochNewChangeLog change_logs = 1;
 }
 
+message StateTableInfo {
+  uint64 committed_epoch = 1;
+  uint64 safe_epoch = 2;
+  uint64 compaction_group_id = 3;
+}
+
+message StateTableInfoDelta {
+  uint64 committed_epoch = 1;
+  uint64 safe_epoch = 2;
+  uint64 compaction_group_id = 3;
+}
+
 message HummockVersion {
   message Levels {
     repeated Level levels = 1;
     OverlappingLevel l0 = 2;
     uint64 group_id = 3;
     uint64 parent_group_id = 4;
-    repeated uint32 member_table_ids = 5;
+    repeated uint32 member_table_ids = 5 [deprecated = true];
   }
   uint64 id = 1;
   // Levels of each compaction group
@@ -166,6 +181,7 @@ message HummockVersion {
   uint64 safe_epoch = 4;
   map<uint32, TableWatermarks> table_watermarks = 5;
   map<uint32, TableChangeLog> table_change_logs = 6;
+  map<uint32, StateTableInfo> state_table_info = 7;
 }
 
 message HummockVersionDelta {
@@ -185,6 +201,13 @@ message HummockVersionDelta {
   reserved "gc_object_ids";
   map<uint32, TableWatermarks> new_table_watermarks = 8;
   repeated uint32 removed_table_ids = 9;
+  message ChangeLogDelta {
+    EpochNewChangeLog new_log = 1;
+    // only logs in epoch later than truncate_epoch will be preserved
+    uint64 truncate_epoch = 2;
+  }
+  map<uint32, ChangeLogDelta> change_log_delta = 10;
+  map<uint32, StateTableInfoDelta> state_table_info_delta = 11;
 }
 
 message HummockVersionDeltas {
@@ -322,6 +345,7 @@ message CompactTask {
     JOIN_HANDLE_FAILED = 11;
     TRACK_SST_OBJECT_ID_FAILED = 12;
     NO_AVAIL_CPU_RESOURCE_CANCELED = 13;
+    HEARTBEAT_PROGRESS_CANCELED = 14;
   }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;
@@ -376,6 +400,8 @@ message CompactTask {
   map<uint32, TableWatermarks> table_watermarks = 24;
   // The table schemas that are at least as new as the one used to create `input_ssts`.
   map<uint32, TableSchema> table_schemas = 25;
+  // Max sub compaction task numbers
+  uint32 max_sub_compaction = 26;
 }
 
 message LevelHandler {
@@ -545,6 +571,7 @@ message VacuumTask {
 // Scan object store to get candidate orphan SSTs.
 message FullScanTask {
   uint64 sst_retention_time_sec = 1;
+  optional string prefix = 2;
 }
 
 // Cancel compact task
@@ -588,6 +615,7 @@ message ReportFullScanTaskResponse {
 
 message TriggerFullGCRequest {
   uint64 sst_retention_time_sec = 1;
+  optional string prefix = 2;
 }
 
 message TriggerFullGCResponse {
@@ -663,6 +691,11 @@ message RiseCtlListCompactionGroupResponse {
 }
 
 message RiseCtlUpdateCompactionConfigRequest {
+  message CompressionAlgorithm {
+    uint32 level = 1;
+    string compression_algorithm = 2;
+  }
+
   message MutableConfig {
     oneof mutable_config {
       uint64 max_bytes_for_level_base = 1;
@@ -680,6 +713,8 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint64 level0_max_compact_file_number = 14;
       bool enable_emergency_picker = 15;
       uint32 tombstone_reclaim_ratio = 16;
+      CompressionAlgorithm compression_algorithm = 17;
+      uint32 max_l0_compact_level_count = 18;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -788,6 +823,14 @@ message CancelCompactTaskResponse {
   bool ret = 1;
 }
 
+message GetVersionByEpochRequest {
+  uint64 epoch = 1;
+}
+
+message GetVersionByEpochResponse {
+  HummockVersion version = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -827,6 +870,8 @@ service HummockManagerService {
   rpc ListCompactTaskAssignment(ListCompactTaskAssignmentRequest) returns (ListCompactTaskAssignmentResponse);
   rpc ListCompactTaskProgress(ListCompactTaskProgressRequest) returns (ListCompactTaskProgressResponse);
   rpc CancelCompactTask(CancelCompactTaskRequest) returns (CancelCompactTaskResponse);
+  rpc ListChangeLogEpochs(ListChangeLogEpochsRequest) returns (ListChangeLogEpochsResponse);
+  rpc GetVersionByEpoch(GetVersionByEpochRequest) returns (GetVersionByEpochResponse);
 }
 
 message CompactionConfig {
@@ -858,6 +903,9 @@ message CompactionConfig {
   uint32 level0_overlapping_sub_level_compact_level_count = 18;
   uint32 tombstone_reclaim_ratio = 19;
   bool enable_emergency_picker = 20;
+
+  // The limitation of the level count of l0 compaction
+  uint32 max_l0_compact_level_count = 21;
 }
 
 message TableStats {
@@ -882,7 +930,17 @@ message WriteLimits {
 
 message BranchedObject {
   uint64 object_id = 1;
-  uint64 sst_id = 2;
+  repeated uint64 sst_id = 2;
   // Compaction group id the SST belongs to.
   uint64 compaction_group_id = 3;
+}
+
+message ListChangeLogEpochsRequest {
+  uint32 table_id = 1;
+  uint64 min_epoch = 2;
+  uint32 max_count = 3;
+}
+
+message ListChangeLogEpochsResponse {
+  repeated uint64 epochs = 1;
 }

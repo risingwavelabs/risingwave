@@ -587,28 +587,6 @@ impl<L> tonic::transport::server::Router<L> {
     }
 }
 
-#[cfg(not(madsim))]
-pub fn monitored_tcp_incoming(
-    listen_addr: std::net::SocketAddr,
-    connection_type: impl Into<String>,
-    config: TcpConfig,
-) -> Result<
-    MonitoredConnection<tonic::transport::server::TcpIncoming, MonitorNewConnectionImpl>,
-    Box<dyn std::error::Error + Send + Sync>,
-> {
-    let incoming = tonic::transport::server::TcpIncoming::new(
-        listen_addr,
-        config.tcp_nodelay,
-        config.keepalive_duration,
-    )?;
-    Ok(MonitoredConnection::new(
-        incoming,
-        MonitorNewConnectionImpl {
-            connection_type: connection_type.into(),
-        },
-    ))
-}
-
 #[derive(Clone)]
 pub struct MonitorNewConnectionImpl {
     connection_type: String,
@@ -744,7 +722,7 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     }
 
     fn on_read_err(&mut self, err: &Error) {
-        // No need to store the value returned from with_label_values
+        // No need to store the value returned from `with_guarded_label_values`
         // because it is reporting a single error.
         GLOBAL_CONNECTION_METRICS
             .io_err_rate
@@ -775,7 +753,7 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     }
 
     fn on_write_err(&mut self, err: &Error) {
-        // No need to store the value returned from with_label_values
+        // No need to store the value returned from `with_guarded_label_values`
         // because it is reporting a single error.
         GLOBAL_CONNECTION_METRICS
             .io_err_rate

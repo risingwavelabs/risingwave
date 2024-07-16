@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use redis::aio::{ConnectionLike, MultiplexedConnection};
-use redis::cluster::ClusterClient;
-use redis::cluster_async::ClusterConnection;
+use redis::aio::MultiplexedConnection;
+use redis::cluster::{ClusterClient, ClusterConnection, ClusterPipeline};
 use redis::{Client as RedisClient, Pipeline};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
@@ -49,6 +48,54 @@ pub struct RedisCommon {
     #[serde(rename = "redis.url")]
     pub url: String,
 }
+
+pub enum RedisPipe {
+    Cluster(ClusterPipeline),
+    Single(Pipeline),
+}
+impl RedisPipe {
+    pub async fn query<T: redis::FromRedisValue>(
+        &self,
+        conn: &mut RedisConn,
+    ) -> ConnectorResult<T> {
+        match (self, conn) {
+            (RedisPipe::Cluster(pipe), RedisConn::Cluster(conn)) => Ok(pipe.query(conn)?),
+            (RedisPipe::Single(pipe), RedisConn::Single(conn)) => {
+                Ok(pipe.query_async(conn).await?)
+            }
+            _ => Err(SinkError::Redis("RedisPipe and RedisConn not match".to_string()).into()),
+        }
+    }
+
+    pub fn clear(&mut self) {
+        match self {
+            RedisPipe::Cluster(pipe) => pipe.clear(),
+            RedisPipe::Single(pipe) => pipe.clear(),
+        }
+    }
+
+    pub fn set(&mut self, k: String, v: Vec<u8>) {
+        match self {
+            RedisPipe::Cluster(pipe) => {
+                pipe.set(k, v);
+            }
+            RedisPipe::Single(pipe) => {
+                pipe.set(k, v);
+            }
+        };
+    }
+
+    pub fn del(&mut self, k: String) {
+        match self {
+            RedisPipe::Cluster(pipe) => {
+                pipe.del(k);
+            }
+            RedisPipe::Single(pipe) => {
+                pipe.del(k);
+            }
+        };
+    }
+}
 pub enum RedisConn {
     // Redis deployed as a cluster, clusters with only one node should also use this conn
     Cluster(ClusterConnection),
@@ -56,39 +103,8 @@ pub enum RedisConn {
     Single(MultiplexedConnection),
 }
 
-impl ConnectionLike for RedisConn {
-    fn req_packed_command<'a>(
-        &'a mut self,
-        cmd: &'a redis::Cmd,
-    ) -> redis::RedisFuture<'a, redis::Value> {
-        match self {
-            RedisConn::Cluster(conn) => conn.req_packed_command(cmd),
-            RedisConn::Single(conn) => conn.req_packed_command(cmd),
-        }
-    }
-
-    fn req_packed_commands<'a>(
-        &'a mut self,
-        cmd: &'a redis::Pipeline,
-        offset: usize,
-        count: usize,
-    ) -> redis::RedisFuture<'a, Vec<redis::Value>> {
-        match self {
-            RedisConn::Cluster(conn) => conn.req_packed_commands(cmd, offset, count),
-            RedisConn::Single(conn) => conn.req_packed_commands(cmd, offset, count),
-        }
-    }
-
-    fn get_db(&self) -> i64 {
-        match self {
-            RedisConn::Cluster(conn) => conn.get_db(),
-            RedisConn::Single(conn) => conn.get_db(),
-        }
-    }
-}
-
 impl RedisCommon {
-    pub async fn build_conn(&self) -> ConnectorResult<RedisConn> {
+    pub async fn build_conn_and_pipe(&self) -> ConnectorResult<(RedisConn, RedisPipe)> {
         match serde_json::from_str(&self.url).map_err(|e| SinkError::Config(anyhow!(e))) {
             Ok(v) => {
                 if let Value::Array(list) = v {
@@ -107,20 +123,25 @@ impl RedisCommon {
                         .collect::<ConnectorResult<Vec<String>>>()?;
 
                     let client = ClusterClient::new(list)?;
-                    Ok(RedisConn::Cluster(client.get_async_connection().await?))
+                    Ok((
+                        RedisConn::Cluster(client.get_connection()?),
+                        RedisPipe::Cluster(redis::cluster::cluster_pipe()),
+                    ))
                 } else {
                     Err(SinkError::Redis("redis.url must be array or string".to_string()).into())
                 }
             }
             Err(_) => {
                 let client = RedisClient::open(self.url.clone())?;
-                Ok(RedisConn::Single(
-                    client.get_multiplexed_async_connection().await?,
+                Ok((
+                    RedisConn::Single(client.get_multiplexed_async_connection().await?),
+                    RedisPipe::Single(redis::pipe()),
                 ))
             }
         }
     }
 }
+
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct RedisConfig {
@@ -129,7 +150,7 @@ pub struct RedisConfig {
 }
 
 impl RedisConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<RedisConfig>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -157,7 +178,7 @@ impl TryFrom<SinkParam> for RedisSink {
                 "Redis Sink Primary Key must be specified."
             )));
         }
-        let config = RedisConfig::from_hashmap(param.properties.clone())?;
+        let config = RedisConfig::from_btreemap(param.properties.clone())?;
         Ok(Self {
             config,
             schema: param.schema(),
@@ -191,7 +212,7 @@ impl Sink for RedisSink {
     }
 
     async fn validate(&self) -> Result<()> {
-        let _conn = self.config.common.build_conn().await?;
+        self.config.common.build_conn_and_pipe().await?;
         let all_set: HashSet<String> = self
             .schema
             .fields()
@@ -228,8 +249,11 @@ impl Sink for RedisSink {
 }
 
 pub struct RedisSinkWriter {
+    #[expect(dead_code)]
     epoch: u64,
+    #[expect(dead_code)]
     schema: Schema,
+    #[expect(dead_code)]
     pk_indices: Vec<usize>,
     formatter: SinkFormatterImpl,
     payload_writer: RedisSinkPayloadWriter,
@@ -239,13 +263,13 @@ struct RedisSinkPayloadWriter {
     // connection to redis, one per executor
     conn: Option<RedisConn>,
     // the command pipeline for write-commit
-    pipe: Pipeline,
+    pipe: RedisPipe,
 }
+
 impl RedisSinkPayloadWriter {
     pub async fn new(config: RedisConfig) -> Result<Self> {
-        let conn = config.common.build_conn().await?;
+        let (conn, pipe) = config.common.build_conn_and_pipe().await?;
         let conn = Some(conn);
-        let pipe = redis::pipe();
 
         Ok(Self { conn, pipe })
     }
@@ -253,7 +277,7 @@ impl RedisSinkPayloadWriter {
     #[cfg(test)]
     pub fn mock() -> Self {
         let conn = None;
-        let pipe = redis::pipe();
+        let pipe = RedisPipe::Single(redis::pipe());
         Self { conn, pipe }
     }
 
@@ -264,7 +288,7 @@ impl RedisSinkPayloadWriter {
                 return Ok(());
             }
         }
-        self.pipe.query_async(self.conn.as_mut().unwrap()).await?;
+        self.pipe.query(self.conn.as_mut().unwrap()).await?;
         self.pipe.clear();
         Ok(())
     }
@@ -353,11 +377,11 @@ impl AsyncTruncateSinkWriter for RedisSinkWriter {
 
 #[cfg(test)]
 mod test {
-    use std::collections::BTreeMap;
+    use core::panic;
 
     use rdkafka::message::FromBytes;
-    use risingwave_common::array::{Array, I32Array, Op, StreamChunk, Utf8Array};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::array::{Array, I32Array, Op, Utf8Array};
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
 
@@ -386,6 +410,8 @@ mod test {
             format: SinkFormat::AppendOnly,
             encode: SinkEncode::Json,
             options: BTreeMap::default(),
+            secret_refs: BTreeMap::default(),
+            key_encode: None,
         };
 
         let mut redis_sink_writer = RedisSinkWriter::mock(schema, vec![0], &format_desc)
@@ -406,24 +432,33 @@ mod test {
             .write_chunk(chunk_a, manager.start_write_chunk(0, 0))
             .await
             .expect("failed to write batch");
-        let expected_a =
-            vec![
-            (0, "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":1}\r\n$23\r\n{\"id\":1,\"name\":\"Alice\"}\r\n"),
-            (1, "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":2}\r\n$21\r\n{\"id\":2,\"name\":\"Bob\"}\r\n"),
-            (2, "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":3}\r\n$23\r\n{\"id\":3,\"name\":\"Clare\"}\r\n"),
+        let expected_a = vec![
+            (
+                0,
+                "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":1}\r\n$23\r\n{\"id\":1,\"name\":\"Alice\"}\r\n",
+            ),
+            (
+                1,
+                "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":2}\r\n$21\r\n{\"id\":2,\"name\":\"Bob\"}\r\n",
+            ),
+            (
+                2,
+                "*3\r\n$3\r\nSET\r\n$8\r\n{\"id\":3}\r\n$23\r\n{\"id\":3,\"name\":\"Clare\"}\r\n",
+            ),
         ];
 
-        redis_sink_writer
-            .payload_writer
-            .pipe
-            .cmd_iter()
-            .enumerate()
-            .zip_eq_debug(expected_a.clone())
-            .for_each(|((i, cmd), (exp_i, exp_cmd))| {
-                if exp_i == i {
-                    assert_eq!(exp_cmd, str::from_bytes(&cmd.get_packed_command()).unwrap())
-                }
-            });
+        if let RedisPipe::Single(pipe) = &redis_sink_writer.payload_writer.pipe {
+            pipe.cmd_iter()
+                .enumerate()
+                .zip_eq_debug(expected_a.clone())
+                .for_each(|((i, cmd), (exp_i, exp_cmd))| {
+                    if exp_i == i {
+                        assert_eq!(exp_cmd, str::from_bytes(&cmd.get_packed_command()).unwrap())
+                    }
+                });
+        } else {
+            panic!("pipe type not match")
+        }
     }
 
     #[tokio::test]
@@ -453,6 +488,8 @@ mod test {
             format: SinkFormat::AppendOnly,
             encode: SinkEncode::Template,
             options: btree_map,
+            secret_refs: Default::default(),
+            key_encode: None,
         };
 
         let mut redis_sink_writer = RedisSinkWriter::mock(schema, vec![0], &format_desc)
@@ -488,16 +525,17 @@ mod test {
             ),
         ];
 
-        redis_sink_writer
-            .payload_writer
-            .pipe
-            .cmd_iter()
-            .enumerate()
-            .zip_eq_debug(expected_a.clone())
-            .for_each(|((i, cmd), (exp_i, exp_cmd))| {
-                if exp_i == i {
-                    assert_eq!(exp_cmd, str::from_bytes(&cmd.get_packed_command()).unwrap())
-                }
-            });
+        if let RedisPipe::Single(pipe) = &redis_sink_writer.payload_writer.pipe {
+            pipe.cmd_iter()
+                .enumerate()
+                .zip_eq_debug(expected_a.clone())
+                .for_each(|((i, cmd), (exp_i, exp_cmd))| {
+                    if exp_i == i {
+                        assert_eq!(exp_cmd, str::from_bytes(&cmd.get_packed_command()).unwrap())
+                    }
+                });
+        } else {
+            panic!("pipe type not match")
+        };
     }
 }

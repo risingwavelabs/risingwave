@@ -1,2 +1,3 @@
 flask
 waitress
+arrow_udf==0.2.1

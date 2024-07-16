@@ -13,20 +13,19 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::default::Default;
 use std::ops::Bound;
 use std::ops::Bound::*;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
-use foyer::memory::CacheContext;
+use foyer::CacheContext;
 use futures::{pin_mut, FutureExt, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayImplBuilder, ArrayRef, DataChunk, Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     get_dist_key_in_pk_indices, ColumnDesc, ColumnId, TableId, TableOption,
 };
@@ -40,8 +39,8 @@ use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, prefixed_range_with_vnode, range_of_prefix,
-    start_bound_of_excluded_prefix, TableKey, TableKeyRange,
+    end_bound_of_prefix, prefixed_range_with_vnode, start_bound_of_excluded_prefix, TableKey,
+    TableKeyRange,
 };
 use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
 use risingwave_pb::catalog::Table;
@@ -165,7 +164,7 @@ pub struct StateTableInner<
     /// 2. Computing output pk indices to used them for backfill state.
     output_indices: Vec<usize>,
 
-    is_consistent_op: bool,
+    op_consistency_level: StateTableOpConsistencyLevel,
 }
 
 /// `StateTable` will use `BasicSerde` as default
@@ -218,32 +217,51 @@ where
     }
 }
 
-fn consistent_old_value_op(row_serde: impl ValueRowSerde) -> OpConsistencyLevel {
-    OpConsistencyLevel::ConsistentOldValue(Arc::new(move |first: &Bytes, second: &Bytes| {
-        if first == second {
-            return true;
-        }
-        let first = match row_serde.deserialize(first) {
-            Ok(rows) => rows,
-            Err(e) => {
-                error!(error = %e.as_report(), value = ?first, "fail to deserialize serialized value");
-                return false;
+fn consistent_old_value_op(
+    row_serde: impl ValueRowSerde,
+    is_log_store: bool,
+) -> OpConsistencyLevel {
+    OpConsistencyLevel::ConsistentOldValue {
+        check_old_value: Arc::new(move |first: &Bytes, second: &Bytes| {
+            if first == second {
+                return true;
             }
-        };
-        let second = match row_serde.deserialize(second) {
-            Ok(rows) => rows,
-            Err(e) => {
-                error!(error = %e.as_report(), value = ?second, "fail to deserialize serialized value");
-                return false;
+            let first = match row_serde.deserialize(first) {
+                Ok(rows) => rows,
+                Err(e) => {
+                    error!(error = %e.as_report(), value = ?first, "fail to deserialize serialized value");
+                    return false;
+                }
+            };
+            let second = match row_serde.deserialize(second) {
+                Ok(rows) => rows,
+                Err(e) => {
+                    error!(error = %e.as_report(), value = ?second, "fail to deserialize serialized value");
+                    return false;
+                }
+            };
+            if first != second {
+                error!(first = ?first, second = ?second, "sanity check fail");
+                false
+            } else {
+                true
             }
-        };
-        if first != second {
-            error!(first = ?first, second = ?second, "sanity check fail");
-            false
-        } else {
-            true
-        }
-    }))
+        }),
+        is_log_store,
+    }
+}
+
+#[derive(Eq, PartialEq, Copy, Clone, Debug)]
+pub enum StateTableOpConsistencyLevel {
+    /// Op is inconsistent
+    Inconsistent,
+    /// Op is consistent.
+    /// - Insert op should ensure that the key does not exist previously
+    /// - Delete and Update op should ensure that the key exists and the previous value matches the passed old value
+    ConsistentOldValue,
+    /// The requirement on operation consistency is the same as `ConsistentOldValue`.
+    /// The difference is that in the `LogStoreEnabled`, the state table should also flush and store and old value.
+    LogStoreEnabled,
 }
 
 // initialize
@@ -258,12 +276,20 @@ where
     W: WatermarkBufferStrategy,
 {
     /// Create state table from table catalog and store.
+    ///
+    /// If `vnodes` is `None`, [`TableDistribution::singleton()`] will be used.
     pub async fn from_table_catalog(
         table_catalog: &Table,
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        Self::from_table_catalog_inner(table_catalog, store, vnodes, true, vec![]).await
+        Self::from_table_catalog_with_consistency_level(
+            table_catalog,
+            store,
+            vnodes,
+            StateTableOpConsistencyLevel::ConsistentOldValue,
+        )
+        .await
     }
 
     /// Create state table from table catalog and store with sanity check disabled.
@@ -272,7 +298,23 @@ where
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        Self::from_table_catalog_inner(table_catalog, store, vnodes, false, vec![]).await
+        Self::from_table_catalog_with_consistency_level(
+            table_catalog,
+            store,
+            vnodes,
+            StateTableOpConsistencyLevel::Inconsistent,
+        )
+        .await
+    }
+
+    pub async fn from_table_catalog_with_consistency_level(
+        table_catalog: &Table,
+        store: S,
+        vnodes: Option<Arc<Bitmap>>,
+        consistency_level: StateTableOpConsistencyLevel,
+    ) -> Self {
+        Self::from_table_catalog_inner(table_catalog, store, vnodes, consistency_level, vec![])
+            .await
     }
 
     /// Create state table from table catalog and store.
@@ -280,7 +322,7 @@ where
         table_catalog: &Table,
         store: S,
         vnodes: Option<Arc<Bitmap>>,
-        is_consistent_op: bool,
+        op_consistency_level: StateTableOpConsistencyLevel,
         output_column_ids: Vec<ColumnId>,
     ) -> Self {
         let table_id = TableId::new(table_catalog.id);
@@ -366,18 +408,17 @@ where
             )
         };
 
-        let is_consistent_op = if crate::consistency::insane() {
-            // In insane mode, we will have inconsistent operations applied on the table, even if
-            // our executor code do not expect that.
-            false
-        } else {
-            is_consistent_op
-        };
-        let op_consistency_level = if is_consistent_op {
-            let row_serde = make_row_serde();
-            consistent_old_value_op(row_serde)
-        } else {
-            OpConsistencyLevel::Inconsistent
+        let state_table_op_consistency_level = op_consistency_level;
+        let op_consistency_level = match op_consistency_level {
+            StateTableOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
+            StateTableOpConsistencyLevel::ConsistentOldValue => {
+                let row_serde = make_row_serde();
+                consistent_old_value_op(row_serde, false)
+            }
+            StateTableOpConsistencyLevel::LogStoreEnabled => {
+                let row_serde = make_row_serde();
+                consistent_old_value_op(row_serde, true)
+            }
         };
 
         let table_option = TableOption::new(table_catalog.retention_seconds);
@@ -463,7 +504,7 @@ where
             data_types,
             output_indices,
             i2o_mapping,
-            is_consistent_op,
+            op_consistency_level: state_table_op_consistency_level,
         }
     }
 
@@ -553,6 +594,7 @@ where
         .await
     }
 
+    /// Create a state table with distribution and without sanity check, used for unit tests.
     pub async fn new_with_distribution_inconsistent_op(
         store: S,
         table_id: TableId,
@@ -599,7 +641,7 @@ where
         };
         let op_consistency_level = if is_consistent_op {
             let row_serde = make_row_serde();
-            consistent_old_value_op(row_serde)
+            consistent_old_value_op(row_serde, false)
         } else {
             OpConsistencyLevel::Inconsistent
         };
@@ -645,7 +687,11 @@ where
             data_types,
             output_indices: vec![],
             i2o_mapping: ColIndexMapping::new(vec![], 0),
-            is_consistent_op,
+            op_consistency_level: if is_consistent_op {
+                StateTableOpConsistencyLevel::ConsistentOldValue
+            } else {
+                StateTableOpConsistencyLevel::Inconsistent
+            },
         }
     }
 
@@ -708,7 +754,11 @@ where
     }
 
     pub fn is_consistent_op(&self) -> bool {
-        self.is_consistent_op
+        matches!(
+            self.op_consistency_level,
+            StateTableOpConsistencyLevel::ConsistentOldValue
+                | StateTableOpConsistencyLevel::LogStoreEnabled
+        )
     }
 }
 
@@ -725,7 +775,14 @@ where
         vnodes: Option<Arc<Bitmap>>,
         output_column_ids: Vec<ColumnId>,
     ) -> Self {
-        Self::from_table_catalog_inner(table_catalog, store, vnodes, false, output_column_ids).await
+        Self::from_table_catalog_inner(
+            table_catalog,
+            store,
+            vnodes,
+            StateTableOpConsistencyLevel::Inconsistent,
+            output_column_ids,
+        )
+        .await
     }
 }
 
@@ -1081,22 +1138,39 @@ where
     }
 
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.commit_with_switch_consistent_op(new_epoch, None).await
+        self.commit_inner(new_epoch, None).await
     }
 
-    pub async fn commit_with_switch_consistent_op(
+    pub async fn commit_may_switch_consistent_op(
         &mut self,
         new_epoch: EpochPair,
-        switch_consistent_op: Option<bool>,
+        op_consistency_level: StateTableOpConsistencyLevel,
+    ) -> StreamExecutorResult<()> {
+        if self.op_consistency_level != op_consistency_level {
+            self.commit_inner(new_epoch, Some(op_consistency_level))
+                .await
+        } else {
+            self.commit_inner(new_epoch, None).await
+        }
+    }
+
+    async fn commit_inner(
+        &mut self,
+        new_epoch: EpochPair,
+        switch_consistent_op: Option<StateTableOpConsistencyLevel>,
     ) -> StreamExecutorResult<()> {
         assert_eq!(self.epoch(), new_epoch.prev);
-        let switch_op_consistency_level = switch_consistent_op.map(|enable_consistent_op| {
-            assert_ne!(self.is_consistent_op, enable_consistent_op);
-            self.is_consistent_op = enable_consistent_op;
-            if enable_consistent_op {
-                consistent_old_value_op(self.row_serde.clone())
-            } else {
-                OpConsistencyLevel::Inconsistent
+        let switch_op_consistency_level = switch_consistent_op.map(|new_consistency_level| {
+            assert_ne!(self.op_consistency_level, new_consistency_level);
+            self.op_consistency_level = new_consistency_level;
+            match new_consistency_level {
+                StateTableOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
+                StateTableOpConsistencyLevel::ConsistentOldValue => {
+                    consistent_old_value_op(self.row_serde.clone(), false)
+                }
+                StateTableOpConsistencyLevel::LogStoreEnabled => {
+                    consistent_old_value_op(self.row_serde.clone(), true)
+                }
             }
         });
         trace!(
@@ -1285,6 +1359,12 @@ where
     }
 }
 
+pub trait KeyedRowStream<'a>: Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a {}
+impl<'a, T> KeyedRowStream<'a> for T where
+    T: Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a
+{
+}
+
 // Iterator functions
 impl<
         S,
@@ -1308,7 +1388,7 @@ where
         vnode: VirtualNode,
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
+    ) -> StreamExecutorResult<impl KeyedRowStream<'_>> {
         Ok(deserialize_keyed_row_stream(
             self.iter_kv_with_pk_range(pk_range, vnode, prefetch_options)
                 .await?,
@@ -1353,18 +1433,57 @@ where
         Ok(self.local_store.iter(table_key_range, read_options).await?)
     }
 
+    async fn rev_iter_kv(
+        &self,
+        table_key_range: TableKeyRange,
+        prefix_hint: Option<Bytes>,
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::RevIter<'_>> {
+        let read_options = ReadOptions {
+            prefix_hint,
+            retention_seconds: self.table_option.retention_seconds,
+            table_id: self.table_id,
+            prefetch_options,
+            cache_policy: CachePolicy::Fill(CacheContext::Default),
+            ..Default::default()
+        };
+
+        Ok(self
+            .local_store
+            .rev_iter(table_key_range, read_options)
+            .await?)
+    }
+
     /// This function scans rows from the relational table with specific `prefix` and `sub_range` under the same
     /// `vnode`. If `sub_range` is (Unbounded, Unbounded), it scans rows from the relational table with specific `pk_prefix`.
     /// `pk_prefix` is used to identify the exact vnode the scan should perform on.
-
-    /// This function scans rows from the relational table with specific `prefix` and `pk_sub_range` under the same
-    /// `vnode`.
     pub async fn iter_with_prefix(
         &self,
         pk_prefix: impl Row,
         sub_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
+    ) -> StreamExecutorResult<impl KeyedRowStream<'_>> {
+        self.iter_with_prefix_inner::</* REVERSE */ false>(pk_prefix, sub_range, prefetch_options)
+            .await
+    }
+
+    /// This function scans the table just like `iter_with_prefix`, but in reverse order.
+    pub async fn rev_iter_with_prefix(
+        &self,
+        pk_prefix: impl Row,
+        sub_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<impl KeyedRowStream<'_>> {
+        self.iter_with_prefix_inner::</* REVERSE */ true>(pk_prefix, sub_range, prefetch_options)
+            .await
+    }
+
+    async fn iter_with_prefix_inner<const REVERSE: bool>(
+        &self,
+        pk_prefix: impl Row,
+        sub_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<impl KeyedRowStream<'_>> {
         let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
         let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
 
@@ -1395,7 +1514,8 @@ where
         trace!(
             table_id = %self.table_id(),
             ?prefix_hint, ?pk_prefix,
-             ?pk_prefix_indices,
+            ?pk_prefix_indices,
+            iter_direction = if REVERSE { "reverse" } else { "forward" },
             "storage_iter_with_prefix"
         );
 
@@ -1404,15 +1524,27 @@ where
 
         let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
 
-        Ok(deserialize_keyed_row_stream(
-            self.iter_kv(
-                memcomparable_range_with_vnode,
-                prefix_hint,
-                prefetch_options,
-            )
-            .await?,
-            &self.row_serde,
-        ))
+        Ok(if REVERSE {
+            futures::future::Either::Left(deserialize_keyed_row_stream(
+                self.rev_iter_kv(
+                    memcomparable_range_with_vnode,
+                    prefix_hint,
+                    prefetch_options,
+                )
+                .await?,
+                &self.row_serde,
+            ))
+        } else {
+            futures::future::Either::Right(deserialize_keyed_row_stream(
+                self.iter_kv(
+                    memcomparable_range_with_vnode,
+                    prefix_hint,
+                    prefetch_options,
+                )
+                .await?,
+                &self.row_serde,
+            ))
+        })
     }
 
     /// This function scans raw key-values from the relational table with specific `pk_range` under
@@ -1433,51 +1565,6 @@ where
         self.iter_kv(memcomparable_range_with_vnode, None, prefetch_options)
             .await
             .map_err(StreamExecutorError::from)
-    }
-
-    /// Returns:
-    /// false: the provided pk prefix is absent in state store.
-    /// true: the provided pk prefix may or may not be present in state store.
-    pub async fn may_exist(&self, pk_prefix: impl Row) -> StreamExecutorResult<bool> {
-        let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
-        let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
-        let encoded_key_range = range_of_prefix(&encoded_prefix);
-
-        // We assume that all usages of iterating the state table only access a single vnode.
-        // If this assertion fails, then something must be wrong with the operator implementation or
-        // the distribution derivation from the optimizer.
-        let vnode = self.compute_prefix_vnode(&pk_prefix);
-        let table_key_range = prefixed_range_with_vnode(encoded_key_range, vnode);
-
-        // Construct prefix hint for prefix bloom filter.
-        if self.prefix_hint_len != 0 {
-            debug_assert_eq!(self.prefix_hint_len, pk_prefix.len());
-        }
-        let prefix_hint = {
-            if self.prefix_hint_len == 0 || self.prefix_hint_len > pk_prefix.len() {
-                panic!();
-            } else {
-                let encoded_prefix_len = self
-                    .pk_serde
-                    .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
-
-                Some(Bytes::copy_from_slice(
-                    &encoded_prefix[..encoded_prefix_len],
-                ))
-            }
-        };
-
-        let read_options = ReadOptions {
-            prefix_hint,
-            table_id: self.table_id,
-            cache_policy: CachePolicy::Fill(CacheContext::Default),
-            ..Default::default()
-        };
-
-        self.local_store
-            .may_exist(table_key_range, read_options)
-            .await
-            .map_err(Into::into)
     }
 
     #[cfg(test)]
@@ -1521,13 +1608,10 @@ where
     }
 }
 
-pub type KeyedRowStream<'a, S: StateStore, SD: ValueRowSerde + 'a> =
-    impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a;
-
 fn deserialize_keyed_row_stream<'a>(
     iter: impl StateStoreIter + 'a,
     deserializer: &'a impl ValueRowSerde,
-) -> impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a {
+) -> impl KeyedRowStream<'a> {
     iter.into_stream(move |(key, value)| {
         Ok(KeyedRow::new(
             // TODO: may avoid clone the key when key is not needed

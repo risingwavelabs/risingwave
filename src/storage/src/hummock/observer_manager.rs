@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common_service::observer_manager::{ObserverState, SubscribeHummock};
+use risingwave_common_service::ObserverState;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_trace::TraceSpan;
 use risingwave_pb::catalog::Table;
@@ -38,7 +38,9 @@ pub struct HummockObserverNode {
 }
 
 impl ObserverState for HummockObserverNode {
-    type SubscribeType = SubscribeHummock;
+    fn subscribe_type() -> risingwave_pb::meta::SubscribeType {
+        risingwave_pb::meta::SubscribeType::Hummock
+    }
 
     fn handle_notification(&mut self, resp: SubscribeResponse) {
         let Some(info) = resp.info.as_ref() else {
@@ -121,13 +123,13 @@ impl ObserverState for HummockObserverNode {
         );
         let _ = self
             .version_update_sender
-            .send(HummockVersionUpdate::PinnedVersion(
+            .send(HummockVersionUpdate::PinnedVersion(Box::new(
                 HummockVersion::from_rpc_protobuf(
                     &snapshot
                         .hummock_version
                         .expect("should get hummock version"),
                 ),
-            ))
+            )))
             .inspect_err(|e| {
                 tracing::error!(event = ?e.0, "unable to send full version");
             });

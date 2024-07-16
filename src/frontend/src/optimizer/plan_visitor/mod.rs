@@ -93,11 +93,20 @@ macro_rules! def_visitor {
 
             paste! {
                 fn visit(&mut self, plan: PlanRef) -> Self::Result {
-                    match plan.node_type() {
-                        $(
-                            PlanNodeType::[<$convention $name>] => self.[<visit_ $convention:snake _ $name:snake>](plan.downcast_ref::<[<$convention $name>]>().unwrap()),
-                        )*
-                    }
+                    use risingwave_common::util::recursive::{tracker, Recurse};
+                    use crate::session::current::notice_to_user;
+
+                    tracker!().recurse(|t| {
+                        if t.depth_reaches(PLAN_DEPTH_THRESHOLD) {
+                            notice_to_user(PLAN_TOO_DEEP_NOTICE);
+                        }
+
+                        match plan.node_type() {
+                            $(
+                                PlanNodeType::[<$convention $name>] => self.[<visit_ $convention:snake _ $name:snake>](plan.downcast_ref::<[<$convention $name>]>().unwrap()),
+                            )*
+                        }
+                    })
                 }
 
                 $(

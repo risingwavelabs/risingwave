@@ -14,11 +14,7 @@
 
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
-mod arrow;
-pub use arrow::{
-    iceberg_to_arrow_type, to_deltalake_record_batch_with_schema,
-    to_iceberg_record_batch_with_schema, to_record_batch_with_schema,
-};
+pub mod arrow;
 mod bool_array;
 pub mod bytes_array;
 mod chrono_array;
@@ -69,7 +65,7 @@ pub use utf8_array::*;
 
 pub use self::error::ArrayError;
 pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
-use crate::buffer::Bitmap;
+use crate::bitmap::Bitmap;
 use crate::types::*;
 use crate::{dispatch_array_builder_variants, dispatch_array_variants, for_all_array_variants};
 pub type ArrayResult<T> = Result<T, ArrayError>;
@@ -710,7 +706,7 @@ mod test_util {
     use std::hash::{BuildHasher, Hasher};
 
     use super::Array;
-    use crate::buffer::Bitmap;
+    use crate::bitmap::Bitmap;
     use crate::util::iter_util::ZipEqFast;
 
     pub fn hash_finish<H: Hasher>(hashers: &[H]) -> Vec<u64> {

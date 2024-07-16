@@ -15,7 +15,7 @@
 //! Types and functions that store or manipulate state/cache inside one single over window
 //! partition.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use std::ops::{Bound, RangeInclusive};
 
@@ -32,9 +32,11 @@ use risingwave_expr::window_function::{
 };
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
+use static_assertions::const_assert;
 
 use super::general::RowConverter;
 use crate::common::table::state_table::StateTable;
+use crate::consistency::{consistency_error, enable_strict_consistency};
 use crate::executor::over_window::frame_finder::*;
 use crate::executor::StreamExecutorResult;
 
@@ -88,27 +90,31 @@ pub(super) fn shrink_partition_cache(
             let (sk_start, sk_end) = recently_accessed_range.into_inner();
             let (ck_start, ck_end) = (CacheKey::from(sk_start), CacheKey::from(sk_end));
 
+            // find the cursor just before `ck_start`
             let mut cursor = range_cache.inner().upper_bound(Bound::Excluded(&ck_start));
             for _ in 0..MAGIC_JITTER_PREVENTION {
-                if cursor.key().is_none() {
+                if cursor.prev().is_none() {
+                    // already at the beginning
                     break;
                 }
-                cursor.move_prev();
             }
             let start = cursor
-                .key()
+                .peek_prev()
+                .map(|(k, _)| k)
                 .unwrap_or_else(|| range_cache.first_key_value().unwrap().0)
                 .clone();
 
+            // find the cursor just after `ck_end`
             let mut cursor = range_cache.inner().lower_bound(Bound::Excluded(&ck_end));
             for _ in 0..MAGIC_JITTER_PREVENTION {
-                if cursor.key().is_none() {
+                if cursor.next().is_none() {
+                    // already at the end
                     break;
                 }
-                cursor.move_next();
             }
             let end = cursor
-                .key()
+                .peek_next()
+                .map(|(k, _)| k)
                 .unwrap_or_else(|| range_cache.last_key_value().unwrap().0)
                 .clone();
 
@@ -122,32 +128,39 @@ pub(super) fn shrink_partition_cache(
                 let (sk_start, _sk_end) = recently_accessed_range.into_inner();
                 let ck_start = CacheKey::from(sk_start);
 
-                let mut capacity_remain = MAGIC_CACHE_SIZE; // precision is not important here, code simplicity is first
+                let mut capacity_remain = MAGIC_CACHE_SIZE; // precision is not important here, code simplicity is the first
+                const_assert!(MAGIC_JITTER_PREVENTION < MAGIC_CACHE_SIZE);
 
-                let mut cursor = range_cache.inner().upper_bound(Bound::Excluded(&ck_start));
+                // find the cursor just before `ck_start`
+                let cursor_just_before_ck_start =
+                    range_cache.inner().upper_bound(Bound::Excluded(&ck_start));
+
+                let mut cursor = cursor_just_before_ck_start.clone();
                 // go back for at most `MAGIC_JITTER_PREVENTION` entries
                 for _ in 0..MAGIC_JITTER_PREVENTION {
-                    if cursor.key().is_none() {
+                    if cursor.prev().is_none() {
+                        // already at the beginning
                         break;
                     }
-                    cursor.move_prev();
                     capacity_remain -= 1;
                 }
                 let start = cursor
-                    .key()
+                    .peek_prev()
+                    .map(|(k, _)| k)
                     .unwrap_or_else(|| range_cache.first_key_value().unwrap().0)
                     .clone();
 
-                let mut cursor = range_cache.inner().lower_bound(Bound::Included(&ck_start));
+                let mut cursor = cursor_just_before_ck_start;
                 // go forward for at most `capacity_remain` entries
                 for _ in 0..capacity_remain {
-                    if cursor.key().is_none() {
+                    if cursor.next().is_none() {
+                        // already at the end
                         break;
                     }
-                    cursor.move_next();
                 }
                 let end = cursor
-                    .key()
+                    .peek_next()
+                    .map(|(k, _)| k)
                     .unwrap_or_else(|| range_cache.last_key_value().unwrap().0)
                     .clone();
 
@@ -162,32 +175,39 @@ pub(super) fn shrink_partition_cache(
                 let (_sk_start, sk_end) = recently_accessed_range.into_inner();
                 let ck_end = CacheKey::from(sk_end);
 
-                let mut capacity_remain = MAGIC_CACHE_SIZE; // precision is not important here, code simplicity is first
+                let mut capacity_remain = MAGIC_CACHE_SIZE; // precision is not important here, code simplicity is the first
+                const_assert!(MAGIC_JITTER_PREVENTION < MAGIC_CACHE_SIZE);
 
-                let mut cursor = range_cache.inner().lower_bound(Bound::Excluded(&ck_end));
+                // find the cursor just after `ck_end`
+                let cursor_just_after_ck_end =
+                    range_cache.inner().lower_bound(Bound::Excluded(&ck_end));
+
+                let mut cursor = cursor_just_after_ck_end.clone();
                 // go forward for at most `MAGIC_JITTER_PREVENTION` entries
                 for _ in 0..MAGIC_JITTER_PREVENTION {
-                    if cursor.key().is_none() {
+                    if cursor.next().is_none() {
+                        // already at the end
                         break;
                     }
-                    cursor.move_next();
                     capacity_remain -= 1;
                 }
                 let end = cursor
-                    .key()
+                    .peek_next()
+                    .map(|(k, _)| k)
                     .unwrap_or_else(|| range_cache.last_key_value().unwrap().0)
                     .clone();
 
-                let mut cursor = range_cache.inner().upper_bound(Bound::Included(&ck_end));
+                let mut cursor = cursor_just_after_ck_end;
                 // go back for at most `capacity_remain` entries
                 for _ in 0..capacity_remain {
-                    if cursor.key().is_none() {
+                    if cursor.prev().is_none() {
+                        // already at the beginning
                         break;
                     }
-                    cursor.move_prev();
                 }
                 let start = cursor
-                    .key()
+                    .peek_prev()
+                    .map(|(k, _)| k)
                     .unwrap_or_else(|| range_cache.first_key_value().unwrap().0)
                     .clone();
 
@@ -230,25 +250,25 @@ pub(super) struct OverPartitionStats {
 /// represented by [`DeltaBTreeMap`].
 ///
 /// - `first_curr_key` and `last_curr_key` are the current keys of the first and the last
-///  windows affected. They are used to pinpoint the bounds where state needs to be updated.
+///   windows affected. They are used to pinpoint the bounds where state needs to be updated.
 /// - `first_frame_start` and `last_frame_end` are the frame start and end of the first and
-///  the last windows affected. They are used to pinpoint the bounds where state needs to be
-///  included for computing the new state.
+///   the last windows affected. They are used to pinpoint the bounds where state needs to be
+///   included for computing the new state.
 #[derive(Debug, Educe)]
 #[educe(Clone, Copy)]
-pub(super) struct AffectedRange<'cache> {
-    pub first_frame_start: &'cache CacheKey,
-    pub first_curr_key: &'cache CacheKey,
-    pub last_curr_key: &'cache CacheKey,
-    pub last_frame_end: &'cache CacheKey,
+pub(super) struct AffectedRange<'a> {
+    pub first_frame_start: &'a CacheKey,
+    pub first_curr_key: &'a CacheKey,
+    pub last_curr_key: &'a CacheKey,
+    pub last_frame_end: &'a CacheKey,
 }
 
-impl<'cache> AffectedRange<'cache> {
+impl<'a> AffectedRange<'a> {
     fn new(
-        first_frame_start: &'cache CacheKey,
-        first_curr_key: &'cache CacheKey,
-        last_curr_key: &'cache CacheKey,
-        last_frame_end: &'cache CacheKey,
+        first_frame_start: &'a CacheKey,
+        first_curr_key: &'a CacheKey,
+        last_curr_key: &'a CacheKey,
+        last_frame_end: &'a CacheKey,
     ) -> Self {
         Self {
             first_frame_start,
@@ -417,34 +437,30 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     /// Find all ranges in the partition that are affected by the given delta.
     /// The returned ranges are guaranteed to be sorted and non-overlapping. All keys in the ranges
     /// are guaranteed to be cached, which means they should be [`Sentinelled::Normal`]s.
-    pub async fn find_affected_ranges<'s, 'cache>(
+    pub async fn find_affected_ranges<'s, 'delta>(
         &'s mut self,
-        table: &'_ StateTable<S>,
-        delta: &'cache PartitionDelta,
+        table: &StateTable<S>,
+        delta: &'delta mut PartitionDelta,
     ) -> StreamExecutorResult<(
-        DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
-        Vec<AffectedRange<'cache>>,
+        DeltaBTreeMap<'delta, CacheKey, OwnedRow>,
+        Vec<AffectedRange<'delta>>,
     )>
     where
-        's: 'cache,
+        'a: 'delta,
+        's: 'delta,
     {
+        self.ensure_delta_in_cache(table, delta).await?;
+        let delta = &*delta; // let's make it immutable
+
+        if delta.is_empty() {
+            return Ok((DeltaBTreeMap::new(self.range_cache.inner(), delta), vec![]));
+        }
+
         let delta_first = delta.first_key_value().unwrap().0.as_normal_expect();
         let delta_last = delta.last_key_value().unwrap().0.as_normal_expect();
 
         let range_frame_logical_curr =
             calc_logical_curr_for_range_frames(&self.range_frames, delta_first, delta_last);
-
-        if self.cache_policy.is_full() {
-            // ensure everything is in the cache
-            self.extend_cache_to_boundary(table).await?;
-        } else {
-            // TODO(rc): later we should extend cache using `self.super_rows_frame_bounds` and
-            // `range_frame_logical_curr` as hints.
-
-            // ensure the cache covers all delta (if possible)
-            self.extend_cache_by_range(table, delta_first..=delta_last)
-                .await?;
-        }
 
         loop {
             // TERMINATEABILITY: `extend_cache_leftward_by_n` and `extend_cache_rightward_by_n` keep
@@ -453,7 +469,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             // `Self::find_affected_ranges_readonly` will return `Ok`.
 
             // SAFETY: Here we shortly borrow the range cache and turn the reference into a
-            // `'cache` one to bypass the borrow checker. This is safe because we only return
+            // `'delta` one to bypass the borrow checker. This is safe because we only return
             // the reference once we don't need to do any further mutation.
             let cache_inner = unsafe { &*(self.range_cache.inner() as *const _) };
             let part_with_delta = DeltaBTreeMap::new(cache_inner, delta);
@@ -483,6 +499,53 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         }
     }
 
+    async fn ensure_delta_in_cache(
+        &mut self,
+        table: &StateTable<S>,
+        delta: &mut PartitionDelta,
+    ) -> StreamExecutorResult<()> {
+        if delta.is_empty() {
+            return Ok(());
+        }
+
+        let delta_first = delta.first_key_value().unwrap().0.as_normal_expect();
+        let delta_last = delta.last_key_value().unwrap().0.as_normal_expect();
+
+        if self.cache_policy.is_full() {
+            // ensure everything is in the cache
+            self.extend_cache_to_boundary(table).await?;
+        } else {
+            // TODO(rc): later we should extend cache using `self.super_rows_frame_bounds` and
+            // `range_frame_logical_curr` as hints.
+
+            // ensure the cache covers all delta (if possible)
+            self.extend_cache_by_range(table, delta_first..=delta_last)
+                .await?;
+        }
+
+        if !enable_strict_consistency() {
+            // in non-strict mode, we should ensure the delta is consistent with the cache
+            let cache = self.range_cache.inner();
+            delta.retain(|key, change| match &*change {
+                Change::Insert(_) => {
+                    // this also includes the case of double-insert and ghost-update,
+                    // but since we already lost the information, let's just ignore it
+                    true
+                }
+                Change::Delete => {
+                    // if the key is not in the cache, it's a ghost-delete
+                    let consistent = cache.contains_key(key);
+                    if !consistent {
+                        consistency_error!(?key, "removing a row with non-existing key");
+                    }
+                    consistent
+                }
+            });
+        }
+
+        Ok(())
+    }
+
     /// Try to find affected ranges on immutable range cache + delta. If the algorithm reaches
     /// any sentinel node in the cache, which means some entries in the affected range may be
     /// in the state table, it returns an `Err((bool, bool))` to notify the caller that the
@@ -491,11 +554,11 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     /// TODO(rc): Currently at most one range will be in the result vector. Ideally we should
     /// recognize uncontinuous changes in the delta and find multiple ranges, but that will be
     /// too complex for now.
-    fn find_affected_ranges_readonly<'cache>(
-        &'_ self,
-        part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
+    fn find_affected_ranges_readonly<'delta>(
+        &self,
+        part_with_delta: DeltaBTreeMap<'delta, CacheKey, OwnedRow>,
         range_frame_logical_curr: Option<&(Sentinelled<Datum>, Sentinelled<Datum>)>,
-    ) -> std::result::Result<Vec<AffectedRange<'cache>>, (bool, bool)> {
+    ) -> std::result::Result<Vec<AffectedRange<'delta>>, (bool, bool)> {
         if part_with_delta.first_key().is_none() {
             // nothing is left after applying the delta, meaning all entries are deleted
             return Ok(vec![]);
@@ -798,35 +861,12 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 .await?;
         }
 
-        // TODO(rc): Uncomment the following to enable prefetching rows before the start of the
-        // range once we have STATE TABLE REVERSE ITERATOR.
-        // self.extend_cache_leftward_by_n(table, range.start()).await?;
+        // prefetch rows before the start of the range
+        self.extend_cache_leftward_by_n(table, range.start())
+            .await?;
 
         // prefetch rows after the end of the range
         self.extend_cache_rightward_by_n(table, range.end()).await
-    }
-
-    async fn extend_cache_by_range_inner(
-        &mut self,
-        table: &StateTable<S>,
-        table_sub_range: (Bound<impl Row>, Bound<impl Row>),
-    ) -> StreamExecutorResult<()> {
-        let stream = table
-            .iter_with_prefix(
-                self.this_partition_key,
-                &table_sub_range,
-                PrefetchOptions::default(),
-            )
-            .await?;
-
-        #[for_await]
-        for row in stream {
-            let row: OwnedRow = row?.into_owned_row();
-            let key = self.row_conv.row_to_state_key(&row)?;
-            self.range_cache.insert(CacheKey::from(key), row);
-        }
-
-        Ok(())
     }
 
     async fn extend_cache_leftward_by_n(
@@ -874,55 +914,6 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         Ok(())
     }
 
-    async fn extend_cache_leftward_by_n_inner(
-        &mut self,
-        table: &StateTable<S>,
-        range_to_exclusive: &StateKey,
-    ) -> StreamExecutorResult<()> {
-        let mut to_extend: VecDeque<OwnedRow> = VecDeque::with_capacity(MAGIC_BATCH_SIZE);
-        {
-            let sub_range = (
-                Bound::<OwnedRow>::Unbounded,
-                Bound::Excluded(
-                    self.row_conv
-                        .state_key_to_table_sub_pk(range_to_exclusive)?,
-                ),
-            );
-            let stream = table
-                .iter_with_prefix(
-                    self.this_partition_key,
-                    &sub_range,
-                    PrefetchOptions::default(),
-                )
-                .await?;
-
-            #[for_await]
-            for row in stream {
-                let row: OwnedRow = row?.into_owned_row();
-
-                // For leftward extension, we now must iterate the table in order from the beginning
-                // of this partition and fill only the last n rows to the cache.
-                // TODO(rc): WE NEED STATE TABLE REVERSE ITERATOR!!
-                if to_extend.len() == MAGIC_BATCH_SIZE {
-                    to_extend.pop_front();
-                }
-                to_extend.push_back(row);
-            }
-        }
-
-        let n_extended = to_extend.len();
-        for row in to_extend {
-            let key = self.row_conv.row_to_state_key(&row)?;
-            self.range_cache.insert(CacheKey::from(key), row);
-        }
-        if n_extended < MAGIC_BATCH_SIZE && self.cache_real_len() > 0 {
-            // we reached the beginning of this partition in the table
-            self.range_cache.remove(&CacheKey::Smallest);
-        }
-
-        Ok(())
-    }
-
     async fn extend_cache_rightward_by_n(
         &mut self,
         table: &StateTable<S>,
@@ -963,6 +954,73 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 self.range_cache.remove(&CacheKey::Smallest);
                 self.range_cache.remove(&CacheKey::Largest);
             }
+        }
+
+        Ok(())
+    }
+
+    async fn extend_cache_by_range_inner(
+        &mut self,
+        table: &StateTable<S>,
+        table_sub_range: (Bound<impl Row>, Bound<impl Row>),
+    ) -> StreamExecutorResult<()> {
+        let stream = table
+            .iter_with_prefix(
+                self.this_partition_key,
+                &table_sub_range,
+                PrefetchOptions::default(),
+            )
+            .await?;
+
+        #[for_await]
+        for row in stream {
+            let row: OwnedRow = row?.into_owned_row();
+            let key = self.row_conv.row_to_state_key(&row)?;
+            self.range_cache.insert(CacheKey::from(key), row);
+        }
+
+        Ok(())
+    }
+
+    async fn extend_cache_leftward_by_n_inner(
+        &mut self,
+        table: &StateTable<S>,
+        range_to_exclusive: &StateKey,
+    ) -> StreamExecutorResult<()> {
+        let mut n_extended = 0usize;
+        {
+            let sub_range = (
+                Bound::<OwnedRow>::Unbounded,
+                Bound::Excluded(
+                    self.row_conv
+                        .state_key_to_table_sub_pk(range_to_exclusive)?,
+                ),
+            );
+            let rev_stream = table
+                .rev_iter_with_prefix(
+                    self.this_partition_key,
+                    &sub_range,
+                    PrefetchOptions::default(),
+                )
+                .await?;
+
+            #[for_await]
+            for row in rev_stream {
+                let row: OwnedRow = row?.into_owned_row();
+
+                let key = self.row_conv.row_to_state_key(&row)?;
+                self.range_cache.insert(CacheKey::from(key), row);
+
+                n_extended += 1;
+                if n_extended == MAGIC_BATCH_SIZE {
+                    break;
+                }
+            }
+        }
+
+        if n_extended < MAGIC_BATCH_SIZE && self.cache_real_len() > 0 {
+            // we reached the beginning of this partition in the table
+            self.range_cache.remove(&CacheKey::Smallest);
         }
 
         Ok(())

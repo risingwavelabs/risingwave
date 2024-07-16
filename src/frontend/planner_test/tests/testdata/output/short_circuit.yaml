@@ -44,3 +44,10 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [false:Boolean] }
       └─BatchScan { table: t1, columns: [t1.c1], distribution: SomeShard }
+- id: short_circuit_optimize_time
+  sql: |
+    select true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true;
+  logical_plan: |-
+    LogicalProject { exprs: [(((((((((((((((((((((((((true:Boolean AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) AND true:Boolean) as $expr1] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  batch_plan: 'BatchValues { rows: [[true:Boolean]] }'

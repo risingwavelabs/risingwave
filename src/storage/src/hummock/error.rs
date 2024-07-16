@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::TableId;
 use risingwave_object_store::object::ObjectError;
 use thiserror::Error;
 use thiserror_ext::AsReport;
@@ -48,7 +49,11 @@ pub enum HummockErrorInner {
     #[error("Barrier read is unavailable for now. Likely the cluster is recovering")]
     ReadCurrentEpoch,
     #[error("Expired Epoch: watermark {safe_epoch}, epoch {epoch}")]
-    ExpiredEpoch { safe_epoch: u64, epoch: u64 },
+    ExpiredEpoch {
+        table_id: u32,
+        safe_epoch: u64,
+        epoch: u64,
+    },
     #[error("CompactionExecutor error: {0}")]
     CompactionExecutor(String),
     #[error("FileCache error: {0}")]
@@ -61,6 +66,8 @@ pub enum HummockErrorInner {
     SstableUploadError(String),
     #[error("Read backup error: {0}")]
     ReadBackupError(String),
+    #[error("Foyer error: {0}")]
+    FoyerError(anyhow::Error),
     #[error("Other error: {0}")]
     Other(String),
 }
@@ -106,8 +113,13 @@ impl HummockError {
         HummockErrorInner::ReadCurrentEpoch.into()
     }
 
-    pub fn expired_epoch(safe_epoch: u64, epoch: u64) -> HummockError {
-        HummockErrorInner::ExpiredEpoch { safe_epoch, epoch }.into()
+    pub fn expired_epoch(table_id: TableId, safe_epoch: u64, epoch: u64) -> HummockError {
+        HummockErrorInner::ExpiredEpoch {
+            table_id: table_id.table_id,
+            safe_epoch,
+            epoch,
+        }
+        .into()
     }
 
     pub fn is_expired_epoch(&self) -> bool {
@@ -144,6 +156,10 @@ impl HummockError {
 
     pub fn read_backup_error(error: impl ToString) -> HummockError {
         HummockErrorInner::ReadBackupError(error.to_string()).into()
+    }
+
+    pub fn foyer_error(error: anyhow::Error) -> HummockError {
+        HummockErrorInner::FoyerError(error).into()
     }
 
     pub fn other(error: impl ToString) -> HummockError {

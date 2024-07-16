@@ -19,15 +19,15 @@ VALUES (default,"scooter","Small 2-wheel scooter"),
        (default,"hammer","14oz carpenter's hammer"),
        (default,"hammer","16oz carpenter's hammer"),
        (default,"rocks","box of assorted rocks"),
-       (default,"jacket","water resistent black wind breaker"),
+       (default,"jacket","water resistant black wind breaker"),
        (default,"spare tire","24 inch spare tire");
 
 
 CREATE TABLE orders (
     order_id INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
     order_date DATETIME NOT NULL,
-    customer_name VARCHAR(255) NOT NULL,
-    price DECIMAL(10, 5) NOT NULL,
+    `cusTomer_Name` VARCHAR(255) NOT NULL,
+    `priCE` DECIMAL(10, 5) NOT NULL,
     product_id INTEGER NOT NULL,
     order_status BOOLEAN NOT NULL -- Whether order has been placed
 ) AUTO_INCREMENT = 10001;
@@ -49,9 +49,11 @@ VALUES (1,1,'no'),
        (3,3,'no'),
        (4,4,'no');
 
+-- This user is for non-shared CDC
 CREATE USER 'dbz'@'%' IDENTIFIED BY '123456';
 GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'dbz'@'%';
 
+-- This user is for shared CDC
 CREATE USER 'rwcdc'@'%' IDENTIFIED BY '123456';
 GRANT SELECT, RELOAD, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'rwcdc'@'%';
 

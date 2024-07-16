@@ -41,6 +41,7 @@ use crate::source::{
 #[derive(Debug)]
 pub struct NexmarkSplitReader {
     generator: EventGenerator,
+    #[expect(dead_code)]
     assigned_split: NexmarkSplit,
     event_num: u64,
     event_type: Option<EventType>,
@@ -121,7 +122,7 @@ impl SplitReader for NexmarkSplitReader {
                 .inspect_ok(move |chunk: &StreamChunk| {
                     metrics
                         .partition_input_count
-                        .with_label_values(&[
+                        .with_guarded_label_values(&[
                             &actor_id,
                             &source_id,
                             &split_id,
@@ -131,7 +132,7 @@ impl SplitReader for NexmarkSplitReader {
                         .inc_by(chunk.cardinality() as u64);
                     metrics
                         .partition_input_bytes
-                        .with_label_values(&[
+                        .with_guarded_label_values(&[
                             &actor_id,
                             &source_id,
                             &split_id,
@@ -210,7 +211,7 @@ impl NexmarkSplitReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::nexmark::{NexmarkProperties, NexmarkSplitEnumerator};
+    use crate::source::nexmark::NexmarkSplitEnumerator;
     use crate::source::{SourceContext, SourceEnumeratorContext, SplitEnumerator};
 
     #[tokio::test]

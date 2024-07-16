@@ -14,10 +14,11 @@
 
 use risingwave_pb::stream_plan::{PbDispatcher, PbDispatcherType};
 use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::{ActorId, ActorMapping, FragmentId, I32Array};
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Deserialize, Serialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum DispatcherType {
     #[sea_orm(string_value = "HASH")]
@@ -81,7 +82,7 @@ impl From<Model> for PbDispatcher {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Deserialize, Serialize)]
 #[sea_orm(table_name = "actor_dispatcher")]
 pub struct Model {
     #[sea_orm(primary_key)]

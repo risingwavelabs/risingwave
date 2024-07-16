@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::{fmt, mem};
 
 use either::Either;
+use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -28,7 +29,7 @@ use risingwave_pb::data::{PbOp, PbStreamChunk};
 use super::stream_chunk_builder::StreamChunkBuilder;
 use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt, RowRef};
 use crate::array::DataChunk;
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::catalog::Schema;
 use crate::field_generator::VarcharProperty;
 use crate::row::Row;
@@ -40,7 +41,7 @@ use crate::types::{DataType, DefaultOrdered, ToText};
 /// but always appear in pairs to represent an update operation.
 /// For example, table source, aggregation and outer join can generate updates by themselves,
 /// while most of the other operators only pass through updates with best effort.
-#[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum Op {
     Insert,
     Delete,
@@ -77,6 +78,15 @@ impl Op {
             Op::Delete => Op::Delete,
             Op::UpdateDelete => Op::Delete,
             Op::UpdateInsert => Op::Insert,
+        }
+    }
+
+    pub fn to_i16(self) -> i16 {
+        match self {
+            Op::Insert => 1,
+            Op::Delete => 2,
+            Op::UpdateInsert => 3,
+            Op::UpdateDelete => 4,
         }
     }
 }
@@ -132,11 +142,7 @@ impl StreamChunk {
     /// Should prefer using [`StreamChunkBuilder`] instead to avoid unnecessary
     /// allocation of rows.
     pub fn from_rows(rows: &[(Op, impl Row)], data_types: &[DataType]) -> Self {
-        // `append_row` will cause the builder to finish immediately once capacity is met.
-        // Hence, we allocate an extra row here, to avoid the builder finishing prematurely.
-        // This just makes the code cleaner, since we can loop through all rows, and consume it finally.
-        // TODO: introduce `new_unlimited` to decouple memory reservation from builder capacity.
-        let mut builder = StreamChunkBuilder::new(rows.len() + 1, data_types.to_vec());
+        let mut builder = StreamChunkBuilder::unlimited(data_types.to_vec(), Some(rows.len()));
 
         for (op, row) in rows {
             let none = builder.append_row(*op, row);
@@ -519,6 +525,10 @@ impl OpRowMutRef<'_> {
 }
 
 impl StreamChunkMut {
+    pub fn capacity(&self) -> usize {
+        self.vis.len()
+    }
+
     pub fn vis(&self, i: usize) -> bool {
         self.vis.is_set(i)
     }
@@ -658,11 +668,7 @@ impl StreamChunk {
         let data_types = chunks[0].data_types();
         let size = chunks.iter().map(|c| c.cardinality()).sum::<usize>();
 
-        // `append_row` will cause the builder to finish immediately once capacity is met.
-        // Hence, we allocate an extra row here, to avoid the builder finishing prematurely.
-        // This just makes the code cleaner, since we can loop through all rows, and consume it finally.
-        // TODO: introduce `new_unlimited` to decouple memory reservation from builder capacity.
-        let mut builder = StreamChunkBuilder::new(size + 1, data_types);
+        let mut builder = StreamChunkBuilder::unlimited(data_types, Some(size));
 
         for chunk in chunks {
             // TODO: directly append chunks.

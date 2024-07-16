@@ -28,11 +28,11 @@ sccache --show-stats
 sccache --zero-stats
 
 echo "--- Run clippy check (release)"
-cargo clippy --release --all-targets --features "rw-static-link" --locked -- -D warnings
+OPENSSL_STATIC=1 cargo clippy --release --all-targets --features "rw-static-link" --locked -- -D warnings
 
 echo "--- Run cargo check on building the release binary (release)"
-cargo check -p risingwave_cmd_all --features "rw-static-link" --profile release
-cargo check -p risingwave_cmd --bin risectl --features "rw-static-link" --profile release
+OPENSSL_STATIC=1 cargo check -p risingwave_cmd_all --features "rw-static-link" --profile release
+OPENSSL_STATIC=1 cargo check -p risingwave_cmd --bin risectl --features "rw-static-link" --profile release
 
 echo "--- Show sccache stats"
 sccache --show-stats

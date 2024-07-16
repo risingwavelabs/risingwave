@@ -1,5 +1,4 @@
 ---
-version: "3"
 services:
   risingwave-standalone:
     extends:
@@ -7,10 +6,10 @@ services:
       service: risingwave-standalone
     volumes:
       - "../../gcp-rwctest.json:/gcp-rwctest.json"
-  etcd-0:
+  postgres-0:
     extends:
       file: ../../docker/docker-compose.yml
-      service: etcd-0
+      service: postgres-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -32,7 +31,7 @@ services:
 volumes:
   risingwave-standalone:
     external: false
-  etcd-0:
+  postgres-0:
     external: false
   grafana-0:
     external: false

@@ -7,3 +7,4 @@
 **/*.json
 out/
 proto/
+public/monaco/

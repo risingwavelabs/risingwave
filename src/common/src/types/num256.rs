@@ -335,7 +335,6 @@ impl EstimateSize for Int256 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::F64;
 
     macro_rules! check_op {
         ($t:ty, $lhs:expr, $rhs:expr, [$($op:tt),+]) => {

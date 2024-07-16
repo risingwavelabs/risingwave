@@ -24,13 +24,16 @@ mod iceberg_scan;
 mod insert;
 mod join;
 mod limit;
+mod log_row_seq_scan;
 mod managed;
 mod max_one_row;
+mod merge_sort;
 mod merge_sort_exchange;
 mod order_by;
 mod project;
 mod project_set;
 mod row_seq_scan;
+mod s3_file_scan;
 mod sort_agg;
 mod sort_over_window;
 mod source;
@@ -59,6 +62,7 @@ pub use join::*;
 pub use limit::*;
 pub use managed::*;
 pub use max_one_row::*;
+pub use merge_sort::*;
 pub use merge_sort_exchange::*;
 pub use order_by::*;
 pub use project::*;
@@ -80,6 +84,7 @@ pub use update::*;
 pub use utils::*;
 pub use values::*;
 
+use self::log_row_seq_scan::LogStoreRowSeqScanExecutorBuilder;
 use self::test_utils::{BlockExecutorBuilder, BusyLoopExecutorBuilder};
 use crate::error::Result;
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
@@ -239,6 +244,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             // Follow NodeBody only used for test
             NodeBody::BlockExecutor => BlockExecutorBuilder,
             NodeBody::BusyLoopExecutor => BusyLoopExecutorBuilder,
+            NodeBody::LogRowSeqScan => LogStoreRowSeqScanExecutorBuilder,
         }
         .await?;
 
@@ -257,8 +263,8 @@ mod tests {
     use crate::executor::ExecutorBuilder;
     use crate::task::{ComputeNodeContext, ShutdownToken, TaskId};
 
-    #[test]
-    fn test_clone_for_plan() {
+    #[tokio::test]
+    async fn test_clone_for_plan() {
         let plan_node = PlanNode::default();
         let task_id = &TaskId {
             task_id: 1,

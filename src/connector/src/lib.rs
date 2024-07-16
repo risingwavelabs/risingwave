@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(dead_code)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(array_chunks)]
 #![feature(coroutines)]
@@ -34,13 +33,14 @@
 #![feature(error_generic_member_access)]
 #![feature(negative_impls)]
 #![feature(register_tool)]
+#![feature(assert_matches)]
+#![feature(never_type)]
 #![register_tool(rw)]
 #![recursion_limit = "256"]
 
 use std::time::Duration;
 
 use duration_str::parse_std;
-use risingwave_pb::connector_service::SinkPayloadFormat;
 use serde::de;
 
 pub mod aws_utils;
@@ -58,23 +58,10 @@ pub use paste::paste;
 pub use risingwave_jni_core::{call_method, call_static_method, jvm_runtime};
 
 mod with_options;
-pub use with_options::WithPropertiesExt;
+pub use with_options::{WithOptionsSecResolved, WithPropertiesExt};
 
 #[cfg(test)]
 mod with_options_test;
-
-#[derive(Clone, Debug, Default)]
-pub struct ConnectorParams {
-    pub sink_payload_format: SinkPayloadFormat,
-}
-
-impl ConnectorParams {
-    pub fn new(sink_payload_format: SinkPayloadFormat) -> Self {
-        Self {
-            sink_payload_format,
-        }
-    }
-}
 
 pub(crate) fn deserialize_u32_from_string<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where
@@ -175,6 +162,8 @@ mod tests {
 
     /// Test some serde behavior we rely on.
     mod serde {
+        #![expect(dead_code)]
+
         use std::collections::BTreeMap;
 
         use expect_test::expect;

@@ -14,7 +14,7 @@
 
 use sea_orm::entity::prelude::*;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, serde::Deserialize, serde::Serialize)]
 #[sea_orm(table_name = "session_parameter")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]

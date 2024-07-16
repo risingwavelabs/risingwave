@@ -103,6 +103,12 @@ impl<F, T> AttachedFuture<F, T> {
             self.item.expect("should not be called after polled ready"),
         )
     }
+
+    pub fn item(&self) -> &T {
+        self.item
+            .as_ref()
+            .expect("should not be called after polled ready")
+    }
 }
 
 impl<F: Future + Unpin, T: Unpin> Future for AttachedFuture<F, T> {

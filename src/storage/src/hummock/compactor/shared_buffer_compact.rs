@@ -20,12 +20,11 @@ use std::sync::{Arc, LazyLock};
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use foyer::memory::CacheContext;
-use futures::future::try_join_all;
+use foyer::CacheContext;
+use futures::future::{try_join, try_join_all};
 use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, UserKey, EPOCH_LEN};
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -38,11 +37,11 @@ use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorMana
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
 use crate::hummock::compactor::context::{await_tree_key, CompactorContext};
 use crate::hummock::compactor::{check_flush_result, CompactOutput, Compactor};
-use crate::hummock::event_handler::uploader::UploadTaskPayload;
-use crate::hummock::event_handler::LocalInstanceId;
+use crate::hummock::event_handler::uploader::UploadTaskOutput;
 use crate::hummock::iterator::{Forward, HummockIterator, MergeIterator, UserIterator};
 use crate::hummock::shared_buffer::shared_buffer_batch::{
-    SharedBufferBatch, SharedBufferBatchInner, SharedBufferKeyEntry, VersionedSharedBufferValue,
+    SharedBufferBatch, SharedBufferBatchInner, SharedBufferBatchOldValues, SharedBufferKeyEntry,
+    VersionedSharedBufferValue,
 };
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{
@@ -59,12 +58,12 @@ const GC_WATERMARK_FOR_FLUSH: u64 = 0;
 pub async fn compact(
     context: CompactorContext,
     sstable_object_id_manager: SstableObjectIdManagerRef,
-    payload: UploadTaskPayload,
+    payload: Vec<ImmutableMemtable>,
     compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
     filter_key_extractor_manager: FilterKeyExtractorManager,
-) -> HummockResult<Vec<LocalSstableInfo>> {
-    let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
-    for imm in payload {
+) -> HummockResult<UploadTaskOutput> {
+    let mut grouped_payload: HashMap<CompactionGroupId, Vec<ImmutableMemtable>> = HashMap::new();
+    for imm in &payload {
         let compaction_group_id = match compaction_group_index.get(&imm.table_id) {
             // compaction group id is used only as a hint for grouping different data.
             // If the compaction group id is not found for the table id, we can assign a
@@ -79,47 +78,67 @@ pub async fn compact(
         grouped_payload
             .entry(compaction_group_id)
             .or_default()
-            .push(imm);
+            .push(imm.clone());
     }
 
-    let mut futures = vec![];
+    let mut new_value_futures = vec![];
     for (id, group_payload) in grouped_payload {
-        let id_copy = id;
-        futures.push(
-            compact_shared_buffer(
+        new_value_futures.push(
+            compact_shared_buffer::<true>(
                 context.clone(),
                 sstable_object_id_manager.clone(),
                 filter_key_extractor_manager.clone(),
                 group_payload,
             )
-            .map_ok(move |results| {
-                results
-                    .into_iter()
-                    .map(move |mut result| {
-                        result.compaction_group_id = id_copy;
-                        result
-                    })
-                    .collect_vec()
-            })
+            .map_ok(move |results| results.into_iter())
             .instrument_await(format!("shared_buffer_compact_compaction_group {}", id)),
         );
     }
-    // Note that the output is reordered compared with input `payload`.
-    let result = try_join_all(futures)
-        .await?
+
+    let old_value_payload = payload
         .into_iter()
-        .flatten()
+        .filter(|imm| imm.has_old_value())
         .collect_vec();
-    Ok(result)
+
+    let old_value_future = async {
+        if old_value_payload.is_empty() {
+            Ok(vec![])
+        } else {
+            compact_shared_buffer::<false>(
+                context.clone(),
+                sstable_object_id_manager,
+                filter_key_extractor_manager,
+                old_value_payload,
+            )
+            .await
+        }
+    };
+
+    // Note that the output is reordered compared with input `payload`.
+    let (grouped_new_value_ssts, old_value_ssts) =
+        try_join(try_join_all(new_value_futures), old_value_future).await?;
+
+    let new_value_ssts = grouped_new_value_ssts.into_iter().flatten().collect_vec();
+    Ok(UploadTaskOutput {
+        new_value_ssts,
+        old_value_ssts,
+        wait_poll_timer: None,
+    })
 }
 
 /// For compaction from shared buffer to level 0, this is the only function gets called.
-async fn compact_shared_buffer(
+///
+/// The `IS_NEW_VALUE` flag means for the given payload, we are doing compaction using its new value or old value.
+/// When `IS_NEW_VALUE` is false, we are compacting with old value, and the payload imms should have `old_values` not `None`
+async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
     context: CompactorContext,
     sstable_object_id_manager: SstableObjectIdManagerRef,
     filter_key_extractor_manager: FilterKeyExtractorManager,
-    mut payload: UploadTaskPayload,
+    mut payload: Vec<ImmutableMemtable>,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
+    if !IS_NEW_VALUE {
+        assert!(payload.iter().all(|imm| imm.has_old_value()));
+    }
     // Local memory compaction looks at all key ranges.
 
     let mut existing_table_ids: HashSet<u32> = payload
@@ -149,7 +168,7 @@ async fn compact_shared_buffer(
     });
 
     let total_key_count = payload.iter().map(|imm| imm.key_count()).sum::<usize>();
-    let (splits, sub_compaction_sstable_size, split_weight_by_vnode) =
+    let (splits, sub_compaction_sstable_size, table_vnode_partition) =
         generate_splits(&payload, &existing_table_ids, context.storage_opts.as_ref());
     let parallelism = splits.len();
     let mut compact_success = true;
@@ -157,14 +176,6 @@ async fn compact_shared_buffer(
     let mut compaction_futures = vec![];
     let use_block_based_filter = BlockedXor16FilterBuilder::is_kv_count_too_large(total_key_count);
 
-    let table_vnode_partition = if existing_table_ids.len() == 1 {
-        let table_id = existing_table_ids.iter().next().unwrap();
-        vec![(*table_id, split_weight_by_vnode)]
-            .into_iter()
-            .collect()
-    } else {
-        BTreeMap::default()
-    };
     for (split_index, key_range) in splits.into_iter().enumerate() {
         let compactor = SharedBufferCompactRunner::new(
             split_index,
@@ -177,7 +188,7 @@ async fn compact_shared_buffer(
         );
         let mut forward_iters = Vec::with_capacity(payload.len());
         for imm in &payload {
-            forward_iters.push(imm.clone().into_forward_iter());
+            forward_iters.push(imm.clone().into_directed_iter::<Forward, IS_NEW_VALUE>());
         }
         let compaction_executor = context.compaction_executor.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
@@ -300,7 +311,6 @@ async fn compact_shared_buffer(
 /// Merge multiple batches into a larger one
 pub async fn merge_imms_in_memory(
     table_id: TableId,
-    instance_id: LocalInstanceId,
     imms: Vec<ImmutableMemtable>,
     memory_tracker: Option<MemoryTracker>,
 ) -> ImmutableMemtable {
@@ -308,6 +318,28 @@ pub async fn merge_imms_in_memory(
     let mut merged_size = 0;
     assert!(imms.iter().rev().map(|imm| imm.batch_id()).is_sorted());
     let max_imm_id = imms[0].batch_id();
+
+    let has_old_value = imms[0].has_old_value();
+    // TODO: make sure that the corner case on switch_op_consistency is handled
+    // If the imm of a table id contains old value, all other imm of the same table id should have old value
+    assert!(imms.iter().all(|imm| imm.has_old_value() == has_old_value));
+
+    let (old_value_size, global_old_value_size) = if has_old_value {
+        (
+            imms.iter()
+                .map(|imm| imm.old_values().expect("has old value").size)
+                .sum(),
+            Some(
+                imms[0]
+                    .old_values()
+                    .expect("has old value")
+                    .global_old_value_size
+                    .clone(),
+            ),
+        )
+    } else {
+        (0, None)
+    };
 
     let mut imm_iters = Vec::with_capacity(imms.len());
     let key_count = imms.iter().map(|imm| imm.key_count()).sum();
@@ -336,6 +368,11 @@ pub async fn merge_imms_in_memory(
 
     let mut merged_entries: Vec<SharedBufferKeyEntry> = Vec::with_capacity(key_count);
     let mut values: Vec<VersionedSharedBufferValue> = Vec::with_capacity(value_count);
+    let mut old_values: Option<Vec<Bytes>> = if has_old_value {
+        Some(Vec::with_capacity(value_count))
+    } else {
+        None
+    };
 
     merged_entries.push(SharedBufferKeyEntry {
         key: first_item_key.clone(),
@@ -380,34 +417,47 @@ pub async fn merge_imms_in_memory(
                 .iter()
                 .map(|(epoch_with_gap, value)| (*epoch_with_gap, value.clone())),
         );
+        if let Some(old_values) = &mut old_values {
+            old_values.extend(key_entry.old_values.expect("should exist").iter().cloned())
+        }
         mi.advance_peek_to_next_key();
         // Since there is no blocking point in this method, but it is cpu intensive, we call this method
         // to do cooperative scheduling
         tokio::task::consume_budget().await;
     }
 
+    let old_values = old_values.map(|old_values| {
+        SharedBufferBatchOldValues::new(
+            old_values,
+            old_value_size,
+            global_old_value_size.expect("should exist when has old value"),
+        )
+    });
+
     SharedBufferBatch {
         inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
             epochs,
             merged_entries,
             values,
+            old_values,
             merged_size,
             max_imm_id,
             memory_tracker,
         )),
         table_id,
-        instance_id,
     }
 }
 
 ///  Based on the incoming payload and opts, calculate the sharding method and sstable size of shared buffer compaction.
 fn generate_splits(
-    payload: &UploadTaskPayload,
+    payload: &Vec<ImmutableMemtable>,
     existing_table_ids: &HashSet<u32>,
     storage_opts: &StorageOpts,
-) -> (Vec<KeyRange>, u64, u32) {
+) -> (Vec<KeyRange>, u64, BTreeMap<u32, u32>) {
     let mut size_and_start_user_keys = vec![];
     let mut compact_data_size = 0;
+    let mut table_size_infos: HashMap<u32, u64> = HashMap::default();
+    let mut table_vnode_partition = BTreeMap::default();
     for imm in payload {
         let data_size = {
             // calculate encoded bytes of key var length
@@ -415,6 +465,8 @@ fn generate_splits(
         };
         compact_data_size += data_size;
         size_and_start_user_keys.push((data_size, imm.start_user_key()));
+        let v = table_size_infos.entry(imm.table_id.table_id).or_insert(0);
+        *v += data_size;
     }
     size_and_start_user_keys.sort_by(|a, b| a.1.cmp(&b.1));
     let mut splits = Vec::with_capacity(size_and_start_user_keys.len());
@@ -424,6 +476,7 @@ fn generate_splits(
         splits.push(KeyRange::new(key_before_last.clone(), Bytes::new()));
     };
     let sstable_size = (storage_opts.sstable_size_mb as u64) << 20;
+    let min_sstable_size = (storage_opts.min_sstable_size_mb as u64) << 20;
     let parallel_compact_size = (storage_opts.parallel_compact_size_mb as u64) << 20;
     let parallelism = std::cmp::min(
         storage_opts.share_buffers_sync_parallelism as u64,
@@ -435,7 +488,6 @@ fn generate_splits(
         compact_data_size
     };
 
-    let mut vnode_partition_count = 0;
     if existing_table_ids.len() > 1 {
         if parallelism > 1 && compact_data_size > sstable_size {
             let mut last_buffer_size = 0;
@@ -460,23 +512,14 @@ fn generate_splits(
                 }
             }
         }
-    } else {
-        // Collect vnodes in imm
-        let mut vnodes = vec![];
-        for imm in payload {
-            vnodes.extend(imm.collect_vnodes());
-        }
-        vnodes.sort();
-        vnodes.dedup();
 
-        // Based on the estimated `vnode_avg_size`, calculate the required `vnode_partition_count` to avoid small files and further align
-        const MIN_SSTABLE_SIZE: u64 = 16 * 1024 * 1024;
-        if compact_data_size >= MIN_SSTABLE_SIZE && !vnodes.is_empty() {
-            let mut avg_vnode_size = compact_data_size / (vnodes.len() as u64);
-            vnode_partition_count = VirtualNode::COUNT;
-            while avg_vnode_size < MIN_SSTABLE_SIZE && vnode_partition_count > 0 {
-                vnode_partition_count /= 2;
-                avg_vnode_size *= 2;
+        // Meta node will calculate size of each state-table in one task in `risingwave_meta::hummock::manager::compaction::calculate_vnode_partition`.
+        // To make the calculate result more accurately we shall split the large state-table from other small ones.
+        for table_id in existing_table_ids {
+            if let Some(table_size) = table_size_infos.get(table_id)
+                && *table_size > min_sstable_size
+            {
+                table_vnode_partition.insert(*table_id, 1);
             }
         }
     }
@@ -484,11 +527,7 @@ fn generate_splits(
     // mul 1.2 for other extra memory usage.
     // Ensure that the size of each sstable is still less than `sstable_size` after optimization to avoid generating a huge size sstable which will affect the object store
     let sub_compaction_sstable_size = std::cmp::min(sstable_size, sub_compaction_data_size * 6 / 5);
-    (
-        splits,
-        sub_compaction_sstable_size,
-        vnode_partition_count as u32,
-    )
+    (splits, sub_compaction_sstable_size, table_vnode_partition)
 }
 
 pub struct SharedBufferCompactRunner {
@@ -564,7 +603,7 @@ mod tests {
     use risingwave_hummock_sdk::key::{prefix_slice_with_vnode, TableKey};
 
     use crate::hummock::compactor::shared_buffer_compact::generate_splits;
-    use crate::hummock::value::HummockValue;
+    use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferValue;
     use crate::mem_table::ImmutableMemtable;
     use crate::opts::StorageOpts;
 
@@ -582,7 +621,7 @@ mod tests {
             0,
             vec![(
                 generate_key("dddd"),
-                HummockValue::put(Bytes::from_static(b"v3")),
+                SharedBufferValue::Insert(Bytes::from_static(b"v3")),
             )],
             1024 * 1024,
             TableId::new(1),
@@ -592,7 +631,7 @@ mod tests {
             0,
             vec![(
                 generate_key("abb"),
-                HummockValue::put(Bytes::from_static(b"v3")),
+                SharedBufferValue::Insert(Bytes::from_static(b"v3")),
             )],
             (1024 + 256) * 1024,
             TableId::new(1),
@@ -603,7 +642,7 @@ mod tests {
             0,
             vec![(
                 generate_key("abc"),
-                HummockValue::put(Bytes::from_static(b"v2")),
+                SharedBufferValue::Insert(Bytes::from_static(b"v2")),
             )],
             (1024 + 512) * 1024,
             TableId::new(1),
@@ -613,7 +652,7 @@ mod tests {
             0,
             vec![(
                 generate_key("aaa"),
-                HummockValue::put(Bytes::from_static(b"v3")),
+                SharedBufferValue::Insert(Bytes::from_static(b"v3")),
             )],
             (1024 + 512) * 1024,
             TableId::new(1),
@@ -624,7 +663,7 @@ mod tests {
             0,
             vec![(
                 generate_key("aaa"),
-                HummockValue::put(Bytes::from_static(b"v3")),
+                SharedBufferValue::Insert(Bytes::from_static(b"v3")),
             )],
             (1024 + 256) * 1024,
             TableId::new(2),
@@ -637,13 +676,13 @@ mod tests {
             ..Default::default()
         };
         let payload = vec![imm1, imm2, imm3, imm4, imm5];
-        let (splits, _sstable_capacity, vnode) =
+        let (splits, _sstable_capacity, vnodes) =
             generate_splits(&payload, &HashSet::from_iter([1, 2]), &storage_opts);
         assert_eq!(
             splits.len(),
             storage_opts.share_buffers_sync_parallelism as usize
         );
-        assert_eq!(vnode, 0);
+        assert!(vnodes.is_empty());
         for i in 1..splits.len() {
             assert_eq!(splits[i].left, splits[i - 1].right);
             assert!(splits[i].left > splits[i - 1].left);

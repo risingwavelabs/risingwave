@@ -285,10 +285,6 @@ fn build_fragment(
                 current_fragment.fragment_type_mask |= FragmentTypeFlag::Sink as u32
             }
 
-            NodeBody::Subscription(_) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::Subscription as u32
-            }
-
             NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 
             NodeBody::StreamScan(node) => {
@@ -312,7 +308,7 @@ fn build_fragment(
                 // memorize upstream source id for later use
                 state
                     .dependent_table_ids
-                    .insert(TableId::new(node.upstream_source_id));
+                    .insert(node.upstream_source_id.into());
                 current_fragment
                     .upstream_table_ids
                     .push(node.upstream_source_id);

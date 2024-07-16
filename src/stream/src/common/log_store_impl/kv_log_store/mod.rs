@@ -14,11 +14,13 @@
 
 use std::sync::Arc;
 
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
+use risingwave_common::metrics::{
+    LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
+};
 use risingwave_connector::sink::log_store::LogStoreFactory;
-use risingwave_connector::sink::{SinkParam, SinkWriterParam};
+use risingwave_connector::sink::SinkParam;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::store::{NewLocalOptions, OpConsistencyLevel};
 use risingwave_storage::StateStore;
@@ -74,6 +76,10 @@ pub(crate) struct KvLogStoreMetrics {
     pub storage_write_size: LabelGuardedIntCounter<3>,
     pub rewind_count: LabelGuardedIntCounter<3>,
     pub rewind_delay: LabelGuardedHistogram<3>,
+    pub buffer_unconsumed_item_count: LabelGuardedIntGauge<3>,
+    pub buffer_unconsumed_row_count: LabelGuardedIntGauge<3>,
+    pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge<3>,
+    pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge<3>,
     pub persistent_log_read_metrics: KvLogStoreReadMetrics,
     pub flushed_buffer_read_metrics: KvLogStoreReadMetrics,
 }
@@ -81,11 +87,11 @@ pub(crate) struct KvLogStoreMetrics {
 impl KvLogStoreMetrics {
     pub(crate) fn new(
         metrics: &StreamingMetrics,
-        writer_param: &SinkWriterParam,
+        identity: &String,
         sink_param: &SinkParam,
         connector: &'static str,
     ) -> Self {
-        let executor_id = format!("{}", writer_param.executor_id);
+        let executor_id = identity;
         let sink_id = format!("{}", sink_param.sink_id.sink_id);
         let labels = &[executor_id.as_str(), connector, sink_id.as_str()];
         let storage_write_size = metrics
@@ -140,10 +146,27 @@ impl KvLogStoreMetrics {
             .kv_log_store_rewind_delay
             .with_guarded_label_values(labels);
 
+        let buffer_unconsumed_item_count = metrics
+            .kv_log_store_buffer_unconsumed_item_count
+            .with_guarded_label_values(labels);
+        let buffer_unconsumed_row_count = metrics
+            .kv_log_store_buffer_unconsumed_row_count
+            .with_guarded_label_values(labels);
+        let buffer_unconsumed_epoch_count = metrics
+            .kv_log_store_buffer_unconsumed_epoch_count
+            .with_guarded_label_values(labels);
+        let buffer_unconsumed_min_epoch = metrics
+            .kv_log_store_buffer_unconsumed_min_epoch
+            .with_guarded_label_values(labels);
+
         Self {
             storage_write_size,
             rewind_count,
             storage_write_count,
+            buffer_unconsumed_item_count,
+            buffer_unconsumed_row_count,
+            buffer_unconsumed_epoch_count,
+            buffer_unconsumed_min_epoch,
             persistent_log_read_metrics: KvLogStoreReadMetrics {
                 storage_read_size: persistent_log_read_size,
                 storage_read_count: persistent_log_read_count,
@@ -161,6 +184,10 @@ impl KvLogStoreMetrics {
         KvLogStoreMetrics {
             storage_write_count: LabelGuardedIntCounter::test_int_counter(),
             storage_write_size: LabelGuardedIntCounter::test_int_counter(),
+            buffer_unconsumed_item_count: LabelGuardedIntGauge::test_int_gauge(),
+            buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge(),
+            buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge(),
+            buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge(),
             rewind_count: LabelGuardedIntCounter::test_int_counter(),
             rewind_delay: LabelGuardedHistogram::test_histogram(),
             persistent_log_read_metrics: KvLogStoreReadMetrics::for_test(),
@@ -369,7 +396,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             })
             .await;
 
-        let (tx, rx) = new_log_store_buffer(self.max_row_count);
+        let (tx, rx) = new_log_store_buffer(self.max_row_count, self.metrics.clone());
 
         let reader = KvLogStoreReader::new(
             table_id,
@@ -397,6 +424,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::future::{poll_fn, Future};
     use std::iter::empty;
     use std::pin::pin;
@@ -405,13 +433,14 @@ mod tests {
 
     use itertools::Itertools;
     use risingwave_common::array::StreamChunk;
-    use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+    use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
+    use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{EpochExt, EpochPair};
     use risingwave_connector::sink::log_store::{
         ChunkId, LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, TruncateOffset,
     };
-    use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
+    use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
     use risingwave_storage::hummock::HummockStorage;
     use risingwave_storage::StateStore;
@@ -468,20 +497,25 @@ mod tests {
             .version()
             .max_committed_epoch
             .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
         writer.flush_current_epoch(epoch2, false).await.unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
         let epoch3 = epoch2.next_epoch();
         writer.flush_current_epoch(epoch3, true).await.unwrap();
 
         test_env.storage.seal_epoch(epoch1, false);
-        test_env.storage.seal_epoch(epoch2, true);
-        let sync_result: SyncResult = test_env.storage.sync(epoch2).await.unwrap();
+        let sync_result = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
         assert!(!sync_result.uncommitted_ssts.is_empty());
 
         reader.init().await.unwrap();
@@ -570,12 +604,18 @@ mod tests {
             .version()
             .max_committed_epoch
             .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
         writer.flush_current_epoch(epoch2, false).await.unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
         let epoch3 = epoch2.next_epoch();
@@ -629,7 +669,6 @@ mod tests {
         // The truncate does not work because it is after the sync
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch2 })
-            .await
             .unwrap();
         test_env
             .storage
@@ -653,6 +692,9 @@ mod tests {
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
+        test_env
+            .storage
+            .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new_test_epoch(epoch3), false)
             .await
@@ -751,6 +793,9 @@ mod tests {
             .version()
             .max_committed_epoch
             .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -758,6 +803,9 @@ mod tests {
         writer.write_chunk(stream_chunk1_1.clone()).await.unwrap();
         writer.write_chunk(stream_chunk1_2.clone()).await.unwrap();
         let epoch2 = epoch1.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
         writer.flush_current_epoch(epoch2, true).await.unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
 
@@ -821,7 +869,6 @@ mod tests {
                 epoch: epoch1,
                 chunk_id: chunk_id1,
             })
-            .await
             .unwrap();
         let epoch3 = epoch2.next_epoch();
         writer.flush_current_epoch(epoch3, true).await.unwrap();
@@ -859,6 +906,9 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
+        test_env
+            .storage
+            .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new_test_epoch(epoch3), false)
             .await
@@ -969,6 +1019,9 @@ mod tests {
             .version()
             .max_committed_epoch
             .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer1
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -983,6 +1036,9 @@ mod tests {
         writer1.write_chunk(chunk1_1.clone()).await.unwrap();
         writer2.write_chunk(chunk1_2.clone()).await.unwrap();
         let epoch2 = epoch1.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
         writer1.flush_current_epoch(epoch2, false).await.unwrap();
         writer2.flush_current_epoch(epoch2, false).await.unwrap();
         let [chunk2_1, chunk2_2] = gen_multi_vnode_stream_chunks::<2>(200, 100, pk_info);
@@ -1022,7 +1078,6 @@ mod tests {
         // Only reader1 will truncate
         reader1
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
-            .await
             .unwrap();
 
         match reader1.next_item().await.unwrap() {
@@ -1085,6 +1140,9 @@ mod tests {
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
+        test_env
+            .storage
+            .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new(epoch3, epoch2), false)
             .await
@@ -1154,6 +1212,9 @@ mod tests {
             .version()
             .max_committed_epoch
             .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -1291,15 +1352,24 @@ mod tests {
             .version()
             .max_committed_epoch
             .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
         writer.flush_current_epoch(epoch2, true).await.unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
         let epoch3 = epoch2.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
         writer.flush_current_epoch(epoch3, true).await.unwrap();
         writer.write_chunk(stream_chunk3.clone()).await.unwrap();
         writer.flush_current_epoch(u64::MAX, true).await.unwrap();
@@ -1333,7 +1403,6 @@ mod tests {
                 epoch: epoch1,
                 chunk_id: chunk_ids[0],
             })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader(
@@ -1350,7 +1419,6 @@ mod tests {
 
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader(
@@ -1369,7 +1437,6 @@ mod tests {
                 epoch: epoch3,
                 chunk_id: chunk_ids[1],
             })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader(&mut reader, [(epoch3, None)].iter()).await;
@@ -1391,6 +1458,9 @@ mod tests {
         let (mut reader, mut writer) = factory.build().await;
 
         let epoch4 = epoch3.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch4, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new(epoch4, epoch3), false)
             .await
@@ -1408,7 +1478,6 @@ mod tests {
 
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader(&mut reader, data[1..].iter()).await;
@@ -1419,7 +1488,6 @@ mod tests {
                 epoch: epoch2,
                 chunk_id: chunk_ids[0],
             })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader(&mut reader, data[1..].iter()).await;
@@ -1427,7 +1495,6 @@ mod tests {
 
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch2 })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader(&mut reader, data[2..].iter()).await;
@@ -1454,6 +1521,9 @@ mod tests {
             .unwrap();
         writer.write_chunk(stream_chunk4.clone()).await.unwrap();
         let epoch5 = epoch4 + 1;
+        test_env
+            .storage
+            .start_epoch(epoch5, HashSet::from_iter([TableId::new(table.id)]));
         writer.flush_current_epoch(epoch5, true).await.unwrap();
         writer.write_chunk(stream_chunk5.clone()).await.unwrap();
 
@@ -1476,7 +1546,6 @@ mod tests {
 
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[1..].iter()).await;
@@ -1487,7 +1556,6 @@ mod tests {
                 epoch: epoch2,
                 chunk_id: chunk_ids[0],
             })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[1..].iter()).await;
@@ -1495,7 +1563,6 @@ mod tests {
 
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch2 })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[2..].iter()).await;
@@ -1503,7 +1570,6 @@ mod tests {
 
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch3 })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[3..].iter()).await;
@@ -1514,7 +1580,6 @@ mod tests {
                 epoch: epoch4,
                 chunk_id: chunk_ids[0],
             })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader_last_unsealed(
@@ -1526,7 +1591,6 @@ mod tests {
 
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch4 })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids =
@@ -1538,10 +1602,246 @@ mod tests {
                 epoch: epoch5,
                 chunk_id: chunk_ids[0],
             })
-            .await
             .unwrap();
         reader.rewind().await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, empty()).await;
         assert!(chunk_ids.is_empty());
+    }
+
+    async fn validate_reader(
+        reader: &mut impl LogReader,
+        expected: impl IntoIterator<Item = (u64, LogStoreReadItem)>,
+    ) {
+        for (expected_epoch, expected_item) in expected {
+            let (epoch, item) = reader.next_item().await.unwrap();
+            assert_eq!(expected_epoch, epoch);
+            match (expected_item, item) {
+                (
+                    LogStoreReadItem::StreamChunk {
+                        chunk: expected_chunk,
+                        ..
+                    },
+                    LogStoreReadItem::StreamChunk { chunk, .. },
+                ) => {
+                    check_stream_chunk_eq(&expected_chunk, &chunk);
+                }
+                (
+                    LogStoreReadItem::Barrier {
+                        is_checkpoint: expected_is_checkpoint,
+                    },
+                    LogStoreReadItem::Barrier { is_checkpoint },
+                ) => {
+                    assert_eq!(expected_is_checkpoint, is_checkpoint);
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_truncate_historical() {
+        #[expect(deprecated)]
+        test_truncate_historical_inner(
+            10,
+            &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
+        )
+        .await;
+        test_truncate_historical_inner(10, &KV_LOG_STORE_V2_INFO).await;
+    }
+
+    async fn test_truncate_historical_inner(
+        max_row_count: usize,
+        pk_info: &'static KvLogStorePkInfo,
+    ) {
+        let gen_stream_chunk = |base| gen_stream_chunk_with_info(base, pk_info);
+        let test_env = prepare_hummock_test_env().await;
+
+        let table = gen_test_log_store_table(pk_info);
+
+        test_env.register_table(table.clone()).await;
+
+        let stream_chunk1 = gen_stream_chunk(0);
+        let stream_chunk2 = gen_stream_chunk(10);
+        let bitmap = calculate_vnode_bitmap(stream_chunk1.rows().chain(stream_chunk2.rows()));
+        let bitmap = Arc::new(bitmap);
+
+        let factory = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            Some(bitmap.clone()),
+            max_row_count,
+            KvLogStoreMetrics::for_test(),
+            "test",
+            pk_info,
+        );
+        let (mut reader, mut writer) = factory.build().await;
+
+        let epoch1 = test_env
+            .storage
+            .get_pinned_version()
+            .version()
+            .max_committed_epoch
+            .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
+        writer
+            .init(EpochPair::new_test_epoch(epoch1), false)
+            .await
+            .unwrap();
+        writer.write_chunk(stream_chunk1.clone()).await.unwrap();
+        let epoch2 = epoch1.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
+        writer.flush_current_epoch(epoch2, false).await.unwrap();
+        writer.write_chunk(stream_chunk2.clone()).await.unwrap();
+        let epoch3 = epoch2.next_epoch();
+        writer.flush_current_epoch(epoch3, true).await.unwrap();
+
+        test_env.storage.seal_epoch(epoch1, false);
+        test_env.commit_epoch(epoch2).await;
+
+        reader.init().await.unwrap();
+        validate_reader(
+            &mut reader,
+            [
+                (
+                    epoch1,
+                    LogStoreReadItem::StreamChunk {
+                        chunk: stream_chunk1.clone(),
+                        chunk_id: 0,
+                    },
+                ),
+                (
+                    epoch1,
+                    LogStoreReadItem::Barrier {
+                        is_checkpoint: false,
+                    },
+                ),
+                (
+                    epoch2,
+                    LogStoreReadItem::StreamChunk {
+                        chunk: stream_chunk2.clone(),
+                        chunk_id: 0,
+                    },
+                ),
+                (
+                    epoch2,
+                    LogStoreReadItem::Barrier {
+                        is_checkpoint: true,
+                    },
+                ),
+            ],
+        )
+        .await;
+
+        drop(writer);
+
+        // Recovery
+        test_env.storage.clear_shared_buffer(epoch2).await;
+
+        // Rebuild log reader and writer in recovery
+        let factory = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            Some(bitmap.clone()),
+            max_row_count,
+            KvLogStoreMetrics::for_test(),
+            "test",
+            pk_info,
+        );
+        let (mut reader, mut writer) = factory.build().await;
+        test_env
+            .storage
+            .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
+        writer
+            .init(EpochPair::new_test_epoch(epoch3), false)
+            .await
+            .unwrap();
+        reader.init().await.unwrap();
+        validate_reader(
+            &mut reader,
+            [
+                (
+                    epoch1,
+                    LogStoreReadItem::StreamChunk {
+                        chunk: stream_chunk1.clone(),
+                        chunk_id: 0,
+                    },
+                ),
+                (
+                    epoch1,
+                    LogStoreReadItem::Barrier {
+                        is_checkpoint: false,
+                    },
+                ),
+                (
+                    epoch2,
+                    LogStoreReadItem::StreamChunk {
+                        chunk: stream_chunk2.clone(),
+                        chunk_id: 0,
+                    },
+                ),
+                (
+                    epoch2,
+                    LogStoreReadItem::Barrier {
+                        is_checkpoint: true,
+                    },
+                ),
+            ],
+        )
+        .await;
+        // The truncate should take effect
+        reader
+            .truncate(TruncateOffset::Barrier { epoch: epoch1 })
+            .unwrap();
+        let epoch4 = epoch3.next_epoch();
+        writer.flush_current_epoch(epoch4, true).await.unwrap();
+        test_env.commit_epoch(epoch3).await;
+
+        drop(writer);
+
+        // Recovery
+        test_env.storage.clear_shared_buffer(epoch3).await;
+
+        // Rebuild log reader and writer in recovery
+        let factory = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            Some(bitmap),
+            max_row_count,
+            KvLogStoreMetrics::for_test(),
+            "test",
+            pk_info,
+        );
+        let (mut reader, mut writer) = factory.build().await;
+        test_env
+            .storage
+            .start_epoch(epoch4, HashSet::from_iter([TableId::new(table.id)]));
+        writer
+            .init(EpochPair::new_test_epoch(epoch4), false)
+            .await
+            .unwrap();
+        reader.init().await.unwrap();
+        validate_reader(
+            &mut reader,
+            [
+                (
+                    epoch2,
+                    LogStoreReadItem::StreamChunk {
+                        chunk: stream_chunk2.clone(),
+                        chunk_id: 0,
+                    },
+                ),
+                (
+                    epoch2,
+                    LogStoreReadItem::Barrier {
+                        is_checkpoint: true,
+                    },
+                ),
+            ],
+        )
+        .await;
     }
 }

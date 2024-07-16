@@ -63,7 +63,7 @@ pub fn generate_with_options_yaml_sink() -> String {
 /// the generated `yaml` might be inconsistent with the actual parsing logic.
 /// TODO: improve the test to check whether serde is used.
 ///
-/// - For sources, the parsing logic is in `TryFromHashMap`.
+/// - For sources, the parsing logic is in `TryFromBTreeMap`.
 /// - For sinks, the parsing logic is in `TryFrom<SinkParam>`.
 fn generate_with_options_yaml_inner(path: &Path) -> String {
     let mut structs = vec![];
@@ -191,15 +191,15 @@ struct FieldInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     default: Option<String>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    alias: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    alias: Vec<String>,
 }
 
 #[derive(Default)]
 struct SerdeProperties {
     default_func: Option<String>,
     rename: Option<String>,
-    alias: Option<String>,
+    alias: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -270,7 +270,7 @@ fn extract_serde_properties(field: &Field) -> SerdeProperties {
                                 }
                             } else if path.is_ident("alias") {
                                 if let Lit::Str(lit_str) = lit {
-                                    serde_props.alias = Some(lit_str.value());
+                                    serde_props.alias.push(lit_str.value());
                                 }
                             } else if path.is_ident("default") {
                                 if let Lit::Str(lit_str) = lit {

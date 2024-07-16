@@ -12,16 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use risingwave_common::catalog::{
     default_key_column_name_version_mapping, TableId, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
-use risingwave_connector::source::{
-    should_copy_to_format_encode_options, SourceCtrlOpts, UPSTREAM_SOURCE_KEY,
-};
-use risingwave_connector::WithPropertiesExt;
+use risingwave_connector::source::{should_copy_to_format_encode_options, UPSTREAM_SOURCE_KEY};
+use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_pb::catalog::PbStreamSourceInfo;
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
@@ -48,7 +44,7 @@ pub fn create_source_desc_builder(
     params: &ExecutorParams,
     source_info: PbStreamSourceInfo,
     row_id_index: Option<u32>,
-    with_properties: HashMap<String, String>,
+    with_properties: WithOptionsSecResolved,
 ) -> SourceDescBuilder {
     {
         // compatible code: introduced in https://github.com/risingwavelabs/risingwave/pull/13707
@@ -120,7 +116,6 @@ pub fn create_source_desc_builder(
         row_id_index.map(|x| x as _),
         with_properties,
         source_info,
-        params.env.connector_params(),
         params.env.config().developer.connector_message_buffer_size,
         // `pk_indices` is used to ensure that a message will be skipped instead of parsed
         // with null pk when the pk column is missing.
@@ -171,18 +166,18 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     );
                 }
 
+                let with_properties = WithOptionsSecResolved::new(
+                    source.with_properties.clone(),
+                    source.secret_refs.clone(),
+                );
+
                 let source_desc_builder = create_source_desc_builder(
                     source.columns.clone(),
                     &params,
                     source_info,
                     source.row_id_index,
-                    source.with_properties.clone(),
+                    with_properties,
                 );
-
-                let source_ctrl_opts = SourceCtrlOpts {
-                    chunk_size: params.env.config().developer.chunk_size,
-                    rate_limit: source.rate_limit.map(|x| x as _),
-                };
 
                 let source_column_ids: Vec<_> = source_desc_builder
                     .column_catalogs_to_source_column_descs()
@@ -219,7 +214,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         params.executor_stats,
                         barrier_receiver,
                         system_params,
-                        source_ctrl_opts,
+                        source.rate_limit,
                     )?
                     .boxed()
                 } else if is_fs_v2_connector {
@@ -229,17 +224,19 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,
-                        source_ctrl_opts.clone(),
+                        source.rate_limit,
                     )
                     .boxed()
                 } else {
+                    let is_shared = source.info.as_ref().is_some_and(|info| info.is_shared());
                     SourceExecutor::new(
                         params.actor_context.clone(),
                         Some(stream_source_core),
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,
-                        source_ctrl_opts.clone(),
+                        source.rate_limit,
+                        is_shared,
                     )
                     .boxed()
                 }
@@ -268,11 +265,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 params.executor_stats,
                 barrier_receiver,
                 system_params,
-                // we don't expect any data in, so no need to set chunk_sizes
-                SourceCtrlOpts {
-                    chunk_size: 0,
-                    rate_limit: None,
-                },
+                None,
+                false,
             );
             Ok((params.info, exec).into())
         }

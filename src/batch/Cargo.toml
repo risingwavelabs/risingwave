@@ -16,10 +16,12 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 arrow-array = { workspace = true }
+arrow-array-iceberg = { workspace = true }
 arrow-schema = { workspace = true }
 assert_matches = "1"
 async-recursion = "1"
 async-trait = "0.1"
+bytes = "1"
 either = "1"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -27,12 +29,15 @@ futures-async-stream = { workspace = true }
 futures-util = "0.3"
 hashbrown = { workspace = true }
 hytra = "0.1.2"
-icelake = { workspace = true }
+iceberg = { workspace = true }
 itertools = { workspace = true }
 memcomparable = "0.2"
+opendal = { workspace = true }
 parking_lot = { workspace = true }
+parquet = { workspace = true }
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
+prost = "0.12"
 rand = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
@@ -62,6 +67,8 @@ tokio-stream = "0.1"
 tokio-util = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
+twox-hash = "1"
+uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

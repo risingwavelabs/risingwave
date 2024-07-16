@@ -17,11 +17,11 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::parser::additional_columns::add_partition_offset_cols;
+use risingwave_connector::parser::additional_columns::source_add_partition_offset_cols;
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::PbStreamNode;
 
@@ -58,12 +58,13 @@ impl StreamSourceScan {
         if let Some(source_catalog) = &core.catalog
             && source_catalog.info.is_shared()
         {
-            let (columns_exist, additional_columns) =
-                add_partition_offset_cols(&core.column_catalog, &source_catalog.connector_name());
-            for (existed, mut c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
-                c.is_hidden = true;
+            let (columns_exist, additional_columns) = source_add_partition_offset_cols(
+                &core.column_catalog,
+                &source_catalog.connector_name(),
+            );
+            for (existed, c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
                 if !existed {
-                    core.column_catalog.push(c);
+                    core.column_catalog.push(ColumnCatalog::hidden(c));
                 }
             }
         }
@@ -94,13 +95,9 @@ impl StreamSourceScan {
             .expect("source scan should have source cataglog")
     }
 
+    /// The state is different from but similar to `StreamSource`.
+    /// Refer to [`generic::Source::infer_internal_table_catalog`] for more details.
     pub fn infer_internal_table_catalog() -> TableCatalog {
-        // note that source's internal table is to store partition_id -> offset mapping and its
-        // schema is irrelevant to input schema
-        // On the premise of ensuring that the materialized_source data can be cleaned up, keep the
-        // state in source.
-        // Source state doesn't maintain retention_seconds, internal_table_subset function only
-        // returns retention_seconds so default is used here
         let mut builder = TableCatalogBuilder::default();
 
         let key = Field {
@@ -119,7 +116,7 @@ impl StreamSourceScan {
         let ordered_col_idx = builder.add_column(&key);
         builder.add_column(&value);
         builder.add_order_column(ordered_col_idx, OrderType::ascending());
-        // read prefix hint is 0. We need to scan all data in the state table.
+        // Hacky: read prefix hint is 0, because we need to scan all data in the state table.
         builder.build(vec![], 0)
     }
 
@@ -142,6 +139,7 @@ impl StreamSourceScan {
             .collect_vec();
 
         let source_catalog = self.source_catalog();
+        let (with_properties, secret_refs) = source_catalog.with_properties.clone().into_parts();
         let backfill = SourceBackfillNode {
             upstream_source_id: source_catalog.id,
             source_name: source_catalog.name.clone(),
@@ -158,8 +156,9 @@ impl StreamSourceScan {
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
-            with_properties: source_catalog.with_properties.clone().into_iter().collect(),
+            with_properties,
             rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+            secret_refs,
         };
 
         let fields = self.schema().to_prost();

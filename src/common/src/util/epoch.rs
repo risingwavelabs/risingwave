@@ -77,6 +77,10 @@ impl Epoch {
         Epoch((mi - UNIX_RISINGWAVE_DATE_SEC * 1000) << EPOCH_PHYSICAL_SHIFT_BITS)
     }
 
+    pub fn from_unix_millis_or_earliest(mi: u64) -> Self {
+        Epoch((mi.saturating_sub(UNIX_RISINGWAVE_DATE_SEC * 1000)) << EPOCH_PHYSICAL_SHIFT_BITS)
+    }
+
     pub fn physical_now() -> u64 {
         UNIX_RISINGWAVE_DATE_EPOCH
             .elapsed()
@@ -174,10 +178,11 @@ impl EpochPair {
         Self::new(curr, curr - EPOCH_INC_MIN_STEP_FOR_TEST)
     }
 }
-/// As most unit tests initializ a new epoch from a random value (e.g. 1, 2, 233 etc.), but the correct epoch in the system is a u64 with the last `EPOCH_AVAILABLE_BITS` bits set to 0.
+
+/// As most unit tests initialize a new epoch from a random value (e.g. 1, 2, 233 etc.), but the correct epoch in the system is a u64 with the last `EPOCH_AVAILABLE_BITS` bits set to 0.
 /// This method is to turn a a random epoch into a well shifted value.
-pub const fn test_epoch(value: u64) -> u64 {
-    value << EPOCH_AVAILABLE_BITS
+pub const fn test_epoch(value_millis: u64) -> u64 {
+    value_millis << EPOCH_AVAILABLE_BITS
 }
 
 /// There are numerous operations in our system's unit tests that involve incrementing or decrementing the epoch.

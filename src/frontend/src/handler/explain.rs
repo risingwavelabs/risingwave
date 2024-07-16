@@ -21,9 +21,7 @@ use thiserror_ext::AsReport;
 
 use super::create_index::{gen_create_index_plan, resolve_index_schema};
 use super::create_mv::gen_create_mv_plan;
-use super::create_sink::{gen_sink_plan, get_partition_compute_info};
-use super::create_subscription::gen_subscription_plan;
-use super::create_table::ColumnIdGenerator;
+use super::create_sink::gen_sink_plan;
 use super::query::gen_batch_plan_by_statement;
 use super::util::SourceSchemaCompatExt;
 use super::{RwPgResponse, RwPgResponseBuilderExt};
@@ -67,14 +65,11 @@ async fn do_handle_explain(
                 wildcard_idx,
                 ..
             } => {
-                let col_id_gen = ColumnIdGenerator::new_initial();
-
                 let source_schema = source_schema.map(|s| s.into_v2_with_warning());
 
                 let (plan, _source, _table, _job_type) = handle_create_table_plan(
                     handler_args,
                     explain_options,
-                    col_id_gen,
                     source_schema,
                     cdc_table_info,
                     name.clone(),
@@ -92,9 +87,8 @@ async fn do_handle_explain(
                 (Ok(plan), context)
             }
             Statement::CreateSink { stmt } => {
-                let partition_info = get_partition_compute_info(&handler_args.with_options).await?;
-                let context = OptimizerContext::new(handler_args, explain_options);
-                let plan = gen_sink_plan(&session, context.into(), stmt, partition_info)
+                let plan = gen_sink_plan(handler_args, stmt, Some(explain_options))
+                    .await
                     .map(|plan| plan.sink_plan)?;
                 let context = plan.ctx();
                 (Ok(plan), context)
@@ -135,9 +129,11 @@ async fn do_handle_explain(
                         ).into());
                     }
 
-                    Statement::CreateSubscription { stmt } => {
-                        gen_subscription_plan(&session, context.clone(), stmt)
-                            .map(|plan| plan.subscription_plan)
+                    Statement::CreateSubscription { .. } => {
+                        return Err(ErrorCode::NotSupported(
+                            "EXPLAIN CREATE SUBSCRIPTION".into(),
+                            "A created SUBSCRIPTION only incremental data queries on the table, not supported EXPLAIN".into()
+                        ).into());
                     }
                     Statement::CreateIndex {
                         name,

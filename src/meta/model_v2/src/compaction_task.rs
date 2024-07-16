@@ -14,7 +14,6 @@
 
 use risingwave_pb::hummock::{CompactTask as PbCompactTask, CompactTaskAssignment};
 use sea_orm::entity::prelude::*;
-use serde::{Deserialize, Serialize};
 
 use crate::{CompactionTaskId, WorkerId};
 

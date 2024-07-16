@@ -20,6 +20,7 @@ chrono = "0.4"
 clap = { workspace = true }
 comfy-table = "7"
 etcd-client = { workspace = true }
+foyer ={ workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 inquire = "0.7.0"
@@ -54,6 +55,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
+tonic = { workspace = true }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 

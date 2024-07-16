@@ -20,4 +20,4 @@ SELECT oid,relname,relowner,relkind FROM pg_catalog.pg_class ORDER BY oid limit 
 query ITIT
 SELECT oid,relname,relowner,relkind FROM pg_catalog.pg_class WHERE oid = 'pg_namespace'::regclass;
 ----
-2147478671 pg_namespace 1 v
+2147478670 pg_namespace 1 v

@@ -15,6 +15,7 @@
 use risingwave_batch::error::BatchError;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, NoFunction, NotImplemented};
+use risingwave_common::secret::SecretError;
 use risingwave_common::session_config::SessionConfigError;
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_connector::error::ConnectorError;
@@ -164,6 +165,12 @@ pub enum ErrorCode {
         #[backtrace]
         SessionConfigError,
     ),
+    #[error("Secret error: {0}")]
+    SecretError(
+        #[from]
+        #[backtrace]
+        SecretError,
+    ),
     #[error("{0} has been deprecated, please use {1} instead.")]
     Deprecated(String, String),
 }
@@ -235,5 +242,15 @@ impl From<BatchError> for RwError {
 impl From<JoinError> for RwError {
     fn from(join_error: JoinError) -> Self {
         ErrorCode::Uncategorized(join_error.into()).into()
+    }
+}
+
+// For errors without a concrete type, put them into `Uncategorized`.
+impl From<BoxedError> for RwError {
+    fn from(e: BoxedError) -> Self {
+        // Show that the error is of `BoxedKind`, instead of `AdhocKind` which loses the sources.
+        // This is essentially expanded from `anyhow::anyhow!(e)`.
+        let e = anyhow::__private::kind::BoxedKind::anyhow_kind(&e).new(e);
+        ErrorCode::Uncategorized(e).into()
     }
 }

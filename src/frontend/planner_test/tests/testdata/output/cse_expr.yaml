@@ -67,7 +67,7 @@
           └─BatchSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v)), sum0(count(t.v))] }
             └─BatchExchange { order: [], dist: Single }
               └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v), count(t.v)] }
-                └─BatchProject { exprs: [t.v, (t.v * t.v) as $expr1] }
+                └─BatchProject { exprs: [(t.v * t.v) as $expr1, t.v] }
                   └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [stddev_pop, stddev_samp, var_pop, var_samp], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
@@ -78,7 +78,7 @@
             └─StreamSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v)), sum0(count(t.v)), count] }
               └─StreamExchange { dist: Single }
                 └─StreamStatelessSimpleAgg { aggs: [sum($expr1), sum(t.v), count(t.v)] }
-                  └─StreamProject { exprs: [t.v, (t.v * t.v) as $expr1, t._row_id] }
+                  └─StreamProject { exprs: [(t.v * t.v) as $expr1, t.v, t._row_id] }
                     └─StreamTableScan { table: t, columns: [t.v, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: Common sub expression shouldn't extract partial expression of `some`/`all`. See 11766
   sql: |

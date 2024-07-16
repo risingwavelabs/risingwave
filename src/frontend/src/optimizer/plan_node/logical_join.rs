@@ -418,6 +418,7 @@ impl LogicalJoin {
             .collect_vec();
 
         let new_scan_output_column_ids = new_scan.output_column_ids();
+        let as_of = new_scan.as_of.clone();
 
         // Construct a new logical join, because we have change its RHS.
         let new_logical_join = generic::Join::new(
@@ -435,6 +436,7 @@ impl LogicalJoin {
             new_scan_output_column_ids,
             lookup_prefix_len,
             false,
+            as_of,
         ))
     }
 
@@ -1339,10 +1341,9 @@ impl ToStream for LogicalJoin {
         } else {
             Err(RwError::from(ErrorCode::NotSupported(
                 "streaming nested-loop join".to_string(),
-                // TODO: replace the link with user doc
                 "The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. \
                  Consider rewriting the query to use dynamic filter as a substitute if possible.\n\
-                 See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md".to_owned(),
+                 See also: https://docs.risingwave.com/docs/current/sql-pattern-dynamic-filters/".to_owned(),
             )))
         }
     }
@@ -1452,7 +1453,7 @@ impl ToStream for LogicalJoin {
                 )
                 .collect_vec();
             let plan: PlanRef = join_with_pk.into();
-            LogicalFilter::filter_if_keys_all_null(plan, &left_right_stream_keys)
+            LogicalFilter::filter_out_all_null_keys(plan, &left_right_stream_keys)
         } else {
             join_with_pk.into()
         };
@@ -1472,7 +1473,7 @@ mod tests {
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
-    use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
+    use crate::expr::{assert_eq_input_ref, FunctionCall, Literal};
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;

@@ -20,10 +20,9 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
-use super::generic::{self, GenericPlanRef};
 use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary};
+use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary};
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -69,6 +68,7 @@ impl StreamDeltaJoin {
             let watermark_columns = from_left.bitand(&from_right);
             core.i2o_col_mapping().rewrite_bitset(&watermark_columns)
         };
+
         // TODO: derive from input
         let base = PlanBase::new_stream_with_core(
             &core,

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::ArrayError;
+use risingwave_common::secret::SecretError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
 use risingwave_expr::ExprError;
@@ -85,9 +86,14 @@ pub enum ErrorKind {
         actor_id: ActorId,
         reason: &'static str,
     },
-
+    #[error("Secret error: {0}")]
+    Secret(
+        #[from]
+        #[backtrace]
+        SecretError,
+    ),
     #[error(transparent)]
-    Internal(
+    Uncategorized(
         #[from]
         #[backtrace]
         anyhow::Error,

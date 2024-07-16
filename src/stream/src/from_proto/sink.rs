@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{ColumnCatalog, Schema};
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkType};
@@ -115,6 +116,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let db_name = sink_desc.get_db_name().into();
         let sink_from_name = sink_desc.get_sink_from_name().into();
         let properties = sink_desc.get_properties().clone();
+        let secret_refs = sink_desc.get_secret_refs().clone();
         let downstream_pk = sink_desc
             .downstream_pk
             .iter()
@@ -155,10 +157,15 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             },
         };
 
+        let properties_with_secret =
+            LocalSecretManager::global().fill_secrets(properties, secret_refs)?;
+
+        let format_desc_with_secret = SinkParam::fill_secret_for_format_desc(format_desc)?;
+
         let sink_param = SinkParam {
             sink_id,
             sink_name,
-            properties,
+            properties: properties_with_secret,
             columns: columns
                 .iter()
                 .filter(|col| !col.is_hidden)
@@ -166,7 +173,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 .collect(),
             downstream_pk,
             sink_type,
-            format_desc,
+            format_desc: format_desc_with_secret,
             db_name,
             sink_from_name,
         };
@@ -180,7 +187,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         );
 
         let sink_write_param = SinkWriterParam {
-            connector_params: params.env.connector_params(),
             executor_id: params.executor_id,
             vnode_bitmap: params.vnode_bitmap.clone(),
             meta_client: params.env.meta_client().map(SinkMetaClient::MetaClient),
@@ -215,7 +221,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             SinkLogStoreType::KvLogStore => {
                 let metrics = KvLogStoreMetrics::new(
                     &params.executor_stats,
-                    &sink_write_param,
+                    &params.info.identity,
                     &sink_param,
                     connector,
                 );
