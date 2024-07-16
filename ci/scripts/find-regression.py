@@ -43,7 +43,8 @@ steps:
   - wait
   - label: 'check'
     command: |
-        START_COMMIT={env['START_COMMIT']} END_COMMIT={env['END_COMMIT']} BISECT_BRANCH={env['BISECT_BRANCH']} BISECT_STEPS=\'{env['BISECT_STEPS']}\' ci/scripts/find-regression.py check'''
+        START_COMMIT={env['START_COMMIT']} END_COMMIT={env['END_COMMIT']} BISECT_BRANCH={env['BISECT_BRANCH']} BISECT_STEPS=\'{env['BISECT_STEPS']}\' ci/scripts/find-regression.py check
+YAML'''
     return step
 
 
@@ -233,7 +234,8 @@ steps:
   - wait
   - label: 'check'
     command: |
-        START_COMMIT=72f70960226680e841a8fbdd09c79d74609f27a2 END_COMMIT=9ca415a9998a5e04e021c899fb66d93a17931d4f BISECT_BRANCH=kwannoel/find-regress BISECT_STEPS='test' ci/scripts/find-regression.py check'''
+        START_COMMIT=72f70960226680e841a8fbdd09c79d74609f27a2 END_COMMIT=9ca415a9998a5e04e021c899fb66d93a17931d4f BISECT_BRANCH=kwannoel/find-regress BISECT_STEPS='test' ci/scripts/find-regression.py check
+YAML'''
         )
 
 if __name__ == "__main__":
