@@ -90,7 +90,7 @@ async fn test_delta_join() -> Result<()> {
     let workers = union_fragment.all_worker_count().into_keys().collect_vec();
     // Scale-in one side
     cluster
-        .reschedule(format!("{}-[{}:1]", t1.id(), workers[0]))
+        .reschedule(format!("{}:[{}:-1]", t1.id(), workers[0]))
         .await?;
 
     test_works!();
@@ -98,25 +98,25 @@ async fn test_delta_join() -> Result<()> {
     // Scale-in both sides together
     cluster
         .reschedule(format!(
-            "{}-[{}];{}-[{}]",
+            "{}:[{}];{}:[{}]",
             t1.id(),
-            format_args!("{}:1", workers[1]),
+            format_args!("{}:-1", workers[1]),
             t2.id(),
-            format_args!("{}:1, {}:1", workers[0], workers[1])
+            format_args!("{}:-1, {}:-1", workers[0], workers[1])
         ))
         .await?;
     test_works!();
 
     // Scale-out one side
     cluster
-        .reschedule(format!("{}+[{}:1]", t2.id(), workers[0]))
+        .reschedule(format!("{}:[{}:1]", t2.id(), workers[0]))
         .await?;
     test_works!();
 
     // Scale-out both sides together
     cluster
         .reschedule(format!(
-            "{}+[{}];{}+[{}]",
+            "{}:[{}];{}:[{}]",
             t1.id(),
             format_args!("{}:1,{}:1", workers[0], workers[1]),
             t2.id(),
@@ -128,17 +128,17 @@ async fn test_delta_join() -> Result<()> {
     // Scale-in join with union
     cluster
         .reschedule(format!(
-            "{}-[{}];{}-[{}]",
+            "{}:[{}];{}:[{}]",
             t1.id(),
-            format_args!("{}:1", workers[2]),
+            format_args!("{}:-1", workers[2]),
             t2.id(),
-            format_args!("{}:1", workers[2])
+            format_args!("{}:-1", workers[2])
         ))
         .await?;
     test_works!();
 
     let result = cluster
-        .reschedule(format!("{}-[{}:1]", lookup_fragments[0].id(), workers[0]))
+        .reschedule(format!("{}:[{}:-1]", lookup_fragments[0].id(), workers[0]))
         .await;
     assert!(
         result.is_err(),

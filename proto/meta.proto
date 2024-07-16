@@ -519,13 +519,10 @@ message GetClusterInfoResponse {
 }
 
 // For each fragment that needs to be rescheduled, there will be a WorkerReschedule,
-// indicating on which workers the actors of this fragment need to be reduced and by how many,
-// and on which workers they need to be increased and by how many.
+// indicating on which workers the actors of this fragment need to be changed and by how many.
 message WorkerReschedule {
-  // worker_id -> increased_actor_count
-  map<uint32, uint32> increased_actor_count = 1;
-  // worker_id -> decreased_actor_count
-  map<uint32, uint32> decreased_actor_count = 2;
+  // worker_id -> actor_diff
+  map<uint32, int32> worker_actor_diff = 1;
 }
 
 message RescheduleRequest {

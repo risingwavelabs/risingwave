@@ -159,23 +159,35 @@ impl Fragment {
             *worker_increased.entry(worker_id).or_insert(0) += 1;
         }
 
-        let worker_decr_str = worker_decreased
-            .iter()
-            .map(|(work, count)| format!("{}:{}", work, count))
-            .join(",");
-        let worker_incr_str = worker_increased
-            .iter()
-            .map(|(work, count)| format!("{}:{}", work, count))
-            .join(",");
+        let worker_ids: HashSet<_> = worker_increased
+            .keys()
+            .chain(worker_decreased.keys())
+            .cloned()
+            .collect();
+
+        let mut worker_actor_diff = HashMap::new();
+
+        for worker_id in worker_ids {
+            let increased = worker_increased.remove(&worker_id).unwrap_or(0);
+            let decreased = worker_decreased.remove(&worker_id).unwrap_or(0);
+            let diff = increased - decreased;
+            if diff != 0 {
+                worker_actor_diff.insert(worker_id, diff);
+            }
+        }
 
         let mut f = String::new();
-        write!(f, "{}", self.id()).unwrap();
-        if !worker_decr_str.is_empty() {
-            write!(f, " -[{}]", worker_decr_str).unwrap();
+
+        if !worker_actor_diff.is_empty() {
+            let worker_diff_str = worker_actor_diff
+                .into_iter()
+                .map(|(k, v)| format!("{}:{}", k, v))
+                .join(", ");
+
+            write!(f, "{}", self.id()).unwrap();
+            write!(f, ":[{}]", worker_diff_str).unwrap();
         }
-        if !worker_incr_str.is_empty() {
-            write!(f, " +[{}]", worker_incr_str).unwrap();
-        }
+
         f
     }
 
