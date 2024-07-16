@@ -42,6 +42,8 @@ impl StreamGroupTopN {
         let input = &core.input;
         let schema = input.schema().clone();
 
+        // FIXME(rc): Actually only watermark messages on the first group-by column are propagated
+        // acccoring to the current GroupTopN implementation. This should be fixed.
         let watermark_columns = if input.append_only() {
             input.watermark_columns().clone()
         } else {
