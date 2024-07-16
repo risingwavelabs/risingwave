@@ -54,6 +54,9 @@ use crate::types::*;
 use crate::util::iter_util::ZipEqFast;
 
 /// Defines how to convert RisingWave arrays to Arrow arrays.
+///
+/// This trait allows for customized conversion logic for different external systems using Arrow.
+/// The default implementation is based on the `From` implemented in this mod.
 pub trait ToArrow {
     /// Converts RisingWave `DataChunk` to Arrow `RecordBatch` with specified schema.
     ///
@@ -767,7 +770,7 @@ converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @map);
 converts!(SerialArray, arrow_array::Int64Array, @map);
 
 /// Converts RisingWave value from and into Arrow value.
-pub trait FromIntoArrow {
+trait FromIntoArrow {
     /// The corresponding element type in the Arrow array.
     type ArrowType;
     fn from_arrow(value: Self::ArrowType) -> Self;

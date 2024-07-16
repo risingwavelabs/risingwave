@@ -26,6 +26,7 @@ impl ArrayImpl {
     pub fn from_protobuf(array: &PbArray, cardinality: usize) -> ArrayResult<Self> {
         use crate::array::value_reader::*;
         let array = match array.array_type() {
+            PbArrayType::Unspecified => unreachable!(),
             PbArrayType::Int16 => read_numeric_array::<i16, I16ValueReader>(array, cardinality)?,
             PbArrayType::Int32 => read_numeric_array::<i32, I32ValueReader>(array, cardinality)?,
             PbArrayType::Int64 => read_numeric_array::<i64, I64ValueReader>(array, cardinality)?,
@@ -49,7 +50,6 @@ impl ArrayImpl {
             PbArrayType::Jsonb => JsonbArray::from_protobuf(array)?,
             PbArrayType::Struct => StructArray::from_protobuf(array)?,
             PbArrayType::List => ListArray::from_protobuf(array)?,
-            PbArrayType::Unspecified => unreachable!(),
             PbArrayType::Bytea => {
                 read_string_array::<BytesArrayBuilder, BytesValueReader>(array, cardinality)?
             }
