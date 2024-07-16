@@ -299,7 +299,8 @@ impl StreamingJob {
         }
     }
 
-    pub fn dependent_secret_refs(&self) -> MetaResult<HashSet<u32>> {
+    // Get the secret ids that are referenced by this job.
+    pub fn dependent_secret_ids(&self) -> MetaResult<HashSet<u32>> {
         match self {
             StreamingJob::Sink(sink, _) => Ok(get_refed_secret_ids_from_sink(sink)),
             StreamingJob::Table(source, _, _) => {

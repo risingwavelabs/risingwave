@@ -12,24 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Range;
-use std::sync::Arc;
-
 use anyhow::anyhow;
-use bytes::Bytes;
 use futures_async_stream::try_stream;
-use futures_util::future::BoxFuture;
 use futures_util::stream::StreamExt;
-use futures_util::TryFutureExt;
-use hashbrown::HashMap;
-use iceberg::io::{
-    FileIOBuilder, FileMetadata, FileRead, S3_ACCESS_KEY_ID, S3_REGION, S3_SECRET_ACCESS_KEY,
-};
-use parquet::arrow::async_reader::{AsyncFileReader, MetadataLoader};
-use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask};
-use parquet::file::metadata::ParquetMetaData;
+use parquet::arrow::ProjectionMask;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::Schema;
+use risingwave_connector::source::iceberg::parquet_file_reader::create_parquet_stream_builder;
 
 use crate::error::BatchError;
 use crate::executor::{DataChunk, Executor};
@@ -93,22 +82,13 @@ impl S3FileScanExecutor {
     async fn do_execute(self: Box<Self>) {
         assert_eq!(self.file_format, FileFormat::Parquet);
 
-        let mut props = HashMap::new();
-        props.insert(S3_REGION, self.s3_region.clone());
-        props.insert(S3_ACCESS_KEY_ID, self.s3_access_key.clone());
-        props.insert(S3_SECRET_ACCESS_KEY, self.s3_secret_key.clone());
-
-        let file_io_builder = FileIOBuilder::new("s3");
-        let file_io = file_io_builder.with_props(props.into_iter()).build()?;
-        let parquet_file = file_io.new_input(&self.location)?;
-
-        let parquet_metadata = parquet_file.metadata().await?;
-        let parquet_reader = parquet_file.reader().await?;
-        let arrow_file_reader = ArrowFileReader::new(parquet_metadata, parquet_reader);
-
-        let mut batch_stream_builder = ParquetRecordBatchStreamBuilder::new(arrow_file_reader)
-            .await
-            .map_err(|e| anyhow!(e))?;
+        let mut batch_stream_builder = create_parquet_stream_builder(
+            self.s3_region.clone(),
+            self.s3_access_key.clone(),
+            self.s3_secret_key.clone(),
+            self.location.clone(),
+        )
+        .await?;
 
         let arrow_schema = batch_stream_builder.schema();
         assert_eq!(arrow_schema.fields.len(), self.schema.fields.len());
@@ -120,7 +100,9 @@ impl S3FileScanExecutor {
 
         batch_stream_builder = batch_stream_builder.with_batch_size(self.batch_size);
 
-        let record_batch_stream = batch_stream_builder.build().map_err(|e| anyhow!(e))?;
+        let record_batch_stream = batch_stream_builder
+            .build()
+            .map_err(|e| anyhow!(e).context("fail to build arrow stream builder"))?;
 
         #[for_await]
         for record_batch in record_batch_stream {
@@ -129,35 +111,5 @@ impl S3FileScanExecutor {
             debug_assert_eq!(chunk.data_types(), self.schema.data_types());
             yield chunk;
         }
-    }
-}
-
-struct ArrowFileReader<R: FileRead> {
-    meta: FileMetadata,
-    r: R,
-}
-
-impl<R: FileRead> ArrowFileReader<R> {
-    fn new(meta: FileMetadata, r: R) -> Self {
-        Self { meta, r }
-    }
-}
-
-impl<R: FileRead> AsyncFileReader for ArrowFileReader<R> {
-    fn get_bytes(&mut self, range: Range<usize>) -> BoxFuture<'_, parquet::errors::Result<Bytes>> {
-        Box::pin(
-            self.r
-                .read(range.start as _..range.end as _)
-                .map_err(|err| parquet::errors::ParquetError::External(Box::new(err))),
-        )
-    }
-
-    fn get_metadata(&mut self) -> BoxFuture<'_, parquet::errors::Result<Arc<ParquetMetaData>>> {
-        Box::pin(async move {
-            let file_size = self.meta.size;
-            let mut loader = MetadataLoader::load(self, file_size as usize, None).await?;
-            loader.load_page_index(false, false).await?;
-            Ok(Arc::new(loader.finish()))
-        })
     }
 }

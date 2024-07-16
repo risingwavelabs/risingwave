@@ -20,6 +20,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
@@ -1103,7 +1104,11 @@ impl CatalogController {
         Ok(version)
     }
 
-    pub async fn create_secret(&self, mut pb_secret: PbSecret) -> MetaResult<NotificationVersion> {
+    pub async fn create_secret(
+        &self,
+        mut pb_secret: PbSecret,
+        secret_plain_payload: Vec<u8>,
+    ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let owner_id = pb_secret.owner as _;
         let txn = inner.db.begin().await?;
@@ -1126,12 +1131,22 @@ impl CatalogController {
 
         txn.commit().await?;
 
+        // Notify the compute and frontend node plain secret
+        let mut secret_plain = pb_secret;
+        secret_plain.value.clone_from(&secret_plain_payload);
+
+        LocalSecretManager::global().add_secret(secret_plain.id, secret_plain_payload);
+        self.env
+            .notification_manager()
+            .notify_compute_without_version(Operation::Add, Info::Secret(secret_plain.clone()));
+
         let version = self
             .notify_frontend(
                 NotificationOperation::Add,
-                NotificationInfo::Secret(pb_secret),
+                NotificationInfo::Secret(secret_plain),
             )
             .await;
+
         Ok(version)
     }
 
@@ -1176,6 +1191,11 @@ impl CatalogController {
         let pb_secret: PbSecret = ObjectModel(secret, secret_obj.unwrap()).into();
 
         self.notify_users_update(user_infos).await;
+
+        LocalSecretManager::global().remove_secret(pb_secret.id);
+        self.env
+            .notification_manager()
+            .notify_compute_without_version(Operation::Delete, Info::Secret(pb_secret.clone()));
         let version = self
             .notify_frontend(
                 NotificationOperation::Delete,
@@ -2687,6 +2707,30 @@ impl CatalogController {
         Ok(subscription)
     }
 
+    pub async fn get_mv_depended_subscriptions(
+        &self,
+    ) -> MetaResult<HashMap<risingwave_common::catalog::TableId, HashMap<u32, u64>>> {
+        let inner = self.inner.read().await;
+        let subscription_objs = Subscription::find()
+            .find_also_related(Object)
+            .all(&inner.db)
+            .await?;
+        let mut map = HashMap::new();
+        // Write object at the same time we write subscription, so we must be able to get obj
+        for subscription in subscription_objs
+            .into_iter()
+            .map(|(subscription, obj)| ObjectModel(subscription, obj.unwrap()).into())
+        {
+            let subscription: PbSubscription = subscription;
+            map.entry(risingwave_common::catalog::TableId::from(
+                subscription.dependent_table_id,
+            ))
+            .or_insert(HashMap::new())
+            .insert(subscription.id, subscription.retention_seconds);
+        }
+        Ok(map)
+    }
+
     pub async fn find_creating_streaming_job_ids(
         &self,
         infos: Vec<PbCreatingJobInfo>,
@@ -3111,7 +3155,7 @@ impl CatalogControllerInner {
             .collect())
     }
 
-    async fn list_secrets(&self) -> MetaResult<Vec<PbSecret>> {
+    pub async fn list_secrets(&self) -> MetaResult<Vec<PbSecret>> {
         let secret_objs = Secret::find()
             .find_also_related(Object)
             .all(&self.db)

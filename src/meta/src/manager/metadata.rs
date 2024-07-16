@@ -39,7 +39,9 @@ use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification,
     NotificationVersion, StreamingClusterInfo, StreamingJob, WorkerId,
 };
-use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
+use crate::model::{
+    ActorId, ClusterId, FragmentId, MetadataModel, TableFragments, TableParallelism,
+};
 use crate::stream::{to_build_actor_info, SplitAssignment};
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
@@ -824,12 +826,22 @@ impl MetadataManager {
         }
     }
 
-    #[expect(clippy::unused_async)]
     pub async fn get_mv_depended_subscriptions(
         &self,
     ) -> MetaResult<HashMap<TableId, HashMap<u32, u64>>> {
-        // TODO(subscription): support the correct logic when supporting L0 log store subscriptions
-        Ok(HashMap::new())
+        match self {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.get_mv_depended_subscriptions().await,
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller.get_mv_depended_subscriptions().await
+            }
+        }
+    }
+
+    pub fn cluster_id(&self) -> &ClusterId {
+        match self {
+            MetadataManager::V1(mgr) => mgr.cluster_manager.cluster_id(),
+            MetadataManager::V2(mgr) => mgr.cluster_controller.cluster_id(),
+        }
     }
 }
 

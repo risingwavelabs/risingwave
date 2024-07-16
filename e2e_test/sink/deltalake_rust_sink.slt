@@ -5,6 +5,11 @@ statement ok
 CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
 
 statement ok
+CREATE SECRET deltalake_s3_secret_key WITH (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
 create sink s6 as select * from mv6
 with (
     connector = 'deltalake',
@@ -12,7 +17,7 @@ with (
     force_append_only = 'true',
     location = 's3a://deltalake/deltalake-test',
     s3.access.key = 'hummockadmin',
-    s3.secret.key = 'hummockadmin',
+    s3.secret.key = secret deltalake_s3_secret_key,
     s3.endpoint = 'http://127.0.0.1:9301'
 );
 
@@ -24,6 +29,9 @@ FLUSH;
 
 statement ok
 DROP SINK s6;
+
+statement ok
+DROP SECRET deltalake_s3_secret_key;
 
 statement ok
 DROP MATERIALIZED VIEW mv6;

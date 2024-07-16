@@ -31,6 +31,7 @@ use risingwave_common::catalog::{
     DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::{bail, current_cluster_version, ensure};
 use risingwave_connector::source::{should_copy_to_format_encode_options, UPSTREAM_SOURCE_KEY};
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
@@ -576,7 +577,11 @@ impl CatalogManager {
         }
     }
 
-    pub async fn create_secret(&self, secret: Secret) -> MetaResult<NotificationVersion> {
+    pub async fn create_secret(
+        &self,
+        secret: Secret,
+        secret_plain_payload: Vec<u8>,
+    ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -593,14 +598,25 @@ impl CatalogManager {
 
         let secret_id = secret.id;
         let mut secret_entry = BTreeMapTransaction::new(&mut database_core.secrets);
+
         secret_entry.insert(secret_id, secret.to_owned());
         commit_meta!(self, secret_entry)?;
 
         user_core.increase_ref(secret.owner);
 
+        // Notify the compute and frontend node plain secret
+        let mut secret_plain = secret;
+        secret_plain.value.clone_from(&secret_plain_payload);
+
+        LocalSecretManager::global().add_secret(secret_id, secret_plain_payload);
+        self.env
+            .notification_manager()
+            .notify_compute_without_version(Operation::Add, Info::Secret(secret_plain.clone()));
+
         let version = self
-            .notify_frontend(Operation::Add, Info::Secret(secret))
+            .notify_frontend(Operation::Add, Info::Secret(secret_plain))
             .await;
+
         Ok(version)
     }
 
@@ -610,21 +626,40 @@ impl CatalogManager {
         let user_core = &mut core.user;
         let mut secrets = BTreeMapTransaction::new(&mut database_core.secrets);
 
-        // todo: impl a ref count check for secret
-        // if secret is used by other relations, not found in the catalog or do not have the privilege to drop, return error
-        // else: commit the change and notify frontend
+        match database_core.secret_ref_count.get(&secret_id) {
+            Some(ref_count) => {
+                let secret_name = secrets
+                    .get(&secret_id)
+                    .ok_or_else(|| MetaError::catalog_id_not_found("connection", secret_id))?
+                    .name
+                    .clone();
+                Err(MetaError::permission_denied(format!(
+                    "Fail to delete secret {} because {} other relation(s) depend on it",
+                    secret_name, ref_count
+                )))
+            }
+            None => {
+                let secret = secrets
+                    .remove(secret_id)
+                    .ok_or_else(|| anyhow!("secret not found"))?;
 
-        let secret = secrets
-            .remove(secret_id)
-            .ok_or_else(|| anyhow!("secret not found"))?;
+                commit_meta!(self, secrets)?;
+                user_core.decrease_ref(secret.owner);
 
-        commit_meta!(self, secrets)?;
-        user_core.decrease_ref(secret.owner);
+                LocalSecretManager::global().remove_secret(secret.id);
+                self.env
+                    .notification_manager()
+                    .notify_compute_without_version(
+                        Operation::Delete,
+                        Info::Secret(secret.clone()),
+                    );
 
-        let version = self
-            .notify_frontend(Operation::Delete, Info::Secret(secret))
-            .await;
-        Ok(version)
+                let version = self
+                    .notify_frontend(Operation::Delete, Info::Secret(secret))
+                    .await;
+                Ok(version)
+            }
+        }
     }
 
     pub async fn create_connection(
@@ -4151,6 +4186,22 @@ impl CatalogManager {
             .get(&subscription_id)
             .ok_or_else(|| MetaError::catalog_id_not_found("subscription", subscription_id))?;
         Ok(subscription.clone())
+    }
+
+    pub async fn get_mv_depended_subscriptions(
+        &self,
+    ) -> MetaResult<HashMap<risingwave_common::catalog::TableId, HashMap<u32, u64>>> {
+        let guard = self.core.lock().await;
+        let mut map = HashMap::new();
+        for subscription in guard.database.subscriptions.values() {
+            map.entry(risingwave_common::catalog::TableId::from(
+                subscription.dependent_table_id,
+            ))
+            .or_insert(HashMap::new())
+            .insert(subscription.id, subscription.retention_seconds);
+        }
+
+        Ok(map)
     }
 
     pub async fn get_created_table_ids(&self) -> Vec<u32> {

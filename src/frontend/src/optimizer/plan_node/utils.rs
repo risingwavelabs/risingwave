@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::default::Default;
 use std::vec;
 
+use anyhow::anyhow;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
@@ -324,12 +325,16 @@ macro_rules! plan_node_name {
     };
 }
 pub(crate) use plan_node_name;
-use risingwave_common::types::DataType;
+use risingwave_common::license::Feature;
+use risingwave_common::types::{DataType, Interval};
 use risingwave_expr::aggregate::AggKind;
+use risingwave_pb::plan_common::as_of::AsOfType;
+use risingwave_pb::plan_common::{as_of, PbAsOf};
+use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
 use super::pretty_config;
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 use crate::expr::InputRef;
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
@@ -387,4 +392,53 @@ pub(crate) fn plan_has_backfill_leaf_nodes(plan: &PlanRef) -> bool {
         assert!(!plan.inputs().is_empty());
         plan.inputs().iter().all(plan_has_backfill_leaf_nodes)
     }
+}
+
+pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
+    let Some(ref a) = a else {
+        return Ok(None);
+    };
+    Feature::TimeTravel
+        .check_available()
+        .map_err(|e| anyhow::anyhow!(e))?;
+    let as_of_type = match a {
+        AsOf::ProcessTime => {
+            return Err(ErrorCode::NotSupported(
+                "do not support as of proctime".to_string(),
+                "please use as of timestamp".to_string(),
+            )
+            .into());
+        }
+        AsOf::TimestampNum(ts) => AsOfType::Timestamp(as_of::Timestamp { timestamp: *ts }),
+        AsOf::TimestampString(ts) => {
+            let date_time = speedate::DateTime::parse_str_rfc3339(ts)
+                .map_err(|_e| anyhow!("fail to parse timestamp"))?;
+            AsOfType::Timestamp(as_of::Timestamp {
+                timestamp: date_time.timestamp_tz(),
+            })
+        }
+        AsOf::VersionNum(_) | AsOf::VersionString(_) => {
+            return Err(ErrorCode::NotSupported(
+                "do not support as of version".to_string(),
+                "please use as of timestamp".to_string(),
+            )
+            .into());
+        }
+        AsOf::ProcessTimeWithInterval((value, leading_field)) => {
+            let interval = Interval::parse_with_fields(
+                value,
+                Some(crate::Binder::bind_date_time_field(leading_field.clone())),
+            )
+            .map_err(|_| anyhow!("fail to parse interval"))?;
+            let interval_sec = (interval.epoch_in_micros() / 1_000_000) as i64;
+            let timestamp = chrono::Utc::now()
+                .timestamp()
+                .checked_sub(interval_sec)
+                .ok_or_else(|| anyhow!("invalid timestamp"))?;
+            AsOfType::Timestamp(as_of::Timestamp { timestamp })
+        }
+    };
+    Ok(Some(PbAsOf {
+        as_of_type: Some(as_of_type),
+    }))
 }

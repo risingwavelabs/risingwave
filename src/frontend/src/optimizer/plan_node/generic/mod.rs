@@ -83,6 +83,9 @@ pub use changelog::*;
 mod now;
 pub use now::*;
 
+mod file_scan;
+pub use file_scan::*;
+
 pub trait DistillUnit {
     fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> XmlNode<'a>;
 }

@@ -17,12 +17,12 @@ use std::sync::LazyLock;
 
 use async_trait::async_trait;
 use regex::Regex;
-use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::kafka::private_link::insert_privatelink_broker_rewrite_map;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
 };
+use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
 use risingwave_meta::manager::{ConnectionId, MetadataManager};
 use risingwave_pb::catalog::connection::Info::PrivateLinkService;
 use risingwave_pb::cloud_service::cloud_service_server::CloudService;
@@ -146,6 +146,10 @@ impl CloudService for CloudServiceImpl {
                 ));
             }
         }
+
+        // XXX: We can't use secret in cloud validate source.
+        let source_cfg = WithOptionsSecResolved::without_secrets(source_cfg);
+
         // try fetch kafka metadata, return error message on failure
         let props = ConnectorProperties::extract(source_cfg, false);
         if let Err(e) = props {

@@ -18,14 +18,12 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
-use aes_siv::aead::generic_array::GenericArray;
-use aes_siv::aead::Aead;
-use aes_siv::{Aes128SivAead, KeyInit};
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use itertools::Itertools;
-use rand::{Rng, RngCore};
+use rand::Rng;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::{ParallelUnitMapping, VirtualNode};
+use risingwave_common::secret::SecretEncryption;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
@@ -33,13 +31,13 @@ use risingwave_common::util::stream_graph_visitor::{
     visit_fragment, visit_stream_node, visit_stream_node_cont_mut,
 };
 use risingwave_common::{bail, current_cluster_version, must_match};
-use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::cdc::CdcSourceType;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
     UPSTREAM_SOURCE_KEY,
 };
+use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::ObjectId;
 use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
@@ -61,7 +59,6 @@ use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
-use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
@@ -69,7 +66,6 @@ use tracing::log::warn;
 use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
-use crate::error::MetaErrorInner;
 use crate::manager::{
     CatalogManagerRef, ConnectionId, DatabaseId, DdlType, FragmentManagerRef, FunctionId,
     IdCategory, IdCategoryType, IndexId, LocalNotification, MetaSrvEnv, MetadataManager,
@@ -158,12 +154,6 @@ pub enum DdlCommand {
     CommentOn(Comment),
     CreateSubscription(Subscription),
     DropSubscription(SubscriptionId, DropMode),
-}
-
-#[derive(Deserialize, Serialize)]
-struct SecretEncryption {
-    nonce: [u8; 16],
-    ciphertext: Vec<u8>,
 }
 
 impl DdlCommand {
@@ -629,44 +619,38 @@ impl DdlController {
     async fn create_secret(&self, mut secret: Secret) -> MetaResult<NotificationVersion> {
         // The 'secret' part of the request we receive from the frontend is in plaintext;
         // here, we need to encrypt it before storing it in the catalog.
+        let secret_plain_payload = secret.value.clone();
+        let secret_store_private_key = self
+            .env
+            .opts
+            .secret_store_private_key
+            .clone()
+            .ok_or_else(|| anyhow!("secret_store_private_key is not configured"))?;
 
         let encrypted_payload = {
-            let data = secret.get_value().as_slice();
-            let key = self.env.opts.secret_store_private_key.as_slice();
-            let encrypt_key = {
-                let mut k = key[..(std::cmp::min(key.len(), 32))].to_vec();
-                k.resize_with(32, || 0);
-                k
-            };
-
-            let mut rng = rand::thread_rng();
-            let mut nonce: [u8; 16] = [0; 16];
-            rng.fill_bytes(&mut nonce);
-            let nonce_array = GenericArray::from_slice(&nonce);
-            let cipher = Aes128SivAead::new(encrypt_key.as_slice().into());
-
-            let ciphertext = cipher.encrypt(nonce_array, data).map_err(|e| {
-                MetaError::from(MetaErrorInner::InvalidParameter(format!(
-                    "failed to encrypt secret {}: {:?}",
-                    secret.name, e
-                )))
-            })?;
-            bincode::serialize(&SecretEncryption { nonce, ciphertext }).map_err(|e| {
-                MetaError::from(MetaErrorInner::InvalidParameter(format!(
-                    "failed to serialize secret {}: {:?}",
-                    secret.name,
-                    e.as_report()
-                )))
-            })?
+            let encrypted_secret = SecretEncryption::encrypt(
+                secret_store_private_key.as_slice(),
+                secret.get_value().as_slice(),
+            )
+            .context(format!("failed to encrypt secret {}", secret.name))?;
+            encrypted_secret
+                .serialize()
+                .context(format!("failed to serialize secret {}", secret.name))?
         };
         secret.value = encrypted_payload;
 
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 secret.id = self.gen_unique_id::<{ IdCategory::Secret }>().await?;
-                mgr.catalog_manager.create_secret(secret).await
+                mgr.catalog_manager
+                    .create_secret(secret, secret_plain_payload)
+                    .await
             }
-            MetadataManager::V2(mgr) => mgr.catalog_controller.create_secret(secret).await,
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .create_secret(secret, secret_plain_payload)
+                    .await
+            }
         }
     }
 
@@ -1045,8 +1029,11 @@ impl DdlController {
                 actor.nodes.as_ref().unwrap().node_body
                 && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
             {
-                let properties = cdc_table_desc.connect_properties.clone();
-                let mut props = ConnectorProperties::extract(properties, true)?;
+                let options_with_secret = WithOptionsSecResolved::new(
+                    cdc_table_desc.connect_properties.clone(),
+                    cdc_table_desc.secret_refs.clone(),
+                );
+                let mut props = ConnectorProperties::extract(options_with_secret, true)?;
                 props.init_from_pb_cdc_table_desc(cdc_table_desc);
 
                 dispatch_source_prop!(props, props, {
