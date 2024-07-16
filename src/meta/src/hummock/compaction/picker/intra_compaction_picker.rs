@@ -313,12 +313,14 @@ impl WholeLevelCompactionPicker {
         partition_count: u32,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        // FIX: ban `pick_whole_level`
-        return None;
-        // if partition_count == 0 {
-        //     return None;
-        // }
+        if partition_count == 0 {
+            return None;
+        }
         for (idx, level) in l0.sub_levels.iter().enumerate() {
+            if idx == l0.sub_levels.len() - 1 {
+                break;
+            }
+
             if level.level_type() != LevelType::Nonoverlapping
                 || level.vnode_partition_count == partition_count
             {
