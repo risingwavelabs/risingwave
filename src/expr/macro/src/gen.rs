@@ -342,10 +342,45 @@ impl FunctionAttr {
             // no prebuilt argument
             (None, _) => quote! {},
         };
-        let variadic_args = variadic.then(|| quote! { variadic_row, });
+        let variadic_args = variadic.then(|| quote! { &variadic_row, });
         let context = user_fn.context.then(|| quote! { &self.context, });
         let writer = user_fn.write.then(|| quote! { &mut writer, });
         let await_ = user_fn.async_.then(|| quote! { .await });
+
+        let record_error = {
+            // Uniform arguments into `DatumRef`.
+            #[allow(clippy::disallowed_methods)] // allow zip
+            let inputs_args = inputs
+                .iter()
+                .zip(user_fn.args_option.iter())
+                .map(|(input, opt)| {
+                    if *opt {
+                        quote! { #input.map(|s| ScalarRefImpl::from(s)) }
+                    } else {
+                        quote! { Some(ScalarRefImpl::from(#input)) }
+                    }
+                });
+            let inputs_args = quote! {
+                let args: &[DatumRef<'_>] = &[#(#inputs_args),*];
+                let args = args.iter().copied();
+            };
+            let var_args = variadic.then(|| {
+                quote! {
+                    let args = args.chain(variadic_row.iter());
+                }
+            });
+
+            quote! {
+                #inputs_args
+                #var_args
+                errors.push(ExprError::function(
+                    stringify!(#fn_name),
+                    args,
+                    e,
+                ));
+            }
+        };
+
         // call the user defined function
         // inputs: [ Option<impl ScalarRef> ]
         let mut output = quote! { #fn_name #generic(
@@ -365,13 +400,19 @@ impl FunctionAttr {
             ReturnTypeKind::Result => quote! {
                 match #output {
                     Ok(x) => Some(x),
-                    Err(e) => { errors.push(e); None }
+                    Err(e) => {
+                        #record_error
+                        None
+                    }
                 }
             },
             ReturnTypeKind::ResultOption => quote! {
                 match #output {
                     Ok(x) => x,
-                    Err(e) => { errors.push(e); None }
+                    Err(e) => {
+                        #record_error
+                        None
+                    }
                 }
             },
         };
@@ -484,10 +525,6 @@ impl FunctionAttr {
             }
         } else {
             // no optimization
-            let array_zip = match children_indices.len() {
-                0 => quote! { std::iter::repeat(()).take(input.capacity()) },
-                _ => quote! { multizip((#(#arrays.iter(),)*)) },
-            };
             let let_variadic = variadic.then(|| {
                 quote! {
                     let variadic_row = variadic_input.row_at_unchecked_vis(i);
@@ -497,18 +534,18 @@ impl FunctionAttr {
                 let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
 
                 if input.is_compacted() {
-                    for (i, (#(#inputs,)*)) in #array_zip.enumerate() {
+                    for i in 0..input.capacity() {
+                        #(let #inputs = unsafe { #arrays.value_at_unchecked(i) };)*
                         #let_variadic
                         #append_output
                     }
                 } else {
-                    // allow using `zip` for performance
-                    #[allow(clippy::disallowed_methods)]
-                    for (i, ((#(#inputs,)*), visible)) in #array_zip.zip(input.visibility().iter()).enumerate() {
-                        if !visible {
+                    for i in 0..input.capacity() {
+                        if unsafe { !input.visibility().is_set_unchecked(i) } {
                             builder.append_null();
                             continue;
                         }
+                        #(let #inputs = unsafe { #arrays.value_at_unchecked(i) };)*
                         #let_variadic
                         #append_output
                     }
@@ -725,15 +762,15 @@ impl FunctionAttr {
         };
         let create_state = if custom_state.is_some() {
             quote! {
-                fn create_state(&self) -> AggregateState {
-                    AggregateState::Any(Box::<#state_type>::default())
+                fn create_state(&self) -> Result<AggregateState> {
+                    Ok(AggregateState::Any(Box::<#state_type>::default()))
                 }
             }
         } else if let Some(state) = &self.init_state {
             let state: TokenStream2 = state.parse().unwrap();
             quote! {
-                fn create_state(&self) -> AggregateState {
-                    AggregateState::Datum(Some(#state.into()))
+                fn create_state(&self) -> Result<AggregateState> {
+                    Ok(AggregateState::Datum(Some(#state.into())))
                 }
             }
         } else {
@@ -1037,10 +1074,10 @@ impl FunctionAttr {
             .map(|ty| format_ident!("{}Builder", types::array_type(ty)))
             .collect_vec();
         let return_types = if return_types.len() == 1 {
-            vec![quote! { self.return_type.clone() }]
+            vec![quote! { self.context.return_type.clone() }]
         } else {
             (0..return_types.len())
-                .map(|i| quote! { self.return_type.as_struct().types().nth(#i).unwrap().clone() })
+                .map(|i| quote! { self.context.return_type.as_struct().types().nth(#i).unwrap().clone() })
                 .collect()
         };
         #[allow(clippy::disallowed_methods)]
@@ -1060,14 +1097,15 @@ impl FunctionAttr {
         } else {
             quote! {
                 let value_array = StructArray::new(
-                    self.return_type.as_struct().clone(),
+                    self.context.return_type.as_struct().clone(),
                     value_arrays.to_vec(),
                     Bitmap::ones(len),
                 ).into_ref();
             }
         };
+        let context = user_fn.context.then(|| quote! { &self.context, });
         let prebuilt_arg = match &self.prebuild {
-            Some(_) => quote! { &self.prebuilt_arg },
+            Some(_) => quote! { &self.prebuilt_arg, },
             None => quote! {},
         };
         let prebuilt_arg_type = match &self.prebuild {
@@ -1081,12 +1119,50 @@ impl FunctionAttr {
                 .expect("invalid prebuild syntax"),
             None => quote! { () },
         };
-        let iter = match user_fn.return_type_kind {
-            ReturnTypeKind::T => quote! { iter },
-            ReturnTypeKind::Option => quote! { if let Some(it) = iter { it } else { continue; } },
-            ReturnTypeKind::Result => quote! { iter? },
-            ReturnTypeKind::ResultOption => {
-                quote! { if let Some(it) = iter? { it } else { continue; } }
+        let iter = quote! { #fn_name(#(#inputs,)* #prebuilt_arg #context) };
+        let mut iter = match user_fn.return_type_kind {
+            ReturnTypeKind::T => quote! { #iter },
+            ReturnTypeKind::Option => quote! { match #iter {
+                Some(it) => it,
+                None => continue,
+            } },
+            ReturnTypeKind::Result => quote! { match #iter {
+                Ok(it) => it,
+                Err(e) => {
+                    index_builder.append(Some(i as i32));
+                    #(#builders.append_null();)*
+                    error_builder.append_display(Some(e.as_report()));
+                    continue;
+                }
+            } },
+            ReturnTypeKind::ResultOption => quote! { match #iter {
+                Ok(Some(it)) => it,
+                Ok(None) => continue,
+                Err(e) => {
+                    index_builder.append(Some(i as i32));
+                    #(#builders.append_null();)*
+                    error_builder.append_display(Some(e.as_report()));
+                    continue;
+                }
+            } },
+        };
+        // if user function accepts non-option arguments, we assume the function
+        // returns empty on null input, so we need to unwrap the inputs before calling.
+        #[allow(clippy::disallowed_methods)] // allow zip
+        let some_inputs = inputs
+            .iter()
+            .zip(user_fn.args_option.iter())
+            .map(|(input, opt)| {
+                if *opt {
+                    quote! { #input }
+                } else {
+                    quote! { Some(#input) }
+                }
+            });
+        iter = quote! {
+            match (#(#inputs,)*) {
+                (#(#some_inputs,)*) => #iter,
+                _ => continue,
             }
         };
         let iterator_item_type = user_fn.iterator_item_kind.clone().ok_or_else(|| {
@@ -1095,11 +1171,24 @@ impl FunctionAttr {
                 "expect `impl Iterator` in return type",
             )
         })?;
-        let output = match iterator_item_type {
-            ReturnTypeKind::T => quote! { Some(output) },
-            ReturnTypeKind::Option => quote! { output },
-            ReturnTypeKind::Result => quote! { Some(output?) },
-            ReturnTypeKind::ResultOption => quote! { output? },
+        let append_output = match iterator_item_type {
+            ReturnTypeKind::T => quote! {
+                let (#(#outputs),*) = output;
+                #(#builders.append(#optioned_outputs);)* error_builder.append_null();
+            },
+            ReturnTypeKind::Option => quote! { match output {
+                Some((#(#outputs),*)) => { #(#builders.append(#optioned_outputs);)* error_builder.append_null(); }
+                None => { #(#builders.append_null();)* error_builder.append_null(); }
+            } },
+            ReturnTypeKind::Result => quote! { match output {
+                Ok((#(#outputs),*)) => { #(#builders.append(#optioned_outputs);)* error_builder.append_null(); }
+                Err(e) => { #(#builders.append_null();)* error_builder.append_display(Some(e.as_report())); }
+            } },
+            ReturnTypeKind::ResultOption => quote! { match output {
+                Ok(Some((#(#outputs),*))) => { #(#builders.append(#optioned_outputs);)* error_builder.append_null(); }
+                Ok(None) => { #(#builders.append_null();)* error_builder.append_null(); }
+                Err(e) => { #(#builders.append_null();)* error_builder.append_display(Some(e.as_report())); }
+            } },
         };
 
         Ok(quote! {
@@ -1108,11 +1197,18 @@ impl FunctionAttr {
                 use risingwave_common::types::*;
                 use risingwave_common::buffer::Bitmap;
                 use risingwave_common::util::iter_util::ZipEqFast;
-                use risingwave_expr::expr::BoxedExpression;
+                use risingwave_expr::expr::{BoxedExpression, Context};
                 use risingwave_expr::{Result, ExprError};
                 use risingwave_expr::codegen::*;
 
                 risingwave_expr::ensure!(children.len() == #num_args);
+
+                let context = Context {
+                    return_type: return_type.clone(),
+                    arg_types: children.iter().map(|c| c.return_type()).collect(),
+                    variadic: false,
+                };
+
                 let mut iter = children.into_iter();
                 #(let #all_child = iter.next().unwrap();)*
                 #(
@@ -1126,7 +1222,7 @@ impl FunctionAttr {
 
                 #[derive(Debug)]
                 struct #struct_name {
-                    return_type: DataType,
+                    context: Context,
                     chunk_size: usize,
                     #(#child: BoxedExpression,)*
                     prebuilt_arg: #prebuilt_arg_type,
@@ -1134,7 +1230,7 @@ impl FunctionAttr {
                 #[async_trait]
                 impl risingwave_expr::table_function::TableFunction for #struct_name {
                     fn return_type(&self) -> DataType {
-                        self.return_type.clone()
+                        self.context.return_type.clone()
                     }
                     async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
                         self.eval_inner(input)
@@ -1150,22 +1246,26 @@ impl FunctionAttr {
 
                         let mut index_builder = I32ArrayBuilder::new(self.chunk_size);
                         #(let mut #builders = #builder_types::with_type(self.chunk_size, #return_types);)*
+                        let mut error_builder = Utf8ArrayBuilder::new(self.chunk_size);
 
-                        for (i, (row, visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.visibility().iter()).enumerate() {
-                            if let (#(Some(#inputs),)*) = row && visible {
-                                let iter = #fn_name(#(#inputs,)* #prebuilt_arg);
-                                for output in #iter {
-                                    index_builder.append(Some(i as i32));
-                                    match #output {
-                                        Some((#(#outputs),*)) => { #(#builders.append(#optioned_outputs);)* }
-                                        None => { #(#builders.append_null();)* }
-                                    }
+                        for i in 0..input.capacity() {
+                            if unsafe { !input.visibility().is_set_unchecked(i) } {
+                                continue;
+                            }
+                            #(let #inputs = unsafe { #arrays.value_at_unchecked(i) };)*
+                            for output in #iter {
+                                index_builder.append(Some(i as i32));
+                                #append_output
 
-                                    if index_builder.len() == self.chunk_size {
-                                        let len = index_builder.len();
-                                        let index_array = std::mem::replace(&mut index_builder, I32ArrayBuilder::new(self.chunk_size)).finish().into_ref();
-                                        let value_arrays = [#(std::mem::replace(&mut #builders, #builder_types::with_type(self.chunk_size, #return_types)).finish().into_ref()),*];
-                                        #build_value_array
+                                if index_builder.len() == self.chunk_size {
+                                    let len = index_builder.len();
+                                    let index_array = std::mem::replace(&mut index_builder, I32ArrayBuilder::new(self.chunk_size)).finish().into_ref();
+                                    let value_arrays = [#(std::mem::replace(&mut #builders, #builder_types::with_type(self.chunk_size, #return_types)).finish().into_ref()),*];
+                                    #build_value_array
+                                    let error_array = std::mem::replace(&mut error_builder, Utf8ArrayBuilder::new(self.chunk_size)).finish().into_ref();
+                                    if error_array.null_bitmap().any() {
+                                        yield DataChunk::new(vec![index_array, value_array, error_array], self.chunk_size);
+                                    } else {
                                         yield DataChunk::new(vec![index_array, value_array], self.chunk_size);
                                     }
                                 }
@@ -1177,13 +1277,18 @@ impl FunctionAttr {
                             let index_array = index_builder.finish().into_ref();
                             let value_arrays = [#(#builders.finish().into_ref()),*];
                             #build_value_array
-                            yield DataChunk::new(vec![index_array, value_array], len);
+                            let error_array = error_builder.finish().into_ref();
+                            if error_array.null_bitmap().any() {
+                                yield DataChunk::new(vec![index_array, value_array, error_array], len);
+                            } else {
+                                yield DataChunk::new(vec![index_array, value_array], len);
+                            }
                         }
                     }
                 }
 
                 Ok(Box::new(#struct_name {
-                    return_type,
+                    context,
                     chunk_size,
                     #(#child,)*
                     prebuilt_arg: #prebuilt_arg_value,

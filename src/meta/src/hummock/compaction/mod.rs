@@ -16,12 +16,12 @@
 
 pub mod compaction_config;
 mod overlap_strategy;
-use risingwave_common::catalog::TableOption;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_pb::hummock::compact_task::{self, TaskType};
 
 mod picker;
 pub mod selector;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
@@ -32,7 +32,8 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, LevelType};
 pub use selector::CompactionSelector;
 
-use self::selector::LocalSelectorStatistic;
+use self::selector::{EmergencySelector, LocalSelectorStatistic};
+use super::check_cg_write_limit;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::compaction::picker::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
@@ -91,6 +92,7 @@ impl CompactStatus {
     pub fn get_compact_task(
         &mut self,
         levels: &Levels,
+        member_table_ids: &BTreeSet<TableId>,
         task_id: HummockCompactionTaskId,
         group: &CompactionGroup,
         stats: &mut LocalSelectorStatistic,
@@ -101,15 +103,36 @@ impl CompactStatus {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
-        selector.pick_compaction(
+        if let Some(task) = selector.pick_compaction(
             task_id,
             group,
             levels,
+            member_table_ids,
             &mut self.level_handlers,
             stats,
-            table_id_to_options,
-            developer_config,
-        )
+            table_id_to_options.clone(),
+            developer_config.clone(),
+        ) {
+            return Some(task);
+        } else {
+            let compaction_group_config = &group.compaction_config;
+            if check_cg_write_limit(levels, compaction_group_config.as_ref()).is_write_stop()
+                && compaction_group_config.enable_emergency_picker
+            {
+                return EmergencySelector::default().pick_compaction(
+                    task_id,
+                    group,
+                    levels,
+                    member_table_ids,
+                    &mut self.level_handlers,
+                    stats,
+                    table_id_to_options,
+                    developer_config,
+                );
+            }
+        }
+
+        None
     }
 
     pub fn is_trivial_move_task(task: &CompactTask) -> bool {
@@ -173,12 +196,6 @@ pub fn create_compaction_task(
 ) -> CompactionTask {
     let target_file_size = if input.target_level == 0 {
         compaction_config.target_file_size_base
-    } else if input.target_level == base_level {
-        // This is just a temporary optimization measure. We hope to reduce the size of SST as much
-        // as possible to reduce the amount of data blocked by a single task during compaction,
-        // but too many files will increase computing overhead.
-        // TODO: remove it after can reduce configuration `target_file_size_base`.
-        compaction_config.target_file_size_base / 4
     } else {
         assert!(input.target_level >= base_level);
         let step = (input.target_level - base_level) / 2;

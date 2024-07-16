@@ -13,16 +13,13 @@
 // limitations under the License.
 
 use risingwave_common::catalog::TableId;
-use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_pb::stream_plan::SourceBackfillNode;
 
 use super::*;
-use crate::executor::source::StreamSourceCore;
-use crate::executor::source_backfill_executor::{
-    SourceBackfillExecutor, SourceBackfillExecutorInner,
+use crate::executor::source::{
+    BackfillStateTableHandler, SourceBackfillExecutor, SourceBackfillExecutorInner,
+    SourceStateTableHandler, StreamSourceCore,
 };
-use crate::executor::state_table_handler::SourceStateTableHandler;
-use crate::executor::BackfillStateTableHandler;
 
 pub struct SourceBackfillExecutorBuilder;
 
@@ -34,7 +31,7 @@ impl ExecutorBuilder for SourceBackfillExecutorBuilder {
         node: &Self::Node,
         store: impl StateStore,
     ) -> StreamResult<Executor> {
-        let source_id = TableId::new(node.source_id);
+        let source_id = TableId::new(node.upstream_source_id);
         let source_name = node.source_name.clone();
         let source_info = node.get_info()?;
 
@@ -45,11 +42,6 @@ impl ExecutorBuilder for SourceBackfillExecutorBuilder {
             node.row_id_index,
             node.with_properties.clone(),
         );
-
-        let source_ctrl_opts = SourceCtrlOpts {
-            chunk_size: params.env.config().developer.chunk_size,
-            rate_limit: node.rate_limit,
-        };
 
         let source_column_ids: Vec<_> = source_desc_builder
             .column_catalogs_to_source_column_descs()
@@ -82,9 +74,8 @@ impl ExecutorBuilder for SourceBackfillExecutorBuilder {
             stream_source_core,
             params.executor_stats.clone(),
             params.env.system_params_manager_ref().get_params(),
-            source_ctrl_opts.clone(),
-            params.env.connector_params(),
             backfill_state_table,
+            node.rate_limit,
         );
         let [input]: [_; 1] = params.input.try_into().unwrap();
 

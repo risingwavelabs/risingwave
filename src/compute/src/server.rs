@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
-use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -21,11 +20,13 @@ use risingwave_batch::monitor::{
     GLOBAL_BATCH_EXECUTOR_METRICS, GLOBAL_BATCH_MANAGER_METRICS, GLOBAL_BATCH_TASK_METRICS,
 };
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
+use risingwave_batch::spill::spill_op::SpillOp;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
     load_config, AsyncStackTraceOption, MetricLevel, StorageMemoryConfig,
     MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
 };
+use risingwave_common::lru::init_global_sequencer_args;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -42,14 +43,13 @@ use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
 use risingwave_dml::dml_manager::DmlManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
-use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
-use risingwave_rpc_client::{ComputeClientPool, ConnectorClient, ExtraInfoSourceRef, MetaClient};
+use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
 use risingwave_storage::hummock::compactor::{
     new_compaction_await_tree_reg_ref, start_compactor, CompactionExecutor, CompactorContext,
 };
@@ -68,16 +68,16 @@ use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tower::Layer;
 
-use crate::memory::config::{reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB};
+use crate::memory::config::{
+    batch_mem_limit, reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
+};
 use crate::memory::manager::{MemoryManager, MemoryManagerConfig};
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::GLOBAL_EXCHANGE_SERVICE_METRICS;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::health_service::HealthServiceImpl;
-use crate::rpc::service::monitor_service::{
-    AwaitTreeMiddlewareLayer, AwaitTreeRegistryRef, MonitorServiceImpl,
-};
+use crate::rpc::service::monitor_service::{AwaitTreeMiddlewareLayer, MonitorServiceImpl};
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::telemetry::ComputeTelemetryCreator;
 use crate::ComputeNodeOpts;
@@ -103,9 +103,21 @@ pub async fn compute_node_serve(
     let stream_config = Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
 
+    // Initialize operator lru cache global sequencer args.
+    init_global_sequencer_args(
+        config
+            .streaming
+            .developer
+            .memory_controller_sequence_tls_step,
+        config
+            .streaming
+            .developer
+            .memory_controller_sequence_tls_lag,
+    );
+
     // Register to the cluster. We're not ready to serve until activate is called.
     let (meta_client, system_params) = MetaClient::register_new(
-        opts.meta_address,
+        opts.meta_address.clone(),
         WorkerType::ComputeNode,
         &advertise_addr,
         Property {
@@ -124,12 +136,12 @@ pub async fn compute_node_serve(
     let embedded_compactor_enabled =
         embedded_compactor_enabled(state_store_url, config.storage.disable_remote_compactor);
 
-    let (reserved_memory_bytes, non_reserved_memory_bytes) =
-        reserve_memory_bytes(opts.total_memory_bytes);
+    let (reserved_memory_bytes, non_reserved_memory_bytes) = reserve_memory_bytes(&opts);
     let storage_memory_config = storage_memory_config(
         non_reserved_memory_bytes,
         embedded_compactor_enabled,
         &config.storage,
+        !opts.role.for_streaming(),
     );
 
     let storage_memory_bytes = total_storage_memory_limit_bytes(&storage_memory_config);
@@ -218,12 +230,6 @@ pub async fn compute_node_serve(
             ));
 
             let compaction_executor = Arc::new(CompactionExecutor::new(Some(1)));
-            let max_task_parallelism = Arc::new(AtomicU32::new(
-                (compaction_executor.worker_num() as f32
-                    * storage_opts.compactor_max_task_multiplier)
-                    .ceil() as u32,
-            ));
-
             let compactor_context = CompactorContext {
                 storage_opts,
                 sstable_store: storage.sstable_store(),
@@ -236,8 +242,6 @@ pub async fn compute_node_serve(
                 await_tree_reg: await_tree_config
                     .clone()
                     .map(new_compaction_await_tree_reg_ref),
-                running_task_parallelism: Arc::new(AtomicU32::new(0)),
-                max_task_parallelism,
             };
 
             let (handle, shutdown_sender) = start_compactor(
@@ -274,6 +278,7 @@ pub async fn compute_node_serve(
     let batch_mgr = Arc::new(BatchManager::new(
         config.batch.clone(),
         batch_manager_metrics,
+        batch_mem_limit(compute_memory_bytes),
     ));
 
     // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
@@ -297,6 +302,18 @@ pub async fn compute_node_serve(
             .streaming
             .developer
             .memory_controller_threshold_stable,
+        eviction_factor_stable: config
+            .streaming
+            .developer
+            .memory_controller_eviction_factor_stable,
+        eviction_factor_graceful: config
+            .streaming
+            .developer
+            .memory_controller_eviction_factor_graceful,
+        eviction_factor_aggressive: config
+            .streaming
+            .developer
+            .memory_controller_eviction_factor_aggressive,
         metrics: streaming_metrics.clone(),
     });
 
@@ -331,33 +348,12 @@ pub async fn compute_node_serve(
         client_pool,
         dml_mgr.clone(),
         source_metrics.clone(),
+        config.server.metrics_level,
     );
-
-    info!(
-        "connector param: {:?} {:?}",
-        opts.connector_rpc_endpoint, opts.connector_rpc_sink_payload_format
-    );
-
-    let connector_client = ConnectorClient::try_new(opts.connector_rpc_endpoint.as_ref()).await;
-
-    let connector_params = risingwave_connector::ConnectorParams {
-        connector_client,
-        sink_payload_format: match opts.connector_rpc_sink_payload_format.as_deref() {
-            None | Some("stream_chunk") => SinkPayloadFormat::StreamChunk,
-            Some("json") => SinkPayloadFormat::Json,
-            _ => {
-                unreachable!(
-                    "invalid sink payload format: {:?}. Should be either json or stream_chunk",
-                    opts.connector_rpc_sink_payload_format
-                )
-            }
-        },
-    };
 
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
         advertise_addr.clone(),
-        connector_params,
         stream_config,
         worker_id,
         state_store,
@@ -371,31 +367,15 @@ pub async fn compute_node_serve(
         stream_env.clone(),
         streaming_metrics.clone(),
         await_tree_config.clone(),
-        memory_mgr.get_watermark_epoch(),
+        memory_mgr.get_watermark_sequence(),
     );
-
-    let grpc_await_tree_reg = await_tree_config
-        .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
-
-    // Generally, one may use `risedev ctl trace` to manually get the trace reports. However, if
-    // this is not the case, we can use the following command to get it printed into the logs
-    // periodically.
-    //
-    // Comment out the following line to enable.
-    // TODO: may optionally enable based on the features
-    #[cfg(any())]
-    stream_mgr.clone().spawn_print_trace();
 
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
     let exchange_srv =
         ExchangeServiceImpl::new(batch_mgr.clone(), stream_mgr.clone(), exchange_srv_metrics);
     let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env.clone());
-    let monitor_srv = MonitorServiceImpl::new(
-        stream_mgr.clone(),
-        grpc_await_tree_reg.clone(),
-        config.server.clone(),
-    );
+    let monitor_srv = MonitorServiceImpl::new(stream_mgr.clone(), config.server.clone());
     let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr);
     let health_srv = HealthServiceImpl::new();
 
@@ -412,6 +392,10 @@ pub async fn compute_node_serve(
         tracing::info!("Telemetry didn't start due to config");
     }
 
+    // Clean up the spill directory.
+    #[cfg(not(madsim))]
+    SpillOp::clean_spill_directory().await.unwrap();
+
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
@@ -427,6 +411,7 @@ pub async fn compute_node_serve(
                 ExchangeServiceServer::new(exchange_srv).max_decoding_message_size(usize::MAX),
             )
             .add_service({
+                let await_tree_reg = stream_srv.mgr.await_tree_reg().cloned();
                 let srv =
                     StreamServiceServer::new(stream_srv).max_decoding_message_size(usize::MAX);
                 #[cfg(madsim)]
@@ -435,7 +420,7 @@ pub async fn compute_node_serve(
                 }
                 #[cfg(not(madsim))]
                 {
-                    AwaitTreeMiddlewareLayer::new_optional(grpc_await_tree_reg).layer(srv)
+                    AwaitTreeMiddlewareLayer::new_optional(await_tree_reg).layer(srv)
                 }
             })
             .add_service(MonitorServiceServer::new(monitor_srv))
@@ -517,8 +502,6 @@ fn total_storage_memory_limit_bytes(storage_memory_config: &StorageMemoryConfig)
     let total_storage_memory_mb = storage_memory_config.block_cache_capacity_mb
         + storage_memory_config.meta_cache_capacity_mb
         + storage_memory_config.shared_buffer_capacity_mb
-        + storage_memory_config.data_file_cache_ring_buffer_capacity_mb
-        + storage_memory_config.meta_file_cache_ring_buffer_capacity_mb
         + storage_memory_config.compactor_memory_limit_mb;
     total_storage_memory_mb << 20
 }
@@ -549,8 +532,6 @@ fn print_memory_config(
         >         block_cache_capacity: {}\n\
         >         meta_cache_capacity: {}\n\
         >         shared_buffer_capacity: {}\n\
-        >         data_file_cache_buffer_pool_capacity: {}\n\
-        >         meta_file_cache_buffer_pool_capacity: {}\n\
         >         compactor_memory_limit: {}\n\
         >     compute_memory: {}\n\
         >     reserved_memory: {}",
@@ -559,8 +540,6 @@ fn print_memory_config(
         convert((storage_memory_config.block_cache_capacity_mb << 20) as _),
         convert((storage_memory_config.meta_cache_capacity_mb << 20) as _),
         convert((storage_memory_config.shared_buffer_capacity_mb << 20) as _),
-        convert((storage_memory_config.data_file_cache_ring_buffer_capacity_mb << 20) as _),
-        convert((storage_memory_config.meta_file_cache_ring_buffer_capacity_mb << 20) as _),
         if embedded_compactor_enabled {
             convert((storage_memory_config.compactor_memory_limit_mb << 20) as _)
         } else {

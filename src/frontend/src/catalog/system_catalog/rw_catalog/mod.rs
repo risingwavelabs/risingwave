@@ -33,6 +33,8 @@ mod rw_hummock_pinned_snapshots;
 mod rw_hummock_pinned_versions;
 mod rw_hummock_version;
 mod rw_hummock_version_deltas;
+mod rw_iceberg_files;
+mod rw_iceberg_snapshots;
 mod rw_indexes;
 mod rw_internal_tables;
 mod rw_materialized_views;
@@ -54,3 +56,6 @@ mod rw_user_secrets;
 mod rw_users;
 mod rw_views;
 mod rw_worker_nodes;
+
+mod rw_actor_id_to_ddl;
+mod rw_fragment_id_to_ddl;

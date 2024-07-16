@@ -273,7 +273,7 @@ impl BatchManagerMetrics {
     fn new(registry: &Registry) -> Self {
         let task_num = IntGauge::new("batch_task_num", "Number of batch task in memory").unwrap();
         let batch_total_mem = TrAdderGauge::new(
-            "batch_total_mem",
+            "compute_batch_total_mem",
             "Total number of memory usage for batch tasks.",
         )
         .unwrap();

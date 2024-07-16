@@ -19,6 +19,7 @@ import static org.junit.Assert.fail;
 
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
+import com.risingwave.connector.ElasticRestHighLevelClientAdapter;
 import com.risingwave.connector.EsSink;
 import com.risingwave.connector.EsSinkConfig;
 import com.risingwave.connector.api.TableSchema;
@@ -28,10 +29,10 @@ import com.risingwave.proto.Data.DataType.TypeName;
 import com.risingwave.proto.Data.Op;
 import java.io.IOException;
 import java.util.Map;
+import org.apache.http.HttpHost;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.RequestOptions;
-import org.elasticsearch.client.RestHighLevelClient;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.SearchHits;
@@ -52,17 +53,19 @@ public class EsSinkTest {
 
     public void testEsSink(ElasticsearchContainer container, String username, String password)
             throws IOException {
-        EsSink sink =
-                new EsSink(
-                        new EsSinkConfig(container.getHttpHostAddress(), "test")
-                                .withDelimiter("$")
-                                .withUsername(username)
-                                .withPassword(password),
-                        getTestTableSchema());
+        EsSinkConfig config =
+                new EsSinkConfig(container.getHttpHostAddress())
+                        .withIndex("test")
+                        .withDelimiter("$")
+                        .withUsername(username)
+                        .withPassword(password);
+        config.setConnector("elasticsearch");
+        EsSink sink = new EsSink(config, getTestTableSchema());
         sink.write(
                 Iterators.forArray(
-                        new ArraySinkRow(Op.INSERT, "1$Alice", "{\"id\":1,\"name\":\"Alice\"}"),
-                        new ArraySinkRow(Op.INSERT, "2$Bob", "{\"id\":2,\"name\":\"Bob\"}")));
+                        new ArraySinkRow(
+                                Op.INSERT, null, "1$Alice", "{\"id\":1,\"name\":\"Alice\"}"),
+                        new ArraySinkRow(Op.INSERT, null, "2$Bob", "{\"id\":2,\"name\":\"Bob\"}")));
         sink.sync();
         // container is slow here, but our default flush time is 5s,
         // so 3s is enough for sync test
@@ -72,7 +75,9 @@ public class EsSinkTest {
             fail(e.getMessage());
         }
 
-        RestHighLevelClient client = sink.getClient();
+        HttpHost host = HttpHost.create(config.getUrl());
+        ElasticRestHighLevelClientAdapter client =
+                new ElasticRestHighLevelClientAdapter(host, config);
         SearchRequest searchRequest = new SearchRequest("test");
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
         searchSourceBuilder.query(QueryBuilders.matchAllQuery());

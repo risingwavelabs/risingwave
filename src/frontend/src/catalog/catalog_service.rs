@@ -34,7 +34,7 @@ use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
 use super::root_catalog::Catalog;
-use super::{DatabaseId, TableId};
+use super::{DatabaseId, SecretId, TableId};
 use crate::error::Result;
 use crate::user::UserId;
 
@@ -43,6 +43,7 @@ pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
 /// [`CatalogReader`] can read catalog from local catalog and force the holder can not modify it.
 #[derive(Clone)]
 pub struct CatalogReader(Arc<RwLock<Catalog>>);
+
 impl CatalogReader {
     pub fn new(inner: Arc<RwLock<Catalog>>) -> Self {
         CatalogReader(inner)
@@ -117,11 +118,7 @@ pub trait CatalogWriter: Send + Sync {
         affected_table_change: Option<PbReplaceTablePlan>,
     ) -> Result<()>;
 
-    async fn create_subscription(
-        &self,
-        subscription: PbSubscription,
-        graph: StreamFragmentGraph,
-    ) -> Result<()>;
+    async fn create_subscription(&self, subscription: PbSubscription) -> Result<()>;
 
     async fn create_function(&self, function: PbFunction) -> Result<()>;
 
@@ -132,6 +129,15 @@ pub trait CatalogWriter: Send + Sync {
         schema_id: u32,
         owner_id: u32,
         connection: create_connection_request::Payload,
+    ) -> Result<()>;
+
+    async fn create_secret(
+        &self,
+        secret_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        payload: Vec<u8>,
     ) -> Result<()>;
 
     async fn comment_on(&self, comment: PbComment) -> Result<()>;
@@ -167,6 +173,8 @@ pub trait CatalogWriter: Send + Sync {
     async fn drop_function(&self, function_id: FunctionId) -> Result<()>;
 
     async fn drop_connection(&self, connection_id: u32) -> Result<()>;
+
+    async fn drop_secret(&self, secret_id: SecretId) -> Result<()>;
 
     async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()>;
 
@@ -204,6 +212,13 @@ pub trait CatalogWriter: Send + Sync {
         object: alter_set_schema_request::Object,
         new_schema_id: u32,
     ) -> Result<()>;
+
+    async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Result<Vec<u64>>;
 }
 
 #[derive(Clone)]
@@ -339,15 +354,8 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn create_subscription(
-        &self,
-        subscription: PbSubscription,
-        graph: StreamFragmentGraph,
-    ) -> Result<()> {
-        let version = self
-            .meta_client
-            .create_subscription(subscription, graph)
-            .await?;
+    async fn create_subscription(&self, subscription: PbSubscription) -> Result<()> {
+        let version = self.meta_client.create_subscription(subscription).await?;
         self.wait_version(version).await
     }
 
@@ -373,6 +381,21 @@ impl CatalogWriter for CatalogWriterImpl {
                 owner_id,
                 connection,
             )
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn create_secret(
+        &self,
+        secret_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        payload: Vec<u8>,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .create_secret(secret_name, database_id, schema_id, owner_id, payload)
             .await?;
         self.wait_version(version).await
     }
@@ -456,6 +479,11 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn drop_connection(&self, connection_id: u32) -> Result<()> {
         let version = self.meta_client.drop_connection(connection_id).await?;
+        self.wait_version(version).await
+    }
+
+    async fn drop_secret(&self, secret_id: SecretId) -> Result<()> {
+        let version = self.meta_client.drop_secret(secret_id).await?;
         self.wait_version(version).await
     }
 
@@ -567,6 +595,18 @@ impl CatalogWriter for CatalogWriterImpl {
             .map_err(|e| anyhow!(e))?;
 
         Ok(())
+    }
+
+    async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Result<Vec<u64>> {
+        Ok(self
+            .meta_client
+            .list_change_log_epochs(table_id, min_epoch, max_count)
+            .await?)
     }
 }
 

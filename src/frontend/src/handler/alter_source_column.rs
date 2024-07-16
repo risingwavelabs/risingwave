@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::ColumnId;
+use risingwave_common::catalog::{ColumnCatalog, ColumnId};
 use risingwave_connector::source::{extract_source_struct, SourceEncode, SourceStruct};
 use risingwave_sqlparser::ast::{
     AlterSourceOperation, ColumnDef, CreateSourceStatement, ObjectName, Statement,
@@ -106,10 +106,7 @@ pub async fn handle_alter_source_column(
             catalog.definition =
                 alter_definition_add_column(&catalog.definition, column_def.clone())?;
             let mut bound_column = bind_sql_columns(&[column_def])?.remove(0);
-            bound_column.column_desc.column_id = columns
-                .iter()
-                .fold(ColumnId::new(i32::MIN), |a, b| a.max(b.column_id()))
-                .next();
+            bound_column.column_desc.column_id = max_column_id(columns).next();
             columns.push(bound_column);
         }
         _ => unreachable!(),
@@ -145,6 +142,20 @@ pub fn alter_definition_add_column(definition: &str, column: ColumnDef) -> Resul
     }
 
     Ok(stmt.to_string())
+}
+
+/// FIXME: perhapts we should use sth like `ColumnIdGenerator::new_alter`,
+/// However, the `SourceVersion` is problematic: It doesn't contain `next_col_id`.
+/// (But for now this isn't a large problem, since drop column is not allowed for source yet..)
+///
+/// Besides, the logic of column id handling is a mess.
+/// In some places, we use `ColumnId::placeholder()`, and use `col_id_gen` to fill it at the end;
+/// In other places, we create column id ad-hoc.
+pub fn max_column_id(columns: &Vec<ColumnCatalog>) -> ColumnId {
+    // XXX: should we check the column IDs of struct fields here?
+    columns
+        .iter()
+        .fold(ColumnId::first_user_column(), |a, b| a.max(b.column_id()))
 }
 
 #[cfg(test)]

@@ -11,21 +11,16 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::sync::Arc;
 
 use anyhow::Context;
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use itertools::Itertools;
 use tokio::time::Instant;
 
 use super::exchange::input::BoxedInput;
-use super::ActorContextRef;
 use crate::executor::exchange::input::new_input;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::utils::ActorInputMetrics;
-use crate::executor::{expect_first_barrier, BoxedMessageStream, Execute, Message};
+use crate::executor::prelude::*;
 use crate::task::{FragmentId, SharedContext};
+
 /// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
 /// there should be a `ReceiverExecutor` running in the background, so as to push
 /// messages down to the executors.
@@ -80,7 +75,6 @@ impl ReceiverExecutor {
     pub fn for_test(input: super::exchange::permit::Receiver) -> Self {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::Input;
-        use crate::executor::ActorContext;
 
         Self::new(
             ActorContext::for_test(114),
@@ -98,8 +92,7 @@ impl Execute for ReceiverExecutor {
     fn execute(mut self: Box<Self>) -> BoxedMessageStream {
         let actor_id = self.actor_context.id;
 
-        let mut metrics = ActorInputMetrics::new(
-            &self.metrics,
+        let mut metrics = self.metrics.new_actor_input_metrics(
             actor_id,
             self.fragment_id,
             self.upstream_fragment_id,
@@ -174,8 +167,7 @@ impl Execute for ReceiverExecutor {
                             self.input = new_upstream;
 
                             self.upstream_fragment_id = new_upstream_fragment_id;
-                            metrics = ActorInputMetrics::new(
-                                &self.metrics,
+                            metrics = self.metrics.new_actor_input_metrics(
                                 actor_id,
                                 self.fragment_id,
                                 self.upstream_fragment_id,
@@ -196,15 +188,13 @@ impl Execute for ReceiverExecutor {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::sync::Arc;
 
     use futures::{pin_mut, FutureExt};
-    use risingwave_common::array::StreamChunk;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 
     use super::*;
-    use crate::executor::{ActorContext, Barrier, Execute, Mutation, UpdateMutation};
+    use crate::executor::UpdateMutation;
     use crate::task::test_utils::helper_make_local_actor;
 
     #[tokio::test]

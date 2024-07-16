@@ -16,7 +16,6 @@ use std::ops::{Deref, DerefMut};
 
 use super::{EstimateSize, KvSize};
 
-pub mod lru;
 pub mod vecdeque;
 pub use vecdeque::EstimatedVecDeque;
 pub mod hashmap;

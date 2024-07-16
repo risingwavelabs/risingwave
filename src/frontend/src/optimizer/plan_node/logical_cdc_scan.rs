@@ -28,6 +28,7 @@ use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::generic::CdcScanOptions;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamCdcTableScan,
     ToStreamContext,
@@ -60,14 +61,14 @@ impl LogicalCdcScan {
         table_name: String, // explain-only
         cdc_table_desc: Rc<CdcTableDesc>,
         ctx: OptimizerContextRef,
-        disable_backfill: bool,
+        options: CdcScanOptions,
     ) -> Self {
         generic::CdcScan::new(
             table_name,
             (0..cdc_table_desc.columns.len()).collect(),
             cdc_table_desc,
             ctx,
-            disable_backfill,
+            options,
         )
         .into()
     }
@@ -96,7 +97,7 @@ impl LogicalCdcScan {
             output_col_idx,
             self.core.cdc_table_desc.clone(),
             self.base.ctx().clone(),
-            self.core.disable_backfill,
+            self.core.options.clone(),
         )
         .into()
     }

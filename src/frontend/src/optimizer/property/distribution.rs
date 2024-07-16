@@ -49,8 +49,9 @@ use std::fmt::Debug;
 use fixedbitset::FixedBitSet;
 use generic::PhysicalPlanRef;
 use itertools::Itertools;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
-use risingwave_common::hash::ParallelUnitId;
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_pb::batch_plan::exchange_info::{
     ConsistentHashInfo, Distribution as DistributionPb, DistributionMode, HashInfo,
 };
@@ -61,8 +62,6 @@ use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::FragmentId;
 use crate::error::Result;
 use crate::optimizer::property::Order;
-use crate::optimizer::PlanRef;
-use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 
 /// the distribution property provided by a operator.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -149,14 +148,17 @@ impl Distribution {
                     let vnode_mapping = worker_node_manager
                         .fragment_mapping(Self::get_fragment_id(catalog_reader, table_id)?)?;
 
-                    let pu2id_map: HashMap<ParallelUnitId, u32> = vnode_mapping
+                    let worker_slot_to_id_map: HashMap<WorkerSlotId, u32> = vnode_mapping
                         .iter_unique()
                         .enumerate()
-                        .map(|(i, pu)| (pu, i as u32))
+                        .map(|(i, worker_slot_id)| (worker_slot_id, i as u32))
                         .collect();
 
                     Some(DistributionPb::ConsistentHashInfo(ConsistentHashInfo {
-                        vmap: vnode_mapping.iter().map(|x| pu2id_map[&x]).collect_vec(),
+                        vmap: vnode_mapping
+                            .iter()
+                            .map(|id| worker_slot_to_id_map[&id])
+                            .collect_vec(),
                         key: key.iter().map(|num| *num as u32).collect(),
                     }))
                 }

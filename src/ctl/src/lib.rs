@@ -19,14 +19,17 @@ use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
+use itertools::Itertools;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::backup_restore::RestoreOpts;
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use thiserror_ext::AsReport;
 
 use crate::cmd_impl::hummock::{
     build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
 };
+use crate::cmd_impl::meta::EtcdBackend;
 use crate::cmd_impl::throttle::apply_throttle;
 use crate::common::CtlContext;
 
@@ -139,6 +142,18 @@ pub enum DebugCommands {
         #[command(flatten)]
         common: DebugCommon,
     },
+    /// Fix table fragments by cleaning up some un-exist fragments, which happens when the upstream
+    /// streaming job is failed to create and the fragments are not cleaned up due to some unidentified issues.
+    FixDirtyUpstreams {
+        #[command(flatten)]
+        common: DebugCommon,
+
+        #[clap(long)]
+        table_id: u32,
+
+        #[clap(long, value_delimiter = ',')]
+        dirty_fragment_ids: Vec<u32>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -240,6 +255,12 @@ enum HummockCommands {
         enable_emergency_picker: Option<bool>,
         #[clap(long)]
         tombstone_reclaim_ratio: Option<u32>,
+        #[clap(long)]
+        compression_level: Option<u32>,
+        #[clap(long)]
+        compression_algorithm: Option<String>,
+        #[clap(long)]
+        max_l0_compact_level: Option<u32>,
         #[clap(long)]
         partition_vnode_count: Option<u32>,
     },
@@ -525,6 +546,29 @@ enum MetaCommands {
         #[clap(long)]
         props: String,
     },
+
+    /// Migration from etcd meta store to sql backend
+    Migration {
+        #[clap(
+            long,
+            required = true,
+            value_delimiter = ',',
+            value_name = "host:port, ..."
+        )]
+        etcd_endpoints: String,
+        #[clap(long, value_name = "username:password")]
+        etcd_user_password: Option<String>,
+
+        #[clap(
+            long,
+            required = true,
+            value_name = "postgres://user:password@host:port/dbname or mysql://user:password@host:port/dbname or sqlite://path?mode=rwc"
+        )]
+        sql_endpoint: String,
+
+        #[clap(short = 'f', long, default_value_t = false)]
+        force_clean: bool,
+    },
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -650,6 +694,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             level0_overlapping_sub_level_compact_level_count,
             enable_emergency_picker,
             tombstone_reclaim_ratio,
+            compression_level,
+            compression_algorithm,
+            max_l0_compact_level,
             partition_vnode_count,
         }) => {
             cmd_impl::hummock::update_compaction_config(
@@ -671,6 +718,16 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     level0_overlapping_sub_level_compact_level_count,
                     enable_emergency_picker,
                     tombstone_reclaim_ratio,
+                    if let Some(level) = compression_level {
+                        assert!(compression_algorithm.is_some());
+                        Some(CompressionAlgorithm {
+                            level,
+                            compression_algorithm: compression_algorithm.unwrap(),
+                        })
+                    } else {
+                        None
+                    },
+                    max_l0_compact_level,
                     partition_vnode_count,
                 ),
             )
@@ -793,6 +850,30 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::ValidateSource { props }) => {
             cmd_impl::meta::validate_source(context, props).await?
         }
+        Commands::Meta(MetaCommands::Migration {
+            etcd_endpoints,
+            etcd_user_password,
+            sql_endpoint,
+            force_clean,
+        }) => {
+            let credentials = match etcd_user_password {
+                Some(user_pwd) => {
+                    let user_pwd_vec = user_pwd.splitn(2, ':').collect_vec();
+                    if user_pwd_vec.len() != 2 {
+                        return Err(anyhow::Error::msg(format!(
+                            "invalid etcd user password: {user_pwd}"
+                        )));
+                    }
+                    Some((user_pwd_vec[0].to_string(), user_pwd_vec[1].to_string()))
+                }
+                None => None,
+            };
+            let etcd_backend = EtcdBackend {
+                endpoints: etcd_endpoints.split(',').map(|s| s.to_string()).collect(),
+                credentials,
+            };
+            cmd_impl::meta::migrate(etcd_backend, sql_endpoint, force_clean).await?
+        }
         Commands::AwaitTree => cmd_impl::await_tree::dump(context).await?,
         Commands::Profile(ProfileCommands::Cpu { sleep }) => {
             cmd_impl::profile::cpu_profile(context, sleep).await?
@@ -816,6 +897,11 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 .await?
         }
         Commands::Debug(DebugCommands::Dump { common }) => cmd_impl::debug::dump(common).await?,
+        Commands::Debug(DebugCommands::FixDirtyUpstreams {
+            common,
+            table_id,
+            dirty_fragment_ids,
+        }) => cmd_impl::debug::fix_table_fragments(common, table_id, dirty_fragment_ids).await?,
         Commands::Throttle(ThrottleCommands::Source(args)) => {
             apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Source, args).await?
         }

@@ -1,0 +1,71 @@
+# Regular function
+query error
+select pow(114, 514);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: error while evaluating expression `pow_f64('114', '514')`
+  3: Numeric out of range: overflow
+
+
+# Nullable arguments
+query error
+select array_position(array[1, null, 2, null], null, null::int);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: error while evaluating expression `array_position_start('{1,NULL,2,NULL}', NULL, NULL)`
+  3: Invalid parameter start: initial position must not be null
+
+
+# Operator
+query error
+select 11111111444 * 51444444444444444;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: error while evaluating expression `general_mul('11111111444', '51444444444444444')`
+  3: Numeric out of range
+
+
+# Cast
+query error
+select 'foo'::bigint;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: error while evaluating expression `str_parse('foo')`
+  3: Parse error: bigint invalid digit found in string
+
+
+# Prebuild context
+# TODO: not included in the error message
+query error
+select jsonb_path_exists('{"a":[1,2,3,4,5]}', '$.a[*] ? (@ >= $min && @ <= $max)', '"foo"');
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: error while evaluating expression `jsonb_path_exists3('{"a": [1, 2, 3, 4, 5]}', '"foo"')`
+  3: Invalid parameter jsonpath: "vars" argument is not an object
+
+
+# Variadic arguments
+query error
+select format('%L %s', 'Hello', 'World');
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: error while evaluating expression `format('Hello', 'World')`
+  3: Unsupported function: unsupported specifier type 'L'

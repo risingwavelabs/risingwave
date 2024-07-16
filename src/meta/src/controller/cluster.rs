@@ -108,11 +108,8 @@ impl From<WorkerInfo> for PbWorkerNode {
 
 impl ClusterController {
     pub async fn new(env: MetaSrvEnv, max_heartbeat_interval: Duration) -> MetaResult<Self> {
-        let meta_store = env
-            .sql_meta_store()
-            .expect("sql meta store is not initialized");
         let inner = ClusterControllerInner::new(
-            meta_store.conn,
+            env.meta_store().as_sql().conn.clone(),
             env.opts.disable_automatic_parallelism_control,
         )
         .await?;
@@ -178,7 +175,7 @@ impl ClusterController {
         Ok(())
     }
 
-    pub async fn delete_worker(&self, host_address: HostAddress) -> MetaResult<PbWorkerNode> {
+    pub async fn delete_worker(&self, host_address: HostAddress) -> MetaResult<()> {
         let mut inner = self.inner.write().await;
         let worker = inner.delete_worker(host_address).await?;
         if worker.r#type() == PbWorkerType::ComputeNode {
@@ -193,10 +190,10 @@ impl ClusterController {
         // local notification.
         self.env
             .notification_manager()
-            .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker.clone()))
+            .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker))
             .await;
 
-        Ok(worker)
+        Ok(())
     }
 
     pub async fn update_schedulability(
@@ -265,11 +262,12 @@ impl ClusterController {
                 // 3. Delete expired workers.
                 let worker_infos = match Worker::find()
                     .select_only()
+                    .column(worker::Column::WorkerId)
                     .column(worker::Column::WorkerType)
                     .column(worker::Column::Host)
                     .column(worker::Column::Port)
                     .filter(worker::Column::WorkerId.is_in(worker_to_delete.clone()))
-                    .into_tuple::<(WorkerType, String, i32)>()
+                    .into_tuple::<(WorkerId, WorkerType, String, i32)>()
                     .all(&inner.db)
                     .await
                 {
@@ -279,33 +277,36 @@ impl ClusterController {
                         continue;
                     }
                 };
+                drop(inner);
 
-                if let Err(err) = Worker::delete_many()
-                    .filter(worker::Column::WorkerId.is_in(worker_to_delete))
-                    .exec(&inner.db)
-                    .await
-                {
-                    tracing::warn!(error = %err.as_report(), "Failed to delete expire workers from db");
-                    continue;
-                }
-
-                for (worker_type, host, port) in worker_infos {
-                    match worker_type {
-                        WorkerType::Frontend
-                        | WorkerType::ComputeNode
-                        | WorkerType::Compactor
-                        | WorkerType::RiseCtl => {
-                            cluster_controller
-                                .env
-                                .notification_manager()
-                                .delete_sender(
-                                    worker_type.into(),
-                                    WorkerKey(HostAddress { host, port }),
-                                )
-                                .await
+                for (worker_id, worker_type, host, port) in worker_infos {
+                    let host_addr = PbHostAddress { host, port };
+                    match cluster_controller.delete_worker(host_addr.clone()).await {
+                        Ok(_) => {
+                            tracing::warn!(
+                                worker_id,
+                                ?host_addr,
+                                %now,
+                                "Deleted expired worker"
+                            );
+                            match worker_type {
+                                WorkerType::Frontend
+                                | WorkerType::ComputeNode
+                                | WorkerType::Compactor
+                                | WorkerType::RiseCtl => {
+                                    cluster_controller
+                                        .env
+                                        .notification_manager()
+                                        .delete_sender(worker_type.into(), WorkerKey(host_addr))
+                                        .await
+                                }
+                                _ => {}
+                            };
                         }
-                        _ => {}
-                    };
+                        Err(err) => {
+                            tracing::warn!(error = %err.as_report(), "Failed to delete expire worker from db");
+                        }
+                    }
                 }
             }
         });
@@ -950,7 +951,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cluster_controller() -> MetaResult<()> {
-        let env = MetaSrvEnv::for_test().await;
+        let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
         let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
 
         let parallelism_num = 4_usize;
@@ -1038,7 +1039,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_schedulability() -> MetaResult<()> {
-        let env = MetaSrvEnv::for_test().await;
+        let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
         let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
 
         let host = HostAddress {

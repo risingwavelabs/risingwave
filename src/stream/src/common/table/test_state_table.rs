@@ -1356,11 +1356,7 @@ async fn test_state_table_may_exist() {
     // test may_exist with data only in uncommitted ssts (e1)
     check_may_exist(&state_table, vec![1, 4], vec![2, 3, 6, 12]).await;
 
-    test_env
-        .meta_client
-        .commit_epoch(e1, e1_res.uncommitted_ssts)
-        .await
-        .unwrap();
+    test_env.meta_client.commit_epoch(e1, e1_res).await.unwrap();
     test_env.storage.try_wait_epoch_for_test(e1).await;
 
     // test may_exist with data only in committed ssts (e1)
@@ -1434,11 +1430,7 @@ async fn test_state_table_may_exist() {
     // (e2), committed ssts (e1)
     check_may_exist(&state_table, vec![1, 3, 4, 6], vec![12]).await;
 
-    test_env
-        .meta_client
-        .commit_epoch(e2, e2_res.uncommitted_ssts)
-        .await
-        .unwrap();
+    test_env.meta_client.commit_epoch(e2, e2_res).await.unwrap();
     test_env.storage.try_wait_epoch_for_test(e2).await;
 
     epoch.inc_for_test();
@@ -1451,18 +1443,10 @@ async fn test_state_table_may_exist() {
     // test may_exist with data in uncommitted ssts (e3, e4), committed ssts (e1, e2, e3, e4)
     check_may_exist(&state_table, vec![1, 3, 4, 6], vec![12]).await;
 
-    test_env
-        .meta_client
-        .commit_epoch(e3, e3_res.uncommitted_ssts)
-        .await
-        .unwrap();
+    test_env.meta_client.commit_epoch(e3, e3_res).await.unwrap();
     test_env.storage.try_wait_epoch_for_test(e3).await;
 
-    test_env
-        .meta_client
-        .commit_epoch(e4, e4_res.uncommitted_ssts)
-        .await
-        .unwrap();
+    test_env.meta_client.commit_epoch(e4, e4_res).await.unwrap();
     test_env.storage.try_wait_epoch_for_test(e4).await;
 
     // test may_exist with data in committed ssts (e1, e2, e3, e4)

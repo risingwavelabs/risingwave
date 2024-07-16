@@ -18,8 +18,9 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_storage::hummock::compactor::merge_imms_in_memory;
-use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use risingwave_storage::hummock::value::HummockValue;
+use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::{
+    SharedBufferBatch, SharedBufferValue,
+};
 
 fn gen_interleave_shared_buffer_batch(
     batch_size: usize,
@@ -34,7 +35,7 @@ fn gen_interleave_shared_buffer_batch(
                 TableKey(Bytes::copy_from_slice(
                     format!("test_key_{:08}", j * batch_count + i).as_bytes(),
                 )),
-                HummockValue::put(Bytes::copy_from_slice("value".as_bytes())),
+                SharedBufferValue::Insert(Bytes::copy_from_slice("value".as_bytes())),
             ));
         }
         let batch = SharedBufferBatch::for_test(batch_data, epoch, Default::default());
@@ -51,7 +52,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         &batches,
         |b, batches| {
             b.to_async(FuturesExecutor).iter(|| async {
-                let imm = merge_imms_in_memory(TableId::default(), 0, batches.clone(), None).await;
+                let imm = merge_imms_in_memory(TableId::default(), batches.clone(), None).await;
                 assert_eq!(imm.key_count(), 10000 * 100);
                 assert_eq!(imm.value_count(), 10000 * 100);
             })
@@ -71,7 +72,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         &later_batches,
         |b, batches| {
             b.to_async(FuturesExecutor).iter(|| async {
-                let imm = merge_imms_in_memory(TableId::default(), 0, batches.clone(), None).await;
+                let imm = merge_imms_in_memory(TableId::default(), batches.clone(), None).await;
                 assert_eq!(imm.key_count(), 2000 * 100);
                 assert_eq!(imm.value_count(), 2000 * 100 * 5);
             })

@@ -29,7 +29,9 @@ use crate::error::ConnectorResult;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 pub struct MqttSplitEnumerator {
+    #[expect(dead_code)]
     topic: String,
+    #[expect(dead_code)]
     client: rumqttc::v5::AsyncClient,
     topics: Arc<RwLock<HashSet<String>>>,
     connected: Arc<AtomicBool>,
@@ -47,7 +49,7 @@ impl SplitEnumerator for MqttSplitEnumerator {
     ) -> ConnectorResult<MqttSplitEnumerator> {
         let (client, mut eventloop) = properties.common.build_client(context.info.source_id, 0)?;
 
-        let topic = properties.common.topic.clone();
+        let topic = properties.topic.clone();
         let mut topics = HashSet::new();
         if !topic.contains('#') && !topic.contains('+') {
             topics.insert(topic.clone());
@@ -109,7 +111,7 @@ impl SplitEnumerator for MqttSplitEnumerator {
         Ok(Self {
             client,
             topics,
-            topic: properties.common.topic,
+            topic: properties.topic,
             connected,
             stopped,
         })

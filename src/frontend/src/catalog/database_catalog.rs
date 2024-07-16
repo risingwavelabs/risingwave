@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_pb::catalog::{PbDatabase, PbSchema};
+use risingwave_pb::user::grant_privilege::Object;
 
 use super::OwnedByUserCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
@@ -97,6 +98,16 @@ impl DatabaseCatalog {
         self.schema_by_name
             .values()
             .find(|schema| schema.get_table_by_id(table_id).is_some())
+    }
+
+    pub fn get_grant_object_by_oid(&self, oid: u32) -> Option<Object> {
+        for schema in self.schema_by_name.values() {
+            let object = schema.get_grant_object_by_oid(oid);
+            if object.is_some() {
+                return object;
+            }
+        }
+        None
     }
 
     pub fn update_schema(&mut self, prost: &PbSchema) {

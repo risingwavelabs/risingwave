@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::{DatabaseId, ObjectId, SchemaId, UserId};
 
-#[derive(Clone, Debug, PartialEq, Eq, Copy, EnumIter, DeriveActiveEnum)]
+#[derive(Clone, Debug, PartialEq, Eq, Copy, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum ObjectType {
     #[sea_orm(string_value = "DATABASE")]
@@ -39,6 +40,8 @@ pub enum ObjectType {
     Connection,
     #[sea_orm(string_value = "SUBSCRIPTION")]
     Subscription,
+    #[sea_orm(string_value = "SECRET")]
+    Secret,
 }
 
 impl ObjectType {
@@ -54,11 +57,12 @@ impl ObjectType {
             ObjectType::Function => "function",
             ObjectType::Connection => "connection",
             ObjectType::Subscription => "subscription",
+            ObjectType::Secret => "secret",
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "object")]
 pub struct Model {
     #[sea_orm(primary_key)]

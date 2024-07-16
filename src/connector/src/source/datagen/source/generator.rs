@@ -276,6 +276,7 @@ mod tests {
                 protocol_config: ProtocolProperties::Plain,
                 encoding_config: EncodingProperties::Json(crate::parser::JsonProperties {
                     use_schema_registry: false,
+                    timestamptz_handling: None,
                 }),
                 key_encoding_config: None,
             },

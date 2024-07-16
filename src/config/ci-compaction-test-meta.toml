@@ -1,6 +1,6 @@
 [meta]
 enable_compaction_deterministic = true
-max_heartbeat_interval_secs = 600
+max_heartbeat_interval_secs = 60
 
 [streaming]
 in_flight_barrier_nums = 40

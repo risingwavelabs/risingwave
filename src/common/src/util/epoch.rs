@@ -64,6 +64,7 @@ impl Epoch {
         next_epoch
     }
 
+    /// milliseconds since the RisingWave epoch
     pub fn physical_time(&self) -> u64 {
         self.0 >> EPOCH_PHYSICAL_SHIFT_BITS
     }
@@ -85,6 +86,10 @@ impl Epoch {
 
     pub fn as_unix_millis(&self) -> u64 {
         UNIX_RISINGWAVE_DATE_SEC * 1000 + self.physical_time()
+    }
+
+    pub fn as_unix_secs(&self) -> u64 {
+        UNIX_RISINGWAVE_DATE_SEC + self.physical_time() / 1000
     }
 
     /// Returns the epoch in a Timestamptz.

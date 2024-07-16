@@ -170,7 +170,7 @@ impl QueryRewriter<'_> {
     ///
     /// So that we DON'T have to:
     /// 1. rewrite the select and expr part like `schema.table.column`, `table.column`,
-    /// `alias.column` etc.
+    ///    `alias.column` etc.
     /// 2. handle the case that the old name is used as alias.
     /// 3. handle the case that the new name is used as alias.
     fn visit_table_factor(&self, table_factor: &mut TableFactor) {
@@ -312,17 +312,23 @@ impl QueryRewriter<'_> {
                 self.visit_expr(low);
                 self.visit_expr(high);
             }
-            Expr::SimilarTo {
-                expr,
-                pat,
-                esc_text,
-                ..
+            Expr::Like {
+                expr, pattern: pat, ..
             } => {
                 self.visit_expr(expr);
                 self.visit_expr(pat);
-                if let Some(e) = esc_text {
-                    self.visit_expr(e);
-                }
+            }
+            Expr::ILike {
+                expr, pattern: pat, ..
+            } => {
+                self.visit_expr(expr);
+                self.visit_expr(pat);
+            }
+            Expr::SimilarTo {
+                expr, pattern: pat, ..
+            } => {
+                self.visit_expr(expr);
+                self.visit_expr(pat);
             }
 
             Expr::IsDistinctFrom(expr1, expr2)

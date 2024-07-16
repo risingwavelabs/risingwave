@@ -12,7 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
+
+pub fn compact_task_output_to_string(compact_task: &CompactTask) -> String {
+    use std::fmt::Write;
+
+    let mut s = String::default();
+    writeln!(
+        s,
+        "Compaction task id: {:?}, group-id: {:?}, type: {:?}, target level: {:?}, target sub level: {:?} watermark: {:?}, target_file_size: {:?}, splits: {:?}, status: {:?}",
+        compact_task.task_id,
+        compact_task.compaction_group_id,
+        compact_task.task_type(),
+        compact_task.target_level,
+        compact_task.target_sub_level_id,
+        compact_task.watermark,
+        compact_task.target_file_size,
+        compact_task.splits.len(),
+        compact_task.task_status()
+    )
+    .unwrap();
+    s.push_str("Output: \n");
+    for sst in &compact_task.sorted_output_ssts {
+        append_sstable_info_to_string(&mut s, sst);
+    }
+    s
+}
 
 pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     use std::fmt::Write;
@@ -20,46 +47,37 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     let mut s = String::new();
     writeln!(
         s,
-        "Compaction task id: {:?}, group-id: {:?}, task type: {:?}, target level: {:?}, target sub level: {:?}",
+        "Compaction task id: {:?}, group-id: {:?}, type: {:?}, target level: {:?}, target sub level: {:?} watermark: {:?}, target_file_size: {:?}, splits: {:?}",
         compact_task.task_id,
         compact_task.compaction_group_id,
         compact_task.task_type(),
         compact_task.target_level,
-        compact_task.target_sub_level_id
+        compact_task.target_sub_level_id,
+        compact_task.watermark,
+        compact_task.target_file_size,
+        compact_task.splits.len(),
     )
     .unwrap();
-    writeln!(s, "Compaction watermark: {:?} ", compact_task.watermark).unwrap();
-    writeln!(
-        s,
-        "Compaction target_file_size: {:?} ",
-        compact_task.target_file_size
-    )
-    .unwrap();
-    writeln!(s, "Compaction # splits: {:?} ", compact_task.splits.len()).unwrap();
-    writeln!(
-        s,
-        "Compaction task status: {:?} ",
-        compact_task.task_status()
-    )
-    .unwrap();
-    writeln!(
-        s,
-        "Compaction task table_ids: {:?} ",
-        compact_task.existing_table_ids,
-    )
-    .unwrap();
-    writeln!(
-        s,
-        "Compaction task partition info: {:?} ",
-        compact_task.table_vnode_partition,
-    )
-    .unwrap();
-    s.push_str("Compaction Sstables structure: \n");
+    s.push_str("Input: \n");
+    let existing_table_ids: HashSet<u32> = compact_task
+        .existing_table_ids
+        .clone()
+        .into_iter()
+        .collect();
+    let mut input_sst_table_ids: HashSet<u32> = HashSet::new();
+    let mut dropped_table_ids = HashSet::new();
     for level_entry in &compact_task.input_ssts {
         let tables: Vec<String> = level_entry
             .table_infos
             .iter()
             .map(|table| {
+                for tid in &table.table_ids {
+                    if !existing_table_ids.contains(tid) {
+                        dropped_table_ids.insert(tid);
+                    } else {
+                        input_sst_table_ids.insert(*tid);
+                    }
+                }
                 if table.total_key_count != 0 {
                     format!(
                         "[id: {}, obj_id: {} {}KB stale_ratio {}]",
@@ -80,9 +98,19 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
             .collect();
         writeln!(s, "Level {:?} {:?} ", level_entry.level_idx, tables).unwrap();
     }
-    s.push_str("Compaction task output: \n");
-    for sst in &compact_task.sorted_output_ssts {
-        append_sstable_info_to_string(&mut s, sst);
+    if !compact_task.table_vnode_partition.is_empty() {
+        writeln!(s, "Table vnode partition info:").unwrap();
+        compact_task
+            .table_vnode_partition
+            .iter()
+            .filter(|t| input_sst_table_ids.contains(t.0))
+            .for_each(|(tid, partition)| {
+                writeln!(s, " [{:?}, {:?}]", tid, partition).unwrap();
+            });
+    }
+
+    if !dropped_table_ids.is_empty() {
+        writeln!(s, "Dropped table_ids: {:?} ", dropped_table_ids).unwrap();
     }
     s
 }
@@ -157,7 +185,6 @@ pub fn estimate_memory_for_compact_task(
     block_size: u64,
     recv_buffer_size: u64,
     sst_capacity: u64,
-    support_streaming_upload: bool,
 ) -> u64 {
     let mut result = 0;
     // When building the SstableStreamIterator, sstable_syncable will fetch the SstableMeta and seek
@@ -195,12 +222,10 @@ pub fn estimate_memory_for_compact_task(
     // output
     // builder will maintain SstableInfo + block_builder(block) + writer (block to vec)
     let estimated_meta_size = sst_capacity * task_max_sst_meta_ratio / 100;
-    if support_streaming_upload {
-        result += estimated_meta_size + 2 * block_size
-    } else {
-        result += estimated_meta_size + sst_capacity; // Use sst_capacity to avoid BatchUploader
-                                                      // memory bursts.
-    }
+
+    // FIXME: sst_capacity is the upper bound of the memory usage of the streaming sstable uploader
+    // A more reasonable memory limit method needs to be adopted, this is just a temporary fix.
+    result += estimated_meta_size + sst_capacity;
 
     result
 }

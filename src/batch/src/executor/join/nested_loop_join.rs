@@ -98,7 +98,9 @@ impl NestedLoopJoinExecutor {
             for chunk in self.left_child.execute() {
                 let c = chunk?;
                 trace!("Estimated chunk size is {:?}", c.estimated_heap_size());
-                self.mem_context.add(c.estimated_heap_size() as i64);
+                if !self.mem_context.add(c.estimated_heap_size() as i64) {
+                    Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
+                }
                 ret.push(c);
             }
             ret
@@ -527,8 +529,6 @@ mod tests {
     const CHUNK_SIZE: usize = 1024;
 
     struct TestFixture {
-        left_types: Vec<DataType>,
-        right_types: Vec<DataType>,
         join_type: JoinType,
     }
 
@@ -549,11 +549,7 @@ mod tests {
     /// ```
     impl TestFixture {
         fn with_join_type(join_type: JoinType) -> Self {
-            Self {
-                left_types: vec![DataType::Int32, DataType::Float32],
-                right_types: vec![DataType::Int32, DataType::Float64],
-                join_type,
-            }
+            Self { join_type }
         }
 
         fn create_left_executor(&self) -> BoxedExecutor {

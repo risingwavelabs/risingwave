@@ -14,7 +14,8 @@
 
 use std::assert_matches::assert_matches;
 use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::mem::replace;
 use std::sync::Arc;
@@ -22,13 +23,12 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use futures::stream::FuturesOrdered;
-use futures::{FutureExt, StreamExt};
-use parking_lot::Mutex;
+use futures::{FutureExt, StreamExt, TryFutureExt};
 use prometheus::HistogramTimer;
 use risingwave_common::must_match;
+use risingwave_hummock_sdk::SyncResult;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
-use risingwave_storage::store::SyncResult;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
@@ -39,7 +39,24 @@ use super::BarrierCompleteResult;
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, Mutation};
-use crate::task::ActorId;
+use crate::task::{await_tree_key, ActorId};
+
+struct IssuedState {
+    pub mutation: Option<Arc<Mutation>>,
+    /// Actor ids remaining to be collected.
+    pub remaining_actors: BTreeSet<ActorId>,
+
+    pub barrier_inflight_latency: HistogramTimer,
+}
+
+impl Debug for IssuedState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IssuedState")
+            .field("mutation", &self.mutation)
+            .field("remaining_actors", &self.remaining_actors)
+            .finish()
+    }
+}
 
 /// The state machine of local barrier manager.
 #[derive(Debug)]
@@ -52,13 +69,7 @@ enum ManagedBarrierStateInner {
     },
 
     /// Meta service has issued a `send_barrier` request. We're collecting barriers now.
-    Issued {
-        mutation: Option<Arc<Mutation>>,
-        /// Actor ids remaining to be collected.
-        remaining_actors: HashSet<ActorId>,
-
-        barrier_inflight_latency: HistogramTimer,
-    },
+    Issued(IssuedState),
 
     /// The barrier has been collected by all remaining actors
     AllCollected,
@@ -85,44 +96,58 @@ fn sync_epoch(
     kind: BarrierKind,
 ) -> impl Future<Output = StreamResult<Option<SyncResult>>> + 'static {
     let barrier_sync_latency = streaming_metrics.barrier_sync_latency.clone();
-    let state_store = state_store.clone();
 
+    let sync_result_future = match kind {
+        BarrierKind::Unspecified => unreachable!(),
+        BarrierKind::Initial => {
+            if let Some(hummock) = state_store.as_hummock() {
+                let mce = hummock.get_pinned_version().max_committed_epoch();
+                assert_eq!(
+                    mce, prev_epoch,
+                    "first epoch should match with the current version",
+                );
+            }
+            tracing::info!(?prev_epoch, "ignored syncing data for the first barrier");
+            None
+        }
+        BarrierKind::Barrier => None,
+        BarrierKind::Checkpoint => {
+            let timer = barrier_sync_latency.start_timer();
+            let sync_result_future = dispatch_state_store!(state_store, store, {
+                store
+                    .sync(prev_epoch)
+                    .instrument_await(format!("sync_epoch (epoch {})", prev_epoch))
+                    .inspect_ok(move |_| {
+                        timer.observe_duration();
+                    })
+                    .inspect_err(move |e| {
+                        tracing::error!(
+                            prev_epoch,
+                            error = %e.as_report(),
+                            "Failed to sync state store",
+                        );
+                    })
+                    .boxed()
+            });
+            Some(sync_result_future)
+        }
+    };
     async move {
-        let sync_result = match kind {
-            BarrierKind::Unspecified => unreachable!(),
-            BarrierKind::Initial => {
-                if let Some(hummock) = state_store.as_hummock() {
-                    let mce = hummock.get_pinned_version().max_committed_epoch();
-                    assert_eq!(
-                        mce, prev_epoch,
-                        "first epoch should match with the current version",
-                    );
-                }
-                tracing::info!(?prev_epoch, "ignored syncing data for the first barrier");
-                None
-            }
-            BarrierKind::Barrier => None,
-            BarrierKind::Checkpoint => {
-                let timer = barrier_sync_latency.start_timer();
-                let sync_result = dispatch_state_store!(state_store, store, {
-                    store
-                        .sync(prev_epoch)
-                        .instrument_await(format!("sync_epoch (epoch {})", prev_epoch))
-                        .await
-                        .inspect_err(|e| {
-                            tracing::error!(
-                                prev_epoch,
-                                error = %e.as_report(),
-                                "Failed to sync state store",
-                            );
-                        })
-                })?;
-                timer.observe_duration();
-                Some(sync_result)
-            }
-        };
-        Ok(sync_result)
+        if let Some(sync_result_future) = sync_result_future {
+            Ok(Some(sync_result_future.await?))
+        } else {
+            Ok(None)
+        }
     }
+}
+
+#[derive(Debug)]
+pub(super) struct ManagedBarrierStateDebugInfo<'a> {
+    #[expect(dead_code)]
+    epoch_barrier_state_map: &'a BTreeMap<u64, BarrierState>,
+
+    #[expect(dead_code)]
+    create_mview_progress: &'a HashMap<u64, HashMap<ActorId, BackfillState>>,
 }
 
 pub(super) struct ManagedBarrierState {
@@ -142,7 +167,7 @@ pub(super) struct ManagedBarrierState {
     await_epoch_completed_futures: FuturesOrdered<AwaitEpochCompletedFuture>,
 
     /// Manages the await-trees of all barriers.
-    barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
+    barrier_await_tree_reg: Option<await_tree::Registry>,
 }
 
 impl ManagedBarrierState {
@@ -159,7 +184,7 @@ impl ManagedBarrierState {
     pub(super) fn new(
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
-        barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
+        barrier_await_tree_reg: Option<await_tree::Registry>,
     ) -> Self {
         Self {
             epoch_barrier_state_map: BTreeMap::default(),
@@ -171,13 +196,11 @@ impl ManagedBarrierState {
         }
     }
 
-    pub(super) fn reset_and_take_barrier_await_tree_reg(
-        &mut self,
-    ) -> Option<Arc<Mutex<await_tree::Registry<u64>>>> {
-        if let Some(reg) = &self.barrier_await_tree_reg {
-            reg.lock().clear();
+    pub(super) fn to_debug_info(&self) -> ManagedBarrierStateDebugInfo<'_> {
+        ManagedBarrierStateDebugInfo {
+            epoch_barrier_state_map: &self.epoch_barrier_state_map,
+            create_mview_progress: &self.create_mview_progress,
         }
-        self.barrier_await_tree_reg.take()
     }
 
     pub fn read_barrier_mutation(
@@ -203,7 +226,7 @@ impl ManagedBarrierState {
                     } => {
                         mutation_senders.push(sender);
                     }
-                    ManagedBarrierStateInner::Issued { mutation, .. } => {
+                    ManagedBarrierStateInner::Issued(IssuedState { mutation, .. }) => {
                         let _ = sender.send(mutation.clone());
                     }
                     _ => {
@@ -229,14 +252,13 @@ impl ManagedBarrierState {
         for (prev_epoch, barrier_state) in &mut self.epoch_barrier_state_map {
             let prev_epoch = *prev_epoch;
             match &barrier_state.inner {
-                ManagedBarrierStateInner::Issued {
+                ManagedBarrierStateInner::Issued(IssuedState {
                     remaining_actors, ..
-                } if remaining_actors.is_empty() => {}
+                }) if remaining_actors.is_empty() => {}
                 ManagedBarrierStateInner::AllCollected | ManagedBarrierStateInner::Completed(_) => {
                     continue;
                 }
-                ManagedBarrierStateInner::Stashed { .. }
-                | ManagedBarrierStateInner::Issued { .. } => {
+                ManagedBarrierStateInner::Stashed { .. } | ManagedBarrierStateInner::Issued(_) => {
                     break;
                 }
             }
@@ -246,10 +268,10 @@ impl ManagedBarrierState {
                 ManagedBarrierStateInner::AllCollected,
             );
 
-            must_match!(prev_state, ManagedBarrierStateInner::Issued {
+            must_match!(prev_state, ManagedBarrierStateInner::Issued(IssuedState {
                 barrier_inflight_latency: timer,
                 ..
-            } => {
+            }) => {
                 timer.observe_duration();
             });
 
@@ -300,10 +322,12 @@ impl ManagedBarrierState {
                         },
                     );
                 if let Some(reg) = &self.barrier_await_tree_reg {
-                    reg.lock()
-                        .register(prev_epoch, format!("SyncEpoch({})", prev_epoch))
-                        .instrument(future)
-                        .left_future()
+                    reg.register(
+                        await_tree_key::BarrierAwait { prev_epoch },
+                        format!("SyncEpoch({})", prev_epoch),
+                    )
+                    .instrument(future)
+                    .left_future()
                 } else {
                     future.right_future()
                 }
@@ -325,10 +349,10 @@ impl ManagedBarrierState {
             .filter_map(move |(prev_epoch, barrier_state)| {
                 #[allow(clippy::single_match)]
                 match barrier_state.inner {
-                    ManagedBarrierStateInner::Issued {
+                    ManagedBarrierStateInner::Issued(IssuedState {
                         ref remaining_actors,
                         ..
-                    } => {
+                    }) => {
                         if remaining_actors.contains(&actor_id) {
                             Some(*prev_epoch)
                         } else {
@@ -365,10 +389,10 @@ impl ManagedBarrierState {
             Some(&mut BarrierState {
                 curr_epoch,
                 inner:
-                    ManagedBarrierStateInner::Issued {
+                    ManagedBarrierStateInner::Issued(IssuedState {
                         ref mut remaining_actors,
                         ..
-                    },
+                    }),
                 ..
             }) => {
                 let exist = remaining_actors.remove(&actor_id);
@@ -424,11 +448,11 @@ impl ManagedBarrierState {
             barrier.epoch.prev,
             BarrierState {
                 curr_epoch: barrier.epoch.curr,
-                inner: ManagedBarrierStateInner::Issued {
-                    remaining_actors: actor_ids_to_collect,
+                inner: ManagedBarrierStateInner::Issued(IssuedState {
+                    remaining_actors: BTreeSet::from_iter(actor_ids_to_collect),
                     mutation: barrier.mutation.clone(),
                     barrier_inflight_latency: timer,
-                },
+                }),
                 kind: barrier.kind,
             },
         );

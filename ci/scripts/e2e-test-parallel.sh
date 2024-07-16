@@ -26,29 +26,33 @@ download_and_prepare_rw "$profile" common
 echo "--- Download artifacts"
 download-and-decompress-artifact e2e_test_generated ./
 
-host_args="-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567"
+kill_cluster() {
+  echo "--- Kill cluster"
+  risedev ci-kill
+}
+
+host_args=(-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567)
+
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_storage::hummock::compactor::compactor_runner=warn"
 
 echo "--- e2e, ci-3streaming-2serving-3fe, streaming"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-3streaming-2serving-3fe
-sqllogictest ${host_args} -d dev './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}"
+RUST_LOG=$RUST_LOG \
+risedev ci-start ci-3streaming-2serving-3fe
+sqllogictest "${host_args[@]}" -d dev './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}"
 
-echo "--- Kill cluster"
-cargo make ci-kill
+kill_cluster
 
 echo "--- e2e, ci-3streaming-2serving-3fe, batch"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-3streaming-2serving-3fe
-sqllogictest ${host_args} -d dev './e2e_test/ddl/**/*.slt' --junit "parallel-batch-ddl-${profile}"
-sqllogictest ${host_args} -d dev './e2e_test/visibility_mode/*.slt' -j 16 --junit "parallel-batch-${profile}"
+RUST_LOG=$RUST_LOG \
+risedev ci-start ci-3streaming-2serving-3fe
+sqllogictest "${host_args[@]}" -d dev './e2e_test/ddl/**/*.slt' --junit "parallel-batch-ddl-${profile}"
+sqllogictest "${host_args[@]}" -d dev './e2e_test/visibility_mode/*.slt' -j 16 --junit "parallel-batch-${profile}"
 
-echo "--- Kill cluster"
-cargo make ci-kill
+kill_cluster
 
 echo "--- e2e, ci-3streaming-2serving-3fe, generated"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-3streaming-2serving-3fe
-sqllogictest ${host_args} -d dev './e2e_test/generated/**/*.slt' -j 16 --junit "parallel-generated-${profile}"
+RUST_LOG=$RUST_LOG \
+risedev ci-start ci-3streaming-2serving-3fe
+sqllogictest "${host_args[@]}" -d dev './e2e_test/generated/**/*.slt' -j 16 --junit "parallel-generated-${profile}"
 
-echo "--- Kill cluster"
-cargo make ci-kill
+kill_cluster

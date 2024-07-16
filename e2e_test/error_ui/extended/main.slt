@@ -4,8 +4,9 @@ selet 1;
 db error: ERROR: Failed to prepare the statement
 
 Caused by:
-  sql parser error: Expected an SQL statement, found: selet at line:1, column:6
-Near "selet"
+  sql parser error: expected statement, found: selet
+LINE 1: selet 1;
+        ^
 
 
 query error
@@ -15,4 +16,5 @@ db error: ERROR: Failed to execute the statement
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: Division by zero
+  2: error while evaluating expression `general_div('1', '0')`
+  3: Division by zero

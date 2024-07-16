@@ -41,10 +41,12 @@ def_anyhow_newtype! {
     url::ParseError => "failed to parse url",
     serde_json::Error => "failed to parse json",
     csv::Error => "failed to parse csv",
+    uuid::Error => transparent, // believed to be self-explanatory
 
     // Connector errors
     opendal::Error => transparent, // believed to be self-explanatory
 
+    sqlx::Error => transparent, // believed to be self-explanatory
     mysql_async::Error => "MySQL error",
     tokio_postgres::Error => "Postgres error",
     apache_avro::Error => "Avro error",
@@ -58,9 +60,11 @@ def_anyhow_newtype! {
     redis::RedisError => "Redis error",
     arrow_schema::ArrowError => "Arrow error",
     google_cloud_pubsub::client::google_cloud_auth::error::Error => "Google Cloud error",
-    tokio_rustls::rustls::Error => "TLS error",
+    rumqttc::tokio_rustls::rustls::Error => "TLS error",
     rumqttc::v5::ClientError => "MQTT error",
     rumqttc::v5::OptionError => "MQTT error",
+
+    openssl::error::ErrorStack => "OpenSSL error",
 }
 
 pub type ConnectorResult<T, E = ConnectorError> = std::result::Result<T, E>;

@@ -15,7 +15,7 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-educe = "0.5"
+educe = "0.6"
 enum-as-inner = "0.6"
 
 [lints]

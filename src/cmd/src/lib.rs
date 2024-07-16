@@ -23,10 +23,6 @@ use risingwave_rt::{init_risingwave_logger, main_okk, LoggerSettings};
 #[macro_export]
 macro_rules! main {
     ($component:ident) => {
-        #[cfg(enable_task_local_alloc)]
-        risingwave_common::enable_task_local_jemalloc!();
-
-        #[cfg(not(enable_task_local_alloc))]
         risingwave_common::enable_jemalloc!();
 
         #[cfg_attr(coverage, coverage(off))]

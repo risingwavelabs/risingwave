@@ -5,22 +5,25 @@ name: Build with Latest Nightly Rust
 on:
   schedule:
     - cron: "0 0 * * *"
+  push:
+    branches:
+      - xxchan/latest-nightly-rust
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      -  name: Maximize build space
-         uses: easimon/maximize-build-space@master
-         with:
-           remove-dotnet: 'true'
-           remove-android: 'true'
-           remove-haskell: 'true'
-           remove-codeql: 'true'
-           remove-docker-images: 'true'
-           root-reserve-mb: 2048
-           swap-size-mb: 8192
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+          root-reserve-mb: 10240
+          temp-reserve-mb: 10240
       - uses: actions/checkout@v3
         if: ${{ github.event_name == 'schedule' }}
         with:
@@ -40,3 +43,5 @@ jobs:
           export CARGO_INCREMENTAL=0
           export CARGO_PROFILE_DEV_DEBUG=false
           cargo check
+      - name: Show available storage
+        run: df -h

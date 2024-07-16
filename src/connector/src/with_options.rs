@@ -48,17 +48,19 @@ impl<T: crate::source::cdc::CdcSourceTypeTrait> WithOptions
 impl<T: WithOptions> WithOptions for Option<T> {}
 impl WithOptions for Vec<String> {}
 impl WithOptions for HashMap<String, String> {}
+impl WithOptions for BTreeMap<String, String> {}
 
 impl WithOptions for String {}
 impl WithOptions for bool {}
 impl WithOptions for usize {}
+impl WithOptions for u16 {}
 impl WithOptions for u32 {}
 impl WithOptions for u64 {}
 impl WithOptions for i32 {}
 impl WithOptions for i64 {}
 impl WithOptions for f64 {}
 impl WithOptions for std::time::Duration {}
-impl WithOptions for crate::mqtt_common::QualityOfService {}
+impl WithOptions for crate::connector_common::mqtt_common::QualityOfService {}
 impl WithOptions for crate::sink::kafka::CompressionCodec {}
 impl WithOptions for nexmark::config::RateShape {}
 impl WithOptions for nexmark::event::EventType {}
@@ -102,7 +104,8 @@ pub trait WithPropertiesExt: Get + Sized {
         connector.contains("-cdc")
     }
 
-    fn is_backfillable_cdc_connector(&self) -> bool {
+    /// It is shared when `CREATE SOURCE`, and not shared when `CREATE TABLE`. So called "shareable".
+    fn is_shareable_cdc_connector(&self) -> bool {
         self.is_cdc_connector() && CdcTableType::from_properties(self).can_backfill()
     }
 

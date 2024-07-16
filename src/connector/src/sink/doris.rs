@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -20,9 +20,6 @@ use async_trait::async_trait;
 use base64::engine::general_purpose;
 use base64::Engine;
 use bytes::{BufMut, Bytes, BytesMut};
-use hyper::body::Body;
-use hyper::{body, Client, Request};
-use hyper_tls::HttpsConnector;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -80,7 +77,7 @@ pub struct DorisConfig {
     pub r#type: String, // accept "append-only" or "upsert"
 }
 impl DorisConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<DorisConfig>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -181,7 +178,7 @@ impl DorisSink {
             risingwave_common::types::DataType::Bytea => {
                 Err(SinkError::Doris("doris can not support Bytea".to_string()))
             }
-            risingwave_common::types::DataType::Jsonb => Ok(doris_data_type.contains("JSONB")),
+            risingwave_common::types::DataType::Jsonb => Ok(doris_data_type.contains("JSON")),
             risingwave_common::types::DataType::Serial => Ok(doris_data_type.contains("BIGINT")),
             risingwave_common::types::DataType::Int256 => {
                 Err(SinkError::Doris("doris can not support Int256".to_string()))
@@ -228,7 +225,9 @@ impl Sink for DorisSink {
 
 pub struct DorisSinkWriter {
     pub config: DorisConfig,
+    #[expect(dead_code)]
     schema: Schema,
+    #[expect(dead_code)]
     pk_indices: Vec<usize>,
     inserter_inner_builder: InserterInnerBuilder,
     is_append_only: bool,
@@ -241,7 +240,7 @@ impl TryFrom<SinkParam> for DorisSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = DorisConfig::from_hashmap(param.properties)?;
+        let config = DorisConfig::from_btreemap(param.properties)?;
         DorisSink::new(
             config,
             schema,
@@ -286,7 +285,7 @@ impl DorisSinkWriter {
             config.common.database.clone(),
             config.common.table.clone(),
             header,
-        );
+        )?;
         Ok(Self {
             config,
             schema: schema.clone(),
@@ -431,14 +430,14 @@ impl DorisSchemaClient {
 
     pub async fn get_schema_from_doris(&self) -> Result<DorisSchema> {
         let uri = format!("{}/api/{}/{}/_schema", self.url, self.db, self.table);
-        let builder = Request::get(uri);
 
-        let connector = HttpsConnector::new();
-        let client = Client::builder()
+        let client = reqwest::Client::builder()
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
-            .build(connector);
+            .build()
+            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
 
-        let request = builder
+        let response = client
+            .get(uri)
             .header(
                 "Authorization",
                 format!(
@@ -446,31 +445,24 @@ impl DorisSchemaClient {
                     general_purpose::STANDARD.encode(format!("{}:{}", self.user, self.password))
                 ),
             )
-            .body(Body::empty())
-            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
-
-        let response = client
-            .request(request)
+            .send()
             .await
             .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
 
-        let raw_bytes = String::from_utf8(match body::to_bytes(response.into_body()).await {
-            Ok(bytes) => bytes.to_vec(),
-            Err(err) => return Err(SinkError::DorisStarrocksConnect(err.into())),
-        })
-        .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
-
-        let json_map: HashMap<String, Value> = serde_json::from_str(&raw_bytes)
+        let json: Value = response
+            .json()
+            .await
             .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
-        let json_data = if json_map.contains_key("code") && json_map.contains_key("msg") {
-            let data = json_map.get("data").ok_or_else(|| {
-                SinkError::DorisStarrocksConnect(anyhow::anyhow!("Can't find data"))
-            })?;
-            data.to_string()
+        let json_data = if json.get("code").is_some() && json.get("msg").is_some() {
+            json.get("data")
+                .ok_or_else(|| {
+                    SinkError::DorisStarrocksConnect(anyhow::anyhow!("Can't find data"))
+                })?
+                .clone()
         } else {
-            raw_bytes
+            json
         };
-        let schema: DorisSchema = serde_json::from_str(&json_data)
+        let schema: DorisSchema = serde_json::from_value(json_data)
             .context("Can't get schema from json")
             .map_err(SinkError::DorisStarrocksConnect)?;
         Ok(schema)
@@ -493,11 +485,9 @@ pub struct DorisField {
     aggregation_type: String,
 }
 impl DorisField {
-    pub fn get_decimal_pre_scale(&self) -> Option<(u8, u8)> {
+    pub fn get_decimal_pre_scale(&self) -> Option<u8> {
         if self.r#type.contains("DECIMAL") {
-            let a = self.precision.clone().unwrap().parse::<u8>().unwrap();
-            let b = self.scale.clone().unwrap().parse::<u8>().unwrap();
-            Some((a, b))
+            Some(self.scale.clone().unwrap().parse::<u8>().unwrap())
         } else {
             None
         }

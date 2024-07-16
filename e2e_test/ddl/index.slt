@@ -124,6 +124,9 @@ statement ok
 insert into t values ('{"k": "abc" }'::jsonb);
 
 statement ok
+flush;
+
+statement ok
 create index idx on t(j->'k');
 
 statement ok

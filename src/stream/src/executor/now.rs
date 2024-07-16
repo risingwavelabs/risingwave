@@ -15,19 +15,12 @@
 use std::ops::Bound;
 use std::ops::Bound::Unbounded;
 
-use futures::{pin_mut, StreamExt};
-use futures_async_stream::try_stream;
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::row::{self, OwnedRow};
-use risingwave_common::types::{DataType, Datum};
-use risingwave_storage::StateStore;
+use risingwave_common::array::Op;
+use risingwave_common::row;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use super::{
-    Barrier, BoxedMessageStream, Execute, Message, Mutation, StreamExecutorError, Watermark,
-};
-use crate::common::table::state_table::StateTable;
+use crate::executor::prelude::*;
 
 pub struct NowExecutor<S: StateStore> {
     data_types: Vec<DataType>,

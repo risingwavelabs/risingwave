@@ -81,7 +81,7 @@ impl<B: FileWriterBuilder> FileWriter for MonitoredBaseFileWriter<B> {
         Ok(())
     }
 
-    /// Complte the write and return the list of `DataFile` as result.
+    /// Complete the write and return the list of `DataFile` as result.
     async fn close(self) -> Result<Vec<Self::R>> {
         let res = self.inner.close().await?;
         let delta = (res.len() - self.cur_metrics.unflush_data_file) as i64;

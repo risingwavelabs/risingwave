@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(dead_code, reason = "WIP")]
-
 use std::future::Future;
 
 use itertools::Itertools;
@@ -23,11 +21,34 @@ use risingwave_backup::MetaSnapshotId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_meta_model_v2 as model_v2;
 use risingwave_pb::hummock::PbHummockVersionDelta;
-use sea_orm::{EntityTrait, QueryOrder, TransactionTrait};
+use sea_orm::{DbErr, EntityTrait, QueryOrder, TransactionTrait};
 
 use crate::controller::SqlMetaStore;
 
 const VERSION: u32 = 2;
+
+fn map_db_err(e: DbErr) -> BackupError {
+    BackupError::MetaStorage(e.into())
+}
+
+macro_rules! define_set_metadata {
+    ($( {$name:ident, $mod_path:ident::$mod_name:ident} ),*) => {
+        async fn set_metadata(
+            metadata: &mut MetadataV2,
+            txn: &sea_orm::DatabaseTransaction,
+        ) -> BackupResult<()> {
+          $(
+              metadata.$name = $mod_path::$mod_name::Entity::find()
+                                    .all(txn)
+                                    .await
+                                    .map_err(map_db_err)?;
+          )*
+          Ok(())
+        }
+    };
+}
+
+risingwave_backup::for_all_metadata_models_v2!(define_set_metadata);
 
 pub struct MetaSnapshotV2Builder {
     snapshot: MetaSnapshotV2,
@@ -61,12 +82,12 @@ impl MetaSnapshotV2Builder {
                 Some(sea_orm::AccessMode::ReadOnly),
             )
             .await
-            .map_err(|e| BackupError::MetaStorage(e.into()))?;
+            .map_err(map_db_err)?;
         let version_deltas = model_v2::prelude::HummockVersionDelta::find()
             .order_by_asc(model_v2::hummock_version_delta::Column::Id)
             .all(&txn)
             .await
-            .map_err(|e| BackupError::MetaStorage(e.into()))?
+            .map_err(map_db_err)?
             .into_iter()
             .map_into::<PbHummockVersionDelta>()
             .map(|pb_delta| HummockVersionDelta::from_persisted_protobuf(&pb_delta));
@@ -89,30 +110,14 @@ impl MetaSnapshotV2Builder {
             }
             redo_state
         };
-        let version_stats = model_v2::prelude::HummockVersionStats::find_by_id(
-            hummock_version.id as model_v2::HummockVersionId,
-        )
-        .one(&txn)
-        .await
-        .map_err(|e| BackupError::MetaStorage(e.into()))?
-        .unwrap_or_else(|| panic!("version stats for version {} not found", hummock_version.id));
-        let compaction_configs = model_v2::prelude::CompactionConfig::find()
-            .all(&txn)
-            .await
-            .map_err(|e| BackupError::MetaStorage(e.into()))?;
-
-        // TODO: other metadata
-        let cluster_id = "TODO".to_string();
-
-        txn.commit()
-            .await
-            .map_err(|e| BackupError::MetaStorage(e.into()))?;
-        self.snapshot.metadata = MetadataV2 {
-            cluster_id,
+        let mut metadata = MetadataV2 {
             hummock_version,
-            version_stats,
-            compaction_configs,
+            ..Default::default()
         };
+        set_metadata(&mut metadata, &txn).await?;
+
+        txn.commit().await.map_err(map_db_err)?;
+        self.snapshot.metadata = metadata;
         Ok(())
     }
 

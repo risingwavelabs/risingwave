@@ -31,13 +31,4 @@ rustflags = [
 
 # Flags for all targets.
 [target.'cfg(all())']
-rustflags = [
-    "--cfg",
-    "tokio_unstable",
-    # Uncomment the following two lines to enable `TaskLocalAlloc`.
-    # "--cfg",
-    # "enable_task_local_alloc",
-]
-
-[unstable]
-lints = true
+rustflags = ["--cfg", "tokio_unstable"]

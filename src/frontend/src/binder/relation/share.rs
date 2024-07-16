@@ -12,19 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use either::Either;
+
+use crate::binder::bind_context::RecursiveUnion;
 use crate::binder::statement::RewriteExprsRecursive;
-use crate::binder::{Relation, ShareId};
+use crate::binder::{BoundQuery, ShareId};
 
 /// Share a relation during binding and planning.
-/// It could be used to share a CTE, a source, a view and so on.
+/// It could be used to share a (recursive) CTE, a source, a view and so on.
 #[derive(Debug, Clone)]
 pub struct BoundShare {
     pub(crate) share_id: ShareId,
-    pub(crate) input: Relation,
+    pub(crate) input: Either<BoundQuery, RecursiveUnion>,
 }
 
 impl RewriteExprsRecursive for BoundShare {
     fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
-        self.input.rewrite_exprs_recursive(rewriter);
+        match &mut self.input {
+            Either::Left(q) => q.rewrite_exprs_recursive(rewriter),
+            Either::Right(r) => r.rewrite_exprs_recursive(rewriter),
+        };
     }
 }

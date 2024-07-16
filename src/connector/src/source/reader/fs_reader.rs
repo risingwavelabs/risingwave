@@ -14,7 +14,7 @@
 
 #![deprecated = "will be replaced by new fs source (list + fetch)"]
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -34,23 +34,19 @@ use crate::source::{
 pub struct FsSourceReader {
     pub config: ConnectorProperties,
     pub columns: Vec<SourceColumnDesc>,
-    pub properties: HashMap<String, String>,
+    pub properties: BTreeMap<String, String>,
     pub parser_config: SpecificParserConfig,
 }
 
 impl FsSourceReader {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        properties: HashMap<String, String>,
+        properties: BTreeMap<String, String>,
         columns: Vec<SourceColumnDesc>,
-        connector_node_addr: Option<String>,
         parser_config: SpecificParserConfig,
     ) -> ConnectorResult<Self> {
         // Store the connector node address to properties for later use.
-        let mut source_props: HashMap<String, String> = HashMap::from_iter(properties.clone());
-        connector_node_addr
-            .map(|addr| source_props.insert("connector_node_addr".to_string(), addr));
-        let config = ConnectorProperties::extract(source_props, false)?;
+        let config = ConnectorProperties::extract(properties.clone(), false)?;
 
         Ok(Self {
             config,

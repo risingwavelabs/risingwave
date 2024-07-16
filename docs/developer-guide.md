@@ -72,6 +72,7 @@ RiseDev is the development mode of RisingWave. To develop RisingWave, you need t
 * Rust toolchain
 * CMake
 * protobuf (>= 3.12.0)
+* OpenSSL (>= 3)
 * PostgreSQL (psql) (>= 14.1)
 * Tmux (>= v3.2a)
 * LLVM 16 (For macOS only, to workaround some bugs in macOS toolchain. See https://github.com/risingwavelabs/risingwave/issues/6205)
@@ -80,7 +81,7 @@ RiseDev is the development mode of RisingWave. To develop RisingWave, you need t
 To install the dependencies on macOS, run:
 
 ```shell
-brew install postgresql cmake protobuf tmux cyrus-sasl llvm
+brew install postgresql cmake protobuf tmux cyrus-sasl llvm openssl@3
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
@@ -97,7 +98,7 @@ Then you'll be able to compile and start RiseDev!
 >
 > `.cargo/config.toml` contains `rustflags` configurations like `-Clink-arg` and `-Ctarget-feature`. Since it will be [merged](https://doc.rust-lang.org/cargo/reference/config.html#hierarchical-structure) with `$HOME/.cargo/config.toml`, check the config files and make sure they don't conflict if you have global `rustflags` configurations for e.g. linker there.
 
-> [!INFO]
+> [!TIP]
 >
 > If you want to build RisingWave with `embedded-python-udf` feature, you need to install Python 3.12.
 >
@@ -185,15 +186,9 @@ For example, you can modify the default section to:
     - use: frontend
     - use: prometheus
     - use: grafana
-    - use: zookeeper
-      persist-data: true
     - use: kafka
       persist-data: true
 ```
-
-> [!NOTE]
->
-> The Kafka service depends on the ZooKeeper service. If you want to enable the Kafka component, enable the ZooKeeper component first.
 
 Now you can run `./risedev d` to start a new dev cluster. The new dev cluster will contain components as configured in the yaml file. RiseDev will automatically configure the components to use the available storage service and to monitor the target.
 
@@ -553,17 +548,18 @@ Instructions about submitting PRs are included in the [contribution guidelines](
 
 ## CI Labels Guide
 
-- `[ci/run-xxx ...]`: Run additional steps indicated by `ci/run-xxx` in your PR.
-- `ci/skip-ci` + `[ci/run-xxx ...]` : Skip steps except for those indicated by `ci/run-xxx` in your **DRAFT PR.**
-- `ci/run-main-cron`: Run full `main-cron`.
-- `ci/run-main-cron` + `ci/main-cron/skip-ci` + `[ci/run-xxx …]` : Run specific steps indicated by `ci/run-xxx`
+- `[ci/run-xxx ...]`: Run additional steps in the PR workflow indicated by `ci/run-xxx` in your PR.
+- `ci/pr/run-selected` + `[ci/run-xxx ...]` : Only run selected steps indicated by `ci/run-xxx` in your **DRAFT PR.**
+- `ci/main-cron/run-all`: Run full `main-cron` workflow for your PR.
+- `ci/main-cron/run-selected` + `[ci/run-xxx …]` : Run specific steps indicated by `ci/run-xxx`
   from the `main-cron` workflow, in your PR. Can use to verify some `main-cron` fix works as expected.
 - To reference `[ci/run-xxx ...]` labels, you may look at steps from `pull-request.yml` and `main-cron.yml`.
-- **Be sure to add all the dependencies.**
 
-  For example to run `e2e-test` for `main-cron` in your pull request:
-  1. Add `ci/run-build`, `ci/run-build-other`, `ci/run-docslt` .
-     These correspond to its `depends` field in `pull-request.yml` and `main-cron.yml` .
-  2. Add `ci/run-e2e-test` to run the step as well.
-  3. Add `ci/run-main-cron` to run `main-cron` workflow in your pull request,
-  4. Add `ci/main-cron/skip-ci` to skip all other steps which were not selected with `ci/run-xxx`.
+### Example
+
+https://github.com/risingwavelabs/risingwave/pull/17197
+
+To run `e2e-test` and `e2e-source-test` for `main-cron` in your pull request:
+1. Add `ci/run-e2e-test`.
+2. Add `ci/run-e2e-source-tests`.
+3. Add `ci/main-cron/run-selected` to skip all other steps which were not selected with `ci/run-xxx`.

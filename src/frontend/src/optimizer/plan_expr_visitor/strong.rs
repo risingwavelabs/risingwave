@@ -81,6 +81,7 @@ impl Strong {
             | ExprType::IsDistinctFrom
             | ExprType::IsNotDistinctFrom
             | ExprType::IsTrue
+            | ExprType::QuoteNullable
             | ExprType::IsNotTrue
             | ExprType::IsFalse
             | ExprType::IsNotFalse => false,
@@ -180,6 +181,7 @@ impl Strong {
             | ExprType::ToAscii
             | ExprType::ToHex
             | ExprType::QuoteIdent
+            | ExprType::QuoteLiteral
             | ExprType::Sin
             | ExprType::Cos
             | ExprType::Tan
@@ -285,6 +287,9 @@ impl Strong {
             | ExprType::JsonbPathMatch
             | ExprType::JsonbPathQueryArray
             | ExprType::JsonbPathQueryFirst
+            | ExprType::JsonbPopulateRecord
+            | ExprType::JsonbToRecord
+            | ExprType::JsonbSet
             | ExprType::Vnode
             | ExprType::Proctime
             | ExprType::PgSleep
@@ -298,7 +303,12 @@ impl Strong {
             | ExprType::PgIndexesSize
             | ExprType::PgRelationSize
             | ExprType::PgGetSerialSequence
-            | ExprType::IcebergTransform => false,
+            | ExprType::IcebergTransform
+            | ExprType::HasTablePrivilege
+            | ExprType::HasAnyColumnPrivilege
+            | ExprType::HasSchemaPrivilege
+            | ExprType::InetAton
+            | ExprType::InetNtoa => false,
             ExprType::Unspecified => unreachable!(),
         }
     }

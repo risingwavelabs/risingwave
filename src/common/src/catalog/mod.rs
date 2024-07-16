@@ -21,15 +21,19 @@ pub mod test_utils;
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 pub use column::*;
 pub use external_table::*;
+use futures::stream::BoxStream;
 pub use internal_table::*;
 use parse_display::Display;
 pub use physical_table::*;
-use risingwave_pb::catalog::HandleConflictBehavior as PbHandleConflictBehavior;
+use risingwave_pb::catalog::{
+    CreateType as PbCreateType, HandleConflictBehavior as PbHandleConflictBehavior,
+    StreamJobStatus as PbStreamJobStatus,
+};
 use risingwave_pb::plan_common::ColumnDescVersion;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
+use serde::{Deserialize, Serialize};
 
 use crate::array::DataChunk;
 pub use crate::constants::hummock;
@@ -146,9 +150,9 @@ pub fn cdc_table_name_column_desc() -> ColumnDesc {
 }
 
 /// The local system catalog reader in the frontend node.
-#[async_trait]
 pub trait SysCatalogReader: Sync + Send + 'static {
-    async fn read_table(&self, table_id: &TableId) -> Result<DataChunk, BoxedError>;
+    /// Reads the data of the system catalog table.
+    fn read_table(&self, table_id: TableId) -> BoxStream<'_, Result<DataChunk, BoxedError>>;
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
@@ -225,7 +229,20 @@ impl From<SchemaId> for u32 {
     }
 }
 
-#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Display,
+    Default,
+    Hash,
+    PartialOrd,
+    PartialEq,
+    Eq,
+    Ord,
+    Serialize,
+    Deserialize,
+)]
 #[display("{table_id}")]
 pub struct TableId {
     pub table_id: u32,
@@ -434,12 +451,48 @@ impl From<ConnectionId> for u32 {
     }
 }
 
+#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
+pub struct SecretId(pub u32);
+
+impl SecretId {
+    pub const fn new(id: u32) -> Self {
+        SecretId(id)
+    }
+
+    pub const fn placeholder() -> Self {
+        SecretId(OBJECT_ID_PLACEHOLDER)
+    }
+
+    pub fn secret_id(&self) -> u32 {
+        self.0
+    }
+}
+
+impl From<u32> for SecretId {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+
+impl From<&u32> for SecretId {
+    fn from(id: &u32) -> Self {
+        Self::new(*id)
+    }
+}
+
+impl From<SecretId> for u32 {
+    fn from(id: SecretId) -> Self {
+        id.0
+    }
+}
+
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ConflictBehavior {
     #[default]
     NoCheck,
     Overwrite,
     IgnoreConflict,
+    DoUpdateIfNotNull,
 }
 
 impl ConflictBehavior {
@@ -447,6 +500,7 @@ impl ConflictBehavior {
         match tb_conflict_behavior {
             PbHandleConflictBehavior::Overwrite => ConflictBehavior::Overwrite,
             PbHandleConflictBehavior::Ignore => ConflictBehavior::IgnoreConflict,
+            PbHandleConflictBehavior::DoUpdateIfNotNull => ConflictBehavior::DoUpdateIfNotNull,
             // This is for backward compatibility, in the previous version
             // `HandleConflictBehavior::Unspecified` represented `NoCheck`, so just treat it as `NoCheck`.
             PbHandleConflictBehavior::NoCheck | PbHandleConflictBehavior::Unspecified => {
@@ -460,6 +514,7 @@ impl ConflictBehavior {
             ConflictBehavior::NoCheck => PbHandleConflictBehavior::NoCheck,
             ConflictBehavior::Overwrite => PbHandleConflictBehavior::Overwrite,
             ConflictBehavior::IgnoreConflict => PbHandleConflictBehavior::Ignore,
+            ConflictBehavior::DoUpdateIfNotNull => PbHandleConflictBehavior::DoUpdateIfNotNull,
         }
     }
 
@@ -468,6 +523,58 @@ impl ConflictBehavior {
             ConflictBehavior::NoCheck => "NoCheck".to_string(),
             ConflictBehavior::Overwrite => "Overwrite".to_string(),
             ConflictBehavior::IgnoreConflict => "IgnoreConflict".to_string(),
+            ConflictBehavior::DoUpdateIfNotNull => "DoUpdateIfNotNull".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Display, Hash, PartialOrd, PartialEq, Eq, Ord)]
+pub enum StreamJobStatus {
+    #[default]
+    Creating,
+    Created,
+}
+
+impl StreamJobStatus {
+    pub fn from_proto(stream_job_status: PbStreamJobStatus) -> Self {
+        match stream_job_status {
+            PbStreamJobStatus::Creating => StreamJobStatus::Creating,
+            PbStreamJobStatus::Created | PbStreamJobStatus::Unspecified => StreamJobStatus::Created,
+        }
+    }
+
+    pub fn to_proto(self) -> PbStreamJobStatus {
+        match self {
+            StreamJobStatus::Creating => PbStreamJobStatus::Creating,
+            StreamJobStatus::Created => PbStreamJobStatus::Created,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Display, Hash, PartialOrd, PartialEq, Eq, Ord)]
+pub enum CreateType {
+    Foreground,
+    Background,
+}
+
+impl Default for CreateType {
+    fn default() -> Self {
+        Self::Foreground
+    }
+}
+
+impl CreateType {
+    pub fn from_proto(pb_create_type: PbCreateType) -> Self {
+        match pb_create_type {
+            PbCreateType::Foreground | PbCreateType::Unspecified => CreateType::Foreground,
+            PbCreateType::Background => CreateType::Background,
+        }
+    }
+
+    pub fn to_proto(self) -> PbCreateType {
+        match self {
+            CreateType::Foreground => PbCreateType::Foreground,
+            CreateType::Background => PbCreateType::Background,
         }
     }
 }

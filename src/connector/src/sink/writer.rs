@@ -126,7 +126,7 @@ impl<W> LogSinkerOf<W> {
 
 #[async_trait]
 impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<()> {
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
         let mut sink_writer = self.writer;
         let sink_metrics = self.sink_metrics;
         #[derive(Debug)]
@@ -199,9 +199,7 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
                         sink_metrics
                             .sink_commit_duration_metrics
                             .observe(start_time.elapsed().as_millis() as f64);
-                        log_reader
-                            .truncate(TruncateOffset::Barrier { epoch })
-                            .await?;
+                        log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                     } else {
                         sink_writer.barrier(false).await?;
                     }
@@ -244,7 +242,7 @@ impl<W: AsyncTruncateSinkWriter> AsyncTruncateLogSinkerOf<W> {
 
 #[async_trait]
 impl<W: AsyncTruncateSinkWriter> LogSinker for AsyncTruncateLogSinkerOf<W> {
-    async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<()> {
+    async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<!> {
         loop {
             let select_result = drop_either_future(
                 select(
@@ -270,7 +268,7 @@ impl<W: AsyncTruncateSinkWriter> LogSinker for AsyncTruncateLogSinkerOf<W> {
                 }
                 Either::Right(offset_result) => {
                     let offset = offset_result?;
-                    log_reader.truncate(offset).await?;
+                    log_reader.truncate(offset)?;
                 }
             }
         }

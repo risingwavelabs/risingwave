@@ -666,6 +666,22 @@ impl HummockManagerService for HummockServiceImpl {
         let response = Response::new(CancelCompactTaskResponse { ret });
         return Ok(response);
     }
+
+    async fn list_change_log_epochs(
+        &self,
+        request: Request<ListChangeLogEpochsRequest>,
+    ) -> Result<Response<ListChangeLogEpochsResponse>, Status> {
+        let ListChangeLogEpochsRequest {
+            table_id,
+            min_epoch,
+            max_count,
+        } = request.into_inner();
+        let epochs = self
+            .hummock_manager
+            .list_change_log_epochs(table_id, min_epoch, max_count)
+            .await;
+        Ok(Response::new(ListChangeLogEpochsResponse { epochs }))
+    }
 }
 
 #[cfg(test)]

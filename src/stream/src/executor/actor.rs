@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
 
@@ -19,6 +20,7 @@ use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use futures::future::join_all;
 use hytra::TrAdder;
+use risingwave_common::catalog::TableId;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::epoch::EpochPair;
@@ -49,7 +51,10 @@ pub struct ActorContext {
 
     pub streaming_metrics: Arc<StreamingMetrics>,
 
-    pub dispatch_num: usize,
+    /// This is the number of dispatchers when the actor is created. It will not be updated during runtime when new downstreams are added.
+    pub initial_dispatch_num: usize,
+    // mv_table_id to subscription id
+    pub related_subscriptions: HashMap<TableId, HashSet<u32>>,
 }
 
 pub type ActorContextRef = Arc<ActorContext>;
@@ -65,7 +70,8 @@ impl ActorContext {
             total_mem_val: Arc::new(TrAdder::new()),
             streaming_metrics: Arc::new(StreamingMetrics::unused()),
             // Set 1 for test to enable sanity check on table
-            dispatch_num: 1,
+            initial_dispatch_num: 1,
+            related_subscriptions: HashMap::new(),
         })
     }
 
@@ -73,7 +79,8 @@ impl ActorContext {
         stream_actor: &PbStreamActor,
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
-        dispatch_num: usize,
+        initial_dispatch_num: usize,
+        related_subscriptions: HashMap<TableId, HashSet<u32>>,
     ) -> ActorContextRef {
         Arc::new(Self {
             id: stream_actor.actor_id,
@@ -83,7 +90,8 @@ impl ActorContext {
             last_mem_val: Arc::new(0.into()),
             total_mem_val,
             streaming_metrics,
-            dispatch_num,
+            initial_dispatch_num,
+            related_subscriptions,
         })
     }
 
@@ -215,13 +223,14 @@ where
             )
             .into()));
 
-            // Collect barriers to local barrier manager
-            self.barrier_manager.collect(id, &barrier);
-
             // Then stop this actor if asked
             if barrier.is_stop(id) {
-                break Ok(());
+                debug!(actor_id = id, epoch = ?barrier.epoch, "stop at barrier");
+                break Ok(barrier);
             }
+
+            // Collect barriers to local barrier manager
+            self.barrier_manager.collect(id, &barrier);
 
             // Tracing related work
             last_epoch = Some(barrier.epoch);
@@ -230,7 +239,12 @@ where
 
         spawn_blocking_drop_stream(stream).await;
 
-        tracing::trace!(actor_id = id, "actor exit");
+        let result = result.map(|stop_barrier| {
+            // Collect the stop barrier after the stream has been dropped to ensure that all resources
+            self.barrier_manager.collect(id, &stop_barrier);
+        });
+
+        tracing::debug!(actor_id = id, ok = result.is_ok(), "actor exit");
         result
     }
 }

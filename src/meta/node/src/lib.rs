@@ -32,6 +32,7 @@ use risingwave_meta::*;
 use risingwave_meta_service::*;
 pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
 use server::rpc_serve;
+pub use server::started::get as is_server_started;
 
 use crate::manager::MetaOpts;
 
@@ -75,7 +76,7 @@ pub struct MetaNodeOpts {
 
     /// Endpoint of the SQL service, make it non-option when SQL service is required.
     #[clap(long, hide = true, env = "RW_SQL_ENDPOINT")]
-    pub sql_endpoint: Option<String>,
+    pub sql_endpoint: Option<Secret<String>>,
 
     /// The HTTP REST-API address of the Prometheus instance associated to this cluster.
     /// This address is used to serve `PromQL` queries to Prometheus.
@@ -88,12 +89,6 @@ pub struct MetaNodeOpts {
     /// The format is same as `PromQL`. Example: `instance="foo",namespace="bar"`
     #[clap(long, env = "RW_PROMETHEUS_SELECTOR")]
     pub prometheus_selector: Option<String>,
-
-    // TODO(eric): remove me
-    /// Endpoint of the connector node, there will be a sidecar connector node
-    /// colocated with Meta node in the cloud environment
-    #[clap(long, hide = true, env = "RW_CONNECTOR_RPC_ENDPOINT")]
-    pub connector_rpc_endpoint: Option<String>,
 
     /// Default tag for the endpoint created when creating a privatelink connection.
     /// Will be appended to the tags specified in the `tags` field in with clause in `create
@@ -166,6 +161,16 @@ pub struct MetaNodeOpts {
     #[clap(long, hide = true, env = "RW_HEAP_PROFILING_DIR")]
     #[override_opts(path = server.heap_profiling.dir)]
     pub heap_profiling_dir: Option<String>,
+
+    /// Exit if idle for a certain period of time.
+    #[clap(long, hide = true, env = "RW_DANGEROUS_MAX_IDLE_SECS")]
+    #[override_opts(path = meta.dangerous_max_idle_secs)]
+    pub dangerous_max_idle_secs: Option<u64>,
+
+    /// Endpoint of the connector node.
+    #[deprecated = "connector node has been deprecated."]
+    #[clap(long, hide = true, env = "RW_CONNECTOR_RPC_ENDPOINT")]
+    pub connector_rpc_endpoint: Option<String>,
 }
 
 impl risingwave_common::opts::Opts for MetaNodeOpts {
@@ -216,7 +221,11 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             },
             MetaBackend::Mem => MetaStoreBackend::Mem,
             MetaBackend::Sql => MetaStoreBackend::Sql {
-                endpoint: opts.sql_endpoint.expect("sql endpoint is required"),
+                endpoint: opts
+                    .sql_endpoint
+                    .expect("sql endpoint is required")
+                    .expose_secret()
+                    .to_string(),
             },
         };
 
@@ -251,25 +260,26 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 
         const MIN_TIMEOUT_INTERVAL_SEC: u64 = 20;
         let compaction_task_max_progress_interval_secs = {
-            (config
-                .storage
-                .object_store
-                .object_store_read_timeout_ms
-                .max(config.storage.object_store.object_store_upload_timeout_ms)
-                .max(
-                    config
-                        .storage
-                        .object_store
-                        .object_store_streaming_read_timeout_ms,
-                )
-                .max(
-                    config
-                        .storage
-                        .object_store
-                        .object_store_streaming_upload_timeout_ms,
-                )
-                .max(config.meta.compaction_task_max_progress_interval_secs * 1000))
-                / 1000
+            let retry_config = &config.storage.object_store.retry;
+            let max_streming_read_timeout_ms = (retry_config.streaming_read_attempt_timeout_ms
+                + retry_config.req_backoff_max_delay_ms)
+                * retry_config.streaming_read_retry_attempts as u64;
+            let max_streaming_upload_timeout_ms = (retry_config
+                .streaming_upload_attempt_timeout_ms
+                + retry_config.req_backoff_max_delay_ms)
+                * retry_config.streaming_upload_retry_attempts as u64;
+            let max_upload_timeout_ms = (retry_config.upload_attempt_timeout_ms
+                + retry_config.req_backoff_max_delay_ms)
+                * retry_config.upload_retry_attempts as u64;
+            let max_read_timeout_ms = (retry_config.read_attempt_timeout_ms
+                + retry_config.req_backoff_max_delay_ms)
+                * retry_config.read_retry_attempts as u64;
+            let max_timeout_ms = max_streming_read_timeout_ms
+                .max(max_upload_timeout_ms)
+                .max(max_streaming_upload_timeout_ms)
+                .max(max_read_timeout_ms)
+                .max(config.meta.compaction_task_max_progress_interval_secs * 1000);
+            max_timeout_ms / 1000
         } + MIN_TIMEOUT_INTERVAL_SEC;
 
         let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
@@ -314,7 +324,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 prometheus_selector: opts.prometheus_selector,
                 vpc_id: opts.vpc_id,
                 security_group_id: opts.security_group_id,
-                connector_rpc_endpoint: opts.connector_rpc_endpoint,
                 privatelink_endpoint_default_tags,
                 periodic_space_reclaim_compaction_interval_sec: config
                     .meta
@@ -334,6 +343,12 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 table_write_throughput_threshold: config.meta.table_write_throughput_threshold,
                 min_table_split_write_throughput: config.meta.min_table_split_write_throughput,
                 partition_vnode_count: config.meta.partition_vnode_count,
+                compact_task_table_size_partition_threshold_low: config
+                    .meta
+                    .compact_task_table_size_partition_threshold_low,
+                compact_task_table_size_partition_threshold_high: config
+                    .meta
+                    .compact_task_table_size_partition_threshold_high,
                 do_not_config_object_storage_lifecycle: config
                     .meta
                     .do_not_config_object_storage_lifecycle,
@@ -343,7 +358,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 compaction_task_max_progress_interval_secs,
                 compaction_config: Some(config.meta.compaction_config),
                 cut_table_size_limit: config.meta.cut_table_size_limit,
-                hybird_partition_vnode_count: config.meta.hybird_partition_vnode_count,
+                hybrid_partition_node_count: config.meta.hybrid_partition_vnode_count,
                 event_log_enabled: config.meta.event_log_enabled,
                 event_log_channel_max_size: config.meta.event_log_channel_max_size,
                 advertise_addr: opts.advertise_addr,
@@ -358,8 +373,16 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .developer
                     .enable_check_task_level_overlap,
                 enable_dropped_column_reclaim: config.meta.enable_dropped_column_reclaim,
+                object_store_config: config.storage.object_store,
+                max_trivial_move_task_count_per_loop: config
+                    .meta
+                    .developer
+                    .max_trivial_move_task_count_per_loop,
+                max_get_task_probe_times: config.meta.developer.max_get_task_probe_times,
+                secret_store_private_key: config.meta.secret_store_private_key,
             },
             config.system.into_init_system_params(),
+            Default::default(),
         )
         .await
         .unwrap();

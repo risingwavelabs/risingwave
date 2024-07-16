@@ -49,6 +49,8 @@ pub async fn replace_table_with_definition(
         constraints,
         source_watermarks,
         append_only,
+        on_conflict,
+        with_version_column,
         wildcard_idx,
         ..
     } = definition
@@ -68,6 +70,8 @@ pub async fn replace_table_with_definition(
         constraints,
         source_watermarks,
         append_only,
+        on_conflict,
+        with_version_column,
     )
     .await?;
 

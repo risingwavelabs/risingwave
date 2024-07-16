@@ -19,16 +19,8 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(Subscription::Name).string().not_null())
-                    .col(
-                        ColumnDef::new(Subscription::Columns)
-                            .json_binary()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Subscription::PlanPk)
-                            .json_binary()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Subscription::Columns).binary().not_null())
+                    .col(ColumnDef::new(Subscription::PlanPk).binary().not_null())
                     .col(
                         ColumnDef::new(Subscription::DistributionKey)
                             .json_binary()
@@ -44,6 +36,17 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(Subscription::SubscriptionFromName)
                             .string()
                             .not_null(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_subscription_object_id")
+                            .from(Subscription::Table, Subscription::SubscriptionId)
+                            .to(
+                                crate::m20230908_072257_init::Object::Table,
+                                crate::m20230908_072257_init::Object::Oid,
+                            )
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
                     )
                     .to_owned(),
             )

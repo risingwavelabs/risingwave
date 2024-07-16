@@ -29,6 +29,9 @@ DROP MATERIALIZED VIEW m;
 statement ok
 delete from t1;
 
+statement ok
+FLUSH;
+
 # Test with small rate_limit. In this case, the stream chunk needs to be split
 
 statement ok

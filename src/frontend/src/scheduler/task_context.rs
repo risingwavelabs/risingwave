@@ -14,12 +14,15 @@
 
 use std::sync::Arc;
 
+use prometheus::core::Atomic;
 use risingwave_batch::error::Result;
 use risingwave_batch::monitor::BatchMetricsWithTaskLabels;
 use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::memory::MemoryContext;
+use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_rpc_client::ComputeClientPoolRef;
@@ -31,11 +34,18 @@ use crate::session::SessionImpl;
 #[derive(Clone)]
 pub struct FrontendBatchTaskContext {
     session: Arc<SessionImpl>,
+
+    mem_context: MemoryContext,
 }
 
 impl FrontendBatchTaskContext {
     pub fn new(session: Arc<SessionImpl>) -> Self {
-        Self { session }
+        let mem_context =
+            MemoryContext::new(Some(session.env().mem_context()), TrAdderAtomic::new(0));
+        Self {
+            session,
+            mem_context,
+        }
     }
 }
 
@@ -84,15 +94,11 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         self.session.env().source_metrics()
     }
 
-    fn store_mem_usage(&self, _val: usize) {
-        todo!()
-    }
-
-    fn mem_usage(&self) -> usize {
-        todo!()
-    }
-
     fn create_executor_mem_context(&self, _executor_id: &str) -> MemoryContext {
-        MemoryContext::none()
+        MemoryContext::new(Some(self.mem_context.clone()), TrAdderAtomic::new(0))
+    }
+
+    fn worker_node_manager(&self) -> Option<WorkerNodeManagerRef> {
+        Some(self.session.env().worker_node_manager_ref())
     }
 }

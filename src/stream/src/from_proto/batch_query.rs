@@ -16,7 +16,6 @@ use risingwave_common::catalog::ColumnId;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::BatchPlanNode;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::StateStore;
 
 use super::*;
 use crate::executor::{BatchQueryExecutor, DummyExecutor};

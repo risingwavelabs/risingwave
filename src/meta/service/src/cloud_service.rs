@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 use async_trait::async_trait;
@@ -147,7 +147,6 @@ impl CloudService for CloudServiceImpl {
             }
         }
         // try fetch kafka metadata, return error message on failure
-        let source_cfg: HashMap<String, String> = source_cfg.into_iter().collect();
         let props = ConnectorProperties::extract(source_cfg, false);
         if let Err(e) = props {
             return Ok(new_rwc_validate_fail_response(
@@ -159,7 +158,7 @@ impl CloudService for CloudServiceImpl {
         async fn new_enumerator<P: SourceProperties>(
             props: P,
         ) -> ConnectorResult<P::SplitEnumerator> {
-            P::SplitEnumerator::new(props, SourceEnumeratorContext::default().into()).await
+            P::SplitEnumerator::new(props, SourceEnumeratorContext::dummy().into()).await
         }
 
         dispatch_source_prop!(props.unwrap(), props, {

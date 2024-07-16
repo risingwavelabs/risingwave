@@ -12,26 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
-use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::Schema;
+use std::collections::HashMap;
+
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
-use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, AlwaysOutput, DistinctDeduplicater,
 };
-use super::*;
-use crate::common::table::state_table::StateTable;
-use crate::error::StreamResult;
 use crate::executor::aggregation::AggGroup;
-use crate::executor::error::StreamExecutorError;
-use crate::executor::{BoxedMessageStream, Message};
-use crate::task::AtomicU64Ref;
+use crate::executor::prelude::*;
 
 /// `SimpleAggExecutor` is the aggregation operator for streaming system.
 /// To create an aggregation operator, states and expressions should be passed along the
@@ -239,15 +232,12 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             table.init_epoch(barrier.epoch);
         });
 
-        let mut distinct_dedup = DistinctDeduplicater::new(
+        let distinct_dedup = DistinctDeduplicater::new(
             &this.agg_calls,
             this.watermark_epoch.clone(),
             &this.distinct_dedup_tables,
-            this.actor_ctx.clone(),
+            &this.actor_ctx,
         );
-        distinct_dedup.dedup_caches_mut().for_each(|cache| {
-            cache.update_epoch(barrier.epoch.curr);
-        });
 
         yield Message::Barrier(barrier);
 
@@ -285,9 +275,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                     {
                         yield Message::Chunk(chunk);
                     }
-                    vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
-                        cache.update_epoch(barrier.epoch.curr);
-                    });
                     yield Message::Barrier(barrier);
                 }
             }
@@ -302,13 +289,11 @@ mod tests {
     use risingwave_common::catalog::Field;
     use risingwave_common::types::*;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_expr::aggregate::AggCall;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::StateStore;
 
+    use super::*;
     use crate::executor::test_utils::agg_executor::new_boxed_simple_agg_executor;
     use crate::executor::test_utils::*;
-    use crate::executor::*;
 
     #[tokio::test]
     async fn test_simple_aggregation_in_memory() {

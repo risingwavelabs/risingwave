@@ -32,9 +32,9 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(result_flattening)]
 #![feature(error_generic_member_access)]
-#![feature(round_ties_even)]
 #![feature(iterator_try_collect)]
 #![feature(used_with_arg)]
+#![feature(entry_insert)]
 #![recursion_limit = "256"]
 
 #[cfg(test)]
@@ -42,6 +42,9 @@ risingwave_expr_impl::enable!();
 
 #[macro_use]
 mod catalog;
+
+use std::collections::HashSet;
+
 pub use catalog::TableCatalog;
 mod binder;
 pub use binder::{bind_data_type, Binder};
@@ -89,7 +92,7 @@ pub struct FrontendOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
     /// Usually the localhost + desired port.
-    #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:4566")]
+    #[clap(long, env = "RW_LISTEN_ADDR", default_value = "0.0.0.0:4566")]
     pub listen_addr: String,
 
     /// The address for contacting this instance of the service.
@@ -98,11 +101,6 @@ pub struct FrontendOpts {
     /// Optional, we will use `listen_addr` if not specified.
     #[clap(long, env = "RW_ADVERTISE_ADDR")]
     pub advertise_addr: Option<String>,
-
-    // TODO(eric): Remove me
-    // TODO: This is currently unused.
-    #[clap(long, env = "RW_PORT")]
-    pub port: Option<u16>,
 
     /// The address via which we will attempt to connect to a leader meta node.
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
@@ -173,8 +171,22 @@ pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
         let listen_addr = opts.listen_addr.clone();
         let session_mgr = Arc::new(SessionManagerImpl::new(opts).await.unwrap());
-        pg_serve(&listen_addr, session_mgr, TlsConfig::new_default())
-            .await
-            .unwrap();
+        let redact_sql_option_keywords = Arc::new(
+            session_mgr
+                .env()
+                .batch_config()
+                .redact_sql_option_keywords
+                .iter()
+                .map(|s| s.to_lowercase())
+                .collect::<HashSet<_>>(),
+        );
+        pg_serve(
+            &listen_addr,
+            session_mgr,
+            TlsConfig::new_default(),
+            Some(redact_sql_option_keywords),
+        )
+        .await
+        .unwrap()
     })
 }

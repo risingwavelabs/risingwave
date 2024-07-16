@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::time::Duration;
 
@@ -30,6 +30,7 @@ use risingwave_pb::connector_service::sink_writer_stream_request::{
 };
 use risingwave_pb::connector_service::sink_writer_stream_response::CommitResponse;
 use risingwave_pb::connector_service::*;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use thiserror_ext::AsReport;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::{Channel, Endpoint};
@@ -201,7 +202,7 @@ impl ConnectorClient {
         source_id: u64,
         source_type: SourceType,
         start_offset: Option<String>,
-        properties: HashMap<String, String>,
+        properties: BTreeMap<String, String>,
         snapshot_done: bool,
         is_source_job: bool,
     ) -> Result<Streaming<GetEventStreamResponse>> {
@@ -223,7 +224,8 @@ impl ConnectorClient {
                     source_id,
                     err.message()
                 )
-            })?
+            })
+            .map_err(RpcError::from_connector_status)?
             .into_inner())
     }
 
@@ -232,11 +234,20 @@ impl ConnectorClient {
         &self,
         source_id: u64,
         source_type: SourceType,
-        properties: HashMap<String, String>,
+        properties: BTreeMap<String, String>,
         table_schema: Option<TableSchema>,
         is_source_job: bool,
         is_backfill_table: bool,
     ) -> Result<()> {
+        let table_schema = table_schema.map(|mut table_schema| {
+            table_schema.columns.retain(|c| {
+                !matches!(
+                    c.generated_or_default_column,
+                    Some(GeneratedOrDefaultColumn::GeneratedColumn(_))
+                )
+            });
+            table_schema
+        });
         let response = self
             .rpc_client
             .clone()
@@ -251,7 +262,8 @@ impl ConnectorClient {
             .await
             .inspect_err(|err| {
                 tracing::error!("failed to validate source#{}: {}", source_id, err.message())
-            })?
+            })
+            .map_err(RpcError::from_connector_status)?
             .into_inner();
 
         response.error.map_or(Ok(()), |err| {
@@ -266,7 +278,6 @@ impl ConnectorClient {
         &self,
         payload_schema: Option<TableSchema>,
         sink_proto: PbSinkParam,
-        sink_payload_format: SinkPayloadFormat,
     ) -> Result<SinkWriterStreamHandle> {
         let mut rpc_client = self.rpc_client.clone();
         let (handle, first_rsp) = SinkWriterStreamHandle::initialize(
@@ -274,15 +285,18 @@ impl ConnectorClient {
                 request: Some(SinkRequest::Start(StartSink {
                     payload_schema,
                     sink_param: Some(sink_proto),
-                    format: sink_payload_format as i32,
                 })),
             },
             |rx| async move {
                 rpc_client
                     .sink_writer_stream(ReceiverStream::new(rx))
                     .await
-                    .map(|response| response.into_inner().map_err(RpcError::from))
-                    .map_err(RpcError::from)
+                    .map(|response| {
+                        response
+                            .into_inner()
+                            .map_err(RpcError::from_connector_status)
+                    })
+                    .map_err(RpcError::from_connector_status)
             },
         )
         .await?;
@@ -313,8 +327,12 @@ impl ConnectorClient {
                 rpc_client
                     .sink_coordinator_stream(ReceiverStream::new(rx))
                     .await
-                    .map(|response| response.into_inner().map_err(RpcError::from))
-                    .map_err(RpcError::from)
+                    .map(|response| {
+                        response
+                            .into_inner()
+                            .map_err(RpcError::from_connector_status)
+                    })
+                    .map_err(RpcError::from_connector_status)
             },
         )
         .await?;
@@ -340,7 +358,8 @@ impl ConnectorClient {
             .await
             .inspect_err(|err| {
                 tracing::error!("failed to validate sink properties: {}", err.message())
-            })?
+            })
+            .map_err(RpcError::from_connector_status)?
             .into_inner();
         response.error.map_or_else(
             || Ok(()), // If there is no error message, return Ok here.

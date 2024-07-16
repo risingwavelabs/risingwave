@@ -32,6 +32,7 @@ pub mod meta_member_service;
 pub mod notification_service;
 pub mod scale_service;
 pub mod serving_service;
+pub mod session_config;
 pub mod sink_coordination_service;
 pub mod stream_service;
 pub mod system_params_service;

@@ -60,16 +60,33 @@ pub trait ExprRewriter {
     }
 
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
-        let (func_type, inputs, distinct, order_by, filter, direct_args) = agg_call.decompose();
-        let inputs = inputs
+        let AggCall {
+            agg_kind,
+            return_type,
+            args,
+            distinct,
+            order_by,
+            filter,
+            direct_args,
+            user_defined,
+        } = agg_call;
+        let args = args
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         let order_by = order_by.rewrite_expr(self);
         let filter = filter.rewrite_expr(self);
-        AggCall::new(func_type, inputs, distinct, order_by, filter, direct_args)
-            .unwrap()
-            .into()
+        AggCall {
+            agg_kind,
+            return_type,
+            args,
+            distinct,
+            order_by,
+            filter,
+            direct_args,
+            user_defined,
+        }
+        .into()
     }
 
     fn rewrite_parameter(&mut self, parameter: Parameter) -> ExprImpl {
@@ -97,7 +114,7 @@ pub trait ExprRewriter {
             args,
             return_type,
             function_type,
-            udtf_catalog,
+            user_defined: udtf_catalog,
         } = table_func;
         let args = args
             .into_iter()
@@ -107,7 +124,7 @@ pub trait ExprRewriter {
             args,
             return_type,
             function_type,
-            udtf_catalog,
+            user_defined: udtf_catalog,
         }
         .into()
     }
