@@ -23,11 +23,11 @@ use super::stream::prelude::*;
 use super::utils::{
     childless_record, column_names_pretty, plan_node_name, watermark_pretty, Distill,
 };
-use super::{generic, ExprRewritable, PlanTreeNodeUnary};
+use super::{generic, ExprRewritable};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
-use crate::optimizer::property::{Distribution, MonotonicityMap};
+use crate::optimizer::property::MonotonicityMap;
 use crate::optimizer::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -41,25 +41,8 @@ pub struct StreamDynamicFilter {
 
 impl StreamDynamicFilter {
     pub fn new(core: DynamicFilter<PlanRef>) -> Self {
-        // TODO(st1page): here we just check if RHS
-        // is a `StreamNow`. It will be generalized to more cases
-        // by introducing monotonically increasing property of the node in https://github.com/risingwavelabs/risingwave/pull/13984.
-        let right_monotonically_increasing = {
-            if let Some(e) = core.right().as_stream_exchange()
-                && *e.distribution() == Distribution::Broadcast
-            {
-                if e.input().as_stream_now().is_some() {
-                    true
-                } else if let Some(proj) = e.input().as_stream_project() {
-                    proj.input().as_stream_now().is_some()
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        };
-        let condition_always_relax = right_monotonically_increasing
+        let right_non_decreasing = core.right().columns_monotonicity()[0].is_non_decreasing();
+        let condition_always_relax = right_non_decreasing
             && matches!(
                 core.comparator(),
                 ExprType::LessThan | ExprType::LessThanOrEqual

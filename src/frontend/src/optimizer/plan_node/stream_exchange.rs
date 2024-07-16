@@ -34,17 +34,22 @@ pub struct StreamExchange {
 
 impl StreamExchange {
     pub fn new(input: PlanRef, dist: Distribution) -> Self {
-        // Dispatch executor won't change the append-only behavior of the stream.
+        let columns_monotonicity = if matches!(dist, Distribution::Broadcast) {
+            input.columns_monotonicity().clone()
+        } else {
+            // we lost monotonicity information when shuffling
+            MonotonicityMap::new()
+        };
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
             input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             dist,
-            input.append_only(),
+            input.append_only(), // append-only property won't change
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
-            MonotonicityMap::new(), // we lost monotonicity information when shuffling
+            columns_monotonicity,
         );
         StreamExchange {
             base,
@@ -55,14 +60,13 @@ impl StreamExchange {
 
     pub fn new_no_shuffle(input: PlanRef) -> Self {
         let ctx = input.ctx();
-        // Dispatch executor won't change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
             ctx,
             input.schema().clone(),
             input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
-            input.append_only(),
+            input.append_only(), // append-only property won't change
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
