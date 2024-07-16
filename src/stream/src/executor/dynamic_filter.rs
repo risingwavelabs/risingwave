@@ -476,8 +476,6 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                     committed_rhs_row.clone_from(&staging_rhs_row);
                     committed_rhs_value = Some(curr);
 
-                    debug_assert_eq!(committed_rhs_row, staging_rhs_row);
-
                     // Update the vnode bitmap for the left state table if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         let (_previous_vnode_bitmap, _cache_may_stale) =
