@@ -36,14 +36,14 @@ steps:
     key: "run-{commit}"
     trigger: "main-cron"
     build:
-      branch: {env["BRANCH"]}
+      branch: {env["BISECT_BRANCH"]}
       commit: {commit}
       env:
         CI_STEPS: {env['BISECT_STEPS']}
   - wait
   - label: 'check'
     command: |
-        START_COMMIT={env['START_COMMIT']} END_COMMIT={env['END_COMMIT']} BUILDKITE_BRANCH={env['BRANCH']} BISECT_STEPS={env['BISECT_STEPS']} ci/scripts/find-regression.py check
+        START_COMMIT={env['START_COMMIT']} END_COMMIT={env['END_COMMIT']} BISECT_BRANCH={env['BISECT_BRANCH']} BISECT_STEPS={env['BISECT_STEPS']} ci/scripts/find-regression.py check
         '''
     return step
 
@@ -58,6 +58,23 @@ def run_pipeline(env):
         print(f"stdout: {result.stdout}")
         sys.exit(1)
 
+
+def checkout_commit(branch):
+    cmd = f"git checkout {branch}"
+    result = subprocess.run([cmd], shell=True)
+    if result.returncode != 0:
+        print(f"stderr: {result.stderr}")
+        print(f"stdout: {result.stdout}")
+        sys.exit(1)
+
+
+def checkout_prev():
+    cmd = f"git checkout -"
+    result = subprocess.run([cmd], shell=True)
+    if result.returncode != 0:
+        print(f"stderr: {result.stderr}")
+        print(f"stdout: {result.stdout}")
+        sys.exit(1)
 
 # Number of commits for [start, end)
 def get_number_of_commits(start, end):
@@ -85,13 +102,17 @@ def get_bisect_commit(start, end):
     return result.stdout.strip()
 
 
-def get_commit_after(commit):
+def get_commit_after(branch, commit):
+    checkout_commit(branch)
+    cmd = f"git checkout {commit}"
+    subprocess.run([cmd], shell=True)
     cmd = f"git log --reverse --ancestry-path  {commit}.. --format=\"%H\" | head -n 1"
     result = subprocess.run([cmd], shell=True, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"stderr: {result.stderr}")
         print(f"stdout: {result.stdout}")
         sys.exit(1)
+    checkout_prev()
     return result.stdout.strip()
 
 
@@ -99,15 +120,15 @@ def get_env():
     env = {
         "START_COMMIT": os.environ['START_COMMIT'],
         "END_COMMIT": os.environ['END_COMMIT'],
-        "BRANCH": os.environ['BUILDKITE_BRANCH'],
+        "BISECT_BRANCH": os.environ['BISECT_BRANCH'],
         "BISECT_STEPS": os.environ['BISECT_STEPS'],
     }
 
     print(f'''
-        START_COMMIT: {env["START_COMMIT"]}
-        END_COMMIT: {env["END_COMMIT"]}
-        BRANCH: {env["BRANCH"]}
-        BISECT_STEPS: {env["BISECT_STEPS"]}
+        START_COMMIT={env["START_COMMIT"]}
+        END_COMMIT={env["END_COMMIT"]}
+        BISECT_BRANCH={env["BRANCH"]}
+        BISECT_STEPS={env["BISECT_STEPS"]}
         ''')
 
     return env
@@ -136,7 +157,7 @@ def main():
         if outcome == "hard_failed":
             env["END_COMMIT"] = commit
         elif outcome == "passed":
-            env["START_COMMIT"] = get_commit_after(commit)
+            env["START_COMMIT"] = get_commit_after(env["BISECT_BRANCH"], commit)
         else:
             print("Invalid outcome")
 
@@ -159,11 +180,11 @@ def main():
 # 9ca415a9998a5e04e021c899fb66d93a17931d4f
 class Test(unittest.TestCase):
     def test_get_commit_after(self):
-        commit = get_commit_after("72f70960226680e841a8fbdd09c79d74609f27a2")
+        commit = get_commit_after("kwannoel/find-regress", "72f70960226680e841a8fbdd09c79d74609f27a2")
         self.assertEqual(commit, "5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0")
-        commit2 = get_commit_after("617d23ddcac88ced87b96a2454c9217da0fe7915")
+        commit2 = get_commit_after("kwannoel/find-regress", "617d23ddcac88ced87b96a2454c9217da0fe7915")
         self.assertEqual(commit2, "72f70960226680e841a8fbdd09c79d74609f27a2")
-        commit3 = get_commit_after("5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0")
+        commit3 = get_commit_after("kwannoel/find-regress", "5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0")
         self.assertEqual(commit3, "9ca415a9998a5e04e021c899fb66d93a17931d4f")
 
     def test_get_number_of_commits(self):
