@@ -28,7 +28,7 @@ For step (2), we need to check its outcome and only run the next step, if the ou
 
 def format_step(env):
     commit = get_bisect_commit(env["START_COMMIT"], env["END_COMMIT"]),
-    print(f"Running pipeline on commit: {commit} with steps: {steps}")
+    print(f"Running pipeline on commit: {commit} with steps: {env['BISECT_STEPS']}")
     step=f'''
 cat <<- YAML | buildkite-agent pipeline upload
 steps:
@@ -141,7 +141,7 @@ def main():
             print("Invalid outcome")
 
         if env["START_COMMIT"] == env["END_COMMIT"]:
-            print(f"REGRESSION FOUND: {env["START_COMMIT"]}")
+            print(f"REGRESSION FOUND: {env['START_COMMIT']}")
             sys.exit(0)
         else:
             print(f"run next iteration, start: {env['START_COMMIT']}, end: {env['END_COMMIT']}")
