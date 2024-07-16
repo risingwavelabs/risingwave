@@ -4,7 +4,6 @@ import subprocess
 import unittest
 import os
 import sys
-from common import *
 
 '''
 @kwannoel
