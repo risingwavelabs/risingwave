@@ -173,7 +173,7 @@ impl CatalogManagerCore {
         sender: Sender<MetaResult<NotificationVersion>>,
     ) {
         self.database
-            .table_id_to_tx
+            .creating_table_finish_notifier
             .entry(id)
             .or_default()
             .push(sender);
@@ -232,7 +232,7 @@ impl CatalogManagerCore {
     pub(crate) fn notify_finish(&mut self, id: TableId, version: NotificationVersion) {
         for tx in self
             .database
-            .table_id_to_tx
+            .creating_table_finish_notifier
             .remove(&id)
             .into_iter()
             .flatten()
@@ -242,7 +242,7 @@ impl CatalogManagerCore {
     }
 
     pub(crate) fn notify_finish_failed(&mut self, err: &MetaError) {
-        for tx in take(&mut self.database.table_id_to_tx)
+        for tx in take(&mut self.database.creating_table_finish_notifier)
             .into_values()
             .flatten()
         {
@@ -1454,7 +1454,7 @@ impl CatalogManager {
 
         for tx in core
             .database
-            .table_id_to_tx
+            .creating_table_finish_notifier
             .remove(&table_id)
             .into_iter()
             .flatten()

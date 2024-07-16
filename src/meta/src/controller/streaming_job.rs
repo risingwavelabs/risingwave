@@ -474,11 +474,19 @@ impl CatalogController {
             Object::delete_by_id(source_id).exec(&txn).await?;
         }
 
-        for tx in inner.table_id_to_tx.remove(&job_id).into_iter().flatten() {
+        for tx in inner
+            .creating_table_finish_notifier
+            .remove(&job_id)
+            .into_iter()
+            .flatten()
+        {
             let err = if is_cancelled {
-                MetaError::cancelled("stremaing job {job_id} is cancelled")
+                MetaError::cancelled(format!("stremaing job {job_id} is cancelled"))
             } else {
-                MetaError::catalog_id_not_found("stream job", "streaming job {job_id} failed")
+                MetaError::catalog_id_not_found(
+                    "stream job",
+                    format!("streaming job {job_id} failed"),
+                )
             };
             let _ = tx.send(Err(err));
         }
@@ -811,7 +819,7 @@ impl CatalogController {
                 )
                 .await;
         }
-        if let Some(txs) = inner.table_id_to_tx.remove(&job_id) {
+        if let Some(txs) = inner.creating_table_finish_notifier.remove(&job_id) {
             for tx in txs {
                 let _ = tx.send(Ok(version));
             }

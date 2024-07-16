@@ -45,7 +45,6 @@ pub struct CreateStreamingJobOption {
 /// [`CreateStreamingJobContext`] carries one-time infos for creating a streaming job.
 ///
 /// Note: for better readability, keep this struct complete and immutable once created.
-#[cfg_attr(test, derive(Default))]
 pub struct CreateStreamingJobContext {
     /// New dispatchers to add from upstream actors to downstream actors.
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
@@ -1144,7 +1143,16 @@ mod tests {
             let ctx = CreateStreamingJobContext {
                 building_locations: locations,
                 streaming_job: StreamingJob::MaterializedView(table.clone()),
-                ..Default::default()
+                mv_table_id: Some(table_fragments.table_id().table_id),
+                dispatchers: Default::default(),
+                upstream_root_actors: Default::default(),
+                internal_tables: Default::default(),
+                existing_locations: Default::default(),
+                definition: "".to_string(),
+                create_type: Default::default(),
+                ddl_type: Default::default(),
+                replace_table_job_info: None,
+                option: Default::default(),
             };
 
             self.catalog_manager

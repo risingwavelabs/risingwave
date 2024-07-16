@@ -97,9 +97,12 @@ pub struct DatabaseManager {
     // In-progress creating tables, including internal tables.
     pub(super) in_progress_creating_tables: HashMap<TableId, Table>,
 
+    /// Registered finish notifiers for creating tables.
+    ///
     /// `DdlController` will update this map, and pass the `tx` side to `CatalogController`.
     /// On notifying, we can remove the entry from this map.
-    pub table_id_to_tx: HashMap<TableId, Vec<Sender<MetaResult<NotificationVersion>>>>,
+    pub creating_table_finish_notifier:
+        HashMap<TableId, Vec<Sender<MetaResult<NotificationVersion>>>>,
 }
 
 impl DatabaseManager {
@@ -192,7 +195,7 @@ impl DatabaseManager {
             in_progress_creation_tracker: HashSet::default(),
             in_progress_creation_streaming_job: HashMap::default(),
             in_progress_creating_tables: HashMap::default(),
-            table_id_to_tx: Default::default(),
+            creating_table_finish_notifier: Default::default(),
         })
     }
 
@@ -573,7 +576,12 @@ impl DatabaseManager {
 
     pub fn unmark_creating_streaming_job(&mut self, table_id: TableId) {
         self.in_progress_creation_streaming_job.remove(&table_id);
-        for tx in self.table_id_to_tx.remove(&table_id).into_iter().flatten() {
+        for tx in self
+            .creating_table_finish_notifier
+            .remove(&table_id)
+            .into_iter()
+            .flatten()
+        {
             let _ = tx.send(Err(MetaError::cancelled(format!(
                 "streaing_job {table_id} has been cancelled"
             ))));

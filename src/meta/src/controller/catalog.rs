@@ -109,7 +109,7 @@ impl CatalogController {
             env,
             inner: RwLock::new(CatalogControllerInner {
                 db: meta_store.conn,
-                table_id_to_tx: HashMap::new(),
+                creating_table_finish_notifier: HashMap::new(),
             }),
         }
     }
@@ -127,9 +127,12 @@ impl CatalogController {
 
 pub struct CatalogControllerInner {
     pub(crate) db: DatabaseConnection,
+    /// Registered finish notifiers for creating tables.
+    ///
     /// `DdlController` will update this map, and pass the `tx` side to `CatalogController`.
     /// On notifying, we can remove the entry from this map.
-    pub table_id_to_tx: HashMap<ObjectId, Vec<Sender<MetaResult<NotificationVersion>>>>,
+    pub creating_table_finish_notifier:
+        HashMap<ObjectId, Vec<Sender<MetaResult<NotificationVersion>>>>,
 }
 
 impl CatalogController {
@@ -3136,7 +3139,10 @@ impl CatalogControllerInner {
         id: i32,
         sender: Sender<MetaResult<NotificationVersion>>,
     ) {
-        self.table_id_to_tx.entry(id).or_default().push(sender);
+        self.creating_table_finish_notifier
+            .entry(id)
+            .or_default()
+            .push(sender);
     }
 
     pub(crate) async fn streaming_job_is_finished(&mut self, id: i32) -> MetaResult<bool> {
@@ -3156,7 +3162,10 @@ impl CatalogControllerInner {
     }
 
     pub(crate) fn notify_finish_failed(&mut self, err: &MetaError) {
-        for tx in take(&mut self.table_id_to_tx).into_values().flatten() {
+        for tx in take(&mut self.creating_table_finish_notifier)
+            .into_values()
+            .flatten()
+        {
             let _ = tx.send(Err(err.clone()));
         }
     }
