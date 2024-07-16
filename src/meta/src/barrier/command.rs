@@ -97,7 +97,7 @@ pub struct ReplaceTablePlan {
     /// Note that there's no `SourceBackfillExecutor` involved for table with connector, so we don't need to worry about
     /// `backfill_splits`.
     pub init_split_assignment: SplitAssignment,
-    /// The streaming_job info of the table to be replaced. Must be `StreamingJob::Table`
+    /// The `StreamingJob` info of the table to be replaced. Must be `StreamingJob::Table`
     pub streaming_job: StreamingJob,
     /// The temporary dummy table fragments id of new table fragment
     pub dummy_id: u32,
