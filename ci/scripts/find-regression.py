@@ -127,7 +127,7 @@ def get_env():
     print(f'''
         START_COMMIT={env["START_COMMIT"]}
         END_COMMIT={env["END_COMMIT"]}
-        BISECT_BRANCH={env["BRANCH"]}
+        BISECT_BRANCH={env["BISECT_BRANCH"]}
         BISECT_STEPS={env["BISECT_STEPS"]}
         ''')
 
