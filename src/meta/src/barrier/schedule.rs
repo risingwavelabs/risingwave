@@ -442,7 +442,7 @@ impl ScheduledBarriers {
                     unreachable!("only drop and cancel streaming jobs should be buffered");
                 }
             }
-            notifiers.into_iter().for_each(|mut notify| {
+            notifiers.into_iter().for_each(|notify| {
                 notify.notify_collected();
             });
         }

@@ -855,7 +855,7 @@ impl GlobalBarrierManagerContext {
     async fn complete_barrier(self, node: EpochNode) -> MetaResult<BarrierCompleteOutput> {
         let EpochNode {
             command_ctx,
-            mut notifiers,
+            notifiers,
             enqueue_time,
             state,
             ..
@@ -873,7 +873,7 @@ impl GlobalBarrierManagerContext {
             }
             return Err(e);
         };
-        notifiers.iter_mut().for_each(|notifier| {
+        notifiers.into_iter().for_each(|notifier| {
             notifier.notify_collected();
         });
         let has_remaining = self

@@ -47,8 +47,8 @@ impl Notifier {
     }
 
     /// Notify when we have collected a barrier from all actors.
-    pub fn notify_collected(&mut self) {
-        if let Some(tx) = self.collected.take() {
+    pub fn notify_collected(self) {
+        if let Some(tx) = self.collected {
             tx.send(Ok(())).ok();
         }
     }
