@@ -44,6 +44,9 @@ pub enum AccessError {
 
     #[error(transparent)]
     NotImplemented(#[from] NotImplemented),
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
 }
 
 pub type AccessResult<T = Datum> = std::result::Result<T, AccessError>;

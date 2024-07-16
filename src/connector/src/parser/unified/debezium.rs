@@ -12,14 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
+use jsonbb::ValueRef;
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::types::{
-    DataType, Datum, DatumCow, Scalar, ScalarImpl, ScalarRefImpl, Timestamptz, ToDatumRef,
+    DataType, Datum, DatumCow, Scalar, ScalarImpl, ScalarRefImpl, StructType, Timestamptz,
+    ToDatumRef,
 };
 use risingwave_connector_codec::decoder::AccessExt;
 use risingwave_pb::plan_common::additional_column::ColumnType;
 
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
-use crate::parser::{TableSchemaChange, TransactionControl};
+use crate::parser::debezium::schema_change::{SchemaChangeEnvelope, TableSchemaChange};
+use crate::parser::mysql::mysql_typename_to_rw_type;
+use crate::parser::TransactionControl;
 use crate::source::{ConnectorProperties, SourceColumnDesc};
 
 // Example of Debezium JSON value:
@@ -133,19 +139,85 @@ pub fn parse_transaction_meta(
 
 pub fn parse_schema_change(
     accessor: &impl Access,
-    _connector_props: &ConnectorProperties,
-) -> AccessResult<TableSchemaChange> {
-    if let Some(ScalarRefImpl::Jsonb(table_changes)) = accessor
-        .access(&[TABLE_CHANGES], &DataType::Jsonb)?
+    connector_props: &ConnectorProperties,
+) -> AccessResult<SchemaChangeEnvelope> {
+    let mut schema_changes = vec![];
+
+    if let Some(ScalarRefImpl::List(table_changes)) = accessor
+        .access(&[TABLE_CHANGES], &DataType::List(Box::new(DataType::Jsonb)))?
         .to_datum_ref()
     {
-        tracing::info!("table_changes: {:?}", table_changes);
-    }
+        for datum in table_changes.iter() {
+            let jsonb = match datum {
+                Some(ScalarRefImpl::Jsonb(jsonb)) => jsonb,
+                _ => unreachable!(""),
+            };
 
-    Err(AccessError::Undefined {
-        name: "table schema change".into(),
-        path: TRANSACTION_STATUS.into(),
-    })
+            let id = jsonb
+                .access_object_field("id")
+                .unwrap()
+                .as_string()
+                .unwrap();
+
+            println!("id: {}", id);
+
+            let mut column_descs: Vec<ColumnDesc> = vec![];
+            if let Some(table) = jsonb.access_object_field("table")
+                && let Some(columns) = table.access_object_field("columns")
+            {
+                for col in columns.array_elements().unwrap() {
+                    let name = col
+                        .access_object_field("name")
+                        .unwrap()
+                        .as_string()
+                        .unwrap();
+                    let type_name = col
+                        .access_object_field("typeName")
+                        .unwrap()
+                        .as_string()
+                        .unwrap();
+                    let position = col
+                        .access_object_field("position")
+                        .unwrap()
+                        .as_number()
+                        .unwrap();
+
+                    let data_type = match *connector_props {
+                        ConnectorProperties::PostgresCdc(_) => {
+                            unimplemented!()
+                        }
+                        ConnectorProperties::MysqlCdc(_) => {
+                            mysql_typename_to_rw_type(type_name.as_str())?
+                        }
+                        _ => {
+                            unreachable!()
+                        }
+                    };
+
+                    column_descs.push(ColumnDesc::named(name, ColumnId::placeholder(), data_type));
+                }
+            }
+            schema_changes.push(TableSchemaChange {
+                up_table_full_name: id,
+                columns: column_descs
+                    .into_iter()
+                    .map(|column_desc| ColumnCatalog {
+                        column_desc,
+                        is_hidden: false,
+                    })
+                    .collect_vec(),
+            });
+        }
+
+        Ok(SchemaChangeEnvelope {
+            table_changes: schema_changes,
+        })
+    } else {
+        Err(AccessError::Undefined {
+            name: "table schema change".into(),
+            path: TABLE_CHANGES.into(),
+        })
+    }
 }
 
 impl<A> DebeziumChangeEvent<A>

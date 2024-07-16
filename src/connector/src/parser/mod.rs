@@ -87,6 +87,7 @@ mod unified;
 mod upsert_parser;
 mod util;
 
+use debezium::schema_change::SchemaChangeEnvelope;
 pub use debezium::DEBEZIUM_IGNORE_KEY;
 use risingwave_common::bitmap::BitmapBuilder;
 pub use unified::{AccessError, AccessResult};
@@ -570,11 +571,6 @@ pub enum TransactionControl {
     Commit { id: Box<str> },
 }
 
-#[derive(Debug)]
-pub struct TableSchemaChange {
-    columns: Vec<ColumnCatalog>,
-}
-
 /// The result of parsing a message.
 #[derive(Debug)]
 pub enum ParseResult {
@@ -584,7 +580,7 @@ pub enum ParseResult {
     TransactionControl(TransactionControl),
 
     /// A schema change message is parsed.
-    SchemaChange(TableSchemaChange),
+    SchemaChange(SchemaChangeEnvelope),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

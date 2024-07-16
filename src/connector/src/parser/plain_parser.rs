@@ -26,7 +26,9 @@ use crate::parser::simd_json_parser::DebeziumJsonAccessBuilder;
 use crate::parser::unified::debezium::{parse_schema_change, parse_transaction_meta};
 use crate::parser::unified::AccessImpl;
 use crate::parser::upsert_parser::get_key_column_name;
-use crate::parser::{BytesProperties, ParseResult, ParserFormat};
+use crate::parser::{
+    BytesProperties, JsonAccessBuilder, JsonProperties, ParseResult, ParserFormat,
+};
 use crate::source::cdc::CdcMessageType;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceMeta};
 
@@ -73,7 +75,7 @@ impl PlainParser {
         ));
 
         let schema_change_builder = Some(AccessBuilderImpl::DebeziumJson(
-            DebeziumJsonAccessBuilder::new(TimestamptzHandling::GuessNumberUnit)?,
+            DebeziumJsonAccessBuilder::new_for_schema_event()?,
         ));
 
         Ok(Self {
@@ -207,6 +209,7 @@ mod tests {
     use futures_async_stream::try_stream;
     use itertools::Itertools;
     use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+    use risingwave_pb::connector_service::cdc_message;
 
     use super::*;
     use crate::parser::{MessageMeta, SourceStreamChunkBuilder, TransactionControl};
@@ -325,7 +328,7 @@ mod tests {
                     meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
                         "orders".to_string(),
                         0,
-                        transactional,
+                        cdc_message::CdcMessageType::TransactionMeta,
                     )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
@@ -339,7 +342,7 @@ mod tests {
                     meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
                         "orders".to_string(),
                         0,
-                        false,
+                        cdc_message::CdcMessageType::Data,
                     )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
@@ -353,7 +356,7 @@ mod tests {
                     meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
                         "orders".to_string(),
                         0,
-                        transactional,
+                        cdc_message::CdcMessageType::TransactionMeta,
                     )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
@@ -399,7 +402,11 @@ mod tests {
         let begin_msg = r#"{"schema":null,"payload":{"status":"BEGIN","id":"3E11FA47-71CA-11E1-9E33-C80AA9429562:23","event_count":null,"data_collections":null,"ts_ms":1704269323180}}"#;
         let commit_msg = r#"{"schema":null,"payload":{"status":"END","id":"3E11FA47-71CA-11E1-9E33-C80AA9429562:23","event_count":11,"data_collections":[{"data_collection":"public.orders_tx","event_count":5},{"data_collection":"public.person","event_count":6}],"ts_ms":1704269323180}}"#;
 
-        let cdc_meta = SourceMeta::DebeziumCdc(DebeziumCdcMeta::new("orders".to_string(), 0, true));
+        let cdc_meta = SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
+            "orders".to_string(),
+            0,
+            cdc_message::CdcMessageType::TransactionMeta,
+        ));
         let msg_meta = MessageMeta {
             meta: &cdc_meta,
             split_id: "1001",
@@ -436,5 +443,58 @@ mod tests {
 
         let output = builder.take(10);
         assert_eq!(0, output.cardinality());
+    }
+
+    #[tokio::test]
+    async fn test_parse_schema_change() {
+        let schema = vec![
+            ColumnCatalog {
+                column_desc: ColumnDesc::named("payload", ColumnId::placeholder(), DataType::Jsonb),
+                is_hidden: false,
+            },
+            ColumnCatalog::offset_column(),
+            ColumnCatalog::cdc_table_name_column(),
+        ];
+
+        let columns = schema
+            .iter()
+            .map(|c| SourceColumnDesc::from(&c.column_desc))
+            .collect::<Vec<_>>();
+
+        // format plain encode json parser
+        let source_ctx = SourceContext {
+            connector_props: ConnectorProperties::MysqlCdc(Box::default()),
+            ..SourceContext::dummy()
+        };
+        let mut parser = PlainParser::new(
+            SpecificParserConfig::DEFAULT_PLAIN_JSON,
+            columns.clone(),
+            Arc::new(source_ctx),
+        )
+        .await
+        .unwrap();
+        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
+
+        let msg = r#"{"schema":null,"payload": { "databaseName": "mydb", "ddl": "ALTER TABLE test add column v2 varchar(32)", "schemaName": null, "source": { "connector": "mysql", "db": "mydb", "file": "binlog.000065", "gtid": null, "name": "RW_CDC_1", "pos": 234, "query": null, "row": 0, "sequence": null, "server_id": 1, "snapshot": "false", "table": "test", "thread": null, "ts_ms": 1718354727000, "version": "2.4.2.Final" }, "tableChanges": [ { "id": "\"mydb\".\"test\"", "table": { "columns": [ { "autoIncremented": false, "charsetName": null, "comment": null, "defaultValueExpression": null, "enumValues": null, "generated": false, "jdbcType": 4, "length": null, "name": "id", "nativeType": null, "optional": false, "position": 1, "scale": null, "typeExpression": "INT", "typeName": "INT" }, { "autoIncremented": false, "charsetName": null, "comment": null, "defaultValueExpression": null, "enumValues": null, "generated": false, "jdbcType": 2014, "length": null, "name": "v1", "nativeType": null, "optional": true, "position": 2, "scale": null, "typeExpression": "TIMESTAMP", "typeName": "TIMESTAMP" }, { "autoIncremented": false, "charsetName": "utf8mb4", "comment": null, "defaultValueExpression": null, "enumValues": null, "generated": false, "jdbcType": 12, "length": 32, "name": "v2", "nativeType": null, "optional": true, "position": 3, "scale": null, "typeExpression": "VARCHAR", "typeName": "VARCHAR" } ], "comment": null, "defaultCharsetName": "utf8mb4", "primaryKeyColumnNames": [ "id" ] }, "type": "ALTER" } ], "ts_ms": 1718354727594 }}"#;
+        let cdc_meta = SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
+            "mydb.test".to_string(),
+            0,
+            cdc_message::CdcMessageType::SchemaChange,
+        ));
+        let msg_meta = MessageMeta {
+            meta: &cdc_meta,
+            split_id: "1001",
+            offset: "",
+        };
+
+        let res = parser
+            .parse_one_with_txn(
+                None,
+                Some(msg.as_bytes().to_vec()),
+                builder.row_writer().with_meta(msg_meta),
+            )
+            .await;
+
+        res.unwrap();
     }
 }

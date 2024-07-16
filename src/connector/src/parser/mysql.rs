@@ -141,6 +141,25 @@ pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> Owne
     OwnedRow::new(datums)
 }
 
+pub fn mysql_typename_to_rw_type(type_name: &str) -> anyhow::Result<DataType> {
+    match type_name.to_lowercase().as_str() {
+        "tinyint" | "smallint" => Ok(DataType::Int16),
+        "int" => Ok(DataType::Int32),
+        "bigint" => Ok(DataType::Int64),
+        "float" => Ok(DataType::Float32),
+        "double" => Ok(DataType::Float64),
+        "decimal" => Ok(DataType::Decimal),
+        "char" | "varchar" | "text" | "mediumtext" | "longtext" => Ok(DataType::Varchar),
+        "date" => Ok(DataType::Date),
+        "time" => Ok(DataType::Time),
+        "timestamp" => Ok(DataType::Timestamptz),
+        "datetime" => Ok(DataType::Timestamptz),
+        "json" => Ok(DataType::Jsonb),
+        "binary" | "varbinary" | "blob" | "mediumblob" | "longblob" => Ok(DataType::Bytea),
+        _ => Err(anyhow::anyhow!("unsupported type: {}", type_name)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
