@@ -26,7 +26,8 @@ We won't run the entire pipeline, only steps specified by the BISECT_STEPS envir
 For step (2), we need to check its outcome and only run the next step, if the outcome is successful.
 '''
 
-def format_step(env, branch, commit, steps):
+def format_step(env):
+    commit = get_bisect_commit(env["START_COMMIT"], env["END_COMMIT"]),
     print(f"Running pipeline on commit: {commit} with steps: {steps}")
     step=f'''
 cat <<- YAML | buildkite-agent pipeline upload
@@ -35,50 +36,30 @@ steps:
     key: "run-{commit}"
     trigger: "main-cron"
     build:
-      branch: {branch}
+      branch: {env["BRANCH"]}
       commit: {commit}
       env:
-        CI_STEPS: {steps}
+        CI_STEPS: {env['BISECT_STEPS']}
   - wait
   - label: 'check'
     command: |
-        START_COMMIT=$START_COMMIT END_COMMIT=$END_COMMIT BUILDKITE_BRANCH=$BUILDKITE_BRANCH BISECT_STEPS=$BISECT_STEPS ci/scripts/find-regression.py check
-        
+        START_COMMIT={env['START_COMMIT']} END_COMMIT={env['END_COMMIT']} BUILDKITE_BRANCH={env['BRANCH']} BISECT_STEPS={env['BISECT_STEPS']} ci/scripts/find-regression.py check
         '''
     return step
 
 
 # Triggers a buildkite job to run the pipeline on the given commit, with the specified tests.
-def run_pipeline_on_commit(env, branch, commit, steps):
-    step = format_step(env, branch, commit, steps)
-    print(f"Running upload pipeline: step={step}")
-    subprocess.run(step, shell=True)
-
-def run(failing_test_key):
-    test_map = get_test_map()
-    current_build_commit = os.environ['BUILDKITE_COMMIT']
-    start = 0
-    end = len(test_commits) - 1 # Exclude the current commit
-    test_commit = None
-    result = None
-    # binary search the commits
-    while start < end:
-        mid = (start + end) // 2
-        test_commit = test_commits[mid]
-        result = run_pipeline_on_commit(test_commit, failed_test_map)
-        if result:
-            start = mid + 1
-        else:
-            end = mid
-
-    if test_commit is None:
-        print("No regression found")
-        return
-
-    print(f"Regression found at commit {test_commit}")
+def run_pipeline(env):
+    step = format_step(env)
+    print(f"Running upload pipeline for step:\n{step}")
+    result = subprocess.run(step, shell=True)
+    if result.returncode != 0:
+        print(f"stderr: {result.stderr}")
+        print(f"stdout: {result.stdout}")
+        sys.exit(1)
 
 
-# Number of commits for [start, end]
+# Number of commits for [start, end)
 def get_number_of_commits(start, end):
     cmd = f"git rev-list --count {start}..{end}"
     result = subprocess.run([cmd], shell=True, capture_output=True, text=True)
@@ -86,7 +67,33 @@ def get_number_of_commits(start, end):
         print(f"stderr: {result.stderr}")
         print(f"stdout: {result.stdout}")
         sys.exit(1)
-    return int(result.stdout) + 1
+    return int(result.stdout)
+
+
+def get_bisect_commit(start, end):
+    number_of_commits = get_number_of_commits(start, end)
+    commit_offset = number_of_commits // 2
+    if commit_offset == 0:
+        return start
+
+    cmd = f"git rev-list --reverse {start}..{end} | head -n {commit_offset} | tail -n 1"
+    result = subprocess.run([cmd], shell=True, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"stderr: {result.stderr}")
+        print(f"stdout: {result.stdout}")
+        sys.exit(1)
+    return result.stdout.strip()
+
+
+def get_commit_after(commit):
+    cmd = f"git log --reverse --ancestry-path  {commit}.. --format=\"%H\" | head -n 1"
+    result = subprocess.run([cmd], shell=True, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"stderr: {result.stderr}")
+        print(f"stdout: {result.stdout}")
+        sys.exit(1)
+    return result.stdout.strip()
+
 
 def get_env():
     env = {
@@ -112,31 +119,68 @@ def main():
     if cmd == "start":
         env = get_env()
         print("start bisecting")
-        run_pipeline_on_commit(env, "kwannoel/find-regress", "f0fa34cdeed95a08b2c7d8428a17d6de27b6588d", "e2e-test")
+        run_pipeline(env)
     elif cmd == "check":
         env = get_env()
         print("check pipeline outcome")
-        number_of_commits = get_number_of_commits(env["START_COMMIT"], env["END_COMMIT"])
-        commit_offset = number_of_commits // 2
-
+        commit = get_bisect_commit(env["START_COMMIT"], env["END_COMMIT"])
         step = f"run-{commit}"
-        outcome = subprocess.run(["buildkite-agent", "step", "get", "outcome", "--step", step], shell=True)
-#         if [ $(buildkite-agent step get "outcome" --step "run-{commit}") == "hard_failed" ]; then
-#     START_COMMIT={env["START_COMMIT"]} END_COMMIT={env["END_COMMIT"]} BUILDKITE_BRANCH={env["BRANCH"]} BISECT_STEPS={env["BISECT_STEPS"]} ci/scripts/find-regression.py failed
-#     else
-#     START_COMMIT={env["START_COMMIT"]} END_COMMIT={env["END_COMMIT"]} BUILDKITE_BRANCH={env["BRANCH"]} BISECT_STEPS={env["BISECT_STEPS"]} ci/scripts/find-regression.py passed
-# fi
+        outcome = subprocess.run(["buildkite-agent", "step", "get", "outcome", "--step", step], shell=True, capture_output=True, text=True)
+
+        if outcome.returncode != 0:
+            print(f"stderr: {outcome.stderr}")
+            print(f"stdout: {outcome.stdout}")
+            sys.exit(1)
+
+        outcome = outcome.stdout.strip()
+        if outcome == "hard_failed":
+            env["END_COMMIT"] = commit
+        elif outcome == "passed":
+            env["START_COMMIT"] = get_commit_after(commit)
+        else:
+            print("Invalid outcome")
+
+        if env["START_COMMIT"] == env["END_COMMIT"]:
+            print(f"REGRESSION FOUND: {env["START_COMMIT"]}")
+            sys.exit(0)
+        else:
+            print(f"run next iteration, start: {env['START_COMMIT']}, end: {env['END_COMMIT']}")
+            run_pipeline(env)
+
     else:
         print("Invalid state")
         sys.exit(1)
 
 
+# For the tests, we use RisingWave's sequence of commits, from earliest to latest:
+# 617d23ddcac88ced87b96a2454c9217da0fe7915
+# 72f70960226680e841a8fbdd09c79d74609f27a2
+# 5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0
+# 9ca415a9998a5e04e021c899fb66d93a17931d4f
 class Test(unittest.TestCase):
+    def test_get_commit_after(self):
+        commit = get_commit_after("72f70960226680e841a8fbdd09c79d74609f27a2")
+        self.assertEqual(commit, "5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0")
+        commit2 = get_commit_after("617d23ddcac88ced87b96a2454c9217da0fe7915")
+        self.assertEqual(commit2, "72f70960226680e841a8fbdd09c79d74609f27a2")
+        commit3 = get_commit_after("5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0")
+        self.assertEqual(commit3, "9ca415a9998a5e04e021c899fb66d93a17931d4f")
+
     def test_get_number_of_commits(self):
         n = get_number_of_commits("72f70960226680e841a8fbdd09c79d74609f27a2", "9ca415a9998a5e04e021c899fb66d93a17931d4f")
-        self.assertEqual(n, 3)
+        self.assertEqual(n, 2)
+        n2 = get_number_of_commits("617d23ddcac88ced87b96a2454c9217da0fe7915", "9ca415a9998a5e04e021c899fb66d93a17931d4f")
+        self.assertEqual(n2, 3)
+        n3 = get_number_of_commits("72f70960226680e841a8fbdd09c79d74609f27a2", "5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0")
+        self.assertEqual(n3, 1)
 
-    def test_get_bisect_commit
+    def test_get_bisect_commit(self):
+        commit = get_bisect_commit("72f70960226680e841a8fbdd09c79d74609f27a2", "9ca415a9998a5e04e021c899fb66d93a17931d4f")
+        self.assertEqual(commit, "5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0")
+        commit2 = get_bisect_commit("617d23ddcac88ced87b96a2454c9217da0fe7915", "9ca415a9998a5e04e021c899fb66d93a17931d4f")
+        self.assertEqual(commit2, "72f70960226680e841a8fbdd09c79d74609f27a2")
+        commit3 = get_bisect_commit("72f70960226680e841a8fbdd09c79d74609f27a2", "5c7b556ea60d136c5bccf1b1f7e313d2f9c79ef0")
+        self.assertEqual(commit3, "72f70960226680e841a8fbdd09c79d74609f27a2")
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
