@@ -153,7 +153,7 @@ pub enum CustomJsonType {
 /// How the jsonb type is encoded.
 ///
 /// - `String`: encode jsonb as string. `[1, true, "foo"] -> "[1, true, \"foo\"]"`
-/// - `Dynamic`: encode jsonb as json object. `[1, true, "foo"] -> [1, true, "foo"]`
+/// - `Dynamic`: encode jsonb as json type dynamically. `[1, true, "foo"] -> [1, true, "foo"]`
 /// - `Custom`: decided by [`CustomJsonType`].
 pub enum EncodeJsonbMode {
     String,
