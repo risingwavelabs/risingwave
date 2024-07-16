@@ -77,6 +77,12 @@ repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
 foyer = { version = "0.9.4", features = ["nightly"] }
+apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "0345f64cbf5322a454bf8f5e810bad2ecb2c4da8", features = [
+    "snappy",
+    "zstandard",
+    "bzip",
+    "xz",
+] }
 auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 await-tree = "0.2.1"
 aws-config = { version = "1", default-features = false, features = [
