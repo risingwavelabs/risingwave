@@ -561,6 +561,7 @@ mod tests {
             timestamp_handling_mode: TimestampHandlingMode::Milli,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
             custom_json_type: CustomJsonType::None,
+            encode_jsonb_mode: EncodeJsonbMode::Custom,
         };
         let ts_value = datum_to_json_object(
             &Field {
@@ -622,7 +623,7 @@ mod tests {
         let mut map = HashMap::default();
         map.insert("aaa".to_string(), 5_u8);
         let doris_config = JsonEncoderConfig {
-            time_handling_mode: TimeHandlingMode::Milli,
+            time_handling_mode: TimeHandlingMode::String,
             date_handling_mode: DateHandlingMode::String,
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
@@ -653,7 +654,7 @@ mod tests {
         assert_eq!(date_value, json!(719163));
 
         let from_epoch_config = JsonEncoderConfig {
-            time_handling_mode: TimeHandlingMode::Milli,
+            time_handling_mode: TimeHandlingMode::String,
             date_handling_mode: DateHandlingMode::FromEpoch,
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
@@ -712,7 +713,7 @@ mod tests {
         assert_eq!(interval_value, json!("{\"v3\":3,\"v2\":2,\"v1\":1}"));
 
         let encode_jsonb_obj_config = JsonEncoderConfig {
-            time_handling_mode: TimeHandlingMode::Milli,
+            time_handling_mode: TimeHandlingMode::String,
             date_handling_mode: DateHandlingMode::String,
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
