@@ -713,6 +713,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 tombstone_reclaim_ratio = 16;
       CompressionAlgorithm compression_algorithm = 17;
       uint32 max_l0_compact_level_count = 18;
+      uint32 partition_vnode_count = 19;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -734,6 +735,7 @@ message PinVersionResponse {
 message SplitCompactionGroupRequest {
   uint64 group_id = 1;
   repeated uint32 table_ids = 2;
+  uint32 partition_vnode_count = 3;
 }
 
 message SplitCompactionGroupResponse {
