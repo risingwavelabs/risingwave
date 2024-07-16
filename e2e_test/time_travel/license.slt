@@ -2,6 +2,9 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
+SET QUERY_MODE TO local;
+
+statement ok
 ALTER SYSTEM SET license_key TO '';
 
 statement ok
@@ -29,3 +32,6 @@ SELECT * FROM t FOR SYSTEM_TIME  AS OF now();
 
 statement ok
 DROP TABLE t;
+
+statement ok
+SET QUERY_MODE TO auto;

@@ -2,6 +2,9 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
+SET QUERY_MODE TO local;
+
+statement ok
 CREATE TABLE t (k INT);
 
 query error
@@ -50,3 +53,6 @@ SELECT *  FROM t FOR SYSTEM_TIME AS OF 5066075780;
 
 statement ok
 DROP TABLE t;
+
+statement ok
+SET QUERY_MODE TO auto;
