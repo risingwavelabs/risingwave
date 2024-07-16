@@ -11,7 +11,7 @@ def upload_to_s3_bucket(config, minio_client, run_id, files, start_bias):
     _local = lambda idx, start_bias: f"data_{idx + start_bias}.{fmt}"
     _s3 = lambda idx, start_bias: f"{run_id}_data_{idx + start_bias}.{fmt}"
     for idx, file_str in enumerate(files):
-        with open(_local(idx), "w") as f:
+        with open(_local(idx, start_bias), "w") as f:
             f.write(file_str)
             os.fsync(f.fileno())
 
