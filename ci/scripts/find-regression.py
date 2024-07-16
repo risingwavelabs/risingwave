@@ -93,6 +93,7 @@ def get_bisect_commit(start, end):
 
 
 def get_commit_after(branch, commit):
+    print(f"finding commit after {commit} in branch {branch}")
     cmd = f"git log --reverse --ancestry-path {commit}..{branch} --format=\"%H\" | head -n 1"
     result = subprocess.run([cmd], shell=True, capture_output=True, text=True)
     if result.returncode != 0:
