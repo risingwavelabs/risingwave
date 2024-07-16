@@ -140,12 +140,10 @@ impl CompactStatus {
             return false;
         }
 
-        // if task.input_ssts.len() == 1 {
-        //     return task.input_ssts[0].level_idx == 0
-        //         && can_concat(&task.input_ssts[0].table_infos);
-        // } else
-
-        if task.input_ssts.len() != 2
+        if task.input_ssts.len() == 1 {
+            return task.input_ssts[0].level_idx == 0
+                && can_concat(&task.input_ssts[0].table_infos);
+        } else if task.input_ssts.len() != 2
             || task.input_ssts[0].level_type() != LevelType::Nonoverlapping
         {
             return false;
