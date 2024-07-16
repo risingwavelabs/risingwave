@@ -581,7 +581,7 @@ set -euo pipefail
 RC_ENV_FILE="${PREFIX_CONFIG}/risedev-env"
 
 if [ ! -f "${RC_ENV_FILE}" ]; then
-  echo "risedev-env file not found. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0) or $(tput setaf 4)\`./risedev p\`$(tput sgr0)?"
+  echo "risedev-env file not found at ${RC_ENV_FILE}. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0) or $(tput setaf 4)\`./risedev p\`$(tput sgr0)?"
   exit 1
 fi
 '''
