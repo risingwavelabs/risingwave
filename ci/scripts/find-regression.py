@@ -60,7 +60,7 @@ def run_pipeline(env):
 
 
 def checkout_commit(branch):
-    cmd = f"git checkout {branch}"
+    cmd = f"git checkout {branch} -q"
     result = subprocess.run([cmd], shell=True)
     if result.returncode != 0:
         print(f"stderr: {result.stderr}")
@@ -69,7 +69,7 @@ def checkout_commit(branch):
 
 
 def checkout_prev():
-    cmd = f"git checkout -"
+    cmd = f"git checkout - -q"
     result = subprocess.run([cmd], shell=True)
     if result.returncode != 0:
         print(f"stderr: {result.stderr}")
@@ -104,8 +104,6 @@ def get_bisect_commit(start, end):
 
 def get_commit_after(branch, commit):
     checkout_commit(branch)
-    cmd = f"git checkout {commit}"
-    subprocess.run([cmd], shell=True)
 
     cmd = f"git log --reverse --ancestry-path  {commit}.. --format=\"%H\" | head -n 1"
     print(f"cmd: {cmd}")
