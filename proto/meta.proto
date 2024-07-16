@@ -149,6 +149,9 @@ enum PausedReason {
   // The cluster is paused due to manual operation, e.g. `risectl` command or the
   // `pause_on_next_bootstrap` system variable.
   PAUSED_REASON_MANUAL = 2;
+  // The reason the cluster was paused is to ensure that the stream is halted during the creation of sink into table to prevent data loss caused by the replace table operation.
+  // If a more general name is needed in the future, please modify or discard me.
+  PAUSED_REASON_REPLACE_TABLE = 3;
 }
 
 message PauseRequest {}

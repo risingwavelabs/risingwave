@@ -306,10 +306,23 @@ impl BarrierScheduler {
         &self,
         command: Command,
     ) -> MetaResult<BarrierInfo> {
+        self.run_command_with_pause_reason(command, PausedReason::ConfigChange)
+            .await
+    }
+
+    /// Run a command with a `Pause` command before and `Resume` command after it. With reason
+    ///
+    /// Returns the barrier info of the actual command.
+    pub async fn run_command_with_pause_reason(
+        &self,
+        command: Command,
+        reason: PausedReason,
+    ) -> MetaResult<BarrierInfo> {
+        assert!(!matches!(reason, PausedReason::Unspecified));
         self.run_multiple_commands(vec![
-            Command::pause(PausedReason::ConfigChange),
+            Command::pause(reason),
             command,
-            Command::resume(PausedReason::ConfigChange),
+            Command::resume(reason),
         ])
         .await
         .map(|i| i[1])

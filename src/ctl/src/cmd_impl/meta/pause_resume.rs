@@ -23,6 +23,7 @@ fn desc(reason: PausedReason) -> &'static str {
         PausedReason::Unspecified => "not paused",
         PausedReason::ConfigChange => "paused due to configuration change",
         PausedReason::Manual => "paused manually",
+        PausedReason::ReplaceTable => "paused due to table replacement",
     }
 }
 
