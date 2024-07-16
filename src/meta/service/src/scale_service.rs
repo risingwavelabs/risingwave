@@ -192,21 +192,13 @@ impl ScaleService for ScaleServiceImpl {
                 worker_reschedules
                     .into_iter()
                     .map(|(fragment_id, reschedule)| {
-                        let PbWorkerReschedule {
-                            increased_actor_count,
-                            decreased_actor_count,
-                        } = reschedule;
-
+                        let PbWorkerReschedule { worker_actor_diff } = reschedule;
                         (
                             fragment_id,
                             WorkerReschedule {
-                                increased_actor_count: increased_actor_count
+                                worker_actor_diff: worker_actor_diff
                                     .into_iter()
-                                    .map(|(k, v)| (k as _, v as _))
-                                    .collect(),
-                                decreased_actor_count: decreased_actor_count
-                                    .into_iter()
-                                    .map(|(k, v)| (k as _, v as _))
+                                    .map(|(worker_id, diff)| (worker_id as _, diff as _))
                                     .collect(),
                             },
                         )

@@ -65,7 +65,7 @@ async fn test_dynamic_filter() -> Result<()> {
 
     // prev -[1,2,3]
     cluster
-        .reschedule(format!("{id}-[{worker_1}:2, {worker_2}:1]"))
+        .reschedule(format!("{id}:[{worker_1}:-2, {worker_2}:-1]"))
         .await?;
     sleep(Duration::from_secs(3)).await;
 
@@ -80,9 +80,7 @@ async fn test_dynamic_filter() -> Result<()> {
 
     // prev -[4,5]+[1,2,3]
     cluster
-        .reschedule(format!(
-            "{id}-[{worker_3}:1, {worker_2}:1]+[{worker_1}:2, {worker_2}:1]"
-        ))
+        .reschedule(format!("{id}:[{worker_3}:-1, {worker_1}:2]"))
         .await?;
     sleep(Duration::from_secs(3)).await;
     session.run(SELECT).await?.assert_result_eq("1\n2\n3");
@@ -95,9 +93,7 @@ async fn test_dynamic_filter() -> Result<()> {
 
     // prev -[1,2,3]+[4,5]
     cluster
-        .reschedule(format!(
-            "{id}-[{worker_1}:2, {worker_2}:1]+[{worker_2}:1, {worker_3}:1]"
-        ))
+        .reschedule(format!("{id}:[{worker_1}:-2, {worker_3}:1]"))
         .await?;
     sleep(Duration::from_secs(3)).await;
     session.run(SELECT).await?.assert_result_eq("3");
@@ -111,7 +107,7 @@ async fn test_dynamic_filter() -> Result<()> {
     //
     // prev +[1,2,3]
     cluster
-        .reschedule(format!("{id}+[{worker_1}:2, {worker_2}:1]"))
+        .reschedule(format!("{id}:[{worker_1}:2, {worker_2}:1]"))
         .await?;
     sleep(Duration::from_secs(3)).await;
     session.run(SELECT).await?.assert_result_eq("2\n3");
@@ -122,7 +118,7 @@ async fn test_dynamic_filter() -> Result<()> {
     session.run(SELECT).await?.assert_result_eq("");
 
     // prev -[1]
-    cluster.reschedule(format!("{id}+[{worker_1}:1]")).await?;
+    cluster.reschedule(format!("{id}:[{worker_1}:1]")).await?;
     sleep(Duration::from_secs(3)).await;
     session.run(SELECT).await?.assert_result_eq("");
 

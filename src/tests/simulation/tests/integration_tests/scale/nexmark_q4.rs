@@ -170,11 +170,11 @@ async fn nexmark_q4_cascade() -> Result<()> {
     // 0~10s
     cluster
         .reschedule(format!(
-            "{}-[{}];{}-[{}]",
+            "{}:[{}];{}:[{}]",
             fragment_1.id(),
-            format_args!("{}:2", workers[0]),
+            format_args!("{}:-2", workers[0]),
             fragment_2.id(),
-            format_args!("{}:1,{}:1,{}:1", workers[0], workers[1], workers[2]),
+            format_args!("{}:-1,{}:-1,{}:-1", workers[0], workers[1], workers[2]),
         ))
         .await?;
 
@@ -184,12 +184,12 @@ async fn nexmark_q4_cascade() -> Result<()> {
     cluster.run(SELECT).await?.assert_result_ne(RESULT);
     cluster
         .reschedule(format!(
-            "{}-[{}]+[{}];{}-[{}]+[{}]",
+            "{}:[{},{}];{}:[{},{}]",
             id_1,
-            format_args!("{}:1,{}:1", workers[1], workers[2]),
+            format_args!("{}:-1,{}:-1", workers[1], workers[2]),
             format_args!("{}:2", workers[0]),
             id_2,
-            format_args!("{}:1", workers[1]),
+            format_args!("{}:-1", workers[1]),
             format_args!("{}:1,{}:1", workers[0], workers[2]),
         ))
         .await?;
@@ -219,9 +219,9 @@ async fn nexmark_q4_materialize_agg_cache_invalidation() -> Result<()> {
     // Let parallel unit 0 handle all groups.
     cluster
         .reschedule(format!(
-            "{}-[{}]",
+            "{}:[{}]",
             id,
-            format_args!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
+            format_args!("{}:-1,{}:-2,{}:-2", workers[0], workers[1], workers[2]),
         ))
         .await?;
     sleep(Duration::from_secs(7)).await;
@@ -230,7 +230,7 @@ async fn nexmark_q4_materialize_agg_cache_invalidation() -> Result<()> {
     // Scale out.
     cluster
         .reschedule(format!(
-            "{}+[{}]",
+            "{}:[{}]",
             id,
             format_args!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
         ))
@@ -247,9 +247,9 @@ async fn nexmark_q4_materialize_agg_cache_invalidation() -> Result<()> {
     // correctly, it will yield the wrong result.
     cluster
         .reschedule(format!(
-            "{}-[{}]",
+            "{}:[{}]",
             id,
-            format_args!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
+            format_args!("{}:-1,{}:-2,{}:-2", workers[0], workers[1], workers[2]),
         ))
         .await?;
     sleep(Duration::from_secs(20)).await;

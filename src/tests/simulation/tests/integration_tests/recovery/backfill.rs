@@ -88,9 +88,9 @@ async fn test_snapshot_mv() -> Result<()> {
     // prev cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
     cluster
         .reschedule(format!(
-            "{}-[{}]",
+            "{}:[{}]",
             id,
-            format_args!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
+            format_args!("{}:-1,{}:-2,{}:-2", workers[0], workers[1], workers[2]),
         ))
         .await?;
 
@@ -102,7 +102,7 @@ async fn test_snapshot_mv() -> Result<()> {
     // prev cluster.reschedule(format!("{id}+[1,2,3,4,5]")).await?;
     cluster
         .reschedule(format!(
-            "{}+[{}]",
+            "{}:[{}]",
             id,
             format_args!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
         ))
@@ -153,9 +153,9 @@ async fn test_backfill_mv() -> Result<()> {
     // prev cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
     cluster
         .reschedule(format!(
-            "{}-[{}]",
+            "{}:[{}]",
             id,
-            format_args!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
+            format_args!("{}:-1,{}:-2,{}:-2", workers[0], workers[1], workers[2]),
         ))
         .await?;
 
@@ -170,7 +170,7 @@ async fn test_backfill_mv() -> Result<()> {
     // prev cluster.reschedule(format!("{id}+[1,2,3,4,5]")).await?;
     cluster
         .reschedule(format!(
-            "{}+[{}]",
+            "{}:[{}]",
             id,
             format_args!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
         ))
@@ -224,9 +224,9 @@ async fn test_index_backfill() -> Result<()> {
     // prev cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
     cluster
         .reschedule(format!(
-            "{}-[{}]",
+            "{}:[{}]",
             id,
-            format_args!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
+            format_args!("{}:-1,{}:-2,{}:-2", workers[0], workers[1], workers[2]),
         ))
         .await?;
     sleep(Duration::from_secs(3)).await;
@@ -240,7 +240,7 @@ async fn test_index_backfill() -> Result<()> {
     // prev cluster.reschedule(format!("{id}+[1,2,3,4,5]")).await?;
     cluster
         .reschedule(format!(
-            "{}+[{}]",
+            "{}:[{}]",
             id,
             format_args!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
         ))

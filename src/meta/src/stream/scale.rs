@@ -107,8 +107,7 @@ impl TableRevision {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct WorkerReschedule {
-    pub increased_actor_count: BTreeMap<WorkerId, usize>,
-    pub decreased_actor_count: BTreeMap<WorkerId, usize>,
+    pub worker_actor_diff: BTreeMap<WorkerId, isize>,
 }
 
 pub struct CustomFragmentInfo {
@@ -486,8 +485,8 @@ impl ScaleController {
             .collect();
 
         for (fragment_id, reschedule) in &*reschedule {
-            for worker_id in reschedule.increased_actor_count.keys() {
-                if unschedulable_worker_ids.contains(worker_id) {
+            for (worker_id, change) in &reschedule.worker_actor_diff {
+                if unschedulable_worker_ids.contains(worker_id) && change.is_positive() {
                     bail!(
                         "unable to move fragment {} to unschedulable worker {}",
                         fragment_id,
@@ -633,14 +632,7 @@ impl ScaleController {
 
         let mut stream_source_fragment_ids = HashSet::new();
         let mut no_shuffle_reschedule = HashMap::new();
-        for (
-            fragment_id,
-            WorkerReschedule {
-                increased_actor_count,
-                decreased_actor_count,
-            },
-        ) in &*reschedule
-        {
+        for (fragment_id, WorkerReschedule { worker_actor_diff }) in &*reschedule {
             let fragment = fragment_map
                 .get(fragment_id)
                 .ok_or_else(|| anyhow!("fragment {fragment_id} does not exist"))?;
@@ -692,8 +684,7 @@ impl ScaleController {
                     no_shuffle_reschedule.insert(
                         downstream_id,
                         WorkerReschedule {
-                            increased_actor_count: increased_actor_count.clone(),
-                            decreased_actor_count: decreased_actor_count.clone(),
+                            worker_actor_diff: worker_actor_diff.clone(),
                         },
                     );
                 }
@@ -713,8 +704,8 @@ impl ScaleController {
                 .map(|a| actor_status.get(&a.actor_id).cloned().unwrap())
                 .collect::<HashSet<_>>();
 
-            for removed in decreased_actor_count.keys() {
-                if !current_worker_ids.contains(removed) {
+            for (removed, change) in worker_actor_diff {
+                if !current_worker_ids.contains(removed) && change.is_negative() {
                     bail!(
                         "no actor on the worker {} of fragment {}",
                         removed,
@@ -723,8 +714,19 @@ impl ScaleController {
                 }
             }
 
-            let added_actor_count: usize = increased_actor_count.values().cloned().sum();
-            let removed_actor_count: usize = decreased_actor_count.values().cloned().sum();
+            let added_actor_count: usize = worker_actor_diff
+                .values()
+                .filter(|change| change.is_positive())
+                .cloned()
+                .map(|change| change as usize)
+                .sum();
+
+            let removed_actor_count: usize = worker_actor_diff
+                .values()
+                .filter(|change| change.is_positive())
+                .cloned()
+                .map(|v| v.unsigned_abs())
+                .sum();
 
             match fragment.distribution_type() {
                 FragmentDistributionType::Hash => {
@@ -1490,14 +1492,7 @@ impl ScaleController {
         let mut fragment_actors_to_remove = HashMap::with_capacity(reschedule.len());
         let mut fragment_actors_to_create = HashMap::with_capacity(reschedule.len());
 
-        for (
-            fragment_id,
-            WorkerReschedule {
-                increased_actor_count,
-                decreased_actor_count,
-            },
-        ) in reschedule
-        {
+        for (fragment_id, WorkerReschedule { worker_actor_diff }) in reschedule {
             let fragment = ctx.fragment_map.get(fragment_id).unwrap();
 
             // Actor Id => Parallel Unit Id
@@ -1514,13 +1509,18 @@ impl ScaleController {
                     .push(actor.actor_id);
             }
 
+            let decreased_actor_count = worker_actor_diff
+                .iter()
+                .filter(|(_, change)| change.is_negative())
+                .map(|(worker_id, change)| (worker_id, change.unsigned_abs()));
+
             for (removed, n) in decreased_actor_count {
                 if let Some(actor_ids) = worker_to_actors.get(removed) {
-                    assert!(actor_ids.len() >= *n);
+                    assert!(actor_ids.len() >= n);
 
                     let removed_actors: Vec<_> = actor_ids
                         .iter()
-                        .skip(actor_ids.len().saturating_sub(*n))
+                        .skip(actor_ids.len().saturating_sub(n))
                         .cloned()
                         .collect();
 
@@ -1529,6 +1529,10 @@ impl ScaleController {
                     }
                 }
             }
+
+            let increased_actor_count = worker_actor_diff
+                .iter()
+                .filter(|(_, change)| change.is_positive());
 
             for (created_worker, n) in increased_actor_count {
                 for _ in 0..*n {
@@ -2019,18 +2023,15 @@ impl ScaleController {
                             })?;
 
                         assert_eq!(*should_be_one, 1);
+                        assert_ne!(*chosen_target_worker_id, *single_worker_id);
 
                         target_plan.insert(
                             fragment_id,
                             WorkerReschedule {
-                                increased_actor_count: BTreeMap::from_iter(vec![(
-                                    *chosen_target_worker_id,
-                                    1,
-                                )]),
-                                decreased_actor_count: BTreeMap::from_iter(vec![(
-                                    *single_worker_id,
-                                    1,
-                                )]),
+                                worker_actor_diff: BTreeMap::from_iter(vec![
+                                    (*chosen_target_worker_id, 1),
+                                    (*single_worker_id, -1),
+                                ]),
                             },
                         );
                     }
@@ -2061,9 +2062,7 @@ impl ScaleController {
             }
         }
 
-        target_plan.retain(|_, plan| {
-            !(plan.increased_actor_count.is_empty() && plan.decreased_actor_count.is_empty())
-        });
+        target_plan.retain(|_, plan| !plan.worker_actor_diff.is_empty());
 
         Ok(target_plan)
     }
@@ -2105,10 +2104,25 @@ impl ScaleController {
             }
         }
 
-        WorkerReschedule {
-            increased_actor_count,
-            decreased_actor_count,
+        let worker_ids: HashSet<_> = increased_actor_count
+            .keys()
+            .chain(decreased_actor_count.keys())
+            .cloned()
+            .collect();
+
+        let mut worker_actor_diff = BTreeMap::new();
+
+        for worker_id in worker_ids {
+            let increased = increased_actor_count.remove(&worker_id).unwrap_or(0) as isize;
+            let decreased = decreased_actor_count.remove(&worker_id).unwrap_or(0) as isize;
+            let change = increased - decreased;
+
+            assert_ne!(change, 0);
+
+            worker_actor_diff.insert(worker_id, change);
         }
+
+        WorkerReschedule { worker_actor_diff }
     }
 
     pub fn build_no_shuffle_relation_index(
