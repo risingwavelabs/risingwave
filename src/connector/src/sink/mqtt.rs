@@ -31,8 +31,8 @@ use with_options::WithOptions;
 
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
 use super::encoder::{
-    DateHandlingMode, JsonEncoder, ProtoEncoder, ProtoHeader, RowEncoder, SerTo, TimeHandlingMode,
-    TimestampHandlingMode, TimestamptzHandlingMode,
+    DateHandlingMode, EncodeJsonbMode, JsonEncoder, ProtoEncoder, ProtoHeader, RowEncoder, SerTo,
+    TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode,
 };
 use super::writer::AsyncTruncateSinkWriterExt;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
@@ -221,7 +221,7 @@ impl MqttSinkWriter {
         }
 
         let timestamptz_mode = TimestamptzHandlingMode::from_options(&format_desc.options)?;
-
+        let encode_jsonb_mode = EncodeJsonbMode::from_options(&format_desc.options)?;
         let encoder = match format_desc.format {
             SinkFormat::AppendOnly => match format_desc.encode {
                 SinkEncode::Json => RowEncoderWrapper::Json(JsonEncoder::new(
@@ -231,6 +231,7 @@ impl MqttSinkWriter {
                     TimestampHandlingMode::Milli,
                     timestamptz_mode,
                     TimeHandlingMode::Milli,
+                    encode_jsonb_mode,
                 )),
                 SinkEncode::Protobuf => {
                     let (descriptor, sid) = crate::schema::protobuf::fetch_descriptor(

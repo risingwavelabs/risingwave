@@ -34,7 +34,8 @@ use uuid::Uuid;
 use with_options::WithOptions;
 
 use super::encoder::{
-    JsonEncoder, RowEncoder, TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode,
+    EncodeJsonbMode, JsonEncoder, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
+    TimestamptzHandlingMode,
 };
 use super::writer::LogSinkerOf;
 use super::{SinkError, SinkParam};
@@ -193,6 +194,7 @@ impl SnowflakeSinkWriter {
                 TimestampHandlingMode::String,
                 TimestamptzHandlingMode::UtcString,
                 TimeHandlingMode::String,
+                EncodeJsonbMode::String,
             ),
             // initial value of `epoch` will be set to 0
             epoch: 0,
