@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 
 import subprocess
+import unittest
 import os
 import sys
 from common import *
 
 '''
+@kwannoel
 This script is used to find the commit that introduced a regression in the codebase.
 It uses binary search to find the regressed commit.
 It works as follows:
@@ -40,12 +42,8 @@ steps:
   - wait
   - label: 'check'
     command: |
-      if [ $(buildkite-agent step get "outcome" --step "run-{commit}") == "hard_failed" ]; then
-        START_COMMIT={env["START_COMMIT"]} END_COMMIT={env["END_COMMIT"]} BUILDKITE_BRANCH={env["BRANCH"]} BISECT_STEPS={env["BISECT_STEPS"]} ci/scripts/find-regression.py failed 
-      else
-        START_COMMIT={env["START_COMMIT"]} END_COMMIT={env["END_COMMIT"]} BUILDKITE_BRANCH={env["BRANCH"]} BISECT_STEPS={env["BISECT_STEPS"]} ci/scripts/find-regression.py passed 
-      fi
-YAML
+        START_COMMIT=$START_COMMIT END_COMMIT=$END_COMMIT BUILDKITE_BRANCH=$BUILDKITE_BRANCH BISECT_STEPS=$BISECT_STEPS ci/scripts/find-regression.py check
+        
         '''
     return step
 
@@ -79,33 +77,69 @@ def run(failing_test_key):
 
     print(f"Regression found at commit {test_commit}")
 
-def main():
+
+# Number of commits for [start, end]
+def get_number_of_commits(start, end):
+    cmd = f"git rev-list --count {start}..{end}"
+    result = subprocess.run([cmd], shell=True, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"stderr: {result.stderr}")
+        print(f"stdout: {result.stdout}")
+        sys.exit(1)
+    return int(result.stdout) + 1
+
+def get_env():
     env = {
         "START_COMMIT": os.environ['START_COMMIT'],
         "END_COMMIT": os.environ['END_COMMIT'],
         "BRANCH": os.environ['BUILDKITE_BRANCH'],
         "BISECT_STEPS": os.environ['BISECT_STEPS'],
-        "STATE": sys.argv[1],
     }
 
     print(f'''
-    START_COMMIT: {env["START_COMMIT"]}
-    END_COMMIT: {env["END_COMMIT"]}
-    BRANCH: {env["BRANCH"]}
-    BISECT_STEPS: {env["BISECT_STEPS"]}
-    STATE: {env["STATE"]}
-    ''')
+        START_COMMIT: {env["START_COMMIT"]}
+        END_COMMIT: {env["END_COMMIT"]}
+        BRANCH: {env["BRANCH"]}
+        BISECT_STEPS: {env["BISECT_STEPS"]}
+        ''')
 
-    if env["STATE"] == "start":
-        print("start")
+    return env
+
+
+def main():
+    cmd = sys.argv[1]
+
+    if cmd == "start":
+        env = get_env()
+        print("start bisecting")
         run_pipeline_on_commit(env, "kwannoel/find-regress", "f0fa34cdeed95a08b2c7d8428a17d6de27b6588d", "e2e-test")
-    elif env["STATE"] == "failed":
-        print("failed")
-    elif env["STATE"] == "passed":
-        print("passed")
+    elif cmd == "check":
+        env = get_env()
+        print("check pipeline outcome")
+        number_of_commits = get_number_of_commits(env["START_COMMIT"], env["END_COMMIT"])
+        commit_offset = number_of_commits // 2
+
+        step = f"run-{commit}"
+        outcome = subprocess.run(["buildkite-agent", "step", "get", "outcome", "--step", step], shell=True)
+#         if [ $(buildkite-agent step get "outcome" --step "run-{commit}") == "hard_failed" ]; then
+#     START_COMMIT={env["START_COMMIT"]} END_COMMIT={env["END_COMMIT"]} BUILDKITE_BRANCH={env["BRANCH"]} BISECT_STEPS={env["BISECT_STEPS"]} ci/scripts/find-regression.py failed
+#     else
+#     START_COMMIT={env["START_COMMIT"]} END_COMMIT={env["END_COMMIT"]} BUILDKITE_BRANCH={env["BRANCH"]} BISECT_STEPS={env["BISECT_STEPS"]} ci/scripts/find-regression.py passed
+# fi
     else:
-        print("Invalid type")
+        print("Invalid state")
         sys.exit(1)
 
 
-main()
+class Test(unittest.TestCase):
+    def test_get_number_of_commits(self):
+        n = get_number_of_commits("72f70960226680e841a8fbdd09c79d74609f27a2", "9ca415a9998a5e04e021c899fb66d93a17931d4f")
+        self.assertEqual(n, 3)
+
+    def test_get_bisect_commit
+
+if __name__ == "__main__":
+    if len(sys.argv) == 1:
+        unittest.main()
+    else:
+        main()
