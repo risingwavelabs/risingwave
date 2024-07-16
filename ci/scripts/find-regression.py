@@ -35,6 +35,7 @@ steps:
   - label: "run-{commit}"
     key: "run-{commit}"
     trigger: "main-cron"
+    soft_fail: true
     build:
       branch: {env["BISECT_BRANCH"]}
       commit: {commit}
@@ -156,7 +157,7 @@ def main():
             sys.exit(1)
 
         outcome = outcome.stdout.strip()
-        if outcome == "hard_failed":
+        if outcome == "soft_failed":
             print(f"commit {commit} failed")
             env["END_COMMIT"] = commit
         elif outcome == "passed":
