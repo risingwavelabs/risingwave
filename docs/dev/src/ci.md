@@ -29,6 +29,7 @@ To run `e2e-test` and `e2e-source-test` for `main-cron` in your pull request:
    - `BISECT_BRANCH`: The branch name where the bisect will be performed.
    - `BISECT_STEPS`: The `CI_STEPS` to run during the bisect. Separate multiple steps with a comma.
                      You can check the labels for this in `main-cron.yml`.
+   - `CI_STEPS`: Just put `disable-build` here, this is used to skip other steps we are not interested in.
 
 Example you can try on [buildkite](https://buildkite.com/risingwavelabs/main-cron/builds/#new):
 - Branch: `kwannoel/find-regress`
@@ -38,4 +39,5 @@ Example you can try on [buildkite](https://buildkite.com/risingwavelabs/main-cro
   END_COMMIT=7f36bf17c1d19a1e6b2cdb90491d3c08ae8b0004
   BISECT_BRANCH=kwannoel/test-bisect
   BISECT_STEPS="test-bisect,disable-build"
+  CI_STEPS="disable-build"
   ```
