@@ -29,7 +29,7 @@ use picker::{LevelCompactionPicker, TierCompactionPicker};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactTask, CompactionConfig};
+use risingwave_pb::hummock::{CompactTask, CompactionConfig, LevelType};
 pub use selector::CompactionSelector;
 
 use self::selector::{EmergencySelector, LocalSelectorStatistic};
@@ -140,7 +140,9 @@ impl CompactStatus {
             return false;
         }
 
-        if task.input_ssts.len() != 2 {
+        if task.input_ssts.len() != 2
+            || task.input_ssts[0].level_type() != LevelType::Nonoverlapping
+        {
             return false;
         }
 
