@@ -20,7 +20,7 @@ It works as follows:
 4. If the pipeline passes, the regression is in the second half of the commits. Recurse (mid+1, end)
 5. If start>=end, return start as the regressed commit.
 
-We won't run the entire pipeline, only steps specified by the BISECT_STEPS environment variable.
+We won't run the entire pipeline, only steps specified by the CI_STEPS environment variable.
 
 For step (2), we need to check its outcome and only run the next step, if the outcome is successful.
 '''
@@ -39,11 +39,11 @@ steps:
       branch: {env["BISECT_BRANCH"]}
       commit: {commit}
       env:
-        CI_STEPS: {env['BISECT_STEPS']}
+        CI_STEPS: {env['CI_STEPS']}
   - wait
   - label: 'check'
     command: |
-        GOOD_COMMIT={env['GOOD_COMMIT']} BAD_COMMIT={env['BAD_COMMIT']} BISECT_BRANCH={env['BISECT_BRANCH']} BISECT_STEPS=\'{env['BISECT_STEPS']}\' ci/scripts/find-regression.py check
+        GOOD_COMMIT={env['GOOD_COMMIT']} BAD_COMMIT={env['BAD_COMMIT']} BISECT_BRANCH={env['BISECT_BRANCH']} CI_STEPS=\'{env['CI_STEPS']}\' ci/scripts/find-regression.py check
 YAML'''
     return step
 
@@ -117,14 +117,14 @@ def get_env():
         "GOOD_COMMIT": os.environ['GOOD_COMMIT'],
         "BAD_COMMIT": os.environ['BAD_COMMIT'],
         "BISECT_BRANCH": os.environ['BISECT_BRANCH'],
-        "BISECT_STEPS": os.environ['BISECT_STEPS'],
+        "CI_STEPS": os.environ['CI_STEPS'],
     }
 
     print(f'''
 GOOD_COMMIT={env["GOOD_COMMIT"]}
 BAD_COMMIT={env["BAD_COMMIT"]}
 BISECT_BRANCH={env["BISECT_BRANCH"]}
-BISECT_STEPS={env["BISECT_STEPS"]}
+CI_STEPS={env["CI_STEPS"]}
         ''')
 
     return env
@@ -229,7 +229,7 @@ class Test(unittest.TestCase):
             "GOOD_COMMIT": "72f70960226680e841a8fbdd09c79d74609f27a2",
             "BAD_COMMIT": "9ca415a9998a5e04e021c899fb66d93a17931d4f",
             "BISECT_BRANCH": "kwannoel/find-regress",
-            "BISECT_STEPS": "test"
+            "CI_STEPS": "test"
         }
         step = format_step(env)
         self.assertEqual(
@@ -249,7 +249,7 @@ steps:
   - wait
   - label: 'check'
     command: |
-        GOOD_COMMIT=72f70960226680e841a8fbdd09c79d74609f27a2 BAD_COMMIT=9ca415a9998a5e04e021c899fb66d93a17931d4f BISECT_BRANCH=kwannoel/find-regress BISECT_STEPS='test' ci/scripts/find-regression.py check
+        GOOD_COMMIT=72f70960226680e841a8fbdd09c79d74609f27a2 BAD_COMMIT=9ca415a9998a5e04e021c899fb66d93a17931d4f BISECT_BRANCH=kwannoel/find-regress CI_STEPS='test' ci/scripts/find-regression.py check
 YAML'''
         )
 

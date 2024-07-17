@@ -7,6 +7,6 @@ auto-retry: &auto-retry
 steps:
   - label: "find regressed step"
     key: "find-regressed-step"
-    command: "GOOD_COMMIT=$GOOD_COMMIT BAD_COMMIT=$BAD_COMMIT BISECT_BRANCH=$BISECT_BRANCH BISECT_STEPS=$BISECT_STEPS ci/scripts/find-regression.py start"
+    command: "GOOD_COMMIT=$GOOD_COMMIT BAD_COMMIT=$BAD_COMMIT BISECT_BRANCH=$BISECT_BRANCH CI_STEPS=$CI_STEPS ci/scripts/find-regression.py start"
     if: build.env("BISECT_STEPS") != null
     retry: *auto-retry
