@@ -17,7 +17,6 @@ use async_trait::async_trait;
 use aws_sdk_kinesis::types::Shard;
 use aws_sdk_kinesis::Client as kinesis_client;
 use risingwave_common::bail;
-use thiserror_ext::AsReport;
 
 use crate::error::ConnectorResult as Result;
 use crate::source::kinesis::split::KinesisOffset;
