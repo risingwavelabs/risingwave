@@ -1,0 +1,12 @@
+auto-retry: &auto-retry
+  automatic:
+    # Agent terminated because the AWS EC2 spot instance killed by AWS.
+    - signal_reason: agent_stop
+      limit: 3
+
+steps:
+  - label: "find regressed step"
+    key: "find-regressed-step"
+    command: "START_COMMIT=$START_COMMIT END_COMMIT=$END_COMMIT BISECT_BRANCH=$BISECT_BRANCH BISECT_STEPS=$BISECT_STEPS ci/scripts/find-regression.py start"
+    if: build.env("BISECT_STEPS") != null
+    retry: *auto-retry

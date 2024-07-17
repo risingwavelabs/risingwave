@@ -1060,19 +1060,6 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "find regressed step"
-    key: "find-regressed-step"
-    command: "START_COMMIT=$START_COMMIT END_COMMIT=$END_COMMIT BISECT_BRANCH=$BISECT_BRANCH BISECT_STEPS=$BISECT_STEPS ci/scripts/find-regression.py start"
-    if: build.env("BISECT_STEPS") != null
-    plugins:
-      - docker-compose#v5.1.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
-    retry: *auto-retry
-
   # Notification test.
   - key: "test-notify"
     if: build.pull_request.labels includes "ci/main-cron/test-notify" || build.env("CI_STEPS") =~ /(^|,)test_notify(,|$$)/
