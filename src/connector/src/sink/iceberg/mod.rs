@@ -122,8 +122,8 @@ pub struct IcebergConfig {
     #[serde(rename = "s3.secret.key")]
     pub secret_key: String,
 
-    #[serde(rename = "s3.path_style_access", default, deserialize_with = "deserialize_bool_from_string")]
-    pub s3_path_style_access: bool,
+    #[serde(rename = "s3.path.style.access", default, deserialize_with = "deserialize_bool_from_string")]
+    pub path_style_access: bool,
 
     #[serde(
         rename = "primary_key",
@@ -274,7 +274,7 @@ impl IcebergConfig {
         );
         iceberg_configs.insert(
             "iceberg.table.io.s3.path-style-access".to_string(),
-            self.s3_path_style_access.to_string(),
+            self.path_style_access.to_string(),
         );
 
         let (bucket, root) = {
@@ -351,7 +351,7 @@ impl IcebergConfig {
             );
             iceberg_configs.insert(
                 "iceberg.table.io.s3.path-style-access".to_string(),
-                self.s3_path_style_access.to_string(),
+                self.path_style_access.to_string(),
             );
 
             // iceberg-rust
@@ -365,7 +365,7 @@ impl IcebergConfig {
             );
             iceberg_configs.insert(
                 ("iceberg.table.io.".to_string() + "s3.path-style-access").to_string(),
-                self.s3_path_style_access.to_string(),
+                self.path_style_access.to_string(),
             );
 
             let (bucket, _) = {
@@ -425,7 +425,7 @@ impl IcebergConfig {
             );
             java_catalog_configs.insert(
                 "s3.path-style-access".to_string(),
-                self.s3_path_style_access.to_string(),
+                self.path_style_access.to_string(),
             );
             if matches!(self.catalog_type.as_deref(), Some("glue")) {
                 java_catalog_configs.insert(
@@ -527,7 +527,7 @@ impl IcebergConfig {
                     .secret_key(self.secret_key.clone())
                     .region(self.region.clone())
                     .endpoint(self.endpoint.clone())
-                    .path_style_access(self.s3_path_style_access.clone())
+                    .path_style_access(self.path_style_access.clone())
                     .build();
                 let catalog = storage_catalog::StorageCatalog::new(config)?;
                 Ok(Arc::new(catalog))
@@ -1278,7 +1278,7 @@ mod test {
             endpoint: Some("http://127.0.0.1:9301".to_string()),
             access_key: "hummockadmin".to_string(),
             secret_key: "hummockadmin".to_string(),
-            s3_path_style_access: false,
+            path_style_access: false,
             primary_key: Some(vec!["v1".to_string()]),
             java_catalog_props: [("jdbc.user", "admin"), ("jdbc.password", "123456")]
                 .into_iter()
