@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use risingwave_common::config::default::compaction_config;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
 
@@ -144,7 +145,10 @@ impl IntraCompactionPicker {
                 self.config.level0_max_compact_file_number,
                 overlap_strategy.clone(),
                 self.developer_config.enable_check_task_level_overlap,
-                self.config.max_l0_compact_level_count as usize,
+                self.config
+                    .max_l0_compact_level_count
+                    .unwrap_or(compaction_config::max_l0_compact_level_count())
+                    as usize,
             );
 
             let l0_select_tables_vec = non_overlap_sub_level_picker
