@@ -67,12 +67,16 @@ impl FragmentManagerCore {
             }
 
             for fragment in table_fragments.fragments() {
+                let worker_slot_mapping = FragmentManager::convert_mapping(
+                    &table_fragments.actor_status,
+                    fragment.vnode_mapping.as_ref().unwrap(),
+                )
+                .inspect_err(|e| tracing::warn!("build mapping failed: {:?}, downgrade to None", e))
+                .ok();
+
                 let mapping = FragmentWorkerSlotMapping {
                     fragment_id: fragment.fragment_id,
-                    mapping: Some(FragmentManager::convert_mapping(
-                        &table_fragments.actor_status,
-                        fragment.vnode_mapping.as_ref().unwrap(),
-                    )?),
+                    mapping: worker_slot_mapping,
                 };
 
                 mappings.push(mapping);
