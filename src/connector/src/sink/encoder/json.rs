@@ -468,7 +468,7 @@ mod tests {
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
             custom_json_type: CustomJsonType::None,
-            encode_jsonb_mode: EncodeJsonbMode::Custom,
+            encode_jsonb_mode: EncodeJsonbMode::String,
         };
 
         let boolean_value = datum_to_json_object(
@@ -540,7 +540,7 @@ mod tests {
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
             custom_json_type: CustomJsonType::None,
-            encode_jsonb_mode: EncodeJsonbMode::Custom,
+            encode_jsonb_mode: EncodeJsonbMode::String,
         };
 
         let tstz_inner = "2018-01-26T18:30:09.453Z".parse().unwrap();
@@ -561,7 +561,7 @@ mod tests {
             timestamp_handling_mode: TimestampHandlingMode::Milli,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
             custom_json_type: CustomJsonType::None,
-            encode_jsonb_mode: EncodeJsonbMode::Custom,
+            encode_jsonb_mode: EncodeJsonbMode::String,
         };
         let ts_value = datum_to_json_object(
             &Field {
@@ -659,7 +659,7 @@ mod tests {
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
             custom_json_type: CustomJsonType::None,
-            encode_jsonb_mode: EncodeJsonbMode::Custom,
+            encode_jsonb_mode: EncodeJsonbMode::String,
         };
         let date_value = datum_to_json_object(
             &Field {
