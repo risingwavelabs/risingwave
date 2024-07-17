@@ -63,7 +63,6 @@ use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
     MetadataManager, SystemParamsManagerImpl, WorkerId,
 };
-use crate::model::{ActorId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::stream::{ScaleControllerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -88,12 +87,6 @@ pub(crate) struct TableMap<T> {
     inner: HashMap<TableId, T>,
 }
 
-impl<T> TableMap<T> {
-    pub fn remove(&mut self, table_id: &TableId) -> Option<T> {
-        self.inner.remove(table_id)
-    }
-}
-
 impl<T> From<HashMap<TableId, T>> for TableMap<T> {
     fn from(inner: HashMap<TableId, T>) -> Self {
         Self { inner }
@@ -105,12 +98,6 @@ impl<T> From<TableMap<T>> for HashMap<TableId, T> {
         table_map.inner
     }
 }
-
-pub(crate) type TableActorMap = TableMap<HashSet<ActorId>>;
-pub(crate) type TableUpstreamMvCountMap = TableMap<HashMap<TableId, usize>>;
-pub(crate) type TableDefinitionMap = TableMap<String>;
-pub(crate) type TableNotifierMap = TableMap<Notifier>;
-pub(crate) type TableFragmentMap = TableMap<TableFragments>;
 
 /// The reason why the cluster is recovering.
 enum RecoveryReason {
@@ -802,7 +789,12 @@ impl GlobalBarrierManager {
     }
 
     async fn failure_recovery(&mut self, err: MetaError) {
-        self.context.tracker.lock().await.abort_all(&err);
+        self.context
+            .tracker
+            .lock()
+            .await
+            .abort_all(&err, &self.context)
+            .await;
         self.checkpoint_control.clear_on_err(&err).await;
         self.pending_non_checkpoint_barriers.clear();
 
@@ -830,27 +822,28 @@ impl GlobalBarrierManager {
 
     async fn adhoc_recovery(&mut self) {
         let err = MetaErrorInner::AdhocRecovery.into();
-        self.context.tracker.lock().await.abort_all(&err);
+        self.context
+            .tracker
+            .lock()
+            .await
+            .abort_all(&err, &self.context)
+            .await;
         self.checkpoint_control.clear_on_err(&err).await;
 
-        if self.enable_recovery {
-            self.context
-                .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Adhoc));
-            let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
-            let span = tracing::info_span!(
-                "adhoc_recovery",
-                error = %err.as_report(),
-                prev_epoch = prev_epoch.value().0
-            );
+        self.context
+            .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Adhoc));
+        let latest_snapshot = self.context.hummock_manager.latest_snapshot();
+        let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
+        let span = tracing::info_span!(
+            "adhoc_recovery",
+            error = %err.as_report(),
+            prev_epoch = prev_epoch.value().0
+        );
 
-            // No need to clean dirty tables for barrier recovery,
-            // The foreground stream job should cleanup their own tables.
-            self.recovery(None).instrument(span).await;
-            self.context.set_status(BarrierManagerStatus::Running);
-        } else {
-            panic!("failed to execute barrier: {}", err.as_report());
-        }
+        // No need to clean dirty tables for barrier recovery,
+        // The foreground stream job should cleanup their own tables.
+        self.recovery(None).instrument(span).await;
+        self.context.set_status(BarrierManagerStatus::Running);
     }
 }
 
@@ -859,7 +852,7 @@ impl GlobalBarrierManagerContext {
     async fn complete_barrier(self, node: EpochNode) -> MetaResult<BarrierCompleteOutput> {
         let EpochNode {
             command_ctx,
-            mut notifiers,
+            notifiers,
             enqueue_time,
             state,
             ..
@@ -877,11 +870,11 @@ impl GlobalBarrierManagerContext {
             }
             return Err(e);
         };
-        notifiers.iter_mut().for_each(|notifier| {
+        notifiers.into_iter().for_each(|notifier| {
             notifier.notify_collected();
         });
         let has_remaining = self
-            .update_tracking_jobs(notifiers, command_ctx.clone(), create_mview_progress)
+            .update_tracking_jobs(command_ctx.clone(), create_mview_progress)
             .await?;
         let duration_sec = enqueue_time.stop_and_record();
         self.report_complete_event(duration_sec, &command_ctx);
@@ -943,7 +936,6 @@ impl GlobalBarrierManagerContext {
 
     async fn update_tracking_jobs(
         &self,
-        notifiers: Vec<Notifier>,
         command_ctx: Arc<CommandContext>,
         create_mview_progress: Vec<CreateMviewProgress>,
     ) -> MetaResult<bool> {
@@ -960,7 +952,6 @@ impl GlobalBarrierManagerContext {
                     if let Some(command) = tracker.add(
                         TrackingCommand {
                             context: command_ctx.clone(),
-                            notifiers,
                         },
                         &version_stats,
                     ) {

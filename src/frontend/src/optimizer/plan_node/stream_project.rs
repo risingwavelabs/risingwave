@@ -81,24 +81,26 @@ impl StreamProject {
 
         let mut watermark_derivations = vec![];
         let mut nondecreasing_exprs = vec![];
-        let mut watermark_columns = FixedBitSet::with_capacity(core.exprs.len());
+        let mut out_watermark_columns = FixedBitSet::with_capacity(core.exprs.len());
         for (expr_idx, expr) in core.exprs.iter().enumerate() {
             use monotonicity_variants::*;
             match analyze_monotonicity(expr) {
-                FollowingInput(input_idx) => {
-                    if input.watermark_columns().contains(input_idx) {
-                        watermark_derivations.push((input_idx, expr_idx));
-                        watermark_columns.insert(expr_idx);
-                    }
-                }
-                Inherent(NonDecreasing) => {
-                    nondecreasing_exprs.push(expr_idx);
-                    watermark_columns.insert(expr_idx);
-                }
                 Inherent(Constant) => {
                     // XXX(rc): we can produce one watermark on each recovery for this case.
                 }
-                Inherent(_) | _FollowingInputInversely(_) => {}
+                Inherent(monotonicity) => {
+                    if monotonicity.is_non_decreasing() {
+                        nondecreasing_exprs.push(expr_idx); // to produce watermarks
+                        out_watermark_columns.insert(expr_idx);
+                    }
+                }
+                FollowingInput(input_idx) => {
+                    if input.watermark_columns().contains(input_idx) {
+                        watermark_derivations.push((input_idx, expr_idx)); // to propagate watermarks
+                        out_watermark_columns.insert(expr_idx);
+                    }
+                }
+                _FollowingInputInversely(_) => {}
             }
         }
         // Project executor won't change the append-only behavior of the stream, so it depends on
@@ -108,7 +110,7 @@ impl StreamProject {
             distribution,
             input.append_only(),
             input.emit_on_window_close(),
-            watermark_columns,
+            out_watermark_columns,
         );
 
         StreamProject {

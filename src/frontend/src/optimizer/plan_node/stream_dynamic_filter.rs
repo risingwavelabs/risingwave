@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -23,7 +24,7 @@ use super::utils::{
     childless_record, column_names_pretty, plan_node_name, watermark_pretty, Distill,
 };
 use super::{generic, ExprRewritable, PlanTreeNodeUnary};
-use crate::expr::{Expr, ExprImpl};
+use crate::expr::Expr;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
 use crate::optimizer::property::Distribution;
@@ -40,8 +41,6 @@ pub struct StreamDynamicFilter {
 
 impl StreamDynamicFilter {
     pub fn new(core: DynamicFilter<PlanRef>) -> Self {
-        let watermark_columns = core.watermark_columns(core.right().watermark_columns()[0]);
-
         // TODO(st1page): here we just check if RHS
         // is a `StreamNow`. It will be generalized to more cases
         // by introducing monotonically increasing property of the node in https://github.com/risingwavelabs/risingwave/pull/13984.
@@ -66,17 +65,18 @@ impl StreamDynamicFilter {
                 ExprType::LessThan | ExprType::LessThanOrEqual
             );
 
-        let append_only = if condition_always_relax {
+        let out_append_only = if condition_always_relax {
             core.left().append_only()
         } else {
             false
         };
+
         let base = PlanBase::new_stream_with_core(
             &core,
             core.left().distribution().clone(),
-            append_only,
+            out_append_only,
             false, // TODO(rc): decide EOWC property
-            watermark_columns,
+            Self::derive_watermark_columns(&core),
         );
         let cleaned_by_watermark = Self::cleaned_by_watermark(&core);
         Self {
@@ -87,20 +87,34 @@ impl StreamDynamicFilter {
         }
     }
 
-    pub fn left_index(&self) -> usize {
-        self.core.left_index()
+    fn derive_watermark_columns(core: &DynamicFilter<PlanRef>) -> FixedBitSet {
+        let mut res = FixedBitSet::with_capacity(core.left().schema().len());
+        let rhs_watermark_columns = core.right().watermark_columns();
+        if rhs_watermark_columns.contains(0) {
+            match core.comparator() {
+                // We can derive output watermark only if the output is supposed to be always >= rhs.
+                // While we have to keep in mind that, the propagation of watermark messages from
+                // the right input must be delayed until `Update`/`Delete`s are sent to downstream,
+                // otherwise, we will have watermark messages sent before the `Delete` of old rows.
+                ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
+                    res.set(core.left_index(), true)
+                }
+                _ => {}
+            }
+        }
+        res
     }
 
-    /// 1. Check the comparator.
-    /// 2. RHS input should only have 1 columns, which is the watermark column.
-    ///    We check that the watermark should be set.
-    pub fn cleaned_by_watermark(core: &DynamicFilter<PlanRef>) -> bool {
-        let expr = core.predicate();
-        if let Some(ExprImpl::FunctionCall(function_call)) = expr.as_expr_unless_true() {
-            match function_call.func_type() {
+    fn cleaned_by_watermark(core: &DynamicFilter<PlanRef>) -> bool {
+        let rhs_watermark_columns = core.right().watermark_columns();
+        if rhs_watermark_columns.contains(0) {
+            match core.comparator() {
                 ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
-                    let rhs_input = core.right();
-                    rhs_input.watermark_columns().contains(0)
+                    // For >= and >, watermark on rhs means there's no change that rows older than the watermark will
+                    // ever be `Insert`ed again. So, we can clean up the state table. In this case, future lhs inputs
+                    // that are less than the watermark can be safely ignored, and hence watermark can be propagated to
+                    // downstream. See `derive_watermark_columns`.
+                    true
                 }
                 _ => false,
             }
