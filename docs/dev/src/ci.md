@@ -28,7 +28,8 @@ To run `e2e-test` and `e2e-source-test` for `main-cron` in your pull request:
    - `BAD_COMMIT`: The bad commit hash.
    - `BISECT_BRANCH`: The branch name where the bisect will be performed.
    - `CI_STEPS`: The `CI_STEPS` to run during the bisect. Separate multiple steps with a comma.
-     - You can check the labels for this in `main-cron.yml`, under the conditions for each step.
+     - You can check the labels for this in [main-cron.yml](https://github.com/risingwavelabs/risingwave/blob/main/ci/workflows/main-cron.yml),
+       under the conditions for each step.
 
 Example you can try on [buildkite](https://buildkite.com/risingwavelabs/main-cron-bisect/builds/#new):
 - Branch: `kwannoel/find-regress`
