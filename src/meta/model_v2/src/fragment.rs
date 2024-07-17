@@ -31,7 +31,7 @@ pub struct Model {
     pub upstream_fragment_id: I32Array,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum DistributionType {
     #[sea_orm(string_value = "SINGLE")]

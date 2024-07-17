@@ -16,7 +16,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
 use itertools::Itertools;
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_common::{bail, current_cluster_version};
@@ -65,7 +64,8 @@ use crate::controller::catalog::CatalogController;
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
     build_relation_group, check_relation_name_duplicate, check_sink_into_table_cycle,
-    ensure_object_id, ensure_user_id, get_fragment_actor_ids, get_fragment_mappings, PartialObject,
+    ensure_object_id, ensure_user_id, get_fragment_actor_ids, get_fragment_mappings,
+    rebuild_fragment_mapping_from_actors, PartialObject,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, SinkId, StreamingJob};
@@ -1386,7 +1386,7 @@ impl CatalogController {
 
         let txn = inner.db.begin().await?;
 
-        let fragment_mapping_to_notify = vec![];
+        let mut fragment_mapping_to_notify = vec![];
 
         // for assert only
         let mut assert_dispatcher_update_checker = HashSet::new();
@@ -1533,15 +1533,24 @@ impl CatalogController {
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
 
-            let fragment_actors = fragment.find_related(Actor).all(&txn).await?;
+            let job_actors = fragment
+                .find_related(Actor)
+                .all(&txn)
+                .await?
+                .into_iter()
+                .map(|actor| {
+                    (
+                        fragment_id,
+                        fragment.distribution_type,
+                        actor.actor_id,
+                        actor.vnode_bitmap,
+                        actor.worker_id,
+                        actor.status,
+                    )
+                })
+                .collect_vec();
 
-            let mut actor_to_vnode_bitmap = HashMap::with_capacity(fragment_actors.len());
-            for actor in &fragment_actors {
-                if let Some(vnode_bitmap) = &actor.vnode_bitmap {
-                    let bitmap = Bitmap::from(&vnode_bitmap.to_protobuf());
-                    actor_to_vnode_bitmap.insert(actor.actor_id as u32, bitmap);
-                }
-            }
+            fragment_mapping_to_notify.extend(rebuild_fragment_mapping_from_actors(job_actors));
 
             // for downstream and upstream
             let removed_actor_ids: HashSet<_> = removed_actors
