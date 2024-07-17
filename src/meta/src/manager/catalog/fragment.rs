@@ -58,27 +58,28 @@ pub struct FragmentManagerCore {
 
 impl FragmentManagerCore {
     /// List all fragment vnode mapping info that not in `State::Initial`.
-    pub fn all_running_fragment_mappings(
-        &self,
-    ) -> impl Iterator<Item = FragmentWorkerSlotMapping> + '_ {
-        self.table_fragments
-            .values()
-            .filter(|tf| tf.state() != State::Initial)
-            .flat_map(|table_fragments| {
-                table_fragments
-                    .fragments
-                    .values()
-                    .map(move |fragment| FragmentWorkerSlotMapping {
-                        fragment_id: fragment.fragment_id,
-                        mapping: Some(
-                            FragmentManager::convert_mapping(
-                                &table_fragments.actor_status,
-                                fragment.vnode_mapping.as_ref().unwrap(),
-                            )
-                            .unwrap(),
-                        ),
-                    })
-            })
+    pub fn all_running_fragment_mappings(&self) -> MetaResult<Vec<FragmentWorkerSlotMapping>> {
+        let mut mappings = vec![];
+
+        for table_fragments in self.table_fragments.values() {
+            if table_fragments.state() == State::Initial {
+                continue;
+            }
+
+            for fragment in table_fragments.fragments() {
+                let mapping = FragmentWorkerSlotMapping {
+                    fragment_id: fragment.fragment_id,
+                    mapping: Some(FragmentManager::convert_mapping(
+                        &table_fragments.actor_status,
+                        fragment.vnode_mapping.as_ref().unwrap(),
+                    )?),
+                };
+
+                mappings.push(mapping);
+            }
+        }
+
+        Ok(mappings)
     }
 
     fn running_fragment_parallelisms(

@@ -197,8 +197,7 @@ impl NotificationServiceImpl {
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 let fragment_guard = mgr.fragment_manager.get_fragment_read_guard().await;
-                let worker_slot_mappings =
-                    fragment_guard.all_running_fragment_mappings().collect_vec();
+                let worker_slot_mappings = fragment_guard.all_running_fragment_mappings()?;
                 let notification_version = self.env.notification_manager().current_version().await;
                 Ok((worker_slot_mappings, notification_version))
             }
