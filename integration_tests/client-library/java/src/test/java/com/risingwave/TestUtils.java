@@ -7,7 +7,7 @@ import java.util.Properties;
 
 public class TestUtils {
     public static Connection establishConnection() throws SQLException {
-        final String url = "jdbc:postgresql://risingwave-standalone:4566/dev";
+        final String url = "jdbc:postgresql://localhost:4566/dev?preferQueryMode=simple";
         final String user = "root";
         final String password = "";
 
