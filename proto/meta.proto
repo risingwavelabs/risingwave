@@ -451,7 +451,7 @@ message SubscribeResponse {
   common.Status status = 1;
   Operation operation = 2;
   
-  // catalog version
+  // Catalog version
   uint64 version = 3;
   
   oneof info {
