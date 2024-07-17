@@ -51,6 +51,7 @@ use risingwave_common::config::{
     load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
 };
 use risingwave_common::memory::MemoryContext;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::session_config::{ConfigReporter, SessionConfig, VisibilityMode};
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
@@ -85,6 +86,7 @@ use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
+use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::{
     check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId,
@@ -316,6 +318,12 @@ impl FrontendEnv {
 
         let system_params_manager =
             Arc::new(LocalSystemParamsManager::new(system_params_reader.clone()));
+
+        LocalSecretManager::init(
+            opts.temp_secret_file_dir,
+            meta_client.cluster_id().to_string(),
+            worker_id,
+        );
 
         // This `session_params` should be initialized during the initial notification in `observer_manager`
         let session_params = Arc::new(RwLock::new(SessionConfig::default()));
@@ -990,6 +998,30 @@ impl SessionImpl {
                 )
             })?;
         Ok(table.clone())
+    }
+
+    pub fn get_secret_by_name(
+        &self,
+        schema_name: Option<String>,
+        secret_name: &str,
+    ) -> Result<Arc<SecretCatalog>> {
+        let db_name = self.database();
+        let search_path = self.config().search_path();
+        let user_name = &self.auth_context().user_name;
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let schema = match schema_name {
+            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
+            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
+        };
+        let schema = catalog_reader.get_schema_by_name(db_name, schema.name().as_str())?;
+        let secret = schema.get_secret_by_name(secret_name).ok_or_else(|| {
+            RwError::from(ErrorCode::ItemNotFound(format!(
+                "secret {} not found",
+                secret_name
+            )))
+        })?;
+        Ok(secret.clone())
     }
 
     pub async fn list_change_log_epochs(

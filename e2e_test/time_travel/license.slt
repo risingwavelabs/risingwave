@@ -1,0 +1,37 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET QUERY_MODE TO local;
+
+statement ok
+ALTER SYSTEM SET license_key TO '';
+
+statement ok
+CREATE TABLE t (k INT);
+
+query error
+SELECT *  FROM t FOR SYSTEM_TIME AS OF now();
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Scheduler error
+  2: feature TimeTravel is only available for tier Paid and above, while the current tier is Free
+
+Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
+
+
+
+statement ok
+ALTER SYSTEM SET license_key TO DEFAULT;
+
+query I
+SELECT * FROM t FOR SYSTEM_TIME  AS OF now();
+----
+
+statement ok
+DROP TABLE t;
+
+statement ok
+SET QUERY_MODE TO auto;

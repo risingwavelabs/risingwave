@@ -24,6 +24,7 @@ use futures::future::try_join_all;
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{pin_mut, FutureExt, StreamExt};
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
@@ -247,6 +248,7 @@ impl ControlStreamManager {
     pub(super) fn inject_barrier(
         &mut self,
         command_context: Arc<CommandContext>,
+        table_ids_to_sync: HashSet<TableId>,
     ) -> MetaResult<HashSet<WorkerId>> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
             "inject_barrier_err"
@@ -263,9 +265,13 @@ impl ControlStreamManager {
                 if actor_ids_to_collect.is_empty() {
                     // No need to send or collect barrier for this node.
                     assert!(actor_ids_to_send.is_empty());
-                    Ok(())
-                } else {
+                }
+                {
                     let Some(node) = self.nodes.get_mut(node_id) else {
+                        if actor_ids_to_collect.is_empty() {
+                            // Worker node get disconnected but has no actor to collect. Simply skip it.
+                            return Ok(());
+                        }
                         return Err(
                             anyhow!("unconnected worker node: {:?}", worker_node.host).into()
                         );
@@ -294,9 +300,7 @@ impl ControlStreamManager {
                                         barrier: Some(barrier),
                                         actor_ids_to_send,
                                         actor_ids_to_collect,
-                                        table_ids_to_sync: command_context
-                                            .info
-                                            .existing_table_ids()
+                                        table_ids_to_sync: table_ids_to_sync
                                             .iter()
                                             .map(|table_id| table_id.table_id)
                                             .collect(),

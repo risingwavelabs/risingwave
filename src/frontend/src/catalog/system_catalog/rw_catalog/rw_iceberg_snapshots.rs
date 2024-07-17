@@ -57,8 +57,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergSnapshots>> 
 
     let mut result = vec![];
     for (schema_name, source) in iceberg_sources {
-        let source_props = source.with_properties.clone();
-        let config = ConnectorProperties::extract(source_props, false)?;
+        let config = ConnectorProperties::extract(source.with_properties.clone(), false)?;
         if let ConnectorProperties::Iceberg(iceberg_properties) = config {
             let iceberg_config: IcebergConfig = iceberg_properties.to_iceberg_config();
             let table: Table = iceberg_config.load_table_v2().await?;

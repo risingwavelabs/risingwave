@@ -33,6 +33,7 @@ aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
 aws-msk-iam-sasl-signer = "1.0.0"
 aws-sdk-dynamodb = "1"
+aws-sdk-glue = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
@@ -93,6 +94,7 @@ opendal = { workspace = true, features = [
 ] }
 openssl = "0.10"
 parking_lot = { workspace = true }
+parquet = { workspace = true }
 paste = "1"
 pg_bigdecimal = { git = "https://github.com/risingwavelabs/rust-pg_bigdecimal", rev = "0b7893d88894ca082b4525f94f812da034486f7c" }
 postgres-openssl = "0.5.0"

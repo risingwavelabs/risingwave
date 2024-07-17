@@ -86,6 +86,7 @@ risingwave-fields-derive = { path = "./fields-derive" }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_common_metrics = { path = "./metrics" }
 risingwave_common_proc_macro = { workspace = true }
+risingwave_common_secret = { path = "./secret" }
 risingwave_error = { workspace = true }
 risingwave_license = { workspace = true }
 risingwave_pb = { workspace = true }

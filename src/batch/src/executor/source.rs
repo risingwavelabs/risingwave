@@ -27,6 +27,7 @@ use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
     ConnectorProperties, SourceColumnDesc, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
+use risingwave_connector::WithOptionsSecResolved;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::Executor;
@@ -64,12 +65,15 @@ impl BoxedExecutorBuilder for SourceExecutor {
         )?;
 
         // prepare connector source
-        let source_props = source_node.with_properties.clone();
-        let config =
-            ConnectorProperties::extract(source_props, false).map_err(BatchError::connector)?;
+        let options_with_secret = WithOptionsSecResolved::new(
+            source_node.with_properties.clone(),
+            source_node.secret_refs.clone(),
+        );
+        let config = ConnectorProperties::extract(options_with_secret.clone(), false)
+            .map_err(BatchError::connector)?;
 
         let info = source_node.get_info().unwrap();
-        let parser_config = SpecificParserConfig::new(info, &source_node.with_properties)?;
+        let parser_config = SpecificParserConfig::new(info, &options_with_secret)?;
 
         let columns: Vec<_> = source_node
             .columns

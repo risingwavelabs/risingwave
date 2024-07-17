@@ -28,6 +28,8 @@ env_scripts = [
 
   set_env ENABLE_TELEMETRY "false"
   set_env RW_TELEMETRY_TYPE "test"
+  set_env RW_SECRET_STORE_PRIVATE_KEY_HEX "0123456789abcdef"
+  set_env RW_TEMP_SECRET_FILE_DIR "${PREFIX_SECRET}"
 
   is_sanitizer_enabled = get_env ENABLE_SANITIZER
   is_hdfs_backend = get_env ENABLE_HDFS
@@ -144,6 +146,7 @@ rm -rf "${PREFIX_DATA}"
 rm -rf "${PREFIX_LOG}"
 rm -rf "${PREFIX_CONFIG}"
 rm -rf "${PREFIX_PROFILING}"
+rm -rf "${PREFIX_SECRET}"
 '''
 
 [tasks.reset-rw]
@@ -578,7 +581,7 @@ set -euo pipefail
 RC_ENV_FILE="${PREFIX_CONFIG}/risedev-env"
 
 if [ ! -f "${RC_ENV_FILE}" ]; then
-  echo "risedev-env file not found. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0) or $(tput setaf 4)\`./risedev p\`$(tput sgr0)?"
+  echo "risedev-env file not found at ${RC_ENV_FILE}. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0) or $(tput setaf 4)\`./risedev p\`$(tput sgr0)?"
   exit 1
 fi
 '''
@@ -710,10 +713,10 @@ if ! ${TMUX} ls &>/dev/null ; then
   exit 0
 fi
 
-# Kill other components with Ctrl+C/Ctrl+D
+# Kill tmux components with Ctrl+C
 ${TMUX} list-windows -F "#{window_name} #{pane_id}" \
 | awk '{ print $2 }' \
-| xargs -I {} ${TMUX} send-keys -t {} C-c C-d
+| xargs -I {} ${TMUX} send-keys -t {} C-c
 
 # Stop docker components
 containers=$(docker ps -a -q -f name=risedev- 2>/dev/null) || true

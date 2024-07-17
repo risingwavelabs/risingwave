@@ -17,7 +17,7 @@ use std::io::{Cursor, Read, Write};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 use byteorder::{BigEndian, ReadBytesExt};
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{BufMut, BytesMut};
 use num_traits::{
     CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Zero,
 };
@@ -26,7 +26,6 @@ use risingwave_common_estimate_size::ZeroHeapSize;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::{Decimal as RustDecimal, Error, MathematicalOps as _, RoundingStrategy};
 
-use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::DataType;
 use crate::array::ArrayResult;
@@ -86,19 +85,6 @@ impl Decimal {
             "inf" | "+inf" | "infinity" | "+infinity" => Ok(Decimal::PositiveInf),
             "-inf" | "-infinity" => Ok(Decimal::NegativeInf),
             s => RustDecimal::from_str_radix(s, radix).map(Decimal::Normalized),
-        }
-    }
-}
-
-impl ToBinary for Decimal {
-    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
-        match ty {
-            DataType::Decimal => {
-                let mut output = BytesMut::new();
-                self.to_sql(&Type::NUMERIC, &mut output).unwrap();
-                Ok(Some(output.freeze()))
-            }
-            _ => unreachable!(),
         }
     }
 }

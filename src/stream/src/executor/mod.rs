@@ -77,6 +77,7 @@ mod lookup;
 mod lookup_union;
 mod merge;
 mod mview;
+mod nested_loop_temporal_join;
 mod no_op;
 mod now;
 mod over_window;
@@ -142,7 +143,7 @@ pub use simple_agg::SimpleAggExecutor;
 pub use sink::SinkExecutor;
 pub use sort::*;
 pub use stateless_simple_agg::StatelessSimpleAggExecutor;
-pub use temporal_join::*;
+pub use temporal_join::TemporalJoinExecutor;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
 };
