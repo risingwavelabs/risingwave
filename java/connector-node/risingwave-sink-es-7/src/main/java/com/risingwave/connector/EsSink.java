@@ -81,7 +81,9 @@ public class EsSink extends SinkWriterBase {
                 if ((esWriteResultResp = this.blockingQueue.poll(10, TimeUnit.MILLISECONDS))
                         != null) {
                     checkEsWriteResultResp(esWriteResultResp);
-                } else if (taskCount >= maxTaskNum) {
+                }
+
+                if (taskCount >= maxTaskNum) {
                     continue;
                 } else {
                     return;
