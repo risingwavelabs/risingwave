@@ -1,6 +1,5 @@
 package com.risingwave;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.sql.Connection;
