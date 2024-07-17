@@ -19,9 +19,9 @@ package com.risingwave.connector;
 import java.util.concurrent.TimeUnit;
 
 public interface BulkProcessorAdapter {
-    public void addRow(String index, String key, String doc);
+    public void addRow(String index, String key, String doc) throws InterruptedException;
 
-    public void deleteRow(String index, String key);
+    public void deleteRow(String index, String key) throws InterruptedException;
 
     public void flush();
 
