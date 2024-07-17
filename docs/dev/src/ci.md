@@ -24,8 +24,8 @@ To run `e2e-test` and `e2e-source-test` for `main-cron` in your pull request:
 
 1. Create a new build via buildkite: https://buildkite.com/risingwavelabs/main-cron-bisect/builds/#new
 2. Add the following environment variables:
-   - `START_COMMIT`: The good commit hash.
-   - `END_COMMIT`: The bad commit hash.
+   - `GOOD_COMMIT`: The good commit hash.
+   - `BAD_COMMIT`: The bad commit hash.
    - `BISECT_BRANCH`: The branch name where the bisect will be performed.
    - `BISECT_STEPS`: The `CI_STEPS` to run during the bisect. Separate multiple steps with a comma.
      - You can check the labels for this in `main-cron.yml`, under the conditions for each step.

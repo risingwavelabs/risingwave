@@ -27,7 +27,7 @@ For step (2), we need to check its outcome and only run the next step, if the ou
 
 
 def format_step(env):
-    commit = get_bisect_commit(env["START_COMMIT"], env["END_COMMIT"])
+    commit = get_bisect_commit(env["GOOD_COMMIT"], env["BAD_COMMIT"])
     step = f'''
 cat <<- YAML | buildkite-agent pipeline upload
 steps:
@@ -43,7 +43,7 @@ steps:
   - wait
   - label: 'check'
     command: |
-        START_COMMIT={env['START_COMMIT']} END_COMMIT={env['END_COMMIT']} BISECT_BRANCH={env['BISECT_BRANCH']} BISECT_STEPS=\'{env['BISECT_STEPS']}\' ci/scripts/find-regression.py check
+        GOOD_COMMIT={env['GOOD_COMMIT']} BAD_COMMIT={env['BAD_COMMIT']} BISECT_BRANCH={env['BISECT_BRANCH']} BISECT_STEPS=\'{env['BISECT_STEPS']}\' ci/scripts/find-regression.py check
 YAML'''
     return step
 
@@ -114,15 +114,15 @@ def get_commit_after(branch, commit):
 
 def get_env():
     env = {
-        "START_COMMIT": os.environ['START_COMMIT'],
-        "END_COMMIT": os.environ['END_COMMIT'],
+        "GOOD_COMMIT": os.environ['GOOD_COMMIT'],
+        "BAD_COMMIT": os.environ['BAD_COMMIT'],
         "BISECT_BRANCH": os.environ['BISECT_BRANCH'],
         "BISECT_STEPS": os.environ['BISECT_STEPS'],
     }
 
     print(f'''
-START_COMMIT={env["START_COMMIT"]}
-END_COMMIT={env["END_COMMIT"]}
+GOOD_COMMIT={env["GOOD_COMMIT"]}
+BAD_COMMIT={env["BAD_COMMIT"]}
 BISECT_BRANCH={env["BISECT_BRANCH"]}
 BISECT_STEPS={env["BISECT_STEPS"]}
         ''')
@@ -151,7 +151,7 @@ def main():
         print("--- check pipeline outcome")
         env = get_env()
         fetch_branch_commits(env["BISECT_BRANCH"])
-        commit = get_bisect_commit(env["START_COMMIT"], env["END_COMMIT"])
+        commit = get_bisect_commit(env["GOOD_COMMIT"], env["BAD_COMMIT"])
         step = f"run-{commit}"
         cmd = f"buildkite-agent step get outcome --step {step}"
         outcome = subprocess.run(cmd, shell=True, capture_output=True, text=True)
@@ -164,19 +164,19 @@ def main():
         outcome = outcome.stdout.strip()
         if outcome == "soft_failed":
             print(f"commit failed: {commit}")
-            env["END_COMMIT"] = commit
+            env["BAD_COMMIT"] = commit
         elif outcome == "passed":
             print(f"commit passed: {commit}")
-            env["START_COMMIT"] = get_commit_after(env["BISECT_BRANCH"], commit)
+            env["GOOD_COMMIT"] = get_commit_after(env["BISECT_BRANCH"], commit)
         else:
             print(f"invalid outcome: {outcome}")
             sys.exit(1)
 
-        if env["START_COMMIT"] == env["END_COMMIT"]:
-            report_step(env["START_COMMIT"])
+        if env["GOOD_COMMIT"] == env["BAD_COMMIT"]:
+            report_step(env["GOOD_COMMIT"])
             return
         else:
-            print(f"run next iteration, start: {env['START_COMMIT']}, end: {env['END_COMMIT']}")
+            print(f"run next iteration, start: {env['GOOD_COMMIT']}, end: {env['BAD_COMMIT']}")
             run_pipeline(env)
     else:
         print(f"invalid cmd: {cmd}")
@@ -226,8 +226,8 @@ class Test(unittest.TestCase):
         fetch_branch_commits("kwannoel/find-regress")
         self.maxDiff = None
         env = {
-            "START_COMMIT": "72f70960226680e841a8fbdd09c79d74609f27a2",
-            "END_COMMIT": "9ca415a9998a5e04e021c899fb66d93a17931d4f",
+            "GOOD_COMMIT": "72f70960226680e841a8fbdd09c79d74609f27a2",
+            "BAD_COMMIT": "9ca415a9998a5e04e021c899fb66d93a17931d4f",
             "BISECT_BRANCH": "kwannoel/find-regress",
             "BISECT_STEPS": "test"
         }
@@ -249,7 +249,7 @@ steps:
   - wait
   - label: 'check'
     command: |
-        START_COMMIT=72f70960226680e841a8fbdd09c79d74609f27a2 END_COMMIT=9ca415a9998a5e04e021c899fb66d93a17931d4f BISECT_BRANCH=kwannoel/find-regress BISECT_STEPS='test' ci/scripts/find-regression.py check
+        GOOD_COMMIT=72f70960226680e841a8fbdd09c79d74609f27a2 BAD_COMMIT=9ca415a9998a5e04e021c899fb66d93a17931d4f BISECT_BRANCH=kwannoel/find-regress BISECT_STEPS='test' ci/scripts/find-regression.py check
 YAML'''
         )
 
