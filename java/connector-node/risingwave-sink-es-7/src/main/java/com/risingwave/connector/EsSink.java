@@ -60,6 +60,12 @@ public class EsSink extends SinkWriterBase {
         // Count of write tasks in progress
         private int taskCount = 0;
 
+        private Integer maxTaskCount;
+
+        public RequestTracker(Integer maxTaskCount) {
+            this.maxTaskCount = maxTaskCount;
+        }
+
         void addErrResult(String errorMsg) {
             blockingQueue.add(new EsWriteResultResp(errorMsg));
         }
@@ -68,12 +74,15 @@ public class EsSink extends SinkWriterBase {
             blockingQueue.add(new EsWriteResultResp(numberOfActions));
         }
 
-        void addWriteTask() {
+        void addWriteTask() throws InterruptedException {
             taskCount++;
             EsWriteResultResp esWriteResultResp;
             while (true) {
-                if ((esWriteResultResp = this.blockingQueue.poll()) != null) {
+                if ((esWriteResultResp = this.blockingQueue.poll(10, TimeUnit.MILLISECONDS))
+                        != null) {
                     checkEsWriteResultResp(esWriteResultResp);
+                } else if (taskCount >= maxTaskCount) {
+                    continue;
                 } else {
                     return;
                 }
@@ -146,7 +155,11 @@ public class EsSink extends SinkWriterBase {
         }
 
         this.config = config;
-        this.requestTracker = new RequestTracker();
+        if (config.getMaxTaskCount() == null) {
+            this.requestTracker = new RequestTracker(Integer.MAX_VALUE);
+        } else {
+            this.requestTracker = new RequestTracker(config.getMaxTaskCount());
+        }
 
         // ApiCompatibilityMode is enabled to ensure the client can talk to newer version es sever.
         if (config.getConnector().equals("elasticsearch")) {
@@ -162,7 +175,8 @@ public class EsSink extends SinkWriterBase {
         }
     }
 
-    private void writeRow(SinkRow row) throws JsonMappingException, JsonProcessingException {
+    private void writeRow(SinkRow row)
+            throws JsonMappingException, JsonProcessingException, InterruptedException {
         final String key = (String) row.get(1);
         String doc = (String) row.get(2);
         final String index;
