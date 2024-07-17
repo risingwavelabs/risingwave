@@ -408,7 +408,7 @@ message Table {
 
   // If a materialize view, sink, or table has a node_label, its actors can only be scheduled 
   // on compute nodes with that label.
-  // If a it does not have a node_label (empty map or null value) it can be scheduled on any 
+  // If it does not have a node_label (empty map or null value) it can be scheduled on any 
   // Compute node without a label. The node has to have both a matching key and value.
   // E.g. {"some":"value"} can be scheduled on a node with the labels
   // { 
