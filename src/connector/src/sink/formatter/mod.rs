@@ -31,7 +31,7 @@ use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
 use super::encoder::template::TemplateEncoder;
 use super::encoder::text::TextEncoder;
 use super::encoder::{
-    DateHandlingMode, EncodeJsonbMode, KafkaConnectParams, TimeHandlingMode,
+    DateHandlingMode, JsonbHandlingMode, KafkaConnectParams, TimeHandlingMode,
     TimestamptzHandlingMode,
 };
 use super::redis::{KEY_FORMAT, VALUE_FORMAT};
@@ -114,7 +114,7 @@ pub trait EncoderBuild: Sized {
 impl EncoderBuild for JsonEncoder {
     async fn build(b: EncoderParams<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
         let timestamptz_mode = TimestamptzHandlingMode::from_options(&b.format_desc.options)?;
-        let encode_jsonb_mode = EncodeJsonbMode::from_options(&b.format_desc.options)?;
+        let jsonb_handling_mode = JsonbHandlingMode::from_options(&b.format_desc.options)?;
         let encoder = JsonEncoder::new(
             b.schema,
             pk_indices,
@@ -122,7 +122,7 @@ impl EncoderBuild for JsonEncoder {
             TimestampHandlingMode::Milli,
             timestamptz_mode,
             TimeHandlingMode::Milli,
-            encode_jsonb_mode,
+            jsonb_handling_mode,
         );
         let encoder = if let Some(s) = b.format_desc.options.get("schemas.enable") {
             match s.to_lowercase().parse::<bool>() {

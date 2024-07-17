@@ -590,7 +590,7 @@ mod test {
 
     use super::*;
     use crate::sink::encoder::{
-        DateHandlingMode, EncodeJsonbMode, JsonEncoder, TimeHandlingMode, TimestampHandlingMode,
+        DateHandlingMode, JsonEncoder, JsonbHandlingMode, TimeHandlingMode, TimestampHandlingMode,
         TimestamptzHandlingMode,
     };
     use crate::sink::formatter::AppendOnlyFormatter;
@@ -778,7 +778,7 @@ mod test {
                     TimestampHandlingMode::Milli,
                     TimestamptzHandlingMode::UtcString,
                     TimeHandlingMode::Milli,
-                    EncodeJsonbMode::String,
+                    JsonbHandlingMode::String,
                 ),
             )),
         )

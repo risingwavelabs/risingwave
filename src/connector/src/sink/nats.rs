@@ -29,7 +29,7 @@ use tokio_retry::Retry;
 use with_options::WithOptions;
 
 use super::encoder::{
-    DateHandlingMode, EncodeJsonbMode, TimeHandlingMode, TimestamptzHandlingMode,
+    DateHandlingMode, JsonbHandlingMode, TimeHandlingMode, TimestamptzHandlingMode,
 };
 use super::utils::chunk_to_json;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
@@ -153,7 +153,7 @@ impl NatsSinkWriter {
                 TimestampHandlingMode::Milli,
                 TimestamptzHandlingMode::UtcWithoutSuffix,
                 TimeHandlingMode::Milli,
-                EncodeJsonbMode::String,
+                JsonbHandlingMode::String,
             ),
         })
     }

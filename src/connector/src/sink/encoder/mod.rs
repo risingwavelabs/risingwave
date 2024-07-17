@@ -154,15 +154,13 @@ pub enum CustomJsonType {
 ///
 /// - `String`: encode jsonb as string. `[1, true, "foo"] -> "[1, true, \"foo\"]"`
 /// - `Dynamic`: encode jsonb as json type dynamically. `[1, true, "foo"] -> [1, true, "foo"]`
-/// - `Custom`: decided by [`CustomJsonType`].
-pub enum EncodeJsonbMode {
+pub enum JsonbHandlingMode {
     String,
     Dynamic,
-    Custom,
 }
 
-impl EncodeJsonbMode {
-    pub const OPTION_KEY: &'static str = "encode.jsonb.mode";
+impl JsonbHandlingMode {
+    pub const OPTION_KEY: &'static str = "jsonb.handling.mode";
 
     pub fn from_options(options: &BTreeMap<String, String>) -> Result<Self> {
         match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {

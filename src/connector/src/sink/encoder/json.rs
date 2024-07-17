@@ -30,7 +30,7 @@ use serde_json::{json, Map, Value};
 use thiserror_ext::AsReport;
 
 use super::{
-    CustomJsonType, DateHandlingMode, EncodeJsonbMode, KafkaConnectParams, KafkaConnectParamsRef,
+    CustomJsonType, DateHandlingMode, JsonbHandlingMode, KafkaConnectParams, KafkaConnectParamsRef,
     Result, RowEncoder, SerTo, TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode,
 };
 use crate::sink::SinkError;
@@ -41,7 +41,7 @@ pub struct JsonEncoderConfig {
     timestamp_handling_mode: TimestampHandlingMode,
     timestamptz_handling_mode: TimestamptzHandlingMode,
     custom_json_type: CustomJsonType,
-    encode_jsonb_mode: EncodeJsonbMode,
+    jsonb_handling_mode: JsonbHandlingMode,
 }
 
 pub struct JsonEncoder {
@@ -59,7 +59,7 @@ impl JsonEncoder {
         timestamp_handling_mode: TimestampHandlingMode,
         timestamptz_handling_mode: TimestamptzHandlingMode,
         time_handling_mode: TimeHandlingMode,
-        encode_jsonb_mode: EncodeJsonbMode,
+        jsonb_handling_mode: JsonbHandlingMode,
     ) -> Self {
         let config = JsonEncoderConfig {
             time_handling_mode,
@@ -67,7 +67,7 @@ impl JsonEncoder {
             timestamp_handling_mode,
             timestamptz_handling_mode,
             custom_json_type: CustomJsonType::None,
-            encode_jsonb_mode,
+            jsonb_handling_mode,
         };
         Self {
             schema,
@@ -84,7 +84,7 @@ impl JsonEncoder {
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
             custom_json_type: CustomJsonType::Es,
-            encode_jsonb_mode: EncodeJsonbMode::Custom,
+            jsonb_handling_mode: JsonbHandlingMode::Dynamic,
         };
         Self {
             schema,
@@ -105,7 +105,7 @@ impl JsonEncoder {
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
             custom_json_type: CustomJsonType::Doris(map),
-            encode_jsonb_mode: EncodeJsonbMode::Custom,
+            jsonb_handling_mode: JsonbHandlingMode::String,
         };
         Self {
             schema,
@@ -122,7 +122,7 @@ impl JsonEncoder {
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
             custom_json_type: CustomJsonType::StarRocks,
-            encode_jsonb_mode: EncodeJsonbMode::Custom,
+            jsonb_handling_mode: JsonbHandlingMode::Dynamic,
         };
         Self {
             schema,
@@ -296,26 +296,11 @@ fn datum_to_json_object(
             json!(v.as_iso_8601())
         }
 
-        (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => match config.custom_json_type {
-            CustomJsonType::Es | CustomJsonType::StarRocks => {
-                matches!(config.encode_jsonb_mode, EncodeJsonbMode::Custom);
-                JsonbVal::from(jsonb_ref).take()
-            }
-            CustomJsonType::Doris(_) => {
-                matches!(config.encode_jsonb_mode, EncodeJsonbMode::Custom);
+        (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => match config.jsonb_handling_mode {
+            JsonbHandlingMode::String => {
                 json!(jsonb_ref.to_string())
             }
-            CustomJsonType::None => match config.encode_jsonb_mode {
-                EncodeJsonbMode::String => {
-                    json!(jsonb_ref.to_string())
-                }
-                EncodeJsonbMode::Dynamic => JsonbVal::from(jsonb_ref).take(),
-                EncodeJsonbMode::Custom => {
-                    return Err(ArrayError::internal(
-                        "jsonb type must be encoded as 'string' or 'dynamic' type".to_string(),
-                    ));
-                }
-            },
+            JsonbHandlingMode::Dynamic => JsonbVal::from(jsonb_ref).take(),
         },
         (DataType::List(datatype), ScalarRefImpl::List(list_ref)) => {
             let elems = list_ref.iter();
@@ -468,7 +453,7 @@ mod tests {
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
             custom_json_type: CustomJsonType::None,
-            encode_jsonb_mode: EncodeJsonbMode::String,
+            jsonb_handling_mode: JsonbHandlingMode::String,
         };
 
         let boolean_value = datum_to_json_object(
@@ -540,7 +525,7 @@ mod tests {
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
             custom_json_type: CustomJsonType::None,
-            encode_jsonb_mode: EncodeJsonbMode::String,
+            jsonb_handling_mode: JsonbHandlingMode::String,
         };
 
         let tstz_inner = "2018-01-26T18:30:09.453Z".parse().unwrap();
@@ -561,7 +546,7 @@ mod tests {
             timestamp_handling_mode: TimestampHandlingMode::Milli,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
             custom_json_type: CustomJsonType::None,
-            encode_jsonb_mode: EncodeJsonbMode::String,
+            jsonb_handling_mode: JsonbHandlingMode::String,
         };
         let ts_value = datum_to_json_object(
             &Field {
@@ -628,7 +613,7 @@ mod tests {
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
             custom_json_type: CustomJsonType::Doris(map),
-            encode_jsonb_mode: EncodeJsonbMode::Custom,
+            jsonb_handling_mode: JsonbHandlingMode::String,
         };
         let decimal = datum_to_json_object(
             &Field {
@@ -659,7 +644,7 @@ mod tests {
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
             custom_json_type: CustomJsonType::None,
-            encode_jsonb_mode: EncodeJsonbMode::String,
+            jsonb_handling_mode: JsonbHandlingMode::String,
         };
         let date_value = datum_to_json_object(
             &Field {
@@ -678,7 +663,7 @@ mod tests {
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
             custom_json_type: CustomJsonType::Doris(HashMap::default()),
-            encode_jsonb_mode: EncodeJsonbMode::Custom,
+            jsonb_handling_mode: JsonbHandlingMode::String,
         };
         let date_value = datum_to_json_object(
             &Field {
@@ -718,7 +703,7 @@ mod tests {
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
             custom_json_type: CustomJsonType::None,
-            encode_jsonb_mode: EncodeJsonbMode::Dynamic,
+            jsonb_handling_mode: JsonbHandlingMode::Dynamic,
         };
         let json_value = datum_to_json_object(
             &Field {
