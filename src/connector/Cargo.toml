@@ -93,6 +93,7 @@ opendal = { workspace = true, features = [
     "services-memory",
     "services-s3",
 ] }
+opensearch = "2.2.0"
 openssl = "0.10"
 parking_lot = { workspace = true }
 parquet = { workspace = true }

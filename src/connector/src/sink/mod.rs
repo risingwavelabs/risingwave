@@ -23,8 +23,9 @@ pub mod doris;
 pub mod doris_starrocks_connector;
 pub mod dynamodb;
 pub mod elasticsearch;
+pub mod elasticsearch_opensearch_common;
+pub mod elasticsearch_rust;
 pub mod encoder;
-pub mod es;
 pub mod formatter;
 pub mod google_pubsub;
 pub mod iceberg;
@@ -35,6 +36,7 @@ pub mod mock_coordination_client;
 pub mod mongodb;
 pub mod mqtt;
 pub mod nats;
+pub mod opensearch;
 pub mod pulsar;
 pub mod redis;
 pub mod remote;
@@ -96,6 +98,8 @@ macro_rules! for_all_sinks {
                 { Jdbc, $crate::sink::remote::JdbcSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
                 { Opensearch, $crate::sink::remote::OpensearchSink },
+                { ElasticSearchRust, $crate::sink::elasticsearch_rust::ElasticSearchSink },
+                { OpensearchRust, $crate::sink::opensearch::OpenSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
@@ -674,6 +678,12 @@ impl From<tiberius::error::Error> for SinkError {
 
 impl From<::elasticsearch::Error> for SinkError {
     fn from(err: ::elasticsearch::Error) -> Self {
+        SinkError::ElasticSearchOpenSearch(anyhow!(err))
+    }
+}
+
+impl From<::opensearch::Error> for SinkError {
+    fn from(err: ::opensearch::Error) -> Self {
         SinkError::ElasticSearchOpenSearch(anyhow!(err))
     }
 }
