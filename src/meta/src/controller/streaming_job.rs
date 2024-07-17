@@ -42,8 +42,8 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::{
-    FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup,
-    PbTableFragments, Relation, RelationGroup,
+    PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup, PbTableFragments, Relation,
+    RelationGroup,
 };
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
@@ -65,8 +65,7 @@ use crate::controller::catalog::CatalogController;
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
     build_relation_group, check_relation_name_duplicate, check_sink_into_table_cycle,
-    ensure_object_id, ensure_user_id, get_fragment_actor_ids, get_fragment_mappings,
-    get_parallel_unit_to_worker_map, PartialObject,
+    ensure_object_id, ensure_user_id, get_fragment_actor_ids, get_fragment_mappings, PartialObject,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, SinkId, StreamingJob};

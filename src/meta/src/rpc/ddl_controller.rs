@@ -31,13 +31,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::stream_graph_visitor::{
     visit_fragment, visit_stream_node, visit_stream_node_cont_mut,
 };
-use risingwave_common::{bail, current_cluster_version, must_match};
-
-
-use risingwave_common::{hash};
-
-
-
+use risingwave_common::{bail, current_cluster_version, hash, must_match};
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::cdc::CdcSourceType;
 use risingwave_connector::source::{
