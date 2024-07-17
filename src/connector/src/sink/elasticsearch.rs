@@ -76,7 +76,7 @@ pub struct EsStreamChunkConverter {
     index_column: Option<usize>,
 }
 impl EsStreamChunkConverter {
-    fn new(
+    pub fn new(
         schema: Schema,
         pk_indices: Vec<usize>,
         delimiter: Option<String>,

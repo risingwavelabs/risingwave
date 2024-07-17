@@ -24,6 +24,7 @@ pub mod doris_starrocks_connector;
 pub mod dynamodb;
 pub mod elasticsearch;
 pub mod encoder;
+pub mod es;
 pub mod formatter;
 pub mod google_pubsub;
 pub mod iceberg;
@@ -571,6 +572,12 @@ pub enum SinkError {
         #[backtrace]
         anyhow::Error,
     ),
+    #[error("ElasticSearch/OpenSearch error: {0}")]
+    ElasticSearchOpenSearch(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
     #[error("Snowflake error: {0}")]
@@ -662,5 +669,11 @@ impl From<RedisError> for SinkError {
 impl From<tiberius::error::Error> for SinkError {
     fn from(err: tiberius::error::Error) -> Self {
         SinkError::SqlServer(anyhow!(err))
+    }
+}
+
+impl From<::elasticsearch::Error> for SinkError {
+    fn from(err: ::elasticsearch::Error) -> Self {
+        SinkError::ElasticSearchOpenSearch(anyhow!(err))
     }
 }
