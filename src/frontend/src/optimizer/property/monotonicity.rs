@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::ops::{Index, IndexMut};
+use std::ops::Index;
 
 use enum_as_inner::EnumAsInner;
 use risingwave_common::types::DataType;
@@ -45,7 +45,28 @@ impl MonotonicityDerivation {
     }
 }
 
-/// Represents the monotonicity of a column. `NULL`s are considered largest when analyzing monotonicity.
+/// Represents the monotonicity of a column.
+///
+/// Monotonicity is a property of the output column of stream node that describes the the order
+/// of the values in the column. One [`Monotonicity`] value is associated with one column, so
+/// each stream node should have a [`MonotonicityMap`] to describe the monotonicity of all its
+/// output columns.
+///
+/// For operator that yields append-only stream, the monotonicity being `NonDecreasing` means
+/// that it will never yield a row smaller than any previously yielded row.
+///
+/// For operator that yields non-append-only stream, the monotonicity being `NonDecreasing` means
+/// that it will never yield a change that has smaller value than any previously yielded change,
+/// ignoring the `Op`. So if such operator yields a `NonDecreasing` column, `Delete` and `UpdateDelete`s
+/// can only happen on the last emitted row (or last rows with the same value on the column). This
+/// is especially useful for `StreamNow` operator with `UpdateCurrent` mode, in which case only
+/// one output row is actively maintained and the value is non-decreasing.
+///
+/// Monotonicity property is be considered in default order type, i.e., ASC NULLS LAST. This means
+/// that `NULL`s are considered largest when analyzing monotonicity.
+///
+/// For distributed operators, the monotonicity describes the property of the output column of
+/// each shard of the operator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Monotonicity {
     Constant,
@@ -293,6 +314,7 @@ impl MonotonicityAnalyzer {
     }
 }
 
+/// A map from column index to its monotonicity.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct MonotonicityMap(BTreeMap<usize, Monotonicity>);
 
@@ -319,12 +341,6 @@ impl Index<usize> for MonotonicityMap {
 
     fn index(&self, idx: usize) -> &Self::Output {
         self.0.get(&idx).unwrap_or(&Monotonicity::Unknown)
-    }
-}
-
-impl IndexMut<usize> for MonotonicityMap {
-    fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
-        self.0.entry(idx).or_insert(Monotonicity::Unknown)
     }
 }
 
