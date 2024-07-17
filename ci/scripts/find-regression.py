@@ -36,7 +36,6 @@ steps:
     key: "{step_name}"
     trigger: "main-cron"
     soft_fail: true
-    async: true
     build:
       branch: {env["BISECT_BRANCH"]}
       commit: {commit}
