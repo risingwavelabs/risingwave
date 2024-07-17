@@ -41,8 +41,8 @@ public class EsSinkConfig extends CommonSinkConfig {
     @JsonProperty(value = "index_column")
     private String indexColumn;
 
-    @JsonProperty(value = "max_task_count")
-    private Integer maxTaskCount;
+    @JsonProperty(value = "max_task_num")
+    private Integer maxTaskNum;
 
     @JsonCreator
     public EsSinkConfig(@JsonProperty(value = "url") String url) {
@@ -98,12 +98,12 @@ public class EsSinkConfig extends CommonSinkConfig {
         return this;
     }
 
-    public Integer getMaxTaskCount() {
-        return maxTaskCount;
+    public Integer getMaxTaskNum() {
+        return maxTaskNum;
     }
 
-    public EsSinkConfig withMaxTaskCount(Integer maxTaskCount) {
-        this.maxTaskCount = maxTaskCount;
+    public EsSinkConfig withMaxTaskNum(Integer maxTaskNum) {
+        this.maxTaskNum = maxTaskNum;
         return this;
     }
 }
