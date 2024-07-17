@@ -905,7 +905,7 @@ message CompactionConfig {
   bool enable_emergency_picker = 20;
 
   // The limitation of the level count of l0 compaction
-  uint32 max_l0_compact_level_count = 21;
+  optional uint32 max_l0_compact_level_count = 21;
 }
 
 message TableStats {
