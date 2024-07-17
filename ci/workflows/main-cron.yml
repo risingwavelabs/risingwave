@@ -8,6 +8,8 @@ steps:
   - label: "build"
     command: "ci/scripts/build.sh -p ci-release"
     key: "build"
+    if: |
+      build.env("CI_STEPS") !~ /(^|,)disable-build(,|$$)/
     plugins:
       - docker-compose#v5.1.0:
           run: rw-build-env
@@ -19,6 +21,8 @@ steps:
   - label: "build other components"
     command: "ci/scripts/build-other.sh"
     key: "build-other"
+    if: |
+      build.env("CI_STEPS") !~ /(^|,)disable-build(,|$$)/
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
@@ -35,6 +39,8 @@ steps:
   - label: "build simulation test"
     command: "ci/scripts/build-simulation.sh"
     key: "build-simulation"
+    if: |
+      build.env("CI_STEPS") !~ /(^|,)disable-build(,|$$)/
     plugins:
       - docker-compose#v5.1.0:
           run: rw-build-env
@@ -46,6 +52,8 @@ steps:
   - label: "docslt"
     command: "ci/scripts/docslt.sh"
     key: "docslt"
+    if: |
+      build.env("CI_STEPS") !~ /(^|,)disable-build(,|$$)/
     plugins:
       - docker-compose#v5.1.0:
           run: rw-build-env
@@ -649,8 +657,7 @@ steps:
   - label: "upload micro-benchmark"
     key: "upload-micro-benchmarks"
     if: |
-      build.branch == "main"
-      || !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-micro-benchmarks"
       || build.env("CI_STEPS") =~ /(^|,)micro-benchmarks?(,|$$)/
     command:
@@ -993,7 +1000,7 @@ steps:
     key: "e2e-mongodb-sink-tests"
     command: "ci/scripts/e2e-mongodb-sink-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-mongodb-sink-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-mongodb-sink-tests?(,|$$)/
     depends_on:
@@ -1119,13 +1126,13 @@ steps:
 
   # Notification test.
   - key: "test-notify"
-    if: build.pull_request.labels includes "ci/main-cron/test-notify"
+    if: build.pull_request.labels includes "ci/main-cron/test-notify" || build.env("CI_STEPS") =~ /(^|,)test_notify(,|$$)/
     command: |
       bash -c 'echo test && exit -1'
 
   # Notification test.
   - key: "test-notify-2"
-    if: build.pull_request.labels includes "ci/main-cron/test-notify"
+    if: build.pull_request.labels includes "ci/main-cron/test-notify" || build.env("CI_STEPS") =~ /(^|,)test_notify(,|$$)/
     command: |
       bash -c 'echo test && exit -1'
 
