@@ -34,8 +34,8 @@ To run `e2e-test` and `e2e-source-test` for `main-cron` in your pull request:
 Example you can try on [buildkite](https://buildkite.com/risingwavelabs/main-cron-bisect/builds/#new):
 - Environment variables:
   ```
-  START_COMMIT=29791ddf16fdf2c2e83ad3a58215f434e610f89a
-  END_COMMIT=7f36bf17c1d19a1e6b2cdb90491d3c08ae8b0004
+  GOOD_COMMIT=29791ddf16fdf2c2e83ad3a58215f434e610f89a
+  BAD_COMMIT=7f36bf17c1d19a1e6b2cdb90491d3c08ae8b0004
   BISECT_BRANCH=kwannoel/test-bisect
   CI_STEPS="test-bisect,disable-build"
   ```
