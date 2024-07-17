@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use async_trait::async_trait;
 use aws_sdk_kinesis::types::Shard;
 use aws_sdk_kinesis::Client as kinesis_client;
@@ -69,7 +70,7 @@ impl SplitEnumerator for KinesisSplitEnumerator {
                         next_token = None;
                         continue;
                     }
-                    bail!("Kinesis ListShards service error: {}", e.to_report_string());
+                    return Err(anyhow!(e).context("failed to list kinesis shards").into());
                 }
             };
             match list_shard_output.shards {
