@@ -22,7 +22,7 @@ To run `e2e-test` and `e2e-source-test` for `main-cron` in your pull request:
 
 ## Main Cron Bisect Guide
 
-1. Create a new build via buildkite: https://buildkite.com/risingwavelabs/main-cron-bisect/builds/#new
+1. Create a new build via [buildkite](https://buildkite.com/risingwavelabs/main-cron-bisect/builds/#new)
 2. Add the following environment variables:
    - `GOOD_COMMIT`: The good commit hash.
    - `BAD_COMMIT`: The bad commit hash.
