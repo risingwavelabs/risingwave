@@ -312,7 +312,7 @@ fn datum_to_json_object(
                 EncodeJsonbMode::Dynamic => JsonbVal::from(jsonb_ref).take(),
                 EncodeJsonbMode::Custom => {
                     return Err(ArrayError::internal(
-                        "jsonb type must be encoded as string or object".to_string(),
+                        "jsonb type must be encoded as 'string' or 'dynamic' type".to_string(),
                     ));
                 }
             },
