@@ -99,13 +99,14 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         let mut input = input.execute();
 
         let first_barrier = expect_first_barrier(&mut input).await?;
+        let prev_epoch = first_barrier.epoch.prev;
         table.init_epoch(first_barrier.epoch);
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
 
         // Initiate and yield the first watermark.
         let mut current_watermark =
-            Self::get_global_max_watermark(&table, &global_watermark_table).await?;
+            Self::get_global_max_watermark(&table, &global_watermark_table, prev_epoch).await?;
 
         let mut last_checkpoint_watermark = None;
 
@@ -208,6 +209,9 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     }
                 }
                 Message::Barrier(barrier) => {
+                    let prev_epoch = barrier.epoch.prev;
+                    let is_checkpoint = barrier.kind.is_checkpoint();
+
                     // Update the vnode bitmap for state tables of all agg calls if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(ctx.id) {
                         let other_vnodes_bitmap = Arc::new(
@@ -220,15 +224,16 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
 
                         // Take the global max watermark when scaling happens.
                         if previous_vnode_bitmap != vnode_bitmap {
-                            current_watermark =
-                                Self::get_global_max_watermark(&table, &global_watermark_table)
-                                    .await?;
+                            current_watermark = Self::get_global_max_watermark(
+                                &table,
+                                &global_watermark_table,
+                                prev_epoch,
+                            )
+                            .await?;
                         }
                     }
 
-                    if barrier.kind.is_checkpoint()
-                        && last_checkpoint_watermark != current_watermark
-                    {
+                    if is_checkpoint && last_checkpoint_watermark != current_watermark {
                         last_checkpoint_watermark.clone_from(&current_watermark);
                         // Persist the watermark when checkpoint arrives.
                         if let Some(watermark) = current_watermark.clone() {
@@ -242,13 +247,18 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     }
 
                     table.commit(barrier.epoch).await?;
+                    yield Message::Barrier(barrier);
 
-                    if barrier.kind.is_checkpoint() {
+                    if is_checkpoint {
                         if idle_input {
                             // Align watermark
-                            let global_max_watermark =
-                                Self::get_global_max_watermark(&table, &global_watermark_table)
-                                    .await?;
+                            // NOTE(st1page): This could lead to a degradation of concurrent checkpoint situations, as it would require waiting for the previous epoch
+                            let global_max_watermark = Self::get_global_max_watermark(
+                                &table,
+                                &global_watermark_table,
+                                prev_epoch,
+                            )
+                            .await?;
 
                             current_watermark = if let Some(global_max_watermark) =
                                 global_max_watermark.clone()
@@ -273,8 +283,6 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                             idle_input = true;
                         }
                     }
-
-                    yield Message::Barrier(barrier);
                 }
             }
         }
@@ -301,8 +309,8 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
     async fn get_global_max_watermark(
         table: &StateTable<S>,
         global_watermark_table: &StorageTable<S>,
+        prev_epoch: u64,
     ) -> StreamExecutorResult<Option<ScalarImpl>> {
-        let epoch = table.epoch();
         let handle_watermark_row = |watermark_row: Option<OwnedRow>| match watermark_row {
             Some(row) => {
                 if row.len() == 1 {
@@ -320,7 +328,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                 .map(|vnode| async move {
                     let pk = row::once(vnode.to_datum());
                     let watermark_row: Option<OwnedRow> = global_watermark_table
-                        .get_row(pk, HummockReadEpoch::NoWait(epoch))
+                        .get_row(pk, HummockReadEpoch::Committed(prev_epoch))
                         .await?;
                     handle_watermark_row(watermark_row)
                 });
