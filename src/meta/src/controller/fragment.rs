@@ -924,8 +924,17 @@ impl CatalogController {
 
         let mut actor_locations = HashMap::new();
 
-        for (fragment_id, _, actor_id, _, worker_id, _) in &actors {
-            // question: shall we check if the actor is Inactive?
+        for (fragment_id, _, actor_id, _, worker_id, status) in &actors {
+            if *status != ActorStatus::Running {
+                tracing::warn!(
+                    "skipping actor {} in fragment {} with status {:?}",
+                    actor_id,
+                    fragment_id,
+                    status
+                );
+                continue;
+            }
+
             actor_locations
                 .entry(*worker_id)
                 .or_insert(HashMap::new())
