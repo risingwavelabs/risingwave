@@ -63,30 +63,20 @@ YAML'''
 # Triggers a buildkite job to run the pipeline on the given commit, with the specified tests.
 def run_pipeline(env, commit):
     step, step_name = format_step(env, commit)
-    print(f"--- running upload pipeline for step: {step_name}\n{step}")
+    print(f"--- running upload pipeline for step\n{step}")
     result = subprocess.run(step, shell=True)
     if result.returncode != 0:
         print(f"stderr: {result.stderr}")
         print(f"stdout: {result.stdout}")
         sys.exit(1)
+
     cmd = f"buildkite-agent step get outcome --job {step_name}"
-    retries = 0
-    max_retries = 10
-    sleep_duration = 1
     while True:
         result = subprocess.run([cmd], shell=True, capture_output=True, text=True)
         if result.returncode != 0:
-            print(f"--- failed to get outcome: {step_name}")
             print(f"stderr: {result.stderr}")
             print(f"stdout: {result.stdout}")
-            retries += 1
-            sleep_duration *= 2
-            if retries > max_retries:
-                print(f"--- exceeded max retries: {max_retries}")
-                sys.exit(1)
-            else:
-                time.sleep(sleep_duration)
-                continue
+            sys.exit(1)
 
         outcome = result.stdout.strip()
         if outcome == "passed" or outcome == "soft_failed":
