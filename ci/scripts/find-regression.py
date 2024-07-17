@@ -4,7 +4,6 @@ import subprocess
 import unittest
 import os
 import sys
-import time
 
 '''
 @kwannoel
@@ -27,13 +26,13 @@ For step (2), we need to check its outcome and only run the next step, if the ou
 '''
 
 
-def format_step(env, commit):
-    step_name = f"run-{commit}"
+def format_step(env):
+    commit = get_bisect_commit(env["START_COMMIT"], env["END_COMMIT"])
     step = f'''
 cat <<- YAML | buildkite-agent pipeline upload
 steps:
-  - label: "{step_name}"
-    key: "{step_name}"
+  - label: "run-{commit}"
+    key: "run-{commit}"
     trigger: "main-cron"
     soft_fail: true
     build:
@@ -41,8 +40,12 @@ steps:
       commit: {commit}
       env:
         CI_STEPS: {env['BISECT_STEPS']}
+  - wait
+  - label: 'check'
+    command: |
+        START_COMMIT={env['START_COMMIT']} END_COMMIT={env['END_COMMIT']} BISECT_BRANCH={env['BISECT_BRANCH']} BISECT_STEPS=\'{env['BISECT_STEPS']}\' ci/scripts/find-regression.py check
 YAML'''
-    return step, step_name
+    return step
 
 
 def report_step(commit):
@@ -61,30 +64,14 @@ YAML'''
 
 
 # Triggers a buildkite job to run the pipeline on the given commit, with the specified tests.
-def run_pipeline(env, commit):
-    step, step_name = format_step(env, commit)
+def run_pipeline(env):
+    step = format_step(env)
     print(f"--- running upload pipeline for step\n{step}")
     result = subprocess.run(step, shell=True)
     if result.returncode != 0:
         print(f"stderr: {result.stderr}")
         print(f"stdout: {result.stdout}")
         sys.exit(1)
-
-    cmd = f"buildkite-agent step get outcome --job {step_name}"
-    while True:
-        result = subprocess.run([cmd], shell=True, capture_output=True, text=True)
-        if result.returncode != 0:
-            print(f"stderr: {result.stderr}")
-            print(f"stdout: {result.stdout}")
-            sys.exit(1)
-
-        outcome = result.stdout.strip()
-        if outcome == "passed" or outcome == "soft_failed":
-            return outcome
-        else:
-            print(f"--- step is still running: {step_name}, outcome: {outcome}")
-            time.sleep(10)
-            continue
 
 
 # Number of commits for [start, end)
@@ -98,8 +85,13 @@ def get_number_of_commits(start, end):
     return int(result.stdout)
 
 
-def get_bisect_commit():
-    cmd = f"git rev-parse HEAD"
+def get_bisect_commit(start, end):
+    number_of_commits = get_number_of_commits(start, end)
+    commit_offset = number_of_commits // 2
+    if commit_offset == 0:
+        return start
+
+    cmd = f"git rev-list --reverse {start}..{end} | head -n {commit_offset} | tail -n 1"
     result = subprocess.run([cmd], shell=True, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"stderr: {result.stderr}")
@@ -151,53 +143,41 @@ def main():
     cmd = sys.argv[1]
 
     if cmd == "start":
-        print("--- starting bisect")
+        print("--- start bisecting")
         env = get_env()
-
-        # Checkout the bisect branch
-        print(f"--- checking out branch: {env['BISECT_BRANCH']}")
         fetch_branch_commits(env["BISECT_BRANCH"])
-        cmd = f"git checkout {env['BISECT_BRANCH']} -q"
-        subprocess.run([cmd], shell=True)
+        run_pipeline(env)
+    elif cmd == "check":
+        print("--- check pipeline outcome")
+        env = get_env()
+        fetch_branch_commits(env["BISECT_BRANCH"])
+        commit = get_bisect_commit(env["START_COMMIT"], env["END_COMMIT"])
+        step = f"run-{commit}"
+        cmd = f"buildkite-agent step get outcome --step {step}"
+        outcome = subprocess.run(cmd, shell=True, capture_output=True, text=True)
 
-        # Start the bisect
-        print(f"--- starting bisect: {env['END_COMMIT']}..{env['START_COMMIT']}")
-        bisect_cmd = f"git bisect start {env['END_COMMIT']} {env['START_COMMIT']}"
-        subprocess.run([bisect_cmd], shell=True)
+        if outcome.returncode != 0:
+            print(f"stderr: {outcome.stderr}")
+            print(f"stdout: {outcome.stdout}")
+            sys.exit(1)
 
-        while True:
-            commit = get_bisect_commit()
-            step_result = run_pipeline(env, commit)
+        outcome = outcome.stdout.strip()
+        if outcome == "soft_failed":
+            print(f"commit failed: {commit}")
+            env["END_COMMIT"] = commit
+        elif outcome == "passed":
+            print(f"commit passed: {commit}")
+            env["START_COMMIT"] = get_commit_after(env["BISECT_BRANCH"], commit)
+        else:
+            print(f"invalid outcome: {outcome}")
+            sys.exit(1)
 
-            print(f"--- {commit}: {step_result}")
-            if step_result == "passed":
-                mark_result_cmd = f"git bisect good"
-            elif step_result == "soft_failed":
-                mark_result_cmd = f"git bisect bad"
-            else:
-                print(f"invalid result: {step_result}")
-                sys.exit(1)
-            bisect_result = subprocess.run([mark_result_cmd], shell=True, capture_output=True, text=True)
-            output = bisect_result.stdout.strip()
-            if "is the first bad commit" in output:
-                print(f"--- regressed commit: {commit}")
-                cmd = f"git rev-parse HEAD"
-                result = subprocess.run([cmd], shell=True, capture_output=True, text=True)
-                if result.returncode != 0:
-                    print(f"stderr: {result.stderr}")
-                    print(f"stdout: {result.stdout}")
-                    sys.exit(1)
-                print(f"--- regressed commit: {result.stdout.strip()}")
-                return
-            elif "revisions left to test after this" in output:
-                print("--- bisecting further")
-                continue
-            else:
-                print("--- bisect in bad state")
-                print(f"stderr: {result.stderr}")
-                print(f"stdout: {result.stdout}")
-                sys.exit(1)
-
+        if env["START_COMMIT"] == env["END_COMMIT"]:
+            report_step(env["START_COMMIT"])
+            return
+        else:
+            print(f"run next iteration, start: {env['START_COMMIT']}, end: {env['END_COMMIT']}")
+            run_pipeline(env)
     else:
         print(f"invalid cmd: {cmd}")
         sys.exit(1)
