@@ -332,7 +332,12 @@ impl ActorMapping {
     /// Transform the actor mapping to the worker slot mapping. Note that the parameter is a mapping from actor to worker.
     pub fn to_worker_slot(&self, actor_to_worker: &HashMap<ActorId, u32>) -> WorkerSlotMapping {
         let mut worker_actors = HashMap::new();
-        for (actor_id, worker_id) in actor_to_worker {
+        for actor_id in self.iter_unique() {
+            let worker_id = actor_to_worker
+                .get(&actor_id)
+                .cloned()
+                .unwrap_or_else(|| panic!("location for actor {} not found", actor_id));
+
             worker_actors
                 .entry(worker_id)
                 .or_insert(BTreeSet::new())
@@ -342,7 +347,7 @@ impl ActorMapping {
         let mut actor_location = HashMap::new();
         for (worker, actors) in worker_actors {
             for (idx, &actor) in actors.iter().enumerate() {
-                actor_location.insert(*actor, WorkerSlotId::new(*worker, idx));
+                actor_location.insert(actor, WorkerSlotId::new(worker, idx));
             }
         }
 
