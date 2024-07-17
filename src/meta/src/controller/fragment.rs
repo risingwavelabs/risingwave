@@ -68,7 +68,7 @@ impl CatalogControllerInner {
     ) -> MetaResult<impl Iterator<Item = FragmentWorkerSlotMapping> + '_> {
         let txn = self.db.begin().await?;
 
-        let job_ids: Vec<i32> = StreamingJob::find()
+        let job_ids: Vec<ObjectId> = StreamingJob::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
@@ -78,7 +78,7 @@ impl CatalogControllerInner {
 
         let mut result = vec![];
         for job_id in job_ids {
-            let mappings = get_fragment_mappings(&txn, job_id as ObjectId).await?;
+            let mappings = get_fragment_mappings(&txn, job_id).await?;
 
             result.extend(mappings.into_iter());
         }
