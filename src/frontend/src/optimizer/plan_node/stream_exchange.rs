@@ -20,7 +20,9 @@ use super::stream::prelude::*;
 use super::utils::{childless_record, plan_node_name, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{Distribution, DistributionDisplay, MonotonicityMap};
+use crate::optimizer::property::{
+    Distribution, DistributionDisplay, MonotonicityMap, RequiredDist,
+};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamExchange` imposes a particular distribution on its input
@@ -34,10 +36,11 @@ pub struct StreamExchange {
 
 impl StreamExchange {
     pub fn new(input: PlanRef, dist: Distribution) -> Self {
-        let columns_monotonicity = if matches!(dist, Distribution::Broadcast) {
+        let columns_monotonicity = if input.distribution().satisfies(&RequiredDist::single()) {
+            // If the input is a singleton, the monotonicity will be preserved during shuffle
+            // since we use ordered channel/buffer when exchanging data.
             input.columns_monotonicity().clone()
         } else {
-            // we lost monotonicity information when shuffling
             MonotonicityMap::new()
         };
         let base = PlanBase::new_stream(
