@@ -15,7 +15,7 @@
 use itertools::{zip_eq, Itertools};
 use rand::RngCore;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};

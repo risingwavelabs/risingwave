@@ -52,6 +52,7 @@ use tokio::task::JoinHandle;
 use crate::manager::{
     LocalNotification, MetaSrvEnv, StreamingClusterInfo, WorkerKey, META_NODE_ID,
 };
+use crate::model::ClusterId;
 use crate::{MetaError, MetaResult};
 
 pub type ClusterControllerRef = Arc<ClusterController>;
@@ -175,7 +176,7 @@ impl ClusterController {
         Ok(())
     }
 
-    pub async fn delete_worker(&self, host_address: HostAddress) -> MetaResult<()> {
+    pub async fn delete_worker(&self, host_address: HostAddress) -> MetaResult<WorkerNode> {
         let mut inner = self.inner.write().await;
         let worker = inner.delete_worker(host_address).await?;
         if worker.r#type() == PbWorkerType::ComputeNode {
@@ -190,10 +191,10 @@ impl ClusterController {
         // local notification.
         self.env
             .notification_manager()
-            .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker))
+            .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker.clone()))
             .await;
 
-        Ok(())
+        Ok(worker)
     }
 
     pub async fn update_schedulability(
@@ -391,6 +392,10 @@ impl ClusterController {
             .read()
             .await
             .get_worker_extra_info_by_id(worker_id)
+    }
+
+    pub fn cluster_id(&self) -> &ClusterId {
+        self.env.cluster_id()
     }
 }
 

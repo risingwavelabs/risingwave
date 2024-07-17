@@ -98,6 +98,21 @@ message StorageTableDesc {
   optional uint32 retention_seconds = 11;
 }
 
+message AsOf {
+  message ProcessTime {}
+  message Timestamp {
+    int64 timestamp = 1;
+  }
+  message Version {
+    int64 version = 1;
+  }
+  oneof as_of_type {
+    ProcessTime process_time = 1;
+    Timestamp timestamp = 2;
+    Version version = 3;
+  }
+}
+
 // Represents a table in external database for CDC scenario
 message ExternalTableDesc {
   uint32 table_id = 1;
@@ -150,6 +165,7 @@ enum EncodeType {
   ENCODE_TYPE_TEMPLATE = 7;
   ENCODE_TYPE_NONE = 8;
   ENCODE_TYPE_TEXT = 9;
+  ENCODE_TYPE_PARQUET = 10;
 }
 
 enum RowFormatType {

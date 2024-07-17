@@ -361,7 +361,7 @@ impl KafkaSplitEnumerator {
         self.context
             .metrics
             .high_watermark
-            .with_label_values(&[
+            .with_guarded_label_values(&[
                 &self.context.info.source_id.to_string(),
                 &partition.to_string(),
             ])

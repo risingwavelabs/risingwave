@@ -51,6 +51,7 @@ use risingwave_common::config::{
     load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
 };
 use risingwave_common::memory::MemoryContext;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::session_config::{ConfigReporter, SessionConfig, VisibilityMode};
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
@@ -64,8 +65,7 @@ use risingwave_common::util::resource_util;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
-use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_common_service::MetricsManager;
+use risingwave_common_service::{MetricsManager, ObserverManager};
 use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::health::health_server::HealthServer;
@@ -86,6 +86,7 @@ use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
+use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::{
     check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId,
@@ -317,6 +318,12 @@ impl FrontendEnv {
 
         let system_params_manager =
             Arc::new(LocalSystemParamsManager::new(system_params_reader.clone()));
+
+        LocalSecretManager::init(
+            opts.temp_secret_file_dir,
+            meta_client.cluster_id().to_string(),
+            worker_id,
+        );
 
         // This `session_params` should be initialized during the initial notification in `observer_manager`
         let session_params = Arc::new(RwLock::new(SessionConfig::default()));
@@ -922,6 +929,27 @@ impl SessionImpl {
         Ok(connection.clone())
     }
 
+    pub fn get_subscription_by_schema_id_name(
+        &self,
+        schema_id: SchemaId,
+        subscription_name: &str,
+    ) -> Result<Arc<SubscriptionCatalog>> {
+        let db_name = self.database();
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
+        let schema = catalog_reader.get_schema_by_id(&db_id, &schema_id)?;
+        let subscription = schema
+            .get_subscription_by_name(subscription_name)
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::ItemNotFound(format!(
+                    "subscription {} not found",
+                    subscription_name
+                )))
+            })?;
+        Ok(subscription.clone())
+    }
+
     pub fn get_subscription_by_name(
         &self,
         schema_name: Option<String>,
@@ -972,16 +1000,41 @@ impl SessionImpl {
         Ok(table.clone())
     }
 
+    pub fn get_secret_by_name(
+        &self,
+        schema_name: Option<String>,
+        secret_name: &str,
+    ) -> Result<Arc<SecretCatalog>> {
+        let db_name = self.database();
+        let search_path = self.config().search_path();
+        let user_name = &self.auth_context().user_name;
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let schema = match schema_name {
+            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
+            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
+        };
+        let schema = catalog_reader.get_schema_by_name(db_name, schema.name().as_str())?;
+        let secret = schema.get_secret_by_name(secret_name).ok_or_else(|| {
+            RwError::from(ErrorCode::ItemNotFound(format!(
+                "secret {} not found",
+                secret_name
+            )))
+        })?;
+        Ok(secret.clone())
+    }
+
     pub async fn list_change_log_epochs(
         &self,
         table_id: u32,
         min_epoch: u64,
         max_count: u32,
     ) -> Result<Vec<u64>> {
-        self.env
-            .catalog_writer
+        Ok(self
+            .env
+            .meta_client()
             .list_change_log_epochs(table_id, min_epoch, max_count)
-            .await
+            .await?)
     }
 
     pub fn clear_cancel_query_flag(&self) {
@@ -1182,10 +1235,18 @@ impl SessionManager for SessionManagerImpl {
     fn end_session(&self, session: &Self::Session) {
         self.delete_session(&session.session_id());
     }
+
+    async fn shutdown(&self) {
+        // Clean up the session map.
+        self.env.sessions_map().write().clear();
+        // Unregister from the meta service.
+        self.env.meta_client().try_unregister().await;
+    }
 }
 
 impl SessionManagerImpl {
     pub async fn new(opts: FrontendOpts) -> Result<Self> {
+        // TODO(shutdown): only save join handles that **need** to be shutdown
         let (env, join_handles, shutdown_senders) = FrontendEnv::init(opts).await?;
         Ok(Self {
             env,

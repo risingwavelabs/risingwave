@@ -15,6 +15,7 @@
 use risingwave_batch::error::BatchError;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, NoFunction, NotImplemented};
+use risingwave_common::secret::SecretError;
 use risingwave_common::session_config::SessionConfigError;
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_connector::error::ConnectorError;
@@ -163,6 +164,12 @@ pub enum ErrorCode {
         #[from]
         #[backtrace]
         SessionConfigError,
+    ),
+    #[error("Secret error: {0}")]
+    SecretError(
+        #[from]
+        #[backtrace]
+        SecretError,
     ),
     #[error("{0} has been deprecated, please use {1} instead.")]
     Deprecated(String, String),

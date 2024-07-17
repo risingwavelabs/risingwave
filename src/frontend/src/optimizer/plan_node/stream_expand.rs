@@ -33,6 +33,7 @@ pub struct StreamExpand {
 impl StreamExpand {
     pub fn new(core: generic::Expand<PlanRef>) -> Self {
         let input = core.input.clone();
+        let input_len = input.schema().len();
 
         let dist = match input.distribution() {
             Distribution::Single => Distribution::Single,
@@ -43,12 +44,7 @@ impl StreamExpand {
         };
 
         let mut watermark_columns = FixedBitSet::with_capacity(core.output_len());
-        watermark_columns.extend(
-            input
-                .watermark_columns()
-                .ones()
-                .map(|idx| idx + input.schema().len()),
-        );
+        watermark_columns.extend(input.watermark_columns().ones().map(|idx| idx + input_len));
 
         let base = PlanBase::new_stream_with_core(
             &core,

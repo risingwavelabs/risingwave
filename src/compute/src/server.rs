@@ -28,7 +28,8 @@ use risingwave_common::config::{
     MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
 };
 use risingwave_common::lru::init_global_sequencer_args;
-use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
+use risingwave_common::monitor::{RouterExt, TcpConfig};
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -38,9 +39,7 @@ use risingwave_common::util::pretty_bytes::convert;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
-use risingwave_common_service::metrics_manager::MetricsManager;
-use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_common_service::tracing::TracingExtractLayer;
+use risingwave_common_service::{MetricsManager, ObserverManager, TracingExtractLayer};
 use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
 use risingwave_dml::dml_manager::DmlManager;
 use risingwave_pb::common::WorkerType;
@@ -216,6 +215,12 @@ pub async fn compute_node_serve(
     )
     .await
     .unwrap();
+
+    LocalSecretManager::init(
+        opts.temp_secret_file_dir,
+        meta_client.cluster_id().to_string(),
+        worker_id,
+    );
 
     // Initialize observer manager.
     let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params.clone()));
@@ -456,9 +461,10 @@ pub async fn compute_node_serve(
     // All set, let the meta service know we're ready.
     meta_client.activate(&advertise_addr).await.unwrap();
     // Wait for the shutdown signal.
-    let _ = shutdown.cancelled().await;
+    shutdown.cancelled().await;
 
-    // TODO(shutdown): gracefully unregister from the meta service.
+    // TODO(shutdown): gracefully unregister from the meta service (need to cautious since it may
+    // trigger auto-scaling)
 
     // NOTE(shutdown): We can't simply join the tonic server here because it only returns when all
     // existing connections are closed, while we have long-running streaming calls that never

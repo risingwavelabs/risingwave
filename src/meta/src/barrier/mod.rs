@@ -31,14 +31,15 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
+use risingwave_hummock_sdk::table_stats::from_prost_table_stats_map;
 use risingwave_hummock_sdk::table_watermark::{
     merge_multiple_new_table_watermarks, TableWatermarks,
 };
-use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
+use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo};
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::PausedReason;
+use risingwave_pb::meta::{PausedReason, PbRecoveryStatus};
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use thiserror_ext::AsReport;
@@ -62,7 +63,6 @@ use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
     MetadataManager, SystemParamsManagerImpl, WorkerId,
 };
-use crate::model::{ActorId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::stream::{ScaleControllerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -87,12 +87,6 @@ pub(crate) struct TableMap<T> {
     inner: HashMap<TableId, T>,
 }
 
-impl<T> TableMap<T> {
-    pub fn remove(&mut self, table_id: &TableId) -> Option<T> {
-        self.inner.remove(table_id)
-    }
-}
-
 impl<T> From<HashMap<TableId, T>> for TableMap<T> {
     fn from(inner: HashMap<TableId, T>) -> Self {
         Self { inner }
@@ -104,12 +98,6 @@ impl<T> From<TableMap<T>> for HashMap<TableId, T> {
         table_map.inner
     }
 }
-
-pub(crate) type TableActorMap = TableMap<HashSet<ActorId>>;
-pub(crate) type TableUpstreamMvCountMap = TableMap<HashMap<TableId, usize>>;
-pub(crate) type TableDefinitionMap = TableMap<String>;
-pub(crate) type TableNotifierMap = TableMap<Notifier>;
-pub(crate) type TableFragmentMap = TableMap<TableFragments>;
 
 /// The reason why the cluster is recovering.
 enum RecoveryReason {
@@ -139,6 +127,19 @@ struct Scheduled {
     span: tracing::Span,
     /// Choose a different barrier(checkpoint == true) according to it
     checkpoint: bool,
+}
+
+impl From<&BarrierManagerStatus> for PbRecoveryStatus {
+    fn from(status: &BarrierManagerStatus) -> Self {
+        match status {
+            BarrierManagerStatus::Starting => Self::StatusStarting,
+            BarrierManagerStatus::Recovering(reason) => match reason {
+                RecoveryReason::Bootstrap => Self::StatusStarting,
+                RecoveryReason::Failover(_) | RecoveryReason::Adhoc => Self::StatusRecovering,
+            },
+            BarrierManagerStatus::Running => Self::StatusRunning,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -753,10 +754,10 @@ impl GlobalBarrierManager {
 
         send_latency_timer.observe_duration();
 
-        let node_to_collect = match self
-            .control_stream_manager
-            .inject_barrier(command_ctx.clone())
-        {
+        let node_to_collect = match self.control_stream_manager.inject_barrier(
+            command_ctx.clone(),
+            self.state.inflight_actor_infos.existing_table_ids(),
+        ) {
             Ok(node_to_collect) => node_to_collect,
             Err(err) => {
                 for notifier in notifiers {
@@ -788,7 +789,12 @@ impl GlobalBarrierManager {
     }
 
     async fn failure_recovery(&mut self, err: MetaError) {
-        self.context.tracker.lock().await.abort_all(&err);
+        self.context
+            .tracker
+            .lock()
+            .await
+            .abort_all(&err, &self.context)
+            .await;
         self.checkpoint_control.clear_on_err(&err).await;
         self.pending_non_checkpoint_barriers.clear();
 
@@ -816,27 +822,28 @@ impl GlobalBarrierManager {
 
     async fn adhoc_recovery(&mut self) {
         let err = MetaErrorInner::AdhocRecovery.into();
-        self.context.tracker.lock().await.abort_all(&err);
+        self.context
+            .tracker
+            .lock()
+            .await
+            .abort_all(&err, &self.context)
+            .await;
         self.checkpoint_control.clear_on_err(&err).await;
 
-        if self.enable_recovery {
-            self.context
-                .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Adhoc));
-            let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
-            let span = tracing::info_span!(
-                "adhoc_recovery",
-                error = %err.as_report(),
-                prev_epoch = prev_epoch.value().0
-            );
+        self.context
+            .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Adhoc));
+        let latest_snapshot = self.context.hummock_manager.latest_snapshot();
+        let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
+        let span = tracing::info_span!(
+            "adhoc_recovery",
+            error = %err.as_report(),
+            prev_epoch = prev_epoch.value().0
+        );
 
-            // No need to clean dirty tables for barrier recovery,
-            // The foreground stream job should cleanup their own tables.
-            self.recovery(None).instrument(span).await;
-            self.context.set_status(BarrierManagerStatus::Running);
-        } else {
-            panic!("failed to execute barrier: {}", err.as_report());
-        }
+        // No need to clean dirty tables for barrier recovery,
+        // The foreground stream job should cleanup their own tables.
+        self.recovery(None).instrument(span).await;
+        self.context.set_status(BarrierManagerStatus::Running);
     }
 }
 
@@ -845,7 +852,7 @@ impl GlobalBarrierManagerContext {
     async fn complete_barrier(self, node: EpochNode) -> MetaResult<BarrierCompleteOutput> {
         let EpochNode {
             command_ctx,
-            mut notifiers,
+            notifiers,
             enqueue_time,
             state,
             ..
@@ -863,11 +870,11 @@ impl GlobalBarrierManagerContext {
             }
             return Err(e);
         };
-        notifiers.iter_mut().for_each(|notifier| {
+        notifiers.into_iter().for_each(|notifier| {
             notifier.notify_collected();
         });
         let has_remaining = self
-            .update_tracking_jobs(notifiers, command_ctx.clone(), create_mview_progress)
+            .update_tracking_jobs(command_ctx.clone(), create_mview_progress)
             .await?;
         let duration_sec = enqueue_time.stop_and_record();
         self.report_complete_event(duration_sec, &command_ctx);
@@ -929,7 +936,6 @@ impl GlobalBarrierManagerContext {
 
     async fn update_tracking_jobs(
         &self,
-        notifiers: Vec<Notifier>,
         command_ctx: Arc<CommandContext>,
         create_mview_progress: Vec<CreateMviewProgress>,
     ) -> MetaResult<bool> {
@@ -946,7 +952,6 @@ impl GlobalBarrierManagerContext {
                     if let Some(command) = tracker.add(
                         TrackingCommand {
                             context: command_ctx.clone(),
-                            notifiers,
                         },
                         &version_stats,
                     ) {
@@ -1069,6 +1074,10 @@ impl GlobalBarrierManagerContext {
         }
     }
 
+    pub fn get_recovery_status(&self) -> PbRecoveryStatus {
+        (&**self.status.load()).into()
+    }
+
     /// Set barrier manager status.
     fn set_status(&self, new_status: BarrierManagerStatus) {
         self.status.store(Arc::new(new_status));
@@ -1150,17 +1159,16 @@ fn collect_commit_epoch_info(
     epochs: &Vec<u64>,
 ) -> CommitEpochInfo {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, WorkerId> = HashMap::new();
-    let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
+    let mut synced_ssts: Vec<LocalSstableInfo> = vec![];
     let mut table_watermarks = Vec::with_capacity(resps.len());
     let mut old_value_ssts = Vec::with_capacity(resps.len());
     for resp in resps {
         let ssts_iter = resp.synced_sstables.into_iter().map(|grouped| {
             let sst_info = grouped.sst.expect("field not None");
             sst_to_worker.insert(sst_info.get_object_id(), resp.worker_id);
-            ExtendedSstableInfo::new(
-                grouped.compaction_group_id,
+            LocalSstableInfo::new(
                 sst_info,
-                grouped.table_stats_map,
+                from_prost_table_stats_map(grouped.table_stats_map),
             )
         });
         synced_ssts.extend(ssts_iter);
