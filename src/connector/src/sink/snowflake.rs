@@ -30,7 +30,8 @@ use uuid::Uuid;
 use with_options::WithOptions;
 
 use super::encoder::{
-    JsonEncoder, RowEncoder, TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode,
+    JsonEncoder, JsonbHandlingMode, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
+    TimestamptzHandlingMode,
 };
 use super::snowflake_connector::{generate_s3_file_name, SnowflakeHttpClient, SnowflakeS3Client};
 use super::writer::LogSinkerOf;
@@ -231,6 +232,7 @@ impl SnowflakeSinkWriter {
                 TimestampHandlingMode::String,
                 TimestamptzHandlingMode::UtcString,
                 TimeHandlingMode::String,
+                JsonbHandlingMode::String,
             ),
             // initial value of `epoch` will be set to 0
             epoch: 0,
