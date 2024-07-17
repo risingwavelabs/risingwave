@@ -548,7 +548,7 @@ message UpdateStreamingJobResponse {}
 
 message GetStreamingJobsRequest {}
 
-// returns descriptions of MVs and sinks
+// Descriptions of MVs and sinks
 message GetStreamingJobResponse {
   repeated catalog.Table materialized_views = 1;
   repeated catalog.Sink sinks = 2;
