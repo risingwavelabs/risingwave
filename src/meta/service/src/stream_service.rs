@@ -388,7 +388,7 @@ impl StreamManagerService for StreamServiceImpl {
                         actor_id: actor_location.actor_id as _,
                         fragment_id: actor_location.fragment_id as _,
                         state: PbActorState::from(actor_location.status) as _,
-                        worker_id: actor_location.worker_id,
+                        worker_id: actor_location.worker_id as _,
                     })
                     .collect_vec()
             }
