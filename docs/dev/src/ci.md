@@ -32,7 +32,6 @@ To run `e2e-test` and `e2e-source-test` for `main-cron` in your pull request:
        under the conditions for each step.
 
 Example you can try on [buildkite](https://buildkite.com/risingwavelabs/main-cron-bisect/builds/#new):
-- Branch: `kwannoel/find-regress`
 - Environment variables:
   ```
   START_COMMIT=29791ddf16fdf2c2e83ad3a58215f434e610f89a
