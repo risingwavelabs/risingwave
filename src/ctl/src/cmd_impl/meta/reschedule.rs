@@ -142,6 +142,7 @@ pub async fn reschedule(
     Ok(())
 }
 
+// It will match formats like `1:[1:+1,2:-1,3:1];2:[1:1,2:1]`, indicating which workers' actors need to change in quantity for each fragment.
 fn parse_plan(mut plan: String) -> Result<HashMap<u32, PbWorkerReschedule>> {
     let mut reschedules = HashMap::new();
     let regex = Regex::new(r"^(\d+):\[((?:\d+:[+-]?\d+,?)+)]$")?;
