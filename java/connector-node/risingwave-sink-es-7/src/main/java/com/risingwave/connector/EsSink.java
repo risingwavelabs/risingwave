@@ -60,10 +60,10 @@ public class EsSink extends SinkWriterBase {
         // Count of write tasks in progress
         private int taskCount = 0;
 
-        private Integer maxTaskCount;
+        private Integer maxTaskNum;
 
-        public RequestTracker(Integer maxTaskCount) {
-            this.maxTaskCount = maxTaskCount;
+        public RequestTracker(Integer maxTaskNum) {
+            this.maxTaskNum = maxTaskNum;
         }
 
         void addErrResult(String errorMsg) {
@@ -81,7 +81,7 @@ public class EsSink extends SinkWriterBase {
                 if ((esWriteResultResp = this.blockingQueue.poll(10, TimeUnit.MILLISECONDS))
                         != null) {
                     checkEsWriteResultResp(esWriteResultResp);
-                } else if (taskCount >= maxTaskCount) {
+                } else if (taskCount >= maxTaskNum) {
                     continue;
                 } else {
                     return;
@@ -155,10 +155,10 @@ public class EsSink extends SinkWriterBase {
         }
 
         this.config = config;
-        if (config.getMaxTaskCount() == null) {
+        if (config.getMaxTaskNum() == null) {
             this.requestTracker = new RequestTracker(Integer.MAX_VALUE);
         } else {
-            this.requestTracker = new RequestTracker(config.getMaxTaskCount());
+            this.requestTracker = new RequestTracker(config.getMaxTaskNum());
         }
 
         // ApiCompatibilityMode is enabled to ensure the client can talk to newer version es sever.
