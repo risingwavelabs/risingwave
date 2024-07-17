@@ -73,7 +73,7 @@ public class OpensearchBulkProcessorAdapter implements BulkProcessorAdapter {
     }
 
     @Override
-    public void addRow(String index, String key, String doc) {
+    public void addRow(String index, String key, String doc) throws InterruptedException {
         UpdateRequest updateRequest;
         updateRequest = new UpdateRequest(index, key).doc(doc, XContentType.JSON);
         updateRequest.docAsUpsert(true);
@@ -82,7 +82,7 @@ public class OpensearchBulkProcessorAdapter implements BulkProcessorAdapter {
     }
 
     @Override
-    public void deleteRow(String index, String key) {
+    public void deleteRow(String index, String key) throws InterruptedException {
         DeleteRequest deleteRequest;
         deleteRequest = new DeleteRequest(index, key);
         this.requestTracker.addWriteTask();
