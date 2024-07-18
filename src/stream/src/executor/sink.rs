@@ -563,6 +563,7 @@ mod test {
             sink_id: 0.into(),
             sink_name: "test".into(),
             properties,
+
             columns: columns
                 .iter()
                 .filter(|col| !col.is_hidden)
@@ -691,6 +692,7 @@ mod test {
             sink_id: 0.into(),
             sink_name: "test".into(),
             properties,
+
             columns: columns
                 .iter()
                 .filter(|col| !col.is_hidden)
@@ -792,6 +794,7 @@ mod test {
             sink_id: 0.into(),
             sink_name: "test".into(),
             properties,
+
             columns: columns
                 .iter()
                 .filter(|col| !col.is_hidden)

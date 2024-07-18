@@ -74,10 +74,11 @@ impl Planner {
     pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
         let as_of = base_table.as_of.clone();
         match as_of {
-            None | Some(AsOf::ProcessTime) => {}
-            Some(AsOf::TimestampString(_)) | Some(AsOf::TimestampNum(_)) => {
-                bail_not_implemented!("As Of Timestamp is not supported yet.")
-            }
+            None
+            | Some(AsOf::ProcessTime)
+            | Some(AsOf::TimestampNum(_))
+            | Some(AsOf::TimestampString(_))
+            | Some(AsOf::ProcessTimeWithInterval(_)) => {}
             Some(AsOf::VersionNum(_)) | Some(AsOf::VersionString(_)) => {
                 bail_not_implemented!("As Of Version is not supported yet.")
             }
@@ -111,7 +112,7 @@ impl Planner {
                 | Some(AsOf::VersionNum(_))
                 | Some(AsOf::TimestampString(_))
                 | Some(AsOf::TimestampNum(_)) => {}
-                Some(AsOf::ProcessTime) => {
+                Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
                     bail_not_implemented!("As Of ProcessTime() is not supported yet.")
                 }
                 Some(AsOf::VersionString(_)) => {

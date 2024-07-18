@@ -123,12 +123,6 @@ impl ControlStreamHandle {
         }
     }
 
-    fn inspect_result(&mut self, result: StreamResult<()>) {
-        if let Err(e) = result {
-            self.reset_stream_with_err(e.to_status_unnamed(Code::Internal));
-        }
-    }
-
     fn send_response(&mut self, response: StreamingControlStreamResponse) {
         if let Some((sender, _)) = self.pair.as_ref() {
             if sender.send(Ok(response)).is_err() {
@@ -377,7 +371,8 @@ pub(super) struct LocalBarrierWorker {
 
     actor_failure_rx: UnboundedReceiver<(ActorId, StreamError)>,
 
-    root_failure: Option<StreamError>,
+    /// Cached result of [`Self::try_find_root_failure`].
+    cached_root_failure: Option<StreamError>,
 }
 
 impl LocalBarrierWorker {
@@ -406,7 +401,7 @@ impl LocalBarrierWorker {
             current_shared_context: shared_context,
             barrier_event_rx: event_rx,
             actor_failure_rx: failure_rx,
-            root_failure: None,
+            cached_root_failure: None,
         }
     }
 
@@ -434,14 +429,16 @@ impl LocalBarrierWorker {
                 }
                 completed_epoch = self.state.next_completed_epoch() => {
                     let result = self.on_epoch_completed(completed_epoch);
-                    self.control_stream_handle.inspect_result(result);
+                    if let Err(err) = result {
+                        self.notify_other_failure(err, "failed to complete epoch").await;
+                    }
                 },
                 event = self.barrier_event_rx.recv() => {
                     self.handle_barrier_event(event.expect("should not be none"));
                 },
                 failure = self.actor_failure_rx.recv() => {
                     let (actor_id, err) = failure.unwrap();
-                    self.notify_failure(actor_id, err).await;
+                    self.notify_actor_failure(actor_id, err).await;
                 },
                 actor_op = actor_op_rx.recv() => {
                     if let Some(actor_op) = actor_op {
@@ -465,7 +462,9 @@ impl LocalBarrierWorker {
                 },
                 request = self.control_stream_handle.next_request() => {
                     let result = self.handle_streaming_control_request(request);
-                    self.control_stream_handle.inspect_result(result);
+                    if let Err(err) = result {
+                        self.notify_other_failure(err, "failed to inject barrier").await;
+                    }
                 },
             }
         }
@@ -623,11 +622,9 @@ impl LocalBarrierWorker {
                             .into_iter()
                             .map(
                                 |LocalSstableInfo {
-                                     compaction_group_id,
                                      sst_info,
                                      table_stats,
                                  }| GroupedSstableInfo {
-                                    compaction_group_id,
                                     sst: Some(sst_info),
                                     table_stats_map: to_prost_table_stats_map(table_stats),
                                 },
@@ -666,6 +663,10 @@ impl LocalBarrierWorker {
 
     /// Broadcast a barrier to all senders. Save a receiver which will get notified when this
     /// barrier is finished, in managed mode.
+    ///
+    /// Note that the error returned here is typically a [`StreamError::barrier_send`], which is not
+    /// the root cause of the failure. The caller should then call [`Self::try_find_root_failure`]
+    /// to find the root cause.
     fn send_barrier(
         &mut self,
         barrier: &Barrier,
@@ -673,8 +674,7 @@ impl LocalBarrierWorker {
         to_collect: HashSet<ActorId>,
         table_ids: HashSet<TableId>,
     ) -> StreamResult<()> {
-        #[cfg(not(test))]
-        {
+        if !cfg!(test) {
             // The barrier might be outdated and been injected after recovery in some certain extreme
             // scenarios. So some newly creating actors in the barrier are possibly not rebuilt during
             // recovery. Check it here and return an error here if some actors are not found to
@@ -706,16 +706,16 @@ impl LocalBarrierWorker {
             to_collect
         );
 
-        // There must be some actors to collect from.
-        assert!(!to_collect.is_empty());
-
         for actor_id in &to_collect {
-            if let Some(e) = self.failure_actors.get(actor_id) {
+            if self.failure_actors.contains_key(actor_id) {
                 // The failure actors could exit before the barrier is issued, while their
                 // up-downstream actors could be stuck somehow. Return error directly to trigger the
                 // recovery.
-                // try_find_root_failure is not used merely because it requires async.
-                return Err(self.root_failure.clone().unwrap_or(e.clone()));
+                return Err(StreamError::barrier_send(
+                    barrier.clone(),
+                    *actor_id,
+                    "actor has already failed",
+                ));
             }
         }
 
@@ -771,11 +771,11 @@ impl LocalBarrierWorker {
         self.state.collect(actor_id, epoch)
     }
 
-    /// When a actor exit unexpectedly, it should report this event using this function, so meta
-    /// will notice actor's exit while collecting.
-    async fn notify_failure(&mut self, actor_id: ActorId, err: StreamError) {
+    /// When a actor exit unexpectedly, the error is reported using this function. The control stream
+    /// will be reset and the meta service will then trigger recovery.
+    async fn notify_actor_failure(&mut self, actor_id: ActorId, err: StreamError) {
         self.add_failure(actor_id, err.clone());
-        let root_err = self.try_find_root_failure().await;
+        let root_err = self.try_find_root_failure().await.unwrap(); // always `Some` because we just added one
 
         let failed_epochs = self.state.epochs_await_on_actor(actor_id).collect_vec();
         if !failed_epochs.is_empty() {
@@ -790,6 +790,21 @@ impl LocalBarrierWorker {
         }
     }
 
+    /// When some other failure happens (like failed to send barrier), the error is reported using
+    /// this function. The control stream will be reset and the meta service will then trigger recovery.
+    ///
+    /// This is similar to [`Self::notify_actor_failure`], but since there's not always an actor failure,
+    /// the given `err` will be used if there's no root failure found.
+    async fn notify_other_failure(&mut self, err: StreamError, message: impl Into<String>) {
+        let root_err = self.try_find_root_failure().await.unwrap_or(err);
+
+        self.control_stream_handle.reset_stream_with_err(
+            anyhow!(root_err)
+                .context(message.into())
+                .to_status_unnamed(Code::Internal),
+        );
+    }
+
     fn add_failure(&mut self, actor_id: ActorId, err: StreamError) {
         if let Some(prev_err) = self.failure_actors.insert(actor_id, err) {
             warn!(
@@ -800,9 +815,12 @@ impl LocalBarrierWorker {
         }
     }
 
-    async fn try_find_root_failure(&mut self) -> StreamError {
-        if let Some(root_failure) = &self.root_failure {
-            return root_failure.clone();
+    /// Collect actor errors for a while and find the one that might be the root cause.
+    ///
+    /// Returns `None` if there's no actor error received.
+    async fn try_find_root_failure(&mut self) -> Option<StreamError> {
+        if self.cached_root_failure.is_some() {
+            return self.cached_root_failure.clone();
         }
         // fetch more actor errors within a timeout
         let _ = tokio::time::timeout(Duration::from_secs(3), async {
@@ -811,11 +829,9 @@ impl LocalBarrierWorker {
             }
         })
         .await;
-        self.root_failure = try_find_root_actor_failure(self.failure_actors.values());
+        self.cached_root_failure = try_find_root_actor_failure(self.failure_actors.values());
 
-        self.root_failure
-            .clone()
-            .expect("failure actors should not be empty")
+        self.cached_root_failure.clone()
     }
 }
 
@@ -923,6 +939,8 @@ impl LocalBarrierManager {
 }
 
 /// Tries to find the root cause of actor failures, based on hard-coded rules.
+///
+/// Returns `None` if the input is empty.
 pub fn try_find_root_actor_failure<'a>(
     actor_errors: impl IntoIterator<Item = &'a StreamError>,
 ) -> Option<StreamError> {
@@ -968,7 +986,8 @@ pub fn try_find_root_actor_failure<'a>(
             | ErrorKind::Storage(_)
             | ErrorKind::Expression(_)
             | ErrorKind::Array(_)
-            | ErrorKind::Sink(_) => 1000,
+            | ErrorKind::Sink(_)
+            | ErrorKind::Secret(_) => 1000,
         }
     }
 

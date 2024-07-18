@@ -50,7 +50,8 @@ struct IssuedState {
 
     pub barrier_inflight_latency: HistogramTimer,
 
-    pub table_ids: HashSet<TableId>,
+    /// Only be `Some(_)` when `kind` is `Checkpoint`
+    pub table_ids: Option<HashSet<TableId>>,
 
     pub kind: BarrierKind,
 }
@@ -203,6 +204,8 @@ pub(super) struct ManagedBarrierState {
 
     mutation_subscribers: HashMap<ActorId, ActorMutationSubscribers>,
 
+    prev_barrier_table_ids: Option<(EpochPair, HashSet<TableId>)>,
+
     /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
     pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
 
@@ -236,6 +239,7 @@ impl ManagedBarrierState {
         Self {
             epoch_barrier_state_map: BTreeMap::default(),
             mutation_subscribers: Default::default(),
+            prev_barrier_table_ids: None,
             create_mview_progress: Default::default(),
             state_store,
             streaming_metrics,
@@ -404,7 +408,7 @@ impl ManagedBarrierState {
                             state_store,
                             &self.streaming_metrics,
                             prev_epoch,
-                            table_ids,
+                            table_ids.expect("should be Some on BarrierKind::Checkpoint"),
                         ))
                     })
                 }
@@ -528,6 +532,50 @@ impl ManagedBarrierState {
             .streaming_metrics
             .barrier_inflight_latency
             .start_timer();
+
+        if let Some(hummock) = self.state_store.as_hummock() {
+            hummock.start_epoch(barrier.epoch.curr, table_ids.clone());
+        }
+
+        let table_ids = match barrier.kind {
+            BarrierKind::Unspecified => {
+                unreachable!()
+            }
+            BarrierKind::Initial => {
+                assert!(
+                    self.prev_barrier_table_ids.is_none(),
+                    "non empty table_ids at initial barrier: {:?}",
+                    self.prev_barrier_table_ids
+                );
+                info!(epoch = ?barrier.epoch, "initialize at Initial barrier");
+                self.prev_barrier_table_ids = Some((barrier.epoch, table_ids));
+                None
+            }
+            BarrierKind::Barrier => {
+                if let Some((prev_epoch, prev_table_ids)) = self.prev_barrier_table_ids.as_mut() {
+                    assert_eq!(prev_epoch.curr, barrier.epoch.prev);
+                    assert_eq!(prev_table_ids, &table_ids);
+                    *prev_epoch = barrier.epoch;
+                } else {
+                    info!(epoch = ?barrier.epoch, "initialize at non-checkpoint barrier");
+                    self.prev_barrier_table_ids = Some((barrier.epoch, table_ids));
+                }
+                None
+            }
+            BarrierKind::Checkpoint => Some(
+                if let Some((prev_epoch, prev_table_ids)) = self
+                    .prev_barrier_table_ids
+                    .replace((barrier.epoch, table_ids))
+                {
+                    assert_eq!(prev_epoch.curr, barrier.epoch.prev);
+                    prev_table_ids
+                } else {
+                    info!(epoch = ?barrier.epoch, "initialize at Checkpoint barrier");
+                    HashSet::new()
+                },
+            ),
+        };
+
         if let Some(BarrierState { ref inner, .. }) =
             self.epoch_barrier_state_map.get_mut(&barrier.epoch.prev)
         {

@@ -83,7 +83,6 @@ pub async fn compact(
 
     let mut new_value_futures = vec![];
     for (id, group_payload) in grouped_payload {
-        let id_copy = id;
         new_value_futures.push(
             compact_shared_buffer::<true>(
                 context.clone(),
@@ -91,15 +90,7 @@ pub async fn compact(
                 filter_key_extractor_manager.clone(),
                 group_payload,
             )
-            .map_ok(move |results| {
-                results
-                    .into_iter()
-                    .map(move |mut result| {
-                        result.compaction_group_id = id_copy;
-                        result
-                    })
-                    .collect_vec()
-            })
+            .map_ok(move |results| results.into_iter())
             .instrument_await(format!("shared_buffer_compact_compaction_group {}", id)),
         );
     }

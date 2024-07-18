@@ -39,7 +39,8 @@ use tokio::task::JoinHandle;
 
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::model::{
-    InMemValTransaction, MetadataModel, ValTransaction, VarTransaction, Worker, INVALID_EXPIRE_AT,
+    ClusterId, InMemValTransaction, MetadataModel, ValTransaction, VarTransaction, Worker,
+    INVALID_EXPIRE_AT,
 };
 use crate::storage::{MetaStore, Transaction};
 use crate::{MetaError, MetaResult};
@@ -538,6 +539,10 @@ impl ClusterManager {
 
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> Option<Worker> {
         self.core.read().await.get_worker_by_id(worker_id)
+    }
+
+    pub fn cluster_id(&self) -> &ClusterId {
+        self.env.cluster_id()
     }
 }
 

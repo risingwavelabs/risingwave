@@ -514,10 +514,26 @@ impl IcebergConfig {
                 Ok(Arc::new(catalog))
             }
             "rest" => {
+                let mut iceberg_configs = HashMap::new();
+                if let Some(region) = &self.region {
+                    iceberg_configs.insert(S3_REGION.to_string(), region.clone().to_string());
+                }
+                if let Some(endpoint) = &self.endpoint {
+                    iceberg_configs.insert(S3_ENDPOINT.to_string(), endpoint.clone().to_string());
+                }
+                iceberg_configs.insert(
+                    S3_ACCESS_KEY_ID.to_string(),
+                    self.access_key.clone().to_string(),
+                );
+                iceberg_configs.insert(
+                    S3_SECRET_ACCESS_KEY.to_string(),
+                    self.secret_key.clone().to_string(),
+                );
                 let config = iceberg_catalog_rest::RestCatalogConfig::builder()
                     .uri(self.uri.clone().ok_or_else(|| {
                         SinkError::Iceberg(anyhow!("`catalog.uri` must be set in rest catalog"))
                     })?)
+                    .props(iceberg_configs)
                     .build();
                 let catalog = iceberg_catalog_rest::RestCatalog::new(config).await?;
                 Ok(Arc::new(catalog))
