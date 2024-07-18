@@ -262,7 +262,9 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         if idle_input {
                             barrier_num_during_idle += 1;
 
-                            if barrier_num_during_idle == UPDATE_GLIOBAL_WATERMARK_FREQUENCY_WHEN_IDLE {
+                            if barrier_num_during_idle
+                                == UPDATE_GLIOBAL_WATERMARK_FREQUENCY_WHEN_IDLE
+                            {
                                 barrier_num_during_idle = 0;
                                 // Align watermark
                                 // NOTE(st1page): Should be `NoWait` because it could lead to a degradation of concurrent checkpoint situations, as it would require waiting for the previous epoch
