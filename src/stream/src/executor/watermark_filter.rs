@@ -105,8 +105,12 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         yield Message::Barrier(first_barrier);
 
         // Initiate and yield the first watermark.
-        let mut current_watermark =
-            Self::get_global_max_watermark(&table, &global_watermark_table, prev_epoch).await?;
+        let mut current_watermark = Self::get_global_max_watermark(
+            &table,
+            &global_watermark_table,
+            HummockReadEpoch::Committed(prev_epoch),
+        )
+        .await?;
 
         let mut last_checkpoint_watermark = None;
 
@@ -227,7 +231,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                             current_watermark = Self::get_global_max_watermark(
                                 &table,
                                 &global_watermark_table,
-                                prev_epoch,
+                                HummockReadEpoch::Committed(prev_epoch),
                             )
                             .await?;
                         }
@@ -252,11 +256,11 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     if is_checkpoint {
                         if idle_input {
                             // Align watermark
-                            // NOTE(st1page): This could lead to a degradation of concurrent checkpoint situations, as it would require waiting for the previous epoch
+                            // NOTE(st1page): Should be `NoWait` because it could lead to a degradation of concurrent checkpoint situations, as it would require waiting for the previous epoch
                             let global_max_watermark = Self::get_global_max_watermark(
                                 &table,
                                 &global_watermark_table,
-                                prev_epoch,
+                                HummockReadEpoch::NoWait(prev_epoch),
                             )
                             .await?;
 
@@ -309,7 +313,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
     async fn get_global_max_watermark(
         table: &StateTable<S>,
         global_watermark_table: &StorageTable<S>,
-        prev_epoch: u64,
+        wait_epoch: HummockReadEpoch,
     ) -> StreamExecutorResult<Option<ScalarImpl>> {
         let handle_watermark_row = |watermark_row: Option<OwnedRow>| match watermark_row {
             Some(row) => {
@@ -327,9 +331,8 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                 .iter_vnodes()
                 .map(|vnode| async move {
                     let pk = row::once(vnode.to_datum());
-                    let watermark_row: Option<OwnedRow> = global_watermark_table
-                        .get_row(pk, HummockReadEpoch::Committed(prev_epoch))
-                        .await?;
+                    let watermark_row: Option<OwnedRow> =
+                        global_watermark_table.get_row(pk, wait_epoch).await?;
                     handle_watermark_row(watermark_row)
                 });
         let local_watermark_iter_futures = table.vnodes().iter_vnodes().map(|vnode| async move {
