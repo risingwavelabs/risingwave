@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 // Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -31,7 +31,8 @@ use risingwave_hummock_sdk::key::{
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
-use risingwave_hummock_sdk::EpochWithGap;
+use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo, SyncResult};
+use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::version::read_filter_for_version;
@@ -2478,4 +2479,128 @@ async fn test_table_watermark() {
     let (_local1, _local2) = test_after_epoch2(local1, local2).await;
 
     test_global_read(test_env.storage.clone(), epoch3).await;
+}
+
+#[tokio::test]
+async fn test_commit_multi_epoch() {
+    let test_env = prepare_hummock_test_env().await;
+    let sr = SyncResult {
+        sync_size: 100,
+        uncommitted_ssts: vec![LocalSstableInfo {
+            sst_info: SstableInfo {
+                sst_id: 1,
+                object_id: 1,
+                ..Default::default()
+            },
+            table_stats: Default::default(),
+        }],
+        table_watermarks: HashMap::new(),
+        old_value_ssts: vec![],
+    };
+
+    let epoch_1 = test_epoch(1);
+    let epoch_to_ssts = vec![(
+        BTreeMap::from_iter([(
+            epoch_1,
+            vec![LocalSstableInfo {
+                sst_info: SstableInfo {
+                    sst_id: 2,
+                    object_id: 2,
+                    ..Default::default()
+                },
+                table_stats: Default::default(),
+            }],
+        )]),
+        vec![TableId::from(2)],
+    )];
+
+    test_env
+        .meta_client
+        .commit_multi_epoch(epoch_1, sr, epoch_to_ssts)
+        .await
+        .unwrap();
+
+    let v = test_env
+        .meta_client
+        .hummock_manager_ref()
+        .get_current_version()
+        .await;
+
+    let levels = &v.levels;
+    assert_eq!(3, levels.len());
+    let new_cg_id = 5;
+    let ssts = &levels
+        .get(&new_cg_id)
+        .unwrap()
+        .get_l0()
+        .unwrap()
+        .get_sub_levels()[0]
+        .table_infos;
+    assert_eq!(1, ssts.len());
+    let sst = &ssts[0];
+    assert_eq!(2, sst.get_sst_id());
+    assert!(v
+        .state_table_info
+        .compaction_group_member_table_ids(new_cg_id)
+        .contains(&TableId::from(2)));
+
+    let epoch_2 = epoch_1.next_epoch();
+
+    let sr = SyncResult {
+        sync_size: 100,
+        uncommitted_ssts: vec![LocalSstableInfo {
+            sst_info: SstableInfo {
+                sst_id: 3,
+                object_id: 3,
+                ..Default::default()
+            },
+            table_stats: Default::default(),
+        }],
+        table_watermarks: HashMap::new(),
+        old_value_ssts: vec![],
+    };
+    let epoch_to_ssts = vec![(
+        BTreeMap::from_iter([(
+            epoch_2,
+            vec![LocalSstableInfo {
+                sst_info: SstableInfo {
+                    sst_id: 4,
+                    object_id: 4,
+                    ..Default::default()
+                },
+                table_stats: Default::default(),
+            }],
+        )]),
+        vec![TableId::from(5)],
+    )];
+
+    test_env
+        .meta_client
+        .commit_multi_epoch(epoch_2, sr, epoch_to_ssts)
+        .await
+        .unwrap();
+
+    let v = test_env
+        .meta_client
+        .hummock_manager_ref()
+        .get_current_version()
+        .await;
+
+    let levels = &v.levels;
+    assert_eq!(4, levels.len());
+    let new_cg_id = 6;
+    let ssts = &levels
+        .get(&new_cg_id)
+        .unwrap()
+        .get_l0()
+        .unwrap()
+        .get_sub_levels()[0]
+        .table_infos;
+    assert_eq!(1, ssts.len());
+    let sst = &ssts[0];
+    assert_eq!(4, sst.get_sst_id());
+    assert!(v
+        .state_table_info
+        .compaction_group_member_table_ids(new_cg_id)
+        .contains(&TableId::from(5)));
 }

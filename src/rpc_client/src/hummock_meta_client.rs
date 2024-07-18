@@ -12,11 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
 use futures::stream::BoxStream;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    HummockEpoch, HummockSstableObjectId, HummockVersionId, SstObjectIdRange, SyncResult,
+    HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo, SstObjectIdRange,
+    SyncResult,
 };
 use risingwave_pb::hummock::{
     HummockSnapshot, PbHummockVersion, SubscribeCompactionEventRequest,
@@ -68,4 +72,11 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     )>;
 
     async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion>;
+
+    async fn commit_multi_epoch(
+        &self,
+        epoch: HummockEpoch,
+        sync_result: SyncResult,
+        batch_commit: Vec<(BTreeMap<HummockEpoch, Vec<LocalSstableInfo>>, Vec<TableId>)>,
+    ) -> Result<()>;
 }

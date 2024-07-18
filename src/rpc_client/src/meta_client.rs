@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Display};
 use std::sync::Arc;
 use std::thread;
@@ -37,8 +37,8 @@ use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, SstObjectIdRange,
-    SyncResult,
+    CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
+    SstObjectIdRange, SyncResult,
 };
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
@@ -1560,6 +1560,15 @@ impl HummockMetaClient for MetaClient {
 
     async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion> {
         self.get_version_by_epoch(epoch).await
+    }
+
+    async fn commit_multi_epoch(
+        &self,
+        _epoch: HummockEpoch,
+        _sync_result: SyncResult,
+        _batch_commit: Vec<(BTreeMap<HummockEpoch, Vec<LocalSstableInfo>>, Vec<TableId>)>,
+    ) -> Result<()> {
+        panic!("Only meta service can commit_multi_epoch in production.")
     }
 }
 
