@@ -20,6 +20,7 @@ use super::stream::prelude::PhysicalPlanRef;
 use super::stream::StreamPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode};
+use crate::optimizer::property::MonotonicityMap;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
@@ -33,19 +34,22 @@ impl StreamChangeLog {
     pub fn new(core: generic::ChangeLog<PlanRef>) -> Self {
         let input = core.input.clone();
         let dist = input.distribution().clone();
+        let input_len = input.schema().len();
         // Filter executor won't change the append-only behavior of the stream.
         let mut watermark_columns = input.watermark_columns().clone();
         if core.need_op {
-            watermark_columns.grow(input.watermark_columns().len() + 2);
+            watermark_columns.grow(input_len + 2);
         } else {
-            watermark_columns.grow(input.watermark_columns().len() + 1);
+            watermark_columns.grow(input_len + 1);
         }
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            input.append_only(),
+            // The changelog will convert all delete/update to insert, so it must be true here.
+            true,
             input.emit_on_window_close(),
             watermark_columns,
+            MonotonicityMap::new(), // TODO: derive monotonicity
         );
         StreamChangeLog { base, core }
     }

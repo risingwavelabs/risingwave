@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
-use risingwave_common::monitor::connection::{EndpointExt, TcpConfig};
+use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;

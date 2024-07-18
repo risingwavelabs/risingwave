@@ -49,7 +49,7 @@ use self::batch::BatchPlanRef;
 use self::generic::{GenericPlanRef, PhysicalPlanRef};
 use self::stream::StreamPlanRef;
 use self::utils::Distill;
-use super::property::{Distribution, FunctionalDependencySet, Order};
+use super::property::{Distribution, FunctionalDependencySet, MonotonicityMap, Order};
 use crate::error::{ErrorCode, Result};
 use crate::optimizer::ExpressionSimplifyRewriter;
 use crate::session::current::notice_to_user;
@@ -609,6 +609,10 @@ impl StreamPlanRef for PlanRef {
     fn watermark_columns(&self) -> &FixedBitSet {
         self.plan_base().watermark_columns()
     }
+
+    fn columns_monotonicity(&self) -> &MonotonicityMap {
+        self.plan_base().columns_monotonicity()
+    }
 }
 
 /// Allow access to all fields defined in [`BatchPlanRef`] for the type-erased plan node.
@@ -910,9 +914,11 @@ mod stream_topn;
 mod stream_values;
 mod stream_watermark_filter;
 
+mod batch_file_scan;
 mod batch_iceberg_scan;
 mod batch_kafka_scan;
 mod derive;
+mod logical_file_scan;
 mod logical_iceberg_scan;
 mod stream_cdc_table_scan;
 mod stream_share;
@@ -923,6 +929,7 @@ pub mod utils;
 pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
 pub use batch_expand::BatchExpand;
+pub use batch_file_scan::BatchFileScan;
 pub use batch_filter::BatchFilter;
 pub use batch_group_topn::BatchGroupTopN;
 pub use batch_hash_agg::BatchHashAgg;
@@ -959,6 +966,7 @@ pub use logical_dedup::LogicalDedup;
 pub use logical_delete::LogicalDelete;
 pub use logical_except::LogicalExcept;
 pub use logical_expand::LogicalExpand;
+pub use logical_file_scan::LogicalFileScan;
 pub use logical_filter::LogicalFilter;
 pub use logical_hop_window::LogicalHopWindow;
 pub use logical_iceberg_scan::LogicalIcebergScan;
@@ -1076,6 +1084,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, RecursiveUnion }
             , { Logical, CteRef }
             , { Logical, ChangeLog }
+            , { Logical, FileScan }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1106,6 +1115,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, MaxOneRow }
             , { Batch, KafkaScan }
             , { Batch, IcebergScan }
+            , { Batch, FileScan }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -1182,6 +1192,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, RecursiveUnion }
             , { Logical, CteRef }
             , { Logical, ChangeLog }
+            , { Logical, FileScan }
         }
     };
 }
@@ -1221,6 +1232,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, MaxOneRow }
             , { Batch, KafkaScan }
             , { Batch, IcebergScan }
+            , { Batch, FileScan }
         }
     };
 }

@@ -17,14 +17,14 @@ use std::sync::Arc;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::catalog::CreateType;
+use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
@@ -44,7 +44,7 @@ use tracing::warn;
 use super::info::{CommandActorChanges, CommandFragmentChanges, InflightActorInfo};
 use super::trace::TracedEpoch;
 use crate::barrier::GlobalBarrierManagerContext;
-use crate::manager::{DdlType, MetadataManager, WorkerId};
+use crate::manager::{DdlType, MetadataManager, StreamingJob, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
 use crate::MetaResult;
@@ -97,6 +97,10 @@ pub struct ReplaceTablePlan {
     /// Note that there's no `SourceBackfillExecutor` involved for table with connector, so we don't need to worry about
     /// `backfill_splits`.
     pub init_split_assignment: SplitAssignment,
+    /// The `StreamingJob` info of the table to be replaced. Must be `StreamingJob::Table`
+    pub streaming_job: StreamingJob,
+    /// The temporary dummy table fragments id of new table fragment
+    pub dummy_id: u32,
 }
 
 impl ReplaceTablePlan {
@@ -183,6 +187,8 @@ pub enum Command {
     /// for a while** until the `finish` channel is signaled, then the state of `TableFragments`
     /// will be set to `Created`.
     CreateStreamingJob {
+        streaming_job: StreamingJob,
+        internal_tables: Vec<Table>,
         table_fragments: TableFragments,
         /// Refer to the doc on [`MetadataManager::get_upstream_root_fragments`] for the meaning of "root".
         upstream_root_actors: HashMap<TableId, Vec<ActorId>>,
@@ -551,6 +557,7 @@ impl CommandContext {
                         merge_updates,
                         dispatchers,
                         init_split_assignment,
+                        ..
                     }) = replace_table
                     {
                         // TODO: support in v2.
@@ -944,7 +951,7 @@ impl CommandContext {
                         // The logic is the same as above, for hummock_manager.unregister_table_ids.
                         if let Err(e) = mgr
                             .catalog_manager
-                            .cancel_create_table_procedure(
+                            .cancel_create_materialized_view_procedure(
                                 table_fragments.table_id().table_id,
                                 table_fragments.internal_table_ids(),
                             )
@@ -1019,6 +1026,7 @@ impl CommandContext {
                             merge_updates,
                             dispatchers,
                             init_split_assignment,
+                            ..
                         }) = replace_table
                         {
                             self.clean_up(old_table_fragments.actor_ids()).await?;
@@ -1104,6 +1112,7 @@ impl CommandContext {
                 merge_updates,
                 dispatchers,
                 init_split_assignment,
+                ..
             }) => {
                 self.clean_up(old_table_fragments.actor_ids()).await?;
 

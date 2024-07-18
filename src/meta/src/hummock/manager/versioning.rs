@@ -24,7 +24,8 @@ use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
+    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableId, HummockSstableObjectId,
+    HummockVersionId,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
@@ -56,6 +57,9 @@ pub struct Versioning {
     /// Latest hummock version
     pub current_version: HummockVersion,
     pub local_metrics: HashMap<u32, LocalTableMetrics>,
+    pub time_travel_snapshot_interval_counter: u64,
+    /// Used to avoid the attempts to rewrite the same SST to meta store
+    pub last_time_travel_snapshot_sst_ids: HashSet<HummockSstableId>,
 
     // Persistent states below
     pub hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
@@ -94,6 +98,10 @@ impl Versioning {
                 .filter(|(version_id, _)| **version_id <= min_pinned_version_id)
                 .flat_map(|(_, stale_objects)| stale_objects.id.iter().cloned()),
         );
+    }
+
+    pub(super) fn mark_next_time_travel_version_snapshot(&mut self) {
+        self.time_travel_snapshot_interval_counter = u64::MAX;
     }
 }
 
