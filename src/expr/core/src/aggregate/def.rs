@@ -446,11 +446,13 @@ pub mod agg_kinds {
     macro_rules! ordered_set {
         () => {
             AggKind::Builtin(
-                PbAggKind::PercentileCont | PbAggKind::PercentileDisc | PbAggKind::Mode,
+                PbAggKind::PercentileCont | PbAggKind::PercentileDisc | PbAggKind::Mode | PbAggKind::ApproxPercentile
             )
         };
     }
     pub use ordered_set;
+
+    use crate::aggregate::{AggKind, PbAggKind};
 }
 
 impl AggKind {

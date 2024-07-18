@@ -511,6 +511,7 @@ impl Binder {
                 }
             }
             (AggKind::Builtin(PbAggKind::Mode), [], [_arg]) => {}
+            (AggKind::Builtin(PbAggKind::ApproxPercentile), [_arg, _arg2], [_arg3]) => {}
             _ => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "invalid direct args or within group argument for `{}` aggregation",
