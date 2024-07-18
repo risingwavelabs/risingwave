@@ -215,7 +215,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                 Message::Barrier(barrier) => {
                     let prev_epoch = barrier.epoch.prev;
                     let is_checkpoint = barrier.kind.is_checkpoint();
-
+                    let mut need_update_global_max_watermark = false;
                     // Update the vnode bitmap for state tables of all agg calls if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(ctx.id) {
                         let other_vnodes_bitmap = Arc::new(
@@ -228,12 +228,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
 
                         // Take the global max watermark when scaling happens.
                         if previous_vnode_bitmap != vnode_bitmap {
-                            current_watermark = Self::get_global_max_watermark(
-                                &table,
-                                &global_watermark_table,
-                                HummockReadEpoch::Committed(prev_epoch),
-                            )
-                            .await?;
+                            need_update_global_max_watermark = true;
                         }
                     }
 
@@ -252,6 +247,15 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
 
                     table.commit(barrier.epoch).await?;
                     yield Message::Barrier(barrier);
+
+                    if need_update_global_max_watermark {
+                        current_watermark = Self::get_global_max_watermark(
+                            &table,
+                            &global_watermark_table,
+                            HummockReadEpoch::Committed(prev_epoch),
+                        )
+                        .await?;
+                    }
 
                     if is_checkpoint {
                         if idle_input {
