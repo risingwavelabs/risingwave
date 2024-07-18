@@ -77,7 +77,7 @@ impl<S: StateStore> Execute for WatermarkFilterExecutor<S> {
         self.execute_inner().boxed()
     }
 }
-const UPDATE_GLIOBAL_WATERMARK_FREQUENCY: usize = 10;
+const UPDATE_GLIOBAL_WATERMARK_FREQUENCY_WHEN_IDLE: usize = 10;
 
 impl<S: StateStore> WatermarkFilterExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -262,7 +262,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         if idle_input {
                             barrier_num_during_idle += 1;
 
-                            if barrier_num_during_idle == UPDATE_GLIOBAL_WATERMARK_FREQUENCY {
+                            if barrier_num_during_idle == UPDATE_GLIOBAL_WATERMARK_FREQUENCY_WHEN_IDLE {
                                 barrier_num_during_idle = 0;
                                 // Align watermark
                                 // NOTE(st1page): Should be `NoWait` because it could lead to a degradation of concurrent checkpoint situations, as it would require waiting for the previous epoch
@@ -295,6 +295,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                             }
                         } else {
                             idle_input = true;
+                            barrier_num_during_idle = 0;
                         }
                     }
                 }
