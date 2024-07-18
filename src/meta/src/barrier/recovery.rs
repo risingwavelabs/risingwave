@@ -152,8 +152,7 @@ impl GlobalBarrierManagerContext {
         let version_stats = self.hummock_manager.get_version_stats().await;
         // If failed, enter recovery mode.
         {
-            let mut tracker = self.tracker.lock().await;
-            *tracker =
+            *self.tracker.lock() =
                 CreateMviewProgressTracker::recover_v1(version_stats, table_mview_map, mgr.clone());
         }
         Ok(())
@@ -180,8 +179,7 @@ impl GlobalBarrierManagerContext {
         let version_stats = self.hummock_manager.get_version_stats().await;
         // If failed, enter recovery mode.
         {
-            let mut tracker = self.tracker.lock().await;
-            *tracker =
+            *self.tracker.lock() =
                 CreateMviewProgressTracker::recover_v2(mview_map, version_stats, mgr.clone());
         }
         Ok(())
