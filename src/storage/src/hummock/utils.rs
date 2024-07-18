@@ -32,7 +32,6 @@ use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::SstableInfo;
 use tokio::sync::oneshot::{channel, Receiver, Sender};
-use tracing::error;
 
 use super::{HummockError, HummockResult};
 use crate::error::StorageResult;
@@ -624,7 +623,6 @@ pub(crate) async fn wait_for_epoch(
     let mut receiver = notifier.subscribe();
     // avoid unnecessary check in the loop if the value does not change
     let max_committed_epoch = *receiver.borrow_and_update();
-    error!(max_committed_epoch, wait_epoch, "wait_for_epoch");
     if max_committed_epoch >= wait_epoch {
         return Ok(());
     }

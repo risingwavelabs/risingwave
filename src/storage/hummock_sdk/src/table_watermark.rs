@@ -249,6 +249,17 @@ impl TableWatermarksIndex {
                 return;
             }
         }
+        if let Some(latest_epoch) = self.latest_epoch {
+            if latest_epoch < committed_epoch {
+                warn!(
+                    latest_epoch,
+                    committed_epoch, "committed_epoch exceed table watermark latest_epoch"
+                );
+                self.latest_epoch = Some(committed_epoch);
+            }
+        } else {
+            self.latest_epoch = Some(committed_epoch);
+        }
         self.committed_epoch = Some(committed_epoch);
         self.committed_watermarks = Some(committed_watermark);
         // keep only watermark higher than committed epoch
@@ -1064,8 +1075,8 @@ mod tests {
                 .clone(),
             EPOCH1,
         );
-        assert_eq!(EPOCH1, index.committed_epoch);
-        assert_eq!(EPOCH2, index.latest_epoch);
+        assert_eq!(EPOCH1, index.committed_epoch.unwrap());
+        assert_eq!(EPOCH2, index.latest_epoch.unwrap());
         for vnode in 0..VirtualNode::COUNT {
             let vnode = VirtualNode::from_index(vnode);
             if (1..5).contains(&vnode.to_index()) {
