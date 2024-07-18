@@ -50,6 +50,9 @@ pub struct ElasticSearchOpenSearchConfig {
     /// It is used for dynamic index, if it is be set, the value of this column will be used as the index. It and `index` can only set one
     #[serde(rename = "index_column")]
     pub index_column: Option<usize>,
+
+    #[serde(rename = "max_task_num")]
+    pub max_task_num: Option<usize>,
 }
 
 impl ElasticSearchOpenSearchConfig {
@@ -68,10 +71,12 @@ impl ElasticSearchOpenSearchConfig {
                         .ok_or_else(|| anyhow!("please ensure that '{}' is set to an existing column within the schema.", n))
                 })
                 .transpose()?;
-        properties.insert(
-            ES_OPTION_INDEX_COLUMN.to_string(),
-            index_column.unwrap().to_string(),
-        );
+        if let Some(index_column) = index_column {
+            properties.insert(
+                ES_OPTION_INDEX_COLUMN.to_string(),
+                index_column.to_string(),
+            );
+        }
         let config = serde_json::from_value::<ElasticSearchOpenSearchConfig>(
             serde_json::to_value(properties).unwrap(),
         )
@@ -85,7 +90,7 @@ impl ElasticSearchOpenSearchConfig {
         let transport = elasticsearch::http::transport::TransportBuilder::new(
             elasticsearch::http::transport::SingleNodeConnectionPool::new(url),
         )
-        .auth(elasticsearch::auth::Credentials::ApiKey(
+        .auth(elasticsearch::auth::Credentials::Basic(
             self.username.clone(),
             self.password.clone(),
         ))

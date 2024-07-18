@@ -125,7 +125,9 @@ impl AsyncTruncateSinkWriter for OpenSearchSinkWriter {
         let future = async move {
             let result = clent_clone.bulk(BulkParts::None).body(bulks).send().await?;
             let json = result.json::<Value>().await?;
-            if json["errors"].as_bool().unwrap() {
+            if json["errors"].as_bool().ok_or_else(||{SinkError::ElasticSearchOpenSearch(anyhow!(
+                "the return value has no error message: response is {:?}",json
+            ))})? {
                 let failed: Vec<&Value> = json["items"]
                     .as_array()
                     .unwrap()
