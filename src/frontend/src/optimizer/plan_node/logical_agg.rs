@@ -22,9 +22,9 @@ use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
-    BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamProject, StreamSimpleAgg,
-    StreamStatelessSimpleAgg, ToBatch, ToStream,
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, Logical, LogicalShare, PlanBase,
+    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamProject, StreamShare,
+    StreamSimpleAgg, StreamStatelessSimpleAgg, ToBatch, ToStream,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
@@ -33,6 +33,9 @@ use crate::expr::{
 };
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
+use crate::optimizer::plan_node::stream_global_approx_percentile::StreamGlobalApproxPercentile;
+use crate::optimizer::plan_node::stream_keyed_merge::StreamKeyedMerge;
+use crate::optimizer::plan_node::stream_local_approx_percentile::StreamLocalApproxPercentile;
 use crate::optimizer::plan_node::{
     gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalDedup, LogicalProject,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -167,7 +170,11 @@ impl LogicalAgg {
     }
 
     /// Generates distributed stream plan.
-    fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
+    fn gen_dist_stream_agg_plan(
+        &self,
+        stream_input: PlanRef,
+        ctx: &mut ToStreamContext,
+    ) -> Result<PlanRef> {
         use super::stream::prelude::*;
 
         let input_dist = stream_input.distribution();
@@ -191,6 +198,15 @@ impl LogicalAgg {
         } else {
             self.core.can_two_phase_agg()
         });
+
+        // Handle 2-phase approx_percentile aggregation.
+        if self
+            .agg_calls()
+            .iter()
+            .any(|agg_call| agg_call.agg_kind == AggKind::ApproxPercentile)
+        {
+            return self.gen_approx_percentile_plan(stream_input, ctx);
+        }
 
         // Stateless 2-phase simple agg
         // can be applied on stateless simple agg calls,
@@ -240,6 +256,55 @@ impl LogicalAgg {
         } else {
             self.gen_single_plan(stream_input)
         }
+    }
+
+    /// ------- REWRITES -------
+    ///
+    /// SimpleAgg { agg_calls: [count(*), approx_percentile(quantile, relative_error, v1), sum(v1)] }
+    /// -> Input
+    ///
+    /// -------- INTO ----------
+    ///
+    /// KeyedMerge { agg_calls: [count(*), approx_percentile(quantile, relative_error, v1), sum(v1)] }
+    /// -> SimpleAgg { agg_calls: [count(*)] }
+    ///    -> StreamShare { id: 0 }
+    ///       -> Input
+    /// -> GlobalApproxPercentile { args: [bucket_id, count] }
+    ///    -> LocalApproxPercentile { args: [relative_error, ] }
+    ///       -> StreamShare { id: 0 }
+    ///       -> Input
+    // NOTE(kwannoel): We can't split LocalApproxPercentile into Project + Agg, because
+    // for the agg step, we need to count by bucket id, and not just dispatch a single record
+    // downstream. So we need a custom executor for this logic.
+    fn gen_approx_percentile_plan(
+        &self,
+        stream_input: PlanRef,
+        ctx: &mut ToStreamContext,
+    ) -> Result<PlanRef> {
+        if !self.group_key().is_empty() {
+            return Err(ErrorCode::NotSupported(
+                "ApproxPercentile aggregation with GROUP BY is not supported".into(),
+                "try to remove GROUP BY".into(),
+            )
+            .into());
+        }
+
+        let shared_input = LogicalShare::new(stream_input).to_stream(ctx)?;
+        let (rewritten_simple_agg, lhs_mapping, rhs_mapping) =
+            Self::rewrite_simple_agg_for_approx_percentile(shared_input.clone())?;
+        let rewritten_approx_percentile = StreamLocalApproxPercentile::new(shared_input);
+        let global_approx_percentile =
+            StreamGlobalApproxPercentile::new(rewritten_approx_percentile.into());
+        let agg_merge =
+            StreamKeyedMerge::new(rewritten_simple_agg, global_approx_percentile.into());
+        Ok(agg_merge.into())
+    }
+
+    /// Returns rewritten simple agg + Mapping of the lhs and rhs indices for keyed merge.
+    fn rewrite_simple_agg_for_approx_percentile(
+        input: PlanRef,
+    ) -> Result<(PlanRef, ColIndexMapping, ColIndexMapping)> {
+        todo!()
     }
 
     pub fn core(&self) -> &Agg<PlanRef> {
@@ -1110,7 +1175,7 @@ impl ToStream for LogicalAgg {
             return logical_dedup.to_stream(ctx);
         }
 
-        let plan = self.gen_dist_stream_agg_plan(stream_input)?;
+        let plan = self.gen_dist_stream_agg_plan(stream_input, ctx)?;
 
         let (plan, n_final_agg_calls) = if let Some(final_agg) = plan.as_stream_simple_agg() {
             if eowc {
