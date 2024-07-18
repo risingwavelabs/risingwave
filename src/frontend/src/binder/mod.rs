@@ -913,6 +913,50 @@ mod tests {
                                         filter: Condition {
                                             conjunctions: [],
                                         },
+                                        distinct: false,
+                                        order_by: OrderBy {
+                                            sort_exprs: [
+                                                OrderByExpr {
+                                                    expr: InputRef(
+                                                        InputRef {
+                                                            index: 0,
+                                                            data_type: Int32,
+                                                        },
+                                                    ),
+                                                    order_type: OrderType {
+                                                        direction: Ascending,
+                                                        nulls_are: Largest,
+                                                    },
+                                                },
+                                            ],
+                                        },
+                                        direct_args: [
+                                            Literal {
+                                                data: Some(
+                                                    Decimal(
+                                                        Normalized(
+                                                            0.5,
+                                                        ),
+                                                    ),
+                                                ),
+                                                data_type: Some(
+                                                    Decimal,
+                                                ),
+                                            },
+                                            Literal {
+                                                data: Some(
+                                                    Decimal(
+                                                        Normalized(
+                                                            0.01,
+                                                        ),
+                                                    ),
+                                                ),
+                                                data_type: Some(
+                                                    Decimal,
+                                                ),
+                                            },
+                                        ],
+                                        user_defined: false,
                                     },
                                 ),
                             ],
