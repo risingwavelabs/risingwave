@@ -122,7 +122,11 @@ pub struct IcebergConfig {
     #[serde(rename = "s3.secret.key")]
     pub secret_key: String,
 
-    #[serde(rename = "s3.path.style.access", default, deserialize_with = "deserialize_bool_from_string")]
+    #[serde(
+        rename = "s3.path.style.access",
+        default,
+        deserialize_with = "deserialize_bool_from_string"
+    )]
     pub path_style_access: bool,
 
     #[serde(
