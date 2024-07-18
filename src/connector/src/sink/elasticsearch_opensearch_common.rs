@@ -21,6 +21,7 @@ use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 use serde::Deserialize;
 use serde_json::{Map, Value};
+use serde_with::{serde_as, DisplayFromStr};
 use url::Url;
 use with_options::WithOptions;
 
@@ -31,6 +32,7 @@ use crate::sink::Result;
 
 pub const ES_OPTION_INDEX_COLUMN: &str = "index_column";
 
+#[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct ElasticSearchOpenSearchConfig {
     #[serde(rename = "url")]
@@ -49,9 +51,11 @@ pub struct ElasticSearchOpenSearchConfig {
     pub password: String,
     /// It is used for dynamic index, if it is be set, the value of this column will be used as the index. It and `index` can only set one
     #[serde(rename = "index_column")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub index_column: Option<usize>,
 
     #[serde(rename = "max_task_num")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_task_num: Option<usize>,
 }
 
@@ -72,10 +76,7 @@ impl ElasticSearchOpenSearchConfig {
                 })
                 .transpose()?;
         if let Some(index_column) = index_column {
-            properties.insert(
-                ES_OPTION_INDEX_COLUMN.to_string(),
-                index_column.to_string(),
-            );
+            properties.insert(ES_OPTION_INDEX_COLUMN.to_string(), index_column.to_string());
         }
         let config = serde_json::from_value::<ElasticSearchOpenSearchConfig>(
             serde_json::to_value(properties).unwrap(),
@@ -106,7 +107,7 @@ impl ElasticSearchOpenSearchConfig {
         let transport = opensearch::http::transport::TransportBuilder::new(
             opensearch::http::transport::SingleNodeConnectionPool::new(url),
         )
-        .auth(opensearch::auth::Credentials::ApiKey(
+        .auth(opensearch::auth::Credentials::Basic(
             self.username.clone(),
             self.password.clone(),
         ))
