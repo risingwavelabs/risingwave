@@ -29,7 +29,9 @@ use tokio::sync::{oneshot, Mutex};
 use tracing::Instrument;
 
 use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
-use crate::barrier::{BarrierScheduler, Command, CreateStreamingJobCommandInfo, ReplaceTablePlan, StreamRpcManager};
+use crate::barrier::{
+    BarrierScheduler, Command, CreateStreamingJobCommandInfo, ReplaceTablePlan, StreamRpcManager,
+};
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob};
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::{to_build_actor_info, SourceManagerRef};
@@ -484,10 +486,12 @@ impl GlobalStreamManager {
             internal_tables: internal_tables.into_values().collect_vec(),
             ddl_type,
             create_type,
-            replace_table: replace_table_command,
         };
 
-        let command = Command::CreateStreamingJob { info };
+        let command = Command::CreateStreamingJob {
+            info,
+            replace_table: replace_table_command,
+        };
         tracing::debug!("sending Command::CreateStreamingJob");
         let result: MetaResult<NotificationVersion> = try {
             self.barrier_scheduler.run_command(command).await?;

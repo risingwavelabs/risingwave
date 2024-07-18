@@ -158,8 +158,6 @@ pub struct CreateStreamingJobCommandInfo {
     pub create_type: CreateType,
     pub streaming_job: StreamingJob,
     pub internal_tables: Vec<Table>,
-    /// This is for create SINK into table.
-    pub replace_table: Option<ReplaceTablePlan>,
 }
 
 impl CreateStreamingJobCommandInfo {
@@ -238,7 +236,11 @@ pub enum Command {
     /// it adds the table fragments info to meta store. However, the creating progress will **last
     /// for a while** until the `finish` channel is signaled, then the state of `TableFragments`
     /// will be set to `Created`.
-    CreateStreamingJob { info: CreateStreamingJobCommandInfo },
+    CreateStreamingJob {
+        info: CreateStreamingJobCommandInfo,
+        /// This is for create SINK into table.
+        replace_table: Option<ReplaceTablePlan>,
+    },
     /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
     /// table fragment.
     ///
@@ -317,7 +319,10 @@ impl Command {
                     .map(|fragment_id| (*fragment_id, CommandFragmentChanges::RemoveFragment))
                     .collect(),
             }),
-            Command::CreateStreamingJob { info } => {
+            Command::CreateStreamingJob {
+                info,
+                replace_table,
+            } => {
                 let fragment_changes = info
                     .new_fragment_info()
                     .map(|(fragment_id, info)| {
@@ -326,7 +331,7 @@ impl Command {
                     .collect();
                 let mut changes = CommandActorChanges { fragment_changes };
 
-                if let Some(plan) = &info.replace_table {
+                if let Some(plan) = replace_table {
                     let extra_change = plan.actor_changes();
                     changes.extend(extra_change);
                 }
@@ -528,9 +533,9 @@ impl CommandContext {
                             table_fragments,
                             dispatchers,
                             init_split_assignment: split_assignment,
-                            replace_table,
                             ..
                         },
+                    replace_table,
                 } => {
                     let actor_dispatchers = dispatchers
                         .iter()
@@ -972,13 +977,15 @@ impl CommandContext {
                 }
             }
 
-            Command::CreateStreamingJob { info } => {
+            Command::CreateStreamingJob {
+                info,
+                replace_table,
+            } => {
                 let CreateStreamingJobCommandInfo {
                     table_fragments,
                     dispatchers,
                     upstream_root_actors,
                     init_split_assignment,
-                    replace_table,
                     ..
                 } = info;
                 match &self.barrier_manager_context.metadata_manager {
