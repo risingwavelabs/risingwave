@@ -480,15 +480,37 @@ impl GlobalBarrierManagerContext {
         let start = Instant::now();
         let mut plan = HashMap::new();
         'discovery: while !to_migrate_worker_slots.is_empty() {
-            let new_worker_slots = active_nodes
+            let to_migration_size = to_migrate_worker_slots.len() as f32;
+
+            let available_size = active_nodes
+                .current()
+                .values()
+                .map(|node| {
+                    (0..node.parallelism)
+                        .map(|idx| WorkerSlotId::new(node.id, idx as _))
+                        .filter(|worker_slot| !inuse_worker_slots.contains(worker_slot))
+                        .count()
+                })
+                .sum::<usize>() as f32;
+
+            let factor = (to_migration_size / available_size).ceil() as u32;
+
+            let mut new_worker_slots = active_nodes
                 .current()
                 .values()
                 .flat_map(|node| {
-                    (0..node.parallelism)
+                    (0..node.parallelism * factor)
                         .map(|idx| WorkerSlotId::new(node.id, idx as _))
                         .filter(|worker_slot| !inuse_worker_slots.contains(worker_slot))
                 })
                 .collect_vec();
+
+            new_worker_slots.sort_by(|a, b| {
+                a.slot_idx()
+                    .cmp(&b.slot_idx())
+                    .then(a.worker_id().cmp(&b.worker_id()))
+            });
+
             if !new_worker_slots.is_empty() {
                 debug!("new worker slots found: {:#?}", new_worker_slots);
                 for target_worker_slot in new_worker_slots {
