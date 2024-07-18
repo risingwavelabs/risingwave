@@ -44,12 +44,15 @@ pub struct TableWatermarksIndex {
     // later epoch at the back
     pub staging_watermarks: VecDeque<(HummockEpoch, Arc<[VnodeWatermark]>)>,
     pub committed_watermarks: Option<Arc<TableWatermarks>>,
-    latest_epoch: HummockEpoch,
-    committed_epoch: HummockEpoch,
+    latest_epoch: Option<HummockEpoch>,
+    committed_epoch: Option<HummockEpoch>,
 }
 
 impl TableWatermarksIndex {
-    pub fn new(watermark_direction: WatermarkDirection, committed_epoch: HummockEpoch) -> Self {
+    pub fn new(
+        watermark_direction: WatermarkDirection,
+        committed_epoch: Option<HummockEpoch>,
+    ) -> Self {
         Self {
             watermark_direction,
             staging_watermarks: VecDeque::new(),
@@ -66,8 +69,8 @@ impl TableWatermarksIndex {
         Self {
             watermark_direction: committed_watermarks.direction,
             staging_watermarks: VecDeque::new(),
-            committed_epoch,
-            latest_epoch: committed_epoch,
+            committed_epoch: Some(committed_epoch),
+            latest_epoch: Some(committed_epoch),
             committed_watermarks: Some(committed_watermarks),
         }
     }
@@ -204,9 +207,11 @@ impl TableWatermarksIndex {
         vnode_watermark_list: Arc<[VnodeWatermark]>,
         direction: WatermarkDirection,
     ) {
-        assert!(epoch > self.latest_epoch);
+        if let Some(prev_latest_epoch) = self.latest_epoch {
+            assert!(epoch > prev_latest_epoch);
+        }
         assert_eq!(self.watermark_direction, direction);
-        self.latest_epoch = epoch;
+        self.latest_epoch = Some(epoch);
         #[cfg(debug_assertions)]
         {
             let mut vnode_is_set = BitmapBuilder::zeroed(VirtualNode::COUNT);
@@ -238,11 +243,13 @@ impl TableWatermarksIndex {
         committed_epoch: HummockEpoch,
     ) {
         assert_eq!(self.watermark_direction, committed_watermark.direction);
-        assert!(self.committed_epoch <= committed_epoch);
-        if self.committed_epoch == committed_epoch {
-            return;
+        if let Some(prev_committed_epoch) = self.committed_epoch {
+            assert!(prev_committed_epoch <= committed_epoch);
+            if prev_committed_epoch == committed_epoch {
+                return;
+            }
         }
-        self.committed_epoch = committed_epoch;
+        self.committed_epoch = Some(committed_epoch);
         self.committed_watermarks = Some(committed_watermark);
         // keep only watermark higher than committed epoch
         while let Some((old_epoch, _)) = self.staging_watermarks.front()
@@ -902,7 +909,7 @@ mod tests {
         watermark2: Bytes,
         watermark3: Bytes,
     ) -> TableWatermarksIndex {
-        let mut index = TableWatermarksIndex::new(direction, COMMITTED_EPOCH);
+        let mut index = TableWatermarksIndex::new(direction, Some(COMMITTED_EPOCH));
         index.add_epoch_watermark(
             EPOCH1,
             vec![VnodeWatermark::new(build_bitmap(0..4), watermark1.clone())].into(),
