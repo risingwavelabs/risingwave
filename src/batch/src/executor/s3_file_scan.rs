@@ -133,8 +133,7 @@ impl BoxedExecutorBuilder for FileScanExecutorBuilder {
         assert_eq!(file_scan_node.storage_type, StorageType::S3 as i32);
 
         Ok(Box::new(S3FileScanExecutor::new(
-            #[allow(deprecated)]
-            match file_scan_node::FileFormat::from_i32(file_scan_node.file_format).unwrap() {
+            match file_scan_node::FileFormat::try_from(file_scan_node.file_format).unwrap() {
                 file_scan_node::FileFormat::Parquet => FileFormat::Parquet,
                 file_scan_node::FileFormat::Unspecified => unreachable!(),
             },
