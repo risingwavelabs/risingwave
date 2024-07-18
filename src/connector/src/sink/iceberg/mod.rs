@@ -523,7 +523,7 @@ impl IcebergConfig {
                     .secret_key(self.secret_key.clone())
                     .region(self.region.clone())
                     .endpoint(self.endpoint.clone())
-                    .path_style_access(self.path_style_access.clone())
+                    .path_style_access(self.path_style_access)
                     .build();
                 let catalog = storage_catalog::StorageCatalog::new(config)?;
                 Ok(Arc::new(catalog))
