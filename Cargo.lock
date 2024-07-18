@@ -975,7 +975,7 @@ checksum = "4506efc6fbc200c083add2a7ed4e3616a859941a745e922320ae7051d90d12ec"
 dependencies = [
  "anyhow",
  "arrow-array 50.0.0",
- "arrow-buffer 52.0.0",
+ "arrow-buffer 50.0.0",
  "arrow-ipc 50.0.0",
  "arrow-schema 50.0.0",
  "lazy_static",
