@@ -296,6 +296,10 @@ pub enum Mutation {
     },
 }
 
+/// The generic type `M` is the mutation type of the barrier.
+///
+/// For barrier of in the dispatcher, `M` is `()`, which means the mutation is erased.
+/// For barrier flowing within the streaming actor, `M` is the normal `BarrierMutationType`.
 #[derive(Debug, Clone)]
 pub struct BarrierInner<M> {
     pub epoch: EpochPair,
@@ -793,17 +797,19 @@ impl<M> BarrierInner<M> {
 
     fn from_protobuf_inner(
         prost: &PbBarrier,
-        f: impl FnOnce(Option<&PbMutation>) -> StreamExecutorResult<M>,
+        mutation_from_pb: impl FnOnce(Option<&PbMutation>) -> StreamExecutorResult<M>,
     ) -> StreamExecutorResult<Self> {
         let epoch = prost.get_epoch()?;
 
         Ok(Self {
             kind: prost.kind(),
             epoch: EpochPair::new(epoch.curr, epoch.prev),
-            mutation: f(prost
-                .mutation
-                .as_ref()
-                .and_then(|mutation| mutation.mutation.as_ref()))?,
+            mutation: mutation_from_pb(
+                prost
+                    .mutation
+                    .as_ref()
+                    .and_then(|mutation| mutation.mutation.as_ref()),
+            )?,
             passed_actors: prost.get_passed_actors().clone(),
             tracing_context: TracingContext::from_protobuf(&prost.tracing_context),
         })
