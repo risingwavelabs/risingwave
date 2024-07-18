@@ -284,9 +284,15 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = SchemaRegistryService::new(c.clone());
                 service.execute(&mut ctx)?;
-                let mut task =
-                    risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
-                task.execute(&mut ctx)?;
+                if c.user_managed {
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                } else {
+                    let mut task =
+                        risedev::LogReadyCheckTask::new("Server started, listening for requests")?;
+                    task.execute(&mut ctx)?;
+                }
                 ctx.pb
                     .set_message(format!("schema registry http://{}:{}", c.address, c.port));
             }

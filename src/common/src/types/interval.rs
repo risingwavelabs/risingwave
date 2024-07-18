@@ -1181,19 +1181,6 @@ impl<'a> FromSql<'a> for Interval {
     }
 }
 
-impl ToBinary for Interval {
-    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
-        match ty {
-            DataType::Interval => {
-                let mut output = BytesMut::new();
-                self.to_sql(&Type::ANY, &mut output).unwrap();
-                Ok(Some(output.freeze()))
-            }
-            _ => unreachable!(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DateTimeField {
     Year,

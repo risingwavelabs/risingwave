@@ -33,6 +33,7 @@ mod order_by;
 mod project;
 mod project_set;
 mod row_seq_scan;
+mod s3_file_scan;
 mod sort_agg;
 mod sort_over_window;
 mod source;

@@ -150,6 +150,7 @@ impl LocalQueryExecution {
         let search_path = self.session.config().search_path();
         let time_zone = self.session.config().timezone();
         let timeout = self.timeout;
+        let meta_client = self.front_env.meta_client_ref();
 
         let sender1 = sender.clone();
         let exec = async move {
@@ -171,7 +172,7 @@ impl LocalQueryExecution {
         use risingwave_expr::expr_context::TIME_ZONE;
 
         use crate::expr::function_impl::context::{
-            AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH, USER_INFO_READER,
+            AUTH_CONTEXT, CATALOG_READER, DB_NAME, META_CLIENT, SEARCH_PATH, USER_INFO_READER,
         };
 
         // box is necessary, otherwise the size of `exec` will double each time it is nested.
@@ -181,6 +182,7 @@ impl LocalQueryExecution {
         let exec = async move { SEARCH_PATH::scope(search_path, exec).await }.boxed();
         let exec = async move { AUTH_CONTEXT::scope(auth_context, exec).await }.boxed();
         let exec = async move { TIME_ZONE::scope(time_zone, exec).await }.boxed();
+        let exec = async move { META_CLIENT::scope(meta_client, exec).await }.boxed();
 
         if let Some(timeout) = timeout {
             let exec = async move {
@@ -578,7 +580,7 @@ impl LocalQueryExecution {
     fn get_fragment_id(&self, table_id: &TableId) -> SchedulerResult<FragmentId> {
         let reader = self.front_env.catalog_reader().read_guard();
         reader
-            .get_table_by_id(table_id)
+            .get_any_table_by_id(table_id)
             .map(|table| table.fragment_id)
             .map_err(|e| SchedulerError::Internal(anyhow!(e)))
     }
@@ -591,7 +593,7 @@ impl LocalQueryExecution {
         let guard = self.front_env.catalog_reader().read_guard();
 
         let table = guard
-            .get_table_by_id(table_id)
+            .get_any_table_by_id(table_id)
             .map_err(|e| SchedulerError::Internal(anyhow!(e)))?;
 
         let fragment_id = match table.dml_fragment_id.as_ref() {

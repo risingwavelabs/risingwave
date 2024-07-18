@@ -1,6 +1,6 @@
 # Introduction
 
-This guide is intended to be used by contributors to learn about how to develop RisingWave. The instructions about how to submit code changes are included in [contributing guidelines](./contributing.md).
+This guide is intended to be used by contributors to learn about how to develop RisingWave. The instructions about how to submit code changes are included in [contribution guidelines](./contributing.md).
 
 If you have questions, you can search for existing discussions or start a new discussion in the [Discussions forum of RisingWave](https://github.com/risingwavelabs/risingwave/discussions), or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://risingwave.com/slack) to join the channel.
 

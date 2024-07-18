@@ -22,7 +22,7 @@ use clickhouse::insert::Insert;
 use clickhouse::{Client as ClickHouseClient, Row as ClickHouseRow};
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
@@ -1011,7 +1011,7 @@ pub fn build_fields_name_type_from_schema(schema: &Schema) -> Result<Vec<(String
             for i in &field.sub_fields {
                 if matches!(i.data_type, DataType::Struct(_)) {
                     return Err(SinkError::ClickHouse(
-                        "Only one level of nesting is supported for sturct".to_string(),
+                        "Only one level of nesting is supported for struct".to_string(),
                     ));
                 } else {
                     vec.push((

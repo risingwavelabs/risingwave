@@ -21,7 +21,7 @@ use async_trait::async_trait;
 use futures::future::{select, Either};
 use futures::TryFuture;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use rw_futures_util::drop_either_future;
 
 use crate::sink::encoder::SerTo;

@@ -159,23 +159,62 @@ impl HummockVersion {
     }
 
     pub fn get_object_ids(&self) -> HashSet<HummockSstableObjectId> {
+        self.get_sst_infos().map(|s| s.object_id).collect()
+    }
+
+    pub fn get_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
+        self.get_sst_infos().map(|s| s.sst_id).collect()
+    }
+
+    pub fn get_sst_infos(&self) -> impl Iterator<Item = &SstableInfo> {
         self.get_combined_levels()
-            .flat_map(|level| {
-                level
-                    .table_infos
-                    .iter()
-                    .map(|table_info| table_info.get_object_id())
-            })
+            .flat_map(|level| level.table_infos.iter())
             .chain(self.table_change_log.values().flat_map(|change_log| {
                 change_log.0.iter().flat_map(|epoch_change_log| {
                     epoch_change_log
                         .old_value
                         .iter()
-                        .map(|sst| sst.object_id)
-                        .chain(epoch_change_log.new_value.iter().map(|sst| sst.object_id))
+                        .chain(epoch_change_log.new_value.iter())
                 })
             }))
-            .collect()
+    }
+
+    /// `get_sst_infos_from_groups` doesn't guarantee that all returned sst info belongs to `select_group`.
+    /// i.e. `select_group` is just a hint.
+    /// We separate `get_sst_infos_from_groups` and `get_sst_infos` because `get_sst_infos_from_groups` may be further customized in the future.
+    pub fn get_sst_infos_from_groups<'a>(
+        &'a self,
+        select_group: &'a HashSet<CompactionGroupId>,
+    ) -> impl Iterator<Item = &SstableInfo> + 'a {
+        self.levels
+            .iter()
+            .filter_map(|(cg_id, level)| {
+                if select_group.contains(cg_id) {
+                    Some(level)
+                } else {
+                    None
+                }
+            })
+            .flat_map(|level| {
+                level
+                    .l0
+                    .as_ref()
+                    .unwrap()
+                    .sub_levels
+                    .iter()
+                    .rev()
+                    .chain(level.levels.iter())
+            })
+            .flat_map(|level| level.table_infos.iter())
+            .chain(self.table_change_log.values().flat_map(|change_log| {
+                // TODO: optimization: strip table change log
+                change_log.0.iter().flat_map(|epoch_change_log| {
+                    epoch_change_log
+                        .old_value
+                        .iter()
+                        .chain(epoch_change_log.new_value.iter())
+                })
+            }))
     }
 
     pub fn level_iter<F: FnMut(&Level) -> bool>(
@@ -295,7 +334,6 @@ impl HummockVersion {
         group_id: CompactionGroupId,
         member_table_ids: HashSet<StateTableId>,
         new_sst_start_id: u64,
-        allow_trivial_split: bool,
     ) {
         let mut new_sst_id = new_sst_start_id;
         if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId
@@ -329,12 +367,8 @@ impl HummockVersion {
                 }
                 // Remove SST from sub level may result in empty sub level. It will be purged
                 // whenever another compaction task is finished.
-                let insert_table_infos = split_sst_info_for_level(
-                    &member_table_ids,
-                    allow_trivial_split,
-                    sub_level,
-                    &mut new_sst_id,
-                );
+                let insert_table_infos =
+                    split_sst_info_for_level(&member_table_ids, sub_level, &mut new_sst_id);
                 sub_level
                     .table_infos
                     .extract_if(|sst_info| sst_info.table_ids.is_empty())
@@ -364,12 +398,8 @@ impl HummockVersion {
             }
         }
         for (idx, level) in parent_levels.levels.iter_mut().enumerate() {
-            let insert_table_infos = split_sst_info_for_level(
-                &member_table_ids,
-                allow_trivial_split,
-                level,
-                &mut new_sst_id,
-            );
+            let insert_table_infos =
+                split_sst_info_for_level(&member_table_ids, level, &mut new_sst_id);
             cur_levels.levels[idx].total_file_size += insert_table_infos
                 .iter()
                 .map(|sst| sst.file_size)
@@ -399,6 +429,12 @@ impl HummockVersion {
 
     pub fn build_sst_delta_infos(&self, version_delta: &HummockVersionDelta) -> Vec<SstDeltaInfo> {
         let mut infos = vec![];
+
+        // Skip trivial move delta for refiller
+        // The trivial move task only changes the position of the sst in the lsm, it does not modify the object information corresponding to the sst, and does not need to re-execute the refill.
+        if version_delta.trivial_move {
+            return infos;
+        }
 
         for (group_id, group_deltas) in &version_delta.group_deltas {
             let mut info = SstDeltaInfo::default();
@@ -520,7 +556,6 @@ impl HummockVersion {
                     *compaction_group_id,
                     member_table_ids,
                     group_construct.get_new_sst_start_id(),
-                    group_construct.version < CompatibilityVersion::NoTrivialSplit as _,
                 );
             } else if let Some(group_change) = &summary.group_table_change {
                 // TODO: may deprecate this branch? This enum variant is not created anywhere
@@ -535,7 +570,6 @@ impl HummockVersion {
                     group_change.target_group_id,
                     HashSet::from_iter(group_change.table_ids.clone()),
                     group_change.new_sst_start_id,
-                    group_change.version() == CompatibilityVersion::VersionUnspecified,
                 );
 
                 let levels = self
@@ -622,7 +656,7 @@ impl HummockVersion {
         }
         self.id = version_delta.id;
         self.max_committed_epoch = version_delta.max_committed_epoch;
-        self.set_safe_epoch(version_delta.safe_epoch);
+        self.set_safe_epoch(version_delta.visible_table_safe_epoch());
 
         // apply to table watermark
 
@@ -645,20 +679,22 @@ impl HummockVersion {
             }
         }
         for (table_id, table_watermarks) in &self.table_watermarks {
-            if let Some(table_delta) = version_delta.state_table_info_delta.get(table_id)
-                && let Some(Some(prev_table)) = changed_table_info.get(table_id)
-                && table_delta.safe_epoch > prev_table.safe_epoch
+            let safe_epoch = if let Some(state_table_info) =
+                self.state_table_info.info().get(table_id)
+                && let Some((oldest_epoch, _)) = table_watermarks.watermarks.first()
+                && state_table_info.safe_epoch > *oldest_epoch
             {
                 // safe epoch has progressed, need further clear.
+                state_table_info.safe_epoch
             } else {
-                // safe epoch not progressed. No need to truncate
+                // safe epoch not progressed or the table has been removed. No need to truncate
                 continue;
-            }
+            };
             let table_watermarks = modified_table_watermarks
                 .entry(*table_id)
                 .or_insert_with(|| Some((**table_watermarks).clone()));
             if let Some(table_watermarks) = table_watermarks {
-                table_watermarks.clear_stale_epoch_watermark(version_delta.safe_epoch);
+                table_watermarks.clear_stale_epoch_watermark(safe_epoch);
             }
         }
         // apply the staging table watermark to hummock version
@@ -944,7 +980,6 @@ pub fn build_initial_compaction_group_levels(
 
 fn split_sst_info_for_level(
     member_table_ids: &HashSet<u32>,
-    allow_trivial_split: bool,
     level: &mut Level,
     new_sst_id: &mut u64,
 ) -> Vec<SstableInfo> {
@@ -959,22 +994,8 @@ fn split_sst_info_for_level(
             .cloned()
             .collect_vec();
         if !removed_table_ids.is_empty() {
-            let is_trivial =
-                allow_trivial_split && removed_table_ids.len() == sst_info.table_ids.len();
-            let mut branch_table_info = sst_info.clone();
-            branch_table_info.sst_id = *new_sst_id;
-            *new_sst_id += 1;
-            if is_trivial {
-                // This is a compatibility design. we only clear the table-ids for files which would
-                // be removed in later code. In the version-delta generated by new
-                // version meta-service, there will be no trivial split, and we will create
-                // a reference for every sstable split to two groups.
-                sst_info.table_ids.clear();
-            } else {
-                sst_info.sst_id = *new_sst_id;
-                *new_sst_id += 1;
-            }
-            insert_table_infos.push(branch_table_info);
+            let branch_sst = split_sst(sst_info, new_sst_id);
+            insert_table_infos.push(branch_sst);
         }
     }
     insert_table_infos
@@ -1306,6 +1327,15 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
     res
 }
 
+pub fn split_sst(sst_info: &mut SstableInfo, new_sst_id: &mut u64) -> SstableInfo {
+    let mut branch_table_info = sst_info.clone();
+    branch_table_info.sst_id = *new_sst_id;
+    sst_info.sst_id = *new_sst_id + 1;
+    *new_sst_id += 1;
+
+    branch_table_info
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -1396,50 +1426,50 @@ mod tests {
                 ),
             ),
         ]);
-        let version_delta = HummockVersionDelta {
-            id: 1,
-            group_deltas: HashMap::from_iter([
-                (
-                    2,
-                    GroupDeltas {
-                        group_deltas: vec![GroupDelta {
-                            delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
-                                group_config: Some(CompactionConfig {
-                                    max_level: 6,
-                                    ..Default::default()
-                                }),
+        let mut version_delta = HummockVersionDelta::default();
+        version_delta.id = 1;
+        version_delta.group_deltas = HashMap::from_iter([
+            (
+                2,
+                GroupDeltas {
+                    group_deltas: vec![GroupDelta {
+                        delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
+                            group_config: Some(CompactionConfig {
+                                max_level: 6,
                                 ..Default::default()
-                            })),
-                        }],
-                    },
-                ),
-                (
-                    0,
-                    GroupDeltas {
-                        group_deltas: vec![GroupDelta {
-                            delta_type: Some(DeltaType::GroupDestroy(GroupDestroy {})),
-                        }],
-                    },
-                ),
-                (
-                    1,
-                    GroupDeltas {
-                        group_deltas: vec![GroupDelta {
-                            delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                                level_idx: 1,
-                                inserted_table_infos: vec![SstableInfo {
-                                    object_id: 1,
-                                    sst_id: 1,
-                                    ..Default::default()
-                                }],
+                            }),
+                            ..Default::default()
+                        })),
+                    }],
+                },
+            ),
+            (
+                0,
+                GroupDeltas {
+                    group_deltas: vec![GroupDelta {
+                        delta_type: Some(DeltaType::GroupDestroy(GroupDestroy {})),
+                    }],
+                },
+            ),
+            (
+                1,
+                GroupDeltas {
+                    group_deltas: vec![GroupDelta {
+                        delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
+                            level_idx: 1,
+                            inserted_table_infos: vec![SstableInfo {
+                                object_id: 1,
+                                sst_id: 1,
                                 ..Default::default()
-                            })),
-                        }],
-                    },
-                ),
-            ]),
-            ..Default::default()
-        };
+                            }],
+                            ..Default::default()
+                        })),
+                    }],
+                },
+            ),
+        ]);
+        let version_delta = version_delta;
+
         version.apply_version_delta(&version_delta);
         let mut cg1 = build_initial_compaction_group_levels(
             1,

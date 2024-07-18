@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
@@ -424,6 +424,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::future::{poll_fn, Future};
     use std::iter::empty;
     use std::pin::pin;
@@ -432,7 +433,8 @@ mod tests {
 
     use itertools::Itertools;
     use risingwave_common::array::StreamChunk;
-    use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+    use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
+    use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{EpochExt, EpochPair};
     use risingwave_connector::sink::log_store::{
@@ -495,12 +497,18 @@ mod tests {
             .version()
             .max_committed_epoch
             .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
         writer.flush_current_epoch(epoch2, false).await.unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
         let epoch3 = epoch2.next_epoch();
@@ -596,12 +604,18 @@ mod tests {
             .version()
             .max_committed_epoch
             .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
         writer.flush_current_epoch(epoch2, false).await.unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
         let epoch3 = epoch2.next_epoch();
@@ -678,6 +692,9 @@ mod tests {
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
+        test_env
+            .storage
+            .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new_test_epoch(epoch3), false)
             .await
@@ -776,6 +793,9 @@ mod tests {
             .version()
             .max_committed_epoch
             .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -783,6 +803,9 @@ mod tests {
         writer.write_chunk(stream_chunk1_1.clone()).await.unwrap();
         writer.write_chunk(stream_chunk1_2.clone()).await.unwrap();
         let epoch2 = epoch1.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
         writer.flush_current_epoch(epoch2, true).await.unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
 
@@ -883,6 +906,9 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
+        test_env
+            .storage
+            .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new_test_epoch(epoch3), false)
             .await
@@ -993,6 +1019,9 @@ mod tests {
             .version()
             .max_committed_epoch
             .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer1
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -1007,6 +1036,9 @@ mod tests {
         writer1.write_chunk(chunk1_1.clone()).await.unwrap();
         writer2.write_chunk(chunk1_2.clone()).await.unwrap();
         let epoch2 = epoch1.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
         writer1.flush_current_epoch(epoch2, false).await.unwrap();
         writer2.flush_current_epoch(epoch2, false).await.unwrap();
         let [chunk2_1, chunk2_2] = gen_multi_vnode_stream_chunks::<2>(200, 100, pk_info);
@@ -1108,6 +1140,9 @@ mod tests {
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
+        test_env
+            .storage
+            .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new(epoch3, epoch2), false)
             .await
@@ -1177,6 +1212,9 @@ mod tests {
             .version()
             .max_committed_epoch
             .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -1314,15 +1352,24 @@ mod tests {
             .version()
             .max_committed_epoch
             .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
         writer.flush_current_epoch(epoch2, true).await.unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
         let epoch3 = epoch2.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
         writer.flush_current_epoch(epoch3, true).await.unwrap();
         writer.write_chunk(stream_chunk3.clone()).await.unwrap();
         writer.flush_current_epoch(u64::MAX, true).await.unwrap();
@@ -1411,6 +1458,9 @@ mod tests {
         let (mut reader, mut writer) = factory.build().await;
 
         let epoch4 = epoch3.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch4, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new(epoch4, epoch3), false)
             .await
@@ -1471,6 +1521,9 @@ mod tests {
             .unwrap();
         writer.write_chunk(stream_chunk4.clone()).await.unwrap();
         let epoch5 = epoch4 + 1;
+        test_env
+            .storage
+            .start_epoch(epoch5, HashSet::from_iter([TableId::new(table.id)]));
         writer.flush_current_epoch(epoch5, true).await.unwrap();
         writer.write_chunk(stream_chunk5.clone()).await.unwrap();
 
@@ -1629,12 +1682,18 @@ mod tests {
             .version()
             .max_committed_epoch
             .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
         writer.flush_current_epoch(epoch2, false).await.unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
         let epoch3 = epoch2.next_epoch();
@@ -1693,6 +1752,9 @@ mod tests {
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
+        test_env
+            .storage
+            .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new_test_epoch(epoch3), false)
             .await
@@ -1754,6 +1816,9 @@ mod tests {
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
+        test_env
+            .storage
+            .start_epoch(epoch4, HashSet::from_iter([TableId::new(table.id)]));
         writer
             .init(EpochPair::new_test_epoch(epoch4), false)
             .await

@@ -71,6 +71,7 @@ pub struct MetaTelemetryReport {
 
     // Get the ENV from key `TELEMETRY_CLUSTER_TYPE`
     cluster_type: PbTelemetryClusterType,
+    object_store_media_type: &'static str,
 }
 
 impl From<MetaTelemetryJobDesc> for risingwave_pb::telemetry::StreamJobDesc {
@@ -117,6 +118,7 @@ impl TelemetryToProtobuf for MetaTelemetryReport {
             stream_job_count: self.streaming_job_count as u32,
             stream_jobs: self.job_desc.into_iter().map(|job| job.into()).collect(),
             cluster_type: self.cluster_type as i32,
+            object_store_media_type: self.object_store_media_type.to_string(),
         };
         pb_report.encode_to_vec()
     }
@@ -143,13 +145,19 @@ impl TelemetryInfoFetcher for MetaTelemetryInfoFetcher {
 pub struct MetaReportCreator {
     metadata_manager: MetadataManager,
     meta_backend: MetaBackend,
+    object_store_media_type: &'static str,
 }
 
 impl MetaReportCreator {
-    pub fn new(metadata_manager: MetadataManager, meta_backend: MetaBackend) -> Self {
+    pub fn new(
+        metadata_manager: MetadataManager,
+        meta_backend: MetaBackend,
+        object_store_media_type: &'static str,
+    ) -> Self {
         Self {
             metadata_manager,
             meta_backend,
+            object_store_media_type,
         }
     }
 }
@@ -204,6 +212,7 @@ impl TelemetryReportCreator for MetaReportCreator {
             meta_backend: self.meta_backend,
             job_desc: stream_job_desc,
             cluster_type: telemetry_cluster_type_from_env_var(),
+            object_store_media_type: self.object_store_media_type,
         })
     }
 
@@ -255,6 +264,7 @@ mod test {
             },
             job_desc: vec![],
             cluster_type: PbTelemetryClusterType::Unspecified,
+            object_store_media_type: "s3",
         };
 
         let pb_bytes = report.to_pb_bytes();

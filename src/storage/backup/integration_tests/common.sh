@@ -111,7 +111,7 @@ function backup() {
 function delete_snapshot() {
   local snapshot_id
   snapshot_id=$1
-  ${BACKUP_TEST_RW_ALL_IN_ONE} risectl meta delete-meta-snapshots "${snapshot_id}"
+  ${BACKUP_TEST_RW_ALL_IN_ONE} risectl meta delete-meta-snapshots --snapshot-ids "${snapshot_id}"
 }
 
 function restore() {

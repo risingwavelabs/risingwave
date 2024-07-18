@@ -170,6 +170,9 @@ pub struct MetaOpts {
     /// Interval of hummock version checkpoint.
     pub hummock_version_checkpoint_interval_sec: u64,
     pub enable_hummock_data_archive: bool,
+    pub enable_hummock_time_travel: bool,
+    pub hummock_time_travel_retention_ms: u64,
+    pub hummock_time_travel_snapshot_interval: u64,
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected. Greater value reduces object store IO, meanwhile it results in
     /// more loss of in memory `HummockVersionCheckpoint::stale_objects` state when meta node is
@@ -283,7 +286,9 @@ pub struct MetaOpts {
     pub compact_task_table_size_partition_threshold_high: u64,
 
     // The private key for the secret store, used when the secret is stored in the meta.
-    pub secret_store_private_key: Vec<u8>,
+    pub secret_store_private_key: Option<Vec<u8>>,
+    /// The path of the temp secret file directory.
+    pub temp_secret_file_dir: String,
 
     pub table_info_statistic_history_times: usize,
 }
@@ -305,6 +310,9 @@ impl MetaOpts {
             vacuum_spin_interval_ms: 0,
             hummock_version_checkpoint_interval_sec: 30,
             enable_hummock_data_archive: false,
+            enable_hummock_time_travel: false,
+            hummock_time_travel_retention_ms: 0,
+            hummock_time_travel_snapshot_interval: 0,
             min_delta_log_num_for_hummock_version_checkpoint: 1,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             full_gc_interval_sec: 3600 * 24 * 7,
@@ -346,7 +354,8 @@ impl MetaOpts {
             object_store_config: ObjectStoreConfig::default(),
             max_trivial_move_task_count_per_loop: 256,
             max_get_task_probe_times: 5,
-            secret_store_private_key: "demo-secret-private-key".as_bytes().to_vec(),
+            secret_store_private_key: Some("0123456789abcdef".as_bytes().to_vec()),
+            temp_secret_file_dir: "./secrets".to_string(),
             table_info_statistic_history_times: 240,
         }
     }

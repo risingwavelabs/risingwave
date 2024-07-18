@@ -74,6 +74,7 @@ if [[ ${#actual[@]} -eq ${#expected[@]} && ${actual[@]} == ${expected[@]} ]]; th
 else
   cat ./query_result.txt
   echo "The output is not as expected."
+  exit 1
 fi
 
 echo "--- Kill cluster"
