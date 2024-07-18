@@ -273,7 +273,7 @@ impl IcebergConfig {
             self.secret_key.clone().to_string(),
         );
         iceberg_configs.insert(
-            "iceberg.table.io.s3.path-style-access".to_string(),
+            "iceberg.table.io.s3.path_style_access".to_string(),
             self.path_style_access.to_string(),
         );
 
@@ -349,10 +349,6 @@ impl IcebergConfig {
                 "iceberg.table.io.secret_access_key".to_string(),
                 self.secret_key.clone().to_string(),
             );
-            iceberg_configs.insert(
-                "iceberg.table.io.s3.path-style-access".to_string(),
-                self.path_style_access.to_string(),
-            );
 
             // iceberg-rust
             iceberg_configs.insert(
@@ -362,10 +358,6 @@ impl IcebergConfig {
             iceberg_configs.insert(
                 ("iceberg.table.io.".to_string() + S3_SECRET_ACCESS_KEY).to_string(),
                 self.secret_key.clone().to_string(),
-            );
-            iceberg_configs.insert(
-                ("iceberg.table.io.".to_string() + "s3.path-style-access").to_string(),
-                self.path_style_access.to_string(),
             );
 
             let (bucket, _) = {
@@ -1249,6 +1241,7 @@ mod test {
             ("s3.endpoint", "http://127.0.0.1:9301"),
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
+            ("s3.path.style.access", "true"),
             ("s3.region", "us-east-1"),
             ("catalog.type", "jdbc"),
             ("catalog.name", "demo"),
@@ -1278,7 +1271,7 @@ mod test {
             endpoint: Some("http://127.0.0.1:9301".to_string()),
             access_key: "hummockadmin".to_string(),
             secret_key: "hummockadmin".to_string(),
-            path_style_access: false,
+            path_style_access: true,
             primary_key: Some(vec!["v1".to_string()]),
             java_catalog_props: [("jdbc.user", "admin"), ("jdbc.password", "123456")]
                 .into_iter()
@@ -1314,6 +1307,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "storage"),
             ("warehouse.path", "s3://icebergdata/demo"),
@@ -1338,6 +1332,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "rest"),
             ("catalog.uri", "http://192.168.167.4:8181"),
@@ -1363,6 +1358,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "jdbc"),
             ("catalog.uri", "jdbc:postgresql://localhost:5432/iceberg"),
@@ -1390,6 +1386,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "hive"),
             ("catalog.uri", "thrift://localhost:9083"),
