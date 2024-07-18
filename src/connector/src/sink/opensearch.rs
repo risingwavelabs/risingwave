@@ -19,9 +19,11 @@ use futures::FutureExt;
 use opensearch::{BulkOperation, BulkParts, OpenSearch};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use serde_json::Value;
 use tonic::async_trait;
 
+use super::catalog::desc::SinkDesc;
 use super::elasticsearch_opensearch_common::{
     validate_config, ElasticSearchOpenSearchConfig, ElasticSearchOpenSearchFormatter,
 };
@@ -64,6 +66,13 @@ impl Sink for OpenSearchSink {
     type LogSinker = AsyncTruncateLogSinkerOf<OpenSearchSinkWriter>;
 
     const SINK_NAME: &'static str = OPENSEARCH_SINK;
+
+    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Disable => Ok(false),
+        }
+    }
 
     async fn validate(&self) -> Result<()> {
         validate_config(&self.config, &self.schema)?;
