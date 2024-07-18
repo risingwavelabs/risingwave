@@ -255,9 +255,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                             HummockReadEpoch::Committed(prev_epoch),
                         )
                         .await?;
-                    }
-
-                    if is_checkpoint {
+                    } else if is_checkpoint {
                         if idle_input {
                             // Align watermark
                             // NOTE(st1page): Should be `NoWait` because it could lead to a degradation of concurrent checkpoint situations, as it would require waiting for the previous epoch
