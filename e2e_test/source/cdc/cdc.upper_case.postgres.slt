@@ -7,7 +7,7 @@ create source pg_source_upper with (
  username = '${PGUSER:$USER}',
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
- slot.name = 'pg_slot'
+ slot.name = 'pg_slot_upper'
 );
 
 statement ok

@@ -521,7 +521,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
         String alterPublicationSql =
                 String.format(
-                        "ALTER PUBLICATION %s ADD TABLE %s", pubName, schemaName + "." + tableName);
+                        "ALTER PUBLICATION %s ADD TABLE %s",
+                        pubName, String.format("\"%s\".\"%s\"", this.schemaName, this.tableName));
         try (var stmt = jdbcConnection.createStatement()) {
             LOG.info("Altered publication with statement: {}", alterPublicationSql);
             stmt.execute(alterPublicationSql);

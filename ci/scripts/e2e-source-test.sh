@@ -63,7 +63,7 @@ psql < ./e2e_test/source/cdc/postgres_cdc.sql
 psql -c "CREATE DATABASE \"UpperDb\";"
 
 export PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=UpperDb
-psql -c "
+psql -d UpperDb -c "
 CREATE SCHEMA \"UpperSchema\";
 CREATE TABLE \"UpperSchema\".\"Orders\" (
     id int PRIMARY KEY,
@@ -71,6 +71,7 @@ CREATE TABLE \"UpperSchema\".\"Orders\" (
 );
 INSERT INTO \"UpperSchema\".\"Orders\" VALUES (1, 'happy');
 "
+
 risedev slt './e2e_test/source/cdc/cdc.upper_case.postgres.slt'
 
 export PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test
