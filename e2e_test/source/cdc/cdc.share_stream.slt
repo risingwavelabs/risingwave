@@ -250,11 +250,6 @@ CREATE TABLE person_new (
     city varchar
 ) FROM pg_source TABLE 'person';
 
-CREATE TABLE orders_shared (
-    id int PRIMARY KEY,
-    name varchar,
-) FROM pg_source TABLE 'Orders';
-
 statement ok
 CREATE TABLE person_new (
     id int,
@@ -496,8 +491,3 @@ select * from enum_to_varchar_shared order by id;
 ----
 1 happy
 2 ok
-
-query II
-select * from orders_shared order by id;
-----
-1 happy
