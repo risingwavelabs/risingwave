@@ -64,7 +64,7 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use super::utils::{check_subscription_name_duplicate, get_fragment_ids_by_jobs};
 use crate::controller::rename::{alter_relation_rename, alter_relation_rename_refs};
 use crate::controller::utils::{
-    check_connection_name_duplicate, check_database_name_duplicate,
+    build_relation_group, check_connection_name_duplicate, check_database_name_duplicate,
     check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
     check_secret_name_duplicate, ensure_object_id, ensure_object_not_refer, ensure_schema_empty,
     ensure_user_id, get_referring_objects, get_referring_objects_cascade, get_user_privilege,
@@ -648,10 +648,15 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let creating_jobs: Vec<(ObjectId, ObjectType)> = streaming_job::Entity::find()
+        let mut dirty_objs: Vec<PartialObject> = streaming_job::Entity::find()
             .select_only()
             .column(streaming_job::Column::JobId)
-            .column(object::Column::ObjType)
+            .columns([
+                object::Column::Oid,
+                object::Column::ObjType,
+                object::Column::SchemaId,
+                object::Column::DatabaseId,
+            ])
             .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
             .filter(
                 streaming_job::Column::JobStatus.eq(JobStatus::Initial).or(
@@ -660,13 +665,13 @@ impl CatalogController {
                         .and(streaming_job::Column::CreateType.eq(CreateType::Foreground)),
                 ),
             )
-            .into_tuple()
+            .into_partial_model()
             .all(&txn)
             .await?;
 
         let changed = Self::clean_dirty_sink_downstreams(&txn).await?;
 
-        if creating_jobs.is_empty() {
+        if dirty_objs.is_empty() {
             if changed {
                 txn.commit().await?;
             }
@@ -674,22 +679,95 @@ impl CatalogController {
             return Ok(ReleaseContext::default());
         }
 
+        self.log_cleaned_dirty_jobs(&dirty_objs, &txn).await?;
+
+        let dirty_job_ids = dirty_objs.iter().map(|obj| obj.oid).collect::<Vec<_>>();
+
+        let associated_source_ids: Vec<SourceId> = Table::find()
+            .select_only()
+            .column(table::Column::OptionalAssociatedSourceId)
+            .filter(
+                table::Column::TableId
+                    .is_in(dirty_job_ids.clone())
+                    .and(table::Column::OptionalAssociatedSourceId.is_not_null()),
+            )
+            .into_tuple()
+            .all(&txn)
+            .await?;
+        let dirty_source_objs: Vec<PartialObject> = Object::find()
+            .filter(object::Column::Oid.is_in(associated_source_ids.clone()))
+            .into_partial_model()
+            .all(&txn)
+            .await?;
+        dirty_objs.extend(dirty_source_objs);
+
+        let mut dirty_state_table_ids = vec![];
+        let to_drop_internal_table_objs: Vec<PartialObject> = Object::find()
+            .select_only()
+            .columns([
+                object::Column::Oid,
+                object::Column::ObjType,
+                object::Column::SchemaId,
+                object::Column::DatabaseId,
+            ])
+            .join(JoinType::InnerJoin, object::Relation::Table.def())
+            .filter(table::Column::BelongsToJobId.is_in(dirty_job_ids.clone()))
+            .into_partial_model()
+            .all(&txn)
+            .await?;
+        dirty_state_table_ids.extend(to_drop_internal_table_objs.iter().map(|obj| obj.oid));
+        dirty_objs.extend(to_drop_internal_table_objs);
+
+        let to_delete_objs: HashSet<ObjectId> = dirty_job_ids
+            .clone()
+            .into_iter()
+            .chain(dirty_state_table_ids.clone().into_iter())
+            .chain(associated_source_ids.clone().into_iter())
+            .collect();
+
+        let res = Object::delete_many()
+            .filter(object::Column::Oid.is_in(to_delete_objs))
+            .exec(&txn)
+            .await?;
+        assert!(res.rows_affected > 0);
+
+        txn.commit().await?;
+
+        let relation_group = build_relation_group(dirty_objs);
+
+        let _version = self
+            .notify_frontend(NotificationOperation::Delete, relation_group)
+            .await;
+
+        Ok(ReleaseContext {
+            state_table_ids: dirty_state_table_ids,
+            source_ids: associated_source_ids,
+            ..Default::default()
+        })
+    }
+
+    async fn log_cleaned_dirty_jobs(
+        &self,
+        dirty_objs: &[PartialObject],
+        txn: &DatabaseTransaction,
+    ) -> MetaResult<()> {
         // Record cleaned streaming jobs in event logs.
-        let mut creating_table_ids = vec![];
-        let mut creating_source_ids = vec![];
-        let mut creating_sink_ids = vec![];
-        let mut creating_job_ids = vec![];
-        for (job_id, job_type) in creating_jobs {
-            creating_job_ids.push(job_id);
+        let mut dirty_table_ids = vec![];
+        let mut dirty_source_ids = vec![];
+        let mut dirty_sink_ids = vec![];
+        for dirty_job_obj in dirty_objs {
+            let job_id = dirty_job_obj.oid;
+            let job_type = dirty_job_obj.obj_type;
             match job_type {
-                ObjectType::Table | ObjectType::Index => creating_table_ids.push(job_id),
-                ObjectType::Source => creating_source_ids.push(job_id),
-                ObjectType::Sink => creating_sink_ids.push(job_id),
+                ObjectType::Table | ObjectType::Index => dirty_table_ids.push(job_id),
+                ObjectType::Source => dirty_source_ids.push(job_id),
+                ObjectType::Sink => dirty_sink_ids.push(job_id),
                 _ => unreachable!("unexpected streaming job type"),
             }
         }
+
         let mut event_logs = vec![];
-        if !creating_table_ids.is_empty() {
+        if !dirty_table_ids.is_empty() {
             let table_info: Vec<(TableId, String, String)> = Table::find()
                 .select_only()
                 .columns([
@@ -697,9 +775,9 @@ impl CatalogController {
                     table::Column::Name,
                     table::Column::Definition,
                 ])
-                .filter(table::Column::TableId.is_in(creating_table_ids))
+                .filter(table::Column::TableId.is_in(dirty_table_ids))
                 .into_tuple()
-                .all(&txn)
+                .all(txn)
                 .await?;
             for (table_id, name, definition) in table_info {
                 let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
@@ -713,7 +791,7 @@ impl CatalogController {
                 ));
             }
         }
-        if !creating_source_ids.is_empty() {
+        if !dirty_source_ids.is_empty() {
             let source_info: Vec<(SourceId, String, String)> = Source::find()
                 .select_only()
                 .columns([
@@ -721,9 +799,9 @@ impl CatalogController {
                     source::Column::Name,
                     source::Column::Definition,
                 ])
-                .filter(source::Column::SourceId.is_in(creating_source_ids))
+                .filter(source::Column::SourceId.is_in(dirty_source_ids))
                 .into_tuple()
-                .all(&txn)
+                .all(txn)
                 .await?;
             for (source_id, name, definition) in source_info {
                 let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
@@ -737,7 +815,7 @@ impl CatalogController {
                 ));
             }
         }
-        if !creating_sink_ids.is_empty() {
+        if !dirty_sink_ids.is_empty() {
             let sink_info: Vec<(SinkId, String, String)> = Sink::find()
                 .select_only()
                 .columns([
@@ -745,9 +823,9 @@ impl CatalogController {
                     sink::Column::Name,
                     sink::Column::Definition,
                 ])
-                .filter(sink::Column::SinkId.is_in(creating_sink_ids))
+                .filter(sink::Column::SinkId.is_in(dirty_sink_ids))
                 .into_tuple()
-                .all(&txn)
+                .all(txn)
                 .await?;
             for (sink_id, name, definition) in sink_info {
                 let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
@@ -761,53 +839,8 @@ impl CatalogController {
                 ));
             }
         }
-
-        let associated_source_ids: Vec<SourceId> = Table::find()
-            .select_only()
-            .column(table::Column::OptionalAssociatedSourceId)
-            .filter(
-                table::Column::TableId
-                    .is_in(creating_job_ids.clone())
-                    .and(table::Column::OptionalAssociatedSourceId.is_not_null()),
-            )
-            .into_tuple()
-            .all(&txn)
-            .await?;
-
-        let state_table_ids: Vec<TableId> = Table::find()
-            .select_only()
-            .column(table::Column::TableId)
-            .filter(
-                table::Column::BelongsToJobId
-                    .is_in(creating_job_ids.clone())
-                    .or(table::Column::TableId.is_in(creating_job_ids.clone())),
-            )
-            .into_tuple()
-            .all(&txn)
-            .await?;
-
-        let to_delete_objs: HashSet<ObjectId> = creating_job_ids
-            .clone()
-            .into_iter()
-            .chain(state_table_ids.clone().into_iter())
-            .chain(associated_source_ids.clone().into_iter())
-            .collect();
-
-        let res = Object::delete_many()
-            .filter(object::Column::Oid.is_in(to_delete_objs))
-            .exec(&txn)
-            .await?;
-        assert!(res.rows_affected > 0);
-
-        txn.commit().await?;
-
         self.env.event_log_manager_ref().add_event_logs(event_logs);
-
-        Ok(ReleaseContext {
-            state_table_ids,
-            source_ids: associated_source_ids,
-            ..Default::default()
-        })
+        Ok(())
     }
 
     async fn clean_dirty_sink_downstreams(txn: &DatabaseTransaction) -> MetaResult<bool> {
@@ -2134,75 +2167,10 @@ impl CatalogController {
 
         // notify about them.
         self.notify_users_update(user_infos).await;
-        let mut relations = vec![];
-        for obj in to_drop_objects {
-            match obj.obj_type {
-                ObjectType::Table => relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::Table(PbTable {
-                        id: obj.oid as _,
-                        schema_id: obj.schema_id.unwrap() as _,
-                        database_id: obj.database_id.unwrap() as _,
-                        ..Default::default()
-                    })),
-                }),
-                ObjectType::Source => relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::Source(PbSource {
-                        id: obj.oid as _,
-                        schema_id: obj.schema_id.unwrap() as _,
-                        database_id: obj.database_id.unwrap() as _,
-                        ..Default::default()
-                    })),
-                }),
-                ObjectType::Sink => relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::Sink(PbSink {
-                        id: obj.oid as _,
-                        schema_id: obj.schema_id.unwrap() as _,
-                        database_id: obj.database_id.unwrap() as _,
-                        ..Default::default()
-                    })),
-                }),
-                ObjectType::Subscription => relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::Subscription(PbSubscription {
-                        id: obj.oid as _,
-                        schema_id: obj.schema_id.unwrap() as _,
-                        database_id: obj.database_id.unwrap() as _,
-                        ..Default::default()
-                    })),
-                }),
-                ObjectType::View => relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::View(PbView {
-                        id: obj.oid as _,
-                        schema_id: obj.schema_id.unwrap() as _,
-                        database_id: obj.database_id.unwrap() as _,
-                        ..Default::default()
-                    })),
-                }),
-                ObjectType::Index => {
-                    relations.push(PbRelation {
-                        relation_info: Some(PbRelationInfo::Index(PbIndex {
-                            id: obj.oid as _,
-                            schema_id: obj.schema_id.unwrap() as _,
-                            database_id: obj.database_id.unwrap() as _,
-                            ..Default::default()
-                        })),
-                    });
-                    relations.push(PbRelation {
-                        relation_info: Some(PbRelationInfo::Table(PbTable {
-                            id: obj.oid as _,
-                            schema_id: obj.schema_id.unwrap() as _,
-                            database_id: obj.database_id.unwrap() as _,
-                            ..Default::default()
-                        })),
-                    });
-                }
-                _ => unreachable!("only relations will be dropped."),
-            }
-        }
+        let relation_group = build_relation_group(to_drop_objects);
+
         let version = self
-            .notify_frontend(
-                NotificationOperation::Delete,
-                NotificationInfo::RelationGroup(PbRelationGroup { relations }),
-            )
+            .notify_frontend(NotificationOperation::Delete, relation_group)
             .await;
 
         let fragment_mappings = fragment_ids

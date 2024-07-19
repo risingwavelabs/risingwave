@@ -20,6 +20,7 @@ use super::stream::prelude::PhysicalPlanRef;
 use super::stream::StreamPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode};
+use crate::optimizer::property::MonotonicityMap;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
@@ -48,6 +49,7 @@ impl StreamChangeLog {
             true,
             input.emit_on_window_close(),
             watermark_columns,
+            MonotonicityMap::new(), // TODO: derive monotonicity
         );
         StreamChangeLog { base, core }
     }

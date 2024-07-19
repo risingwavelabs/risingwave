@@ -143,7 +143,7 @@ impl RestartPoint {
 pub struct Block {
     /// Uncompressed entries data, with restart encoded restart points info.
     data: Bytes,
-    /// Uncompressed entried data length.
+    /// Uncompressed entries data length.
     data_len: usize,
 
     /// Table id of this block.
