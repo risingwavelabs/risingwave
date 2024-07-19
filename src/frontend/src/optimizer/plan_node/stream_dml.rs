@@ -21,6 +21,7 @@ use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::property::MonotonicityMap;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -41,6 +42,7 @@ impl StreamDml {
             append_only,
             false,                                            // TODO(rc): decide EOWC property
             FixedBitSet::with_capacity(input.schema().len()), // no watermark if dml is allowed
+            MonotonicityMap::new(),                           // TODO: derive monotonicity
         );
 
         Self {
