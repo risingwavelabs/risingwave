@@ -81,7 +81,7 @@
 - name: Temporal filter with equal condition
   sql: |-
     create table t1 (ts timestamp with time zone);
-    select * from t1 where date_trunc('week', now())  = date_trunc('week',ts);
+    select * from t1 where date_trunc('week', now()) = date_trunc('week',ts);
   stream_plan: |-
     StreamMaterialize { columns: [ts, t1._row_id(hidden), $expr1(hidden)], stream_key: [t1._row_id, $expr1], pk_columns: [t1._row_id, $expr1], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t1._row_id, $expr1) }
@@ -486,3 +486,8 @@
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [DateTrunc('day':Varchar, SubtractWithTimeZone('2024-07-18 00:00:00+00:00':Timestamptz, ('2024-07-18 00:00:00+00:00':Timestamptz - now), 'UTC':Varchar), 'UTC':Varchar) as $expr2] }
             └─StreamNow { output: [now] }
+- name: Non-monotonic now expression
+  sql: |
+    create table t (ts timestamp with time zone, a int);
+    select * from t where a > extract(hour from now());
+  stream_error: Conditions containing now must be in the form of `input_expr cmp now_expr` or `now_expr cmp input_expr`, where `input_expr` references a column and contains no `now()`, and `now_expr` is a non-decreasing expression contains `now()`.

@@ -26,7 +26,7 @@
 - name: Temporal filter with equal condition
   sql: |-
     create table t1 (ts timestamp with time zone);
-    select * from t1 where date_trunc('week', now())  = date_trunc('week',ts);
+    select * from t1 where date_trunc('week', now()) = date_trunc('week',ts);
   expected_outputs:
     - stream_plan
     - stream_dist_plan
@@ -129,3 +129,9 @@
     select * from t where ts + interval '1 hour' > date_trunc('day', ('2024-07-18 00:00:00+00:00'::timestamptz - ('2024-07-18 00:00:00+00:00'::timestamptz - now())));
   expected_outputs:
     - stream_plan
+- name: Non-monotonic now expression
+  sql: |
+    create table t (ts timestamp with time zone, a int);
+    select * from t where a > extract(hour from now());
+  expected_outputs:
+    - stream_error
