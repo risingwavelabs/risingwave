@@ -17,11 +17,15 @@ use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use parquet::arrow::ProjectionMask;
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_connector::source::iceberg::parquet_file_reader::create_parquet_stream_builder;
+use risingwave_pb::batch_plan::file_scan_node;
+use risingwave_pb::batch_plan::file_scan_node::StorageType;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::BatchError;
-use crate::executor::{DataChunk, Executor};
+use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, DataChunk, Executor, ExecutorBuilder};
+use crate::task::BatchTaskContext;
 
 #[derive(PartialEq, Debug)]
 pub enum FileFormat {
@@ -55,7 +59,6 @@ impl Executor for S3FileScanExecutor {
 }
 
 impl S3FileScanExecutor {
-    #![expect(dead_code)]
     pub fn new(
         file_format: FileFormat,
         location: String,
@@ -111,5 +114,36 @@ impl S3FileScanExecutor {
             debug_assert_eq!(chunk.data_types(), self.schema.data_types());
             yield chunk;
         }
+    }
+}
+
+pub struct FileScanExecutorBuilder {}
+
+#[async_trait::async_trait]
+impl BoxedExecutorBuilder for FileScanExecutorBuilder {
+    async fn new_boxed_executor<C: BatchTaskContext>(
+        source: &ExecutorBuilder<'_, C>,
+        _inputs: Vec<BoxedExecutor>,
+    ) -> crate::error::Result<BoxedExecutor> {
+        let file_scan_node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::FileScan
+        )?;
+
+        assert_eq!(file_scan_node.storage_type, StorageType::S3 as i32);
+
+        Ok(Box::new(S3FileScanExecutor::new(
+            match file_scan_node::FileFormat::try_from(file_scan_node.file_format).unwrap() {
+                file_scan_node::FileFormat::Parquet => FileFormat::Parquet,
+                file_scan_node::FileFormat::Unspecified => unreachable!(),
+            },
+            file_scan_node.file_location.clone(),
+            file_scan_node.s3_region.clone(),
+            file_scan_node.s3_access_key.clone(),
+            file_scan_node.s3_secret_key.clone(),
+            source.context.get_config().developer.chunk_size,
+            Schema::from_iter(file_scan_node.columns.iter().map(Field::from)),
+            source.plan_node().get_identity().clone(),
+        )))
     }
 }

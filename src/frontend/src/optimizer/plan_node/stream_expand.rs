@@ -21,7 +21,7 @@ use super::stream::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, MonotonicityMap};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -52,6 +52,7 @@ impl StreamExpand {
             input.append_only(),
             input.emit_on_window_close(),
             watermark_columns,
+            MonotonicityMap::new(),
         );
         StreamExpand { base, core }
     }

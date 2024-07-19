@@ -20,7 +20,7 @@ use std::hash::Hash;
 use std::io::Write;
 use std::str::FromStr;
 
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 use chrono::{
     DateTime, Datelike, Days, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday,
 };
@@ -28,7 +28,6 @@ use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::ZeroHeapSize;
 use thiserror::Error;
 
-use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::{CheckedAdd, DataType, Interval};
 use crate::array::{ArrayError, ArrayResult};
@@ -422,45 +421,6 @@ impl ToText for Timestamp {
     fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
         match ty {
             super::DataType::Timestamp => self.write(f),
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl ToBinary for Date {
-    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
-        match ty {
-            super::DataType::Date => {
-                let mut output = BytesMut::new();
-                self.0.to_sql(&Type::ANY, &mut output).unwrap();
-                Ok(Some(output.freeze()))
-            }
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl ToBinary for Time {
-    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
-        match ty {
-            super::DataType::Time => {
-                let mut output = BytesMut::new();
-                self.0.to_sql(&Type::ANY, &mut output).unwrap();
-                Ok(Some(output.freeze()))
-            }
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl ToBinary for Timestamp {
-    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
-        match ty {
-            super::DataType::Timestamp => {
-                let mut output = BytesMut::new();
-                self.0.to_sql(&Type::ANY, &mut output).unwrap();
-                Ok(Some(output.freeze()))
-            }
             _ => unreachable!(),
         }
     }
