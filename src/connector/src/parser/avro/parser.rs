@@ -58,13 +58,12 @@ impl AvroAccessBuilder {
     pub fn new(config: AvroParserConfig, encoding_type: EncodingType) -> ConnectorResult<Self> {
         let AvroParserConfig {
             schema,
-            key_schema,
             writer_schema_cache,
             ..
         } = config;
         Ok(Self {
             schema: match encoding_type {
-                EncodingType::Key => key_schema.context("Avro with empty key schema")?,
+                EncodingType::Key => bail!("Avro with empty key schema"),
                 EncodingType::Value => schema,
             },
             writer_schema_cache,
@@ -148,7 +147,6 @@ impl AvroAccessBuilder {
 #[derive(Debug, Clone)]
 pub struct AvroParserConfig {
     schema: Arc<ResolvedAvroSchema>,
-    key_schema: Option<Arc<ResolvedAvroSchema>>,
     /// Writer schema is the schema used to write the data. When parsing Avro data, the exactly same schema
     /// must be used to decode the message, and then convert it with the reader schema.
     writer_schema_cache: WriterSchemaCache,
@@ -197,7 +195,6 @@ impl AvroParserConfig {
                     schema: Arc::new(ResolvedAvroSchema::create(
                         resolver.get_by_subject(&subject_value).await?,
                     )?),
-                    key_schema: None,
                     writer_schema_cache: WriterSchemaCache::Confluent(Arc::new(resolver)),
                     map_handling,
                 })
@@ -213,7 +210,6 @@ impl AvroParserConfig {
                     .context("failed to parse avro schema")?;
                 Ok(Self {
                     schema: Arc::new(ResolvedAvroSchema::create(Arc::new(schema))?),
-                    key_schema: None,
                     writer_schema_cache: WriterSchemaCache::File,
                     map_handling,
                 })
@@ -228,7 +224,6 @@ impl AvroParserConfig {
                 let schema = resolver.get_by_name(&schema_arn).await?;
                 Ok(Self {
                     schema: Arc::new(ResolvedAvroSchema::create(schema)?),
-                    key_schema: None,
                     writer_schema_cache: WriterSchemaCache::Glue(Arc::new(resolver)),
                     map_handling,
                 })
