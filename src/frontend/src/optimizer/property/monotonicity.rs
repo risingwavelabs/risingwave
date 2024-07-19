@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+use std::ops::Index;
+
 use enum_as_inner::EnumAsInner;
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::expr_node::Type as ExprType;
@@ -42,8 +45,29 @@ impl MonotonicityDerivation {
     }
 }
 
-/// Represents the monotonicity of a column. `NULL`s are considered largest when analyzing monotonicity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
+/// Represents the monotonicity of a column.
+///
+/// Monotonicity is a property of the output column of stream node that describes the the order
+/// of the values in the column. One [`Monotonicity`] value is associated with one column, so
+/// each stream node should have a [`MonotonicityMap`] to describe the monotonicity of all its
+/// output columns.
+///
+/// For operator that yields append-only stream, the monotonicity being `NonDecreasing` means
+/// that it will never yield a row smaller than any previously yielded row.
+///
+/// For operator that yields non-append-only stream, the monotonicity being `NonDecreasing` means
+/// that it will never yield a change that has smaller value than any previously yielded change,
+/// ignoring the `Op`. So if such operator yields a `NonDecreasing` column, `Delete` and `UpdateDelete`s
+/// can only happen on the last emitted row (or last rows with the same value on the column). This
+/// is especially useful for `StreamNow` operator with `UpdateCurrent` mode, in which case only
+/// one output row is actively maintained and the value is non-decreasing.
+///
+/// Monotonicity property is be considered in default order type, i.e., ASC NULLS LAST. This means
+/// that `NULL`s are considered largest when analyzing monotonicity.
+///
+/// For distributed operators, the monotonicity describes the property of the output column of
+/// each shard of the operator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Monotonicity {
     Constant,
     NonDecreasing,
@@ -52,6 +76,24 @@ pub enum Monotonicity {
 }
 
 impl Monotonicity {
+    pub fn is_constant(self) -> bool {
+        matches!(self, Monotonicity::Constant)
+    }
+
+    pub fn is_non_decreasing(self) -> bool {
+        // we don't use `EnumAsInner` here because we need to include `Constant`
+        matches!(self, Monotonicity::NonDecreasing | Monotonicity::Constant)
+    }
+
+    pub fn is_non_increasing(self) -> bool {
+        // similar to `is_non_decreasing`
+        matches!(self, Monotonicity::NonIncreasing | Monotonicity::Constant)
+    }
+
+    pub fn is_unknown(self) -> bool {
+        matches!(self, Monotonicity::Unknown)
+    }
+
     pub fn inverse(self) -> Self {
         use Monotonicity::*;
         match self {
@@ -269,5 +311,50 @@ impl MonotonicityAnalyzer {
         // TODO: derive monotonicity for table funcs like `generate_series`
         use monotonicity_variants::*;
         Inherent(Unknown)
+    }
+}
+
+/// A map from column index to its monotonicity.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub struct MonotonicityMap(BTreeMap<usize, Monotonicity>);
+
+impl MonotonicityMap {
+    pub fn new() -> Self {
+        MonotonicityMap(BTreeMap::new())
+    }
+
+    pub fn insert(&mut self, idx: usize, monotonicity: Monotonicity) {
+        if monotonicity != Monotonicity::Unknown {
+            self.0.insert(idx, monotonicity);
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (usize, Monotonicity)> + '_ {
+        self.0
+            .iter()
+            .map(|(idx, monotonicity)| (*idx, *monotonicity))
+    }
+}
+
+impl Index<usize> for MonotonicityMap {
+    type Output = Monotonicity;
+
+    fn index(&self, idx: usize) -> &Self::Output {
+        self.0.get(&idx).unwrap_or(&Monotonicity::Unknown)
+    }
+}
+
+impl IntoIterator for MonotonicityMap {
+    type IntoIter = std::collections::btree_map::IntoIter<usize, Monotonicity>;
+    type Item = (usize, Monotonicity);
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl FromIterator<(usize, Monotonicity)> for MonotonicityMap {
+    fn from_iter<T: IntoIterator<Item = (usize, Monotonicity)>>(iter: T) -> Self {
+        MonotonicityMap(iter.into_iter().collect())
     }
 }

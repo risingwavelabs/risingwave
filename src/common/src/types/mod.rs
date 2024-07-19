@@ -89,7 +89,6 @@ pub use self::serial::Serial;
 pub use self::struct_type::StructType;
 pub use self::successor::Successor;
 pub use self::timestamptz::*;
-pub use self::to_binary::ToBinary;
 pub use self::to_text::ToText;
 pub use self::with_data_type::WithDataType;
 
@@ -505,6 +504,10 @@ macro_rules! scalar_impl_enum {
     ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
         /// `ScalarImpl` embeds all possible scalars in the evaluation framework.
         ///
+        /// Note: `ScalarImpl` doesn't contain all information of its `DataType`,
+        /// so sometimes they need to be used together.
+        /// e.g., for `Struct`, we don't have the field names in the value.
+        ///
         /// See `for_all_variants` for the definition.
         #[derive(Debug, Clone, PartialEq, Eq, EstimateSize)]
         pub enum ScalarImpl {
@@ -513,6 +516,12 @@ macro_rules! scalar_impl_enum {
 
         /// `ScalarRefImpl` embeds all possible scalar references in the evaluation
         /// framework.
+        ///
+        /// Note: `ScalarRefImpl` doesn't contain all information of its `DataType`,
+        /// so sometimes they need to be used together.
+        /// e.g., for `Struct`, we don't have the field names in the value.
+        ///
+        /// See `for_all_variants` for the definition.
         #[derive(Debug, Copy, Clone, PartialEq, Eq)]
         pub enum ScalarRefImpl<'scalar> {
             $( $variant_name($scalar_ref) ),*
@@ -791,7 +800,9 @@ impl From<Bytes> for ScalarImpl {
 }
 
 impl ScalarImpl {
-    /// Creates a scalar from binary.
+    /// Creates a scalar from pgwire "BINARY" format.
+    ///
+    /// The counterpart of [`to_binary::ToBinary`].
     pub fn from_binary(bytes: &Bytes, data_type: &DataType) -> Result<Self, BoxedError> {
         let res = match data_type {
             DataType::Varchar => Self::Utf8(String::from_sql(&Type::VARCHAR, bytes)?.into()),
@@ -827,7 +838,9 @@ impl ScalarImpl {
         Ok(res)
     }
 
-    /// Creates a scalar from text.
+    /// Creates a scalar from pgwire "TEXT" format.
+    ///
+    /// The counterpart of [`ToText`].
     pub fn from_text(s: &str, data_type: &DataType) -> Result<Self, BoxedError> {
         Ok(match data_type {
             DataType::Boolean => str_to_bool(s)?.into(),
@@ -908,9 +921,8 @@ pub fn hash_datum(datum: impl ToDatumRef, state: &mut impl std::hash::Hasher) {
 }
 
 impl ScalarRefImpl<'_> {
-    /// Encode the scalar to postgresql binary format.
-    /// The encoder implements encoding using <https://docs.rs/postgres-types/0.2.3/postgres_types/trait.ToSql.html>
     pub fn binary_format(&self, data_type: &DataType) -> to_binary::Result<Bytes> {
+        use self::to_binary::ToBinary;
         self.to_binary_with_type(data_type).transpose().unwrap()
     }
 

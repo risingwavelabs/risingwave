@@ -147,8 +147,8 @@ pub fn int_to_bool(input: i32) -> bool {
     input != 0
 }
 
-// For most of the types, cast them to varchar is similar to return their text format.
-// So we use this function to cast type to varchar.
+/// For most of the types, cast them to varchar is the same as their pgwire "TEXT" format.
+/// So we use `ToText` to cast type to varchar.
 #[function("cast(*int) -> varchar")]
 #[function("cast(decimal) -> varchar")]
 #[function("cast(*float) -> varchar")]
@@ -177,7 +177,7 @@ pub fn bool_to_varchar(input: bool, writer: &mut impl Write) {
         .unwrap();
 }
 
-/// `bool_out` is different from `general_to_string<bool>` to produce a single char. `PostgreSQL`
+/// `bool_out` is different from `cast(boolean) -> varchar` to produce a single char. `PostgreSQL`
 /// uses different variants of bool-to-string in different situations.
 #[function("bool_out(boolean) -> varchar")]
 pub fn bool_out(input: bool, writer: &mut impl Write) {

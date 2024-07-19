@@ -581,7 +581,7 @@ impl GlobalBarrierManager {
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
             let paused_reason = paused.then_some(PausedReason::Manual);
 
-            self.recovery(paused_reason).instrument(span).await;
+            self.recovery(paused_reason, None).instrument(span).await;
         }
 
         self.context.set_status(BarrierManagerStatus::Running);
@@ -792,10 +792,6 @@ impl GlobalBarrierManager {
 
     async fn failure_recovery(&mut self, err: MetaError) {
         self.context.tracker.lock().abort_all();
-        self.context
-            .metadata_manager
-            .notify_finish_failed(&err)
-            .await;
         self.checkpoint_control.clear_on_err(&err).await;
         self.pending_non_checkpoint_barriers.clear();
 
@@ -814,7 +810,7 @@ impl GlobalBarrierManager {
 
             // No need to clean dirty tables for barrier recovery,
             // The foreground stream job should cleanup their own tables.
-            self.recovery(None).instrument(span).await;
+            self.recovery(None, Some(err)).instrument(span).await;
             self.context.set_status(BarrierManagerStatus::Running);
         } else {
             panic!("failed to execute barrier: {}", err.as_report());
@@ -824,30 +820,22 @@ impl GlobalBarrierManager {
     async fn adhoc_recovery(&mut self) {
         let err = MetaErrorInner::AdhocRecovery.into();
         self.context.tracker.lock().abort_all();
-        self.context
-            .metadata_manager
-            .notify_finish_failed(&err)
-            .await;
         self.checkpoint_control.clear_on_err(&err).await;
 
-        if self.enable_recovery {
-            self.context
-                .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Adhoc));
-            let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
-            let span = tracing::info_span!(
-                "adhoc_recovery",
-                error = %err.as_report(),
-                prev_epoch = prev_epoch.value().0
-            );
+        self.context
+            .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Adhoc));
+        let latest_snapshot = self.context.hummock_manager.latest_snapshot();
+        let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recover from the committed epoch
+        let span = tracing::info_span!(
+            "adhoc_recovery",
+            error = %err.as_report(),
+            prev_epoch = prev_epoch.value().0
+        );
 
-            // No need to clean dirty tables for barrier recovery,
-            // The foreground stream job should cleanup their own tables.
-            self.recovery(None).instrument(span).await;
-            self.context.set_status(BarrierManagerStatus::Running);
-        } else {
-            panic!("failed to execute barrier: {}", err.as_report());
-        }
+        // No need to clean dirty tables for barrier recovery,
+        // The foreground stream job should cleanup their own tables.
+        self.recovery(None, Some(err)).instrument(span).await;
+        self.context.set_status(BarrierManagerStatus::Running);
     }
 }
 

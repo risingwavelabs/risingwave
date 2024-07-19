@@ -59,6 +59,7 @@ impl Index<usize> for Row {
     }
 }
 
+/// <https://www.postgresql.org/docs/current/protocol-overview.html#PROTOCOL-FORMAT-CODES>
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
     Binary,
