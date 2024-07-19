@@ -39,6 +39,21 @@ pub type DispatcherId = u64;
 pub type UpDownActorIds = (ActorId, ActorId);
 pub type UpDownFragmentIds = (FragmentId, FragmentId);
 
+#[derive(Hash, Eq, PartialEq, Copy, Clone, Debug)]
+struct PartialGraphId(u32);
+
+impl PartialGraphId {
+    fn new(id: u32) -> Self {
+        Self(id)
+    }
+}
+
+impl Into<u32> for PartialGraphId {
+    fn into(self) -> u32 {
+        self.0
+    }
+}
+
 /// Stores the information which may be modified from the data plane.
 ///
 /// The data structure is created in `LocalBarrierWorker` and is shared by actors created

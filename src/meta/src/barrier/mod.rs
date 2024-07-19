@@ -50,10 +50,9 @@ use tracing::{error, info, warn, Instrument};
 
 use self::command::CommandContext;
 use self::notifier::Notifier;
-use self::progress::TrackingCommand;
 use crate::barrier::info::InflightActorInfo;
 use crate::barrier::notifier::BarrierInfo;
-use crate::barrier::progress::CreateMviewProgressTracker;
+use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand};
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::state::BarrierManagerState;
 use crate::error::MetaErrorInner;
@@ -275,12 +274,10 @@ impl CheckpointControl {
 
     /// Change the state of this `prev_epoch` to `Completed`. Return continuous nodes
     /// with `Completed` starting from first node [`Completed`..`InFlight`) and remove them.
-    fn barrier_collected(
-        &mut self,
-        worker_id: WorkerId,
-        prev_epoch: u64,
-        resp: BarrierCompleteResponse,
-    ) {
+    fn barrier_collected(&mut self, resp: BarrierCompleteResponse) {
+        let worker_id = resp.worker_id;
+        let prev_epoch = resp.epoch;
+        assert_eq!(resp.partial_graph_id, u32::MAX);
         if let Some(node) = self.command_ctx_queue.get_mut(&prev_epoch) {
             assert!(node.state.node_to_collect.remove(&worker_id));
             node.state.resps.push(resp);
@@ -389,10 +386,20 @@ impl CheckpointControl {
             node.enqueue_time.observe_duration();
         }
     }
+
+    fn report_collect_failure(&self, worker_id: WorkerId, e: &MetaError) {
+        for epoch_node in self.command_ctx_queue.values() {
+            if epoch_node.state.node_to_collect.contains(&worker_id) {
+                self.context
+                    .report_collect_failure(&epoch_node.command_ctx, e);
+                break;
+            }
+        }
+    }
 }
 
 /// The state and message of this barrier, a node for concurrent checkpoint.
-pub struct EpochNode {
+struct EpochNode {
     /// Timer for recording barrier latency, taken after `complete_barriers`.
     enqueue_time: HistogramTimer,
 
@@ -674,13 +681,14 @@ impl GlobalBarrierManager {
                         _ => {}
                     }
                 }
-                resp_result = self.control_stream_manager.next_complete_barrier_response() => {
+                (worker_id, resp_result) = self.control_stream_manager.next_complete_barrier_response() => {
                     match resp_result {
-                        Ok((worker_id, prev_epoch, resp)) => {
-                            self.checkpoint_control.barrier_collected(worker_id, prev_epoch, resp);
+                        Ok(resp) => {
+                            self.checkpoint_control.barrier_collected(resp);
 
                         }
                         Err(e) => {
+                            self.checkpoint_control.report_collect_failure(worker_id, &e);
                             self.failure_recovery(e).await;
                         }
                     }
@@ -754,10 +762,10 @@ impl GlobalBarrierManager {
 
         send_latency_timer.observe_duration();
 
-        let node_to_collect = match self.control_stream_manager.inject_barrier(
-            command_ctx.clone(),
-            self.state.inflight_actor_infos.existing_table_ids(),
-        ) {
+        let node_to_collect = match self
+            .control_stream_manager
+            .inject_barrier(command_ctx.clone(), &self.state.inflight_actor_infos)
+        {
             Ok(node_to_collect) => node_to_collect,
             Err(err) => {
                 for notifier in notifiers {

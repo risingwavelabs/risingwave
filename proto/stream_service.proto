@@ -52,12 +52,16 @@ message DropActorsResponse {
   common.Status status = 2;
 }
 
-message InjectBarrierRequest {
-  string request_id = 1;
-  stream_plan.Barrier barrier = 2;
+message PartialGraphInfo {
   repeated uint32 actor_ids_to_send = 3;
   repeated uint32 actor_ids_to_collect = 4;
   repeated uint32 table_ids_to_sync = 5;
+}
+
+message InjectBarrierRequest {
+  string request_id = 1;
+  stream_plan.Barrier barrier = 2;
+  map<uint32, PartialGraphInfo> graph_info = 3;
 }
 
 message BarrierCompleteResponse {
@@ -80,6 +84,9 @@ message BarrierCompleteResponse {
   uint32 worker_id = 5;
   map<uint32, hummock.TableWatermarks> table_watermarks = 6;
   repeated hummock.SstableInfo old_value_sstables = 7;
+  uint32 partial_graph_id = 8;
+  // prev_epoch of barrier
+  uint64 epoch = 9;
 }
 
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.

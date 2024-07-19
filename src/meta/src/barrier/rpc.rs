@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::future::Future;
 use std::sync::Arc;
@@ -24,7 +24,6 @@ use futures::future::try_join_all;
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{pin_mut, FutureExt, StreamExt};
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
@@ -32,8 +31,8 @@ use risingwave_pb::stream_plan::{Barrier, BarrierMutation};
 use risingwave_pb::stream_service::{
     streaming_control_stream_request, streaming_control_stream_response, BarrierCompleteResponse,
     BroadcastActorInfoTableRequest, BuildActorInfo, BuildActorsRequest, DropActorsRequest,
-    InjectBarrierRequest, StreamingControlStreamRequest, StreamingControlStreamResponse,
-    UpdateActorsRequest,
+    InjectBarrierRequest, PbPartialGraphInfo, StreamingControlStreamRequest,
+    StreamingControlStreamResponse, UpdateActorsRequest,
 };
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::StreamClient;
@@ -47,6 +46,7 @@ use uuid::Uuid;
 
 use super::command::CommandContext;
 use super::GlobalBarrierManagerContext;
+use crate::barrier::info::InflightActorInfo;
 use crate::manager::{MetaSrvEnv, WorkerId};
 use crate::{MetaError, MetaResult};
 
@@ -55,8 +55,6 @@ const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
 struct ControlStreamNode {
     worker: WorkerNode,
     sender: UnboundedSender<StreamingControlStreamRequest>,
-    // earlier epoch at the front
-    inflight_barriers: VecDeque<Arc<CommandContext>>,
 }
 
 fn into_future(
@@ -180,43 +178,32 @@ impl ControlStreamManager {
 
     pub(super) async fn next_complete_barrier_response(
         &mut self,
-    ) -> MetaResult<(WorkerId, u64, BarrierCompleteResponse)> {
+    ) -> (WorkerId, MetaResult<BarrierCompleteResponse>) {
         loop {
             let (worker_id, result) = pending_on_none(self.next_response()).await;
             match result {
                 Ok(resp) => match resp.response {
                     Some(streaming_control_stream_response::Response::CompleteBarrier(resp)) => {
-                        let node = self
-                            .nodes
-                            .get_mut(&worker_id)
-                            .expect("should exist when get collect resp");
-                        let command = node
-                            .inflight_barriers
-                            .pop_front()
-                            .expect("should exist when get collect resp");
-                        break Ok((worker_id, command.prev_epoch.value().0, resp));
+                        assert_eq!(worker_id, resp.worker_id);
+                        return (worker_id, Ok(resp));
                     }
                     resp => {
-                        break Err(anyhow!("get unexpected resp: {:?}", resp).into());
+                        break (
+                            worker_id,
+                            Err(anyhow!("get unexpected resp: {:?}", resp).into()),
+                        );
                     }
                 },
                 Err(err) => {
-                    let mut node = self
+                    let node = self
                         .nodes
                         .remove(&worker_id)
                         .expect("should exist when get collect resp");
                     // Note: No need to use `?` as the backtrace is from meta and not useful.
                     warn!(node = ?node.worker, err = %err.as_report(), "get error from response stream");
-                    if let Some(command) = node.inflight_barriers.pop_front() {
-                        let errors = self.collect_errors(node.worker.id, err).await;
-                        let err = merge_node_rpc_errors("get error from control stream", errors);
-                        self.context.report_collect_failure(&command, &err);
-                        break Err(err);
-                    } else {
-                        // for node with no inflight barrier, simply ignore the error
-                        info!(node = ?node.worker, "no inflight barrier no node. Ignore error");
-                        continue;
-                    }
+                    let errors = self.collect_errors(node.worker.id, err).await;
+                    let err = merge_node_rpc_errors("get error from control stream", errors);
+                    break (worker_id, Err(err));
                 }
             }
         }
@@ -248,7 +235,7 @@ impl ControlStreamManager {
     pub(super) fn inject_barrier(
         &mut self,
         command_context: Arc<CommandContext>,
-        table_ids_to_sync: HashSet<TableId>,
+        inflight_actor_info_after_apply_command: &InflightActorInfo,
     ) -> MetaResult<HashSet<WorkerId>> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
             "inject_barrier_err"
@@ -266,9 +253,25 @@ impl ControlStreamManager {
                     // No need to send or collect barrier for this node.
                     assert!(actor_ids_to_send.is_empty());
                 }
+                let graph_info = HashMap::from_iter([(
+                    u32::MAX,
+                    PbPartialGraphInfo {
+                        actor_ids_to_send,
+                        actor_ids_to_collect,
+                        table_ids_to_sync: inflight_actor_info_after_apply_command
+                            .existing_table_ids()
+                            .iter()
+                            .map(|table_id| table_id.table_id)
+                            .collect(),
+                    },
+                )]);
+
                 {
                     let Some(node) = self.nodes.get_mut(node_id) else {
-                        if actor_ids_to_collect.is_empty() {
+                        if graph_info
+                            .values()
+                            .all(|info| info.actor_ids_to_collect.is_empty())
+                        {
                             // Worker node get disconnected but has no actor to collect. Simply skip it.
                             return Ok(());
                         }
@@ -298,12 +301,7 @@ impl ControlStreamManager {
                                     InjectBarrierRequest {
                                         request_id: StreamRpcManager::new_request_id(),
                                         barrier: Some(barrier),
-                                        actor_ids_to_send,
-                                        actor_ids_to_collect,
-                                        table_ids_to_sync: table_ids_to_sync
-                                            .iter()
-                                            .map(|table_id| table_id.table_id)
-                                            .collect(),
+                                        graph_info,
                                     },
                                 ),
                             ),
@@ -316,7 +314,6 @@ impl ControlStreamManager {
                             ))
                         })?;
 
-                    node.inflight_barriers.push_back(command_context.clone());
                     node_need_collect.insert(*node_id);
                     Result::<_, MetaError>::Ok(())
                 }
@@ -359,14 +356,17 @@ impl GlobalBarrierManagerContext {
             ControlStreamNode {
                 worker: node.clone(),
                 sender: handle.request_sender,
-                inflight_barriers: VecDeque::new(),
             },
             handle.response_stream,
         ))
     }
 
     /// Send barrier-complete-rpc and wait for responses from all CNs
-    fn report_collect_failure(&self, command_context: &CommandContext, error: &MetaError) {
+    pub(super) fn report_collect_failure(
+        &self,
+        command_context: &CommandContext,
+        error: &MetaError,
+    ) {
         // Record failure in event log.
         use risingwave_pb::meta::event_log;
         let event = event_log::EventCollectBarrierFail {

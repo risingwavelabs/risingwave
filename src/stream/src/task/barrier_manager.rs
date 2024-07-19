@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::Display;
 use std::future::pending;
 use std::sync::Arc;
@@ -38,7 +38,8 @@ use tonic::{Code, Status};
 use self::managed_state::ManagedBarrierState;
 use crate::error::{IntoUnexpectedExit, StreamError, StreamResult};
 use crate::task::{
-    ActorHandle, ActorId, AtomicU64Ref, SharedContext, StreamEnvironment, UpDownActorIds,
+    ActorHandle, ActorId, AtomicU64Ref, PartialGraphId, SharedContext, StreamEnvironment,
+    UpDownActorIds,
 };
 
 mod managed_state;
@@ -47,7 +48,6 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
-use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
@@ -57,7 +57,7 @@ use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::streaming_control_stream_request::{InitRequest, Request};
 use risingwave_pb::stream_service::streaming_control_stream_response::InitResponse;
 use risingwave_pb::stream_service::{
-    streaming_control_stream_response, BarrierCompleteResponse, BuildActorInfo,
+    streaming_control_stream_response, BarrierCompleteResponse, BuildActorInfo, PartialGraphInfo,
     StreamingControlStreamRequest, StreamingControlStreamResponse,
 };
 
@@ -190,7 +190,7 @@ pub(super) enum LocalBarrierEvent {
         barrier: Barrier,
     },
     ReportCreateProgress {
-        current_epoch: u64,
+        epoch: EpochPair,
         actor: ActorId,
         state: BackfillState,
     },
@@ -424,8 +424,8 @@ impl LocalBarrierWorker {
                 (sender, create_actors_result) = self.actor_manager_state.next_created_actors() => {
                     self.handle_actor_created(sender, create_actors_result);
                 }
-                completed_epoch = self.state.next_completed_epoch() => {
-                    let result = self.on_epoch_completed(completed_epoch);
+                (partial_graph_id, completed_epoch) = self.state.next_completed_epoch() => {
+                    let result = self.on_epoch_completed(partial_graph_id, completed_epoch);
                     if let Err(err) = result {
                         self.notify_other_failure(err, "failed to complete epoch").await;
                     }
@@ -489,15 +489,7 @@ impl LocalBarrierWorker {
         match request.request.expect("should not be empty") {
             Request::InjectBarrier(req) => {
                 let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
-                self.send_barrier(
-                    &barrier,
-                    req.actor_ids_to_send.into_iter().collect(),
-                    req.actor_ids_to_collect.into_iter().collect(),
-                    req.table_ids_to_sync
-                        .into_iter()
-                        .map(TableId::new)
-                        .collect(),
-                )?;
+                self.send_barrier(barrier, req.graph_info)?;
                 Ok(())
             }
             Request::Init(_) => {
@@ -512,11 +504,11 @@ impl LocalBarrierWorker {
                 self.collect(actor_id, &barrier)
             }
             LocalBarrierEvent::ReportCreateProgress {
-                current_epoch,
+                epoch,
                 actor,
                 state,
             } => {
-                self.update_create_mview_progress(current_epoch, actor, state);
+                self.update_create_mview_progress(epoch, actor, state);
             }
             LocalBarrierEvent::SubscribeBarrierMutation {
                 actor_id,
@@ -586,9 +578,17 @@ impl LocalBarrierWorker {
 
 // event handler
 impl LocalBarrierWorker {
-    fn on_epoch_completed(&mut self, epoch: u64) -> StreamResult<()> {
-        let result = self
+    fn on_epoch_completed(
+        &mut self,
+        partial_graph_id: PartialGraphId,
+        epoch: u64,
+    ) -> StreamResult<()> {
+        let state = self
             .state
+            .graph_states
+            .get_mut(&partial_graph_id)
+            .expect("should exist");
+        let result = state
             .pop_completed_epoch(epoch)
             .expect("should exist")
             .expect("should have completed")?;
@@ -613,6 +613,8 @@ impl LocalBarrierWorker {
                 streaming_control_stream_response::Response::CompleteBarrier(
                     BarrierCompleteResponse {
                         request_id: "todo".to_string(),
+                        partial_graph_id: partial_graph_id.into(),
+                        epoch,
                         status: None,
                         create_mview_progress,
                         synced_sstables: synced_sstables
@@ -666,19 +668,22 @@ impl LocalBarrierWorker {
     /// to find the root cause.
     fn send_barrier(
         &mut self,
-        barrier: &Barrier,
-        to_send: HashSet<ActorId>,
-        to_collect: HashSet<ActorId>,
-        table_ids: HashSet<TableId>,
+        barrier: Barrier,
+        graph_infos: HashMap<u32, PartialGraphInfo>,
     ) -> StreamResult<()> {
+        let all_to_collect = || {
+            graph_infos
+                .values()
+                .flat_map(|info| info.actor_ids_to_collect.iter())
+                .cloned()
+        };
         if !cfg!(test) {
             // The barrier might be outdated and been injected after recovery in some certain extreme
             // scenarios. So some newly creating actors in the barrier are possibly not rebuilt during
             // recovery. Check it here and return an error here if some actors are not found to
             // avoid collection hang. We need some refine in meta side to remove this workaround since
             // it will cause another round of unnecessary recovery.
-            let missing_actor_ids = to_collect
-                .iter()
+            let missing_actor_ids = all_to_collect()
                 .filter(|id| !self.actor_manager_state.handles.contains_key(id))
                 .collect_vec();
             if !missing_actor_ids.is_empty() {
@@ -686,7 +691,7 @@ impl LocalBarrierWorker {
                     "to collect actors not found, they should be cleaned when recovering: {:?}",
                     missing_actor_ids
                 );
-                return Err(anyhow!("to collect actors not found: {:?}", to_collect).into());
+                return Err(anyhow!("to collect actors not found: {:?}", missing_actor_ids).into());
             }
         }
 
@@ -697,29 +702,31 @@ impl LocalBarrierWorker {
         }
         debug!(
             target: "events::stream::barrier::manager::send",
-            "send barrier {:?}, senders = {:?}, actor_ids_to_collect = {:?}",
+            "send barrier {:?}, graph_info: {:?}",
             barrier,
-            to_send,
-            to_collect
+            graph_infos,
         );
 
-        for actor_id in &to_collect {
-            if self.failure_actors.contains_key(actor_id) {
+        for actor_id in all_to_collect() {
+            if self.failure_actors.contains_key(&actor_id) {
                 // The failure actors could exit before the barrier is issued, while their
                 // up-downstream actors could be stuck somehow. Return error directly to trigger the
                 // recovery.
                 return Err(StreamError::barrier_send(
                     barrier.clone(),
-                    *actor_id,
+                    actor_id,
                     "actor has already failed",
                 ));
             }
         }
 
-        self.state
-            .transform_to_issued(barrier, to_collect, table_ids);
+        self.state.transform_to_issued(&barrier, &graph_infos);
 
-        for actor_id in to_send {
+        for actor_id in graph_infos
+            .values()
+            .flat_map(|infos| infos.actor_ids_to_send.iter())
+            .cloned()
+        {
             match self.barrier_senders.get(&actor_id) {
                 Some(senders) => {
                     for sender in senders {
@@ -774,14 +781,12 @@ impl LocalBarrierWorker {
         self.add_failure(actor_id, err.clone());
         let root_err = self.try_find_root_failure().await.unwrap(); // always `Some` because we just added one
 
-        let failed_epochs = self.state.epochs_await_on_actor(actor_id).collect_vec();
-        if !failed_epochs.is_empty() {
+        if let Some(actor_state) = self.state.actor_states.get(&actor_id)
+            && !actor_state.inflight_barriers.is_empty()
+        {
             self.control_stream_handle.reset_stream_with_err(
                 anyhow!(root_err)
-                    .context(format!(
-                        "failed to collect barrier for epoch {:?}",
-                        failed_epochs
-                    ))
+                    .context("failed to collect barrier")
                     .to_status_unnamed(Code::Internal),
             );
         }
