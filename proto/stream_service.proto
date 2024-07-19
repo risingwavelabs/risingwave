@@ -61,7 +61,9 @@ message PartialGraphInfo {
 message InjectBarrierRequest {
   string request_id = 1;
   stream_plan.Barrier barrier = 2;
-  map<uint32, PartialGraphInfo> graph_info = 3;
+  reserved 3, 4, 5;
+  reserved "actor_ids_to_send", "actor_ids_to_collect", "table_ids_to_sync";
+  map<uint32, PartialGraphInfo> graph_info = 6;
 }
 
 message BarrierCompleteResponse {
