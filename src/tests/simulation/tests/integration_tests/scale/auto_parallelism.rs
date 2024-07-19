@@ -217,7 +217,6 @@ async fn test_active_online() -> Result<()> {
         true,
     );
     let mut cluster = Cluster::start(config.clone()).await?;
-    let mut session = cluster.start_session();
 
     // Keep one worker reserved for adding later.
     cluster
@@ -228,6 +227,8 @@ async fn test_active_online() -> Result<()> {
         MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
     ))
     .await;
+
+    let mut session = cluster.start_session();
 
     session.run("create table t (v1 int);").await?;
     session
@@ -303,7 +304,6 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
         enable_auto_parallelism_control,
     );
     let mut cluster = Cluster::start(config.clone()).await?;
-    let mut session = cluster.start_session();
 
     // Keep one worker reserved for adding later.
     let select_worker = "compute-2";
@@ -315,6 +315,8 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
         MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
     ))
     .await;
+
+    let mut session = cluster.start_session();
 
     session.run("create table t (v1 int);").await?;
 
@@ -490,10 +492,6 @@ async fn test_compatibility_with_low_level() -> Result<()> {
         true,
     );
     let mut cluster = Cluster::start(config.clone()).await?;
-    let mut session = cluster.start_session();
-    session
-        .run("SET streaming_use_arrangement_backfill = false;")
-        .await?;
 
     // Keep one worker reserved for adding later.
     let select_worker = "compute-2";
@@ -505,6 +503,11 @@ async fn test_compatibility_with_low_level() -> Result<()> {
         MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
     ))
     .await;
+
+    let mut session = cluster.start_session();
+    session
+        .run("SET streaming_use_arrangement_backfill = false;")
+        .await?;
 
     session.run("create table t(v int);").await?;
 
@@ -631,7 +634,6 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
         true,
     );
     let mut cluster = Cluster::start(config.clone()).await?;
-    let mut session = cluster.start_session();
 
     // Keep one worker reserved for adding later.
     let select_worker = "compute-2";
@@ -643,6 +645,8 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
         MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
     ))
     .await;
+
+    let mut session = cluster.start_session();
 
     session.run("create table t(v int);").await?;
 
