@@ -98,12 +98,15 @@ impl<S> std::fmt::Debug for RpcClientPool<S> {
     }
 }
 
+/// Intentionally not implementing `Default` to let callers be explicit about the pool size.
 impl<S> !Default for RpcClientPool<S> {}
 
 impl<S> RpcClientPool<S>
 where
     S: RpcClient,
 {
+    /// Create a new pool with the given `connection_pool_size`, which is the number of
+    /// connections to each node that will be reused.
     pub fn new(connection_pool_size: u16) -> Self {
         Self {
             connection_pool_size,
@@ -111,10 +114,12 @@ where
         }
     }
 
+    /// Create a pool for testing purposes. Same as [`Self::adhoc`].
     pub fn for_test() -> Self {
         Self::adhoc()
     }
 
+    /// Create a pool for ad-hoc usage, where the number of connections to each node is 1.
     pub fn adhoc() -> Self {
         Self::new(1)
     }
