@@ -1072,7 +1072,6 @@ impl SpecificParserConfig {
 #[derive(Debug, Default, Clone)]
 pub struct AvroProperties {
     pub schema_location: SchemaLocation,
-    pub enable_upsert: bool,
     pub record_name: Option<String>,
     pub key_record_name: Option<String>,
     pub map_handling: Option<MapHandling>,
@@ -1224,9 +1223,6 @@ impl SpecificParserConfig {
                     map_handling: MapHandling::from_options(&format_encode_options_with_secret)?,
                     ..Default::default()
                 };
-                if format == SourceFormat::Upsert {
-                    config.enable_upsert = true;
-                }
                 config.schema_location = if let Some(schema_arn) =
                     format_encode_options_with_secret.get(AWS_GLUE_SCHEMA_ARN_KEY)
                 {
