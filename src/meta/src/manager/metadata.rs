@@ -855,6 +855,17 @@ impl MetadataManager {
             MetadataManager::V2(mgr) => mgr.wait_streaming_job_finished(job.id() as _).await,
         }
     }
+
+    pub(crate) async fn notify_finish_failed(&self, err: &MetaError) {
+        match self {
+            MetadataManager::V1(mgr) => {
+                mgr.notify_finish_failed(err).await;
+            }
+            MetadataManager::V2(mgr) => {
+                mgr.notify_finish_failed(err).await;
+            }
+        }
+    }
 }
 
 impl MetadataManagerV2 {

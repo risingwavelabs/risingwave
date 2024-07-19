@@ -184,10 +184,8 @@ impl BarrierScheduler {
     pub fn try_cancel_scheduled_create(&self, table_id: TableId) -> bool {
         let queue = &mut self.inner.queue.lock();
         if let Some(idx) = queue.queue.iter().position(|scheduled| {
-            if let Command::CreateStreamingJob {
-                table_fragments, ..
-            } = &scheduled.command
-                && table_fragments.table_id() == table_id
+            if let Command::CreateStreamingJob { info, .. } = &scheduled.command
+                && info.table_fragments.table_id() == table_id
             {
                 true
             } else {
