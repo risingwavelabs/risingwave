@@ -43,7 +43,7 @@ use crate::controller::catalog::ReleaseContext;
 use crate::manager::{ActiveStreamingWorkerNodes, MetadataManager, WorkerId};
 use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
-use crate::{model, MetaResult};
+use crate::{model, MetaError, MetaResult};
 
 impl GlobalBarrierManager {
     // Retry base interval in milliseconds.
@@ -224,7 +224,7 @@ impl GlobalBarrierManager {
     /// the cluster or `risectl` command. Used for debugging purpose.
     ///
     /// Returns the new state of the barrier manager after recovery.
-    pub async fn recovery(&mut self, paused_reason: Option<PausedReason>) {
+    pub async fn recovery(&mut self, paused_reason: Option<PausedReason>, err: Option<MetaError>) {
         let prev_epoch = TracedEpoch::new(
             self.context
                 .hummock_manager
@@ -246,6 +246,15 @@ impl GlobalBarrierManager {
         let new_state = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
                 let recovery_result: MetaResult<_> = try {
+                    if let Some(err) = &err {
+                        self.context
+                            .tracker
+                            .lock()
+                            .await
+                            .abort_all(err, &self.context)
+                            .await;
+                    }
+
                     self.context
                         .clean_dirty_streaming_jobs()
                         .await
