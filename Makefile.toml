@@ -1261,7 +1261,7 @@ echo If you still feel this is not enough, you may copy $(tput setaf 4)risedev$(
 [tasks.ci-start]
 category = "RiseDev - CI"
 dependencies = ["clean-data", "pre-start-dev"]
-command = "target/${BUILD_MODE_DIR}/risedev-dev"
+command = "target/debug/risedev-dev" # `risedev-dev` is always built in dev profile
 args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
 
