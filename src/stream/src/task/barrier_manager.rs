@@ -63,7 +63,10 @@ use risingwave_pb::stream_service::{
 
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Actor, Barrier, DispatchExecutor, Mutation, StreamExecutorError};
+use crate::executor::{
+    Actor, Barrier, BarrierInner, DispatchExecutor, DispatcherBarrier, Mutation,
+    StreamExecutorError,
+};
 use crate::task::barrier_manager::managed_state::ManagedBarrierStateDebugInfo;
 use crate::task::barrier_manager::progress::BackfillState;
 
@@ -182,12 +185,12 @@ impl CreateActorContext {
     }
 }
 
-pub(super) type SubscribeMutationItem = (u64, Option<Arc<Mutation>>);
+pub(crate) type SubscribeMutationItem = (u64, Option<Arc<Mutation>>);
 
 pub(super) enum LocalBarrierEvent {
     ReportActorCollected {
         actor_id: ActorId,
-        barrier: Barrier,
+        epoch: EpochPair,
     },
     ReportCreateProgress {
         epoch: EpochPair,
@@ -500,8 +503,8 @@ impl LocalBarrierWorker {
 
     fn handle_barrier_event(&mut self, event: LocalBarrierEvent) {
         match event {
-            LocalBarrierEvent::ReportActorCollected { actor_id, barrier } => {
-                self.collect(actor_id, &barrier)
+            LocalBarrierEvent::ReportActorCollected { actor_id, epoch } => {
+                self.collect(actor_id, epoch)
             }
             LocalBarrierEvent::ReportCreateProgress {
                 epoch,
@@ -771,8 +774,8 @@ impl LocalBarrierWorker {
 
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
     /// and collect this barrier with its own `actor_id` using this function.
-    fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) {
-        self.state.collect(actor_id, barrier)
+    fn collect(&mut self, actor_id: ActorId, epoch: EpochPair) {
+        self.state.collect(actor_id, epoch)
     }
 
     /// When a actor exit unexpectedly, the error is reported using this function. The control stream
@@ -909,10 +912,10 @@ impl LocalBarrierManager {
 
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
     /// and collect this barrier with its own `actor_id` using this function.
-    pub fn collect(&self, actor_id: ActorId, barrier: &Barrier) {
+    pub fn collect<M>(&self, actor_id: ActorId, barrier: &BarrierInner<M>) {
         self.send_event(LocalBarrierEvent::ReportActorCollected {
             actor_id,
-            barrier: barrier.clone(),
+            epoch: barrier.epoch,
         })
     }
 
@@ -928,7 +931,7 @@ impl LocalBarrierManager {
     pub fn subscribe_barrier_mutation(
         &self,
         actor_id: ActorId,
-        first_barrier: &Barrier,
+        first_barrier: &DispatcherBarrier,
     ) -> mpsc::UnboundedReceiver<SubscribeMutationItem> {
         let (tx, rx) = mpsc::unbounded_channel();
         self.send_event(LocalBarrierEvent::SubscribeBarrierMutation {
@@ -1001,7 +1004,7 @@ pub fn try_find_root_actor_failure<'a>(
 
 #[cfg(test)]
 impl LocalBarrierManager {
-    pub(super) fn spawn_for_test() -> EventSender<LocalActorOperation> {
+    fn spawn_for_test() -> EventSender<LocalActorOperation> {
         use std::sync::atomic::AtomicU64;
         let (tx, rx) = unbounded_channel();
         let _join_handle = LocalBarrierWorker::spawn(
@@ -1031,5 +1034,87 @@ impl LocalBarrierManager {
         let (tx, rx) = oneshot::channel();
         self.send_event(LocalBarrierEvent::Flush(tx));
         rx.await.unwrap()
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod barrier_test_utils {
+    use std::sync::Arc;
+
+    use assert_matches::assert_matches;
+    use futures::StreamExt;
+    use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
+    use risingwave_pb::stream_service::{
+        streaming_control_stream_request, streaming_control_stream_response, InjectBarrierRequest,
+        StreamingControlStreamRequest, StreamingControlStreamResponse,
+    };
+    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+    use tokio_stream::wrappers::UnboundedReceiverStream;
+    use tonic::Status;
+
+    use crate::executor::Barrier;
+    use crate::task::barrier_manager::{ControlStreamHandle, EventSender, LocalActorOperation};
+    use crate::task::{ActorId, LocalBarrierManager, SharedContext};
+
+    pub(crate) struct LocalBarrierTestEnv {
+        pub shared_context: Arc<SharedContext>,
+        pub(super) actor_op_tx: EventSender<LocalActorOperation>,
+        pub request_tx: UnboundedSender<Result<StreamingControlStreamRequest, Status>>,
+        pub response_rx: UnboundedReceiver<Result<StreamingControlStreamResponse, Status>>,
+    }
+
+    impl LocalBarrierTestEnv {
+        pub(crate) async fn for_test() -> Self {
+            let actor_op_tx = LocalBarrierManager::spawn_for_test();
+
+            let (request_tx, request_rx) = unbounded_channel();
+            let (response_tx, mut response_rx) = unbounded_channel();
+
+            actor_op_tx.send_event(LocalActorOperation::NewControlStream {
+                handle: ControlStreamHandle::new(
+                    response_tx,
+                    UnboundedReceiverStream::new(request_rx).boxed(),
+                ),
+                init_request: InitRequest { prev_epoch: 0 },
+            });
+
+            assert_matches!(
+                response_rx.recv().await.unwrap().unwrap().response.unwrap(),
+                streaming_control_stream_response::Response::Init(_)
+            );
+
+            let shared_context = actor_op_tx
+                .send_and_await(LocalActorOperation::GetCurrentSharedContext)
+                .await
+                .unwrap();
+
+            Self {
+                shared_context,
+                actor_op_tx,
+                request_tx,
+                response_rx,
+            }
+        }
+
+        pub(crate) fn inject_barrier(
+            &self,
+            barrier: &Barrier,
+            actor_to_send: impl IntoIterator<Item = ActorId>,
+            actor_to_collect: impl IntoIterator<Item = ActorId>,
+        ) {
+            self.request_tx
+                .send(Ok(StreamingControlStreamRequest {
+                    request: Some(streaming_control_stream_request::Request::InjectBarrier(
+                        InjectBarrierRequest {
+                            request_id: "".to_string(),
+                            barrier: Some(barrier.to_protobuf()),
+                            actor_ids_to_send: actor_to_send.into_iter().collect(),
+                            actor_ids_to_collect: actor_to_collect.into_iter().collect(),
+                            table_ids_to_sync: vec![],
+                        },
+                    )),
+                }))
+                .unwrap();
+        }
     }
 }
