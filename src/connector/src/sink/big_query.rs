@@ -15,10 +15,8 @@
 use core::pin::Pin;
 use core::time::Duration;
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::pin::pin;
 
 use anyhow::anyhow;
-use futures::prelude::future::{select, Either};
 use futures::prelude::Future;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -47,7 +45,6 @@ use prost_types::{
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
-use rw_futures_util::drop_either_future;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use simd_json::prelude::ArrayTrait;
@@ -95,9 +92,6 @@ pub struct BigQueryCommon {
 struct BigQueryFutureManager {
     offset_queue: VecDeque<TruncateOffset>,
     resp_stream: Pin<Box<dyn Stream<Item = Result<()>> + Send>>,
-    max_future_num: usize,
-    tx: mpsc::Sender<()>,
-    rx: mpsc::Receiver<()>,
 }
 impl BigQueryFutureManager {
     pub fn new(
@@ -105,49 +99,35 @@ impl BigQueryFutureManager {
         resp_stream: impl Stream<Item = Result<()>> + Send + 'static,
     ) -> Self {
         let offset_queue = VecDeque::with_capacity(max_future_num);
-        let (tx, rx) = mpsc::channel(1);
         Self {
             offset_queue,
             resp_stream: Box::pin(resp_stream),
-            max_future_num,
-            tx,
-            rx,
         }
     }
 
-    pub async fn add_offset(&mut self, offset: TruncateOffset) -> Result<()> {
+    pub async fn add_offset(&mut self, offset: TruncateOffset) {
         self.offset_queue.push_back(offset);
-        let _ = self.tx.try_send(());
-        while self.offset_queue.len() >= self.max_future_num {
-            self.wait_one_offset().await?;
-        }
-        Ok(())
     }
 
     pub async fn wait_next_offset(&mut self) -> Result<TruncateOffset> {
-        loop {
-            if let Some(offset) = self.wait_one_offset().await? {
-                return Ok(offset);
-            } else {
-                self.rx.recv().await.unwrap();
-            }
+        if let Some(TruncateOffset::Barrier { .. }) = self.offset_queue.front() {
+            return Ok(self.offset_queue.pop_front().unwrap());
         }
-    }
-
-    pub async fn wait_one_offset(&mut self) -> Result<Option<TruncateOffset>> {
-        if let Some(offset) = self.offset_queue.pop_front() {
-            if matches!(offset, TruncateOffset::Chunk { .. }) {
-                self.resp_stream.next().await.unwrap()?;
-            }
-            Ok(Some(offset))
-        } else {
-            Ok(None)
-        }
+        self.resp_stream
+            .next()
+            .await
+            .ok_or_else(|| SinkError::BigQuery(anyhow::anyhow!("end of stream")))??;
+        self.offset_queue.pop_front().ok_or_else(|| {
+            SinkError::BigQuery(anyhow::anyhow!(
+                "should have pending chunk offset when we receive new response"
+            ))
+        })
     }
 }
 pub struct BigQueryLogSinker {
     writer: BigQuerySinkWriter,
     bigquery_future_manager: BigQueryFutureManager,
+    future_num: usize,
 }
 impl BigQueryLogSinker {
     pub fn new(
@@ -158,6 +138,7 @@ impl BigQueryLogSinker {
         Self {
             writer,
             bigquery_future_manager: BigQueryFutureManager::new(future_num, resp_stream),
+            future_num,
         }
     }
 }
@@ -166,35 +147,28 @@ impl BigQueryLogSinker {
 impl LogSinker for BigQueryLogSinker {
     async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<!> {
         loop {
-            let select_result = drop_either_future(
-                select(
-                    pin!(log_reader.next_item()),
-                    pin!(self.bigquery_future_manager.wait_next_offset()),
-                )
-                .await,
-            );
-            match select_result {
-                Either::Left(item_result) => {
+            tokio::select!(
+                offset = self.bigquery_future_manager.wait_next_offset() => {
+                    log_reader.truncate(offset?)?;
+                 }
+                 item_result = log_reader.next_item(), if self.bigquery_future_manager.offset_queue.len() <= self.future_num => {
                     let (epoch, item) = item_result?;
                     match item {
                         LogStoreReadItem::StreamChunk { chunk_id, chunk } => {
                             self.writer.write_chunk(chunk).await?;
                             self.bigquery_future_manager
                                 .add_offset(TruncateOffset::Chunk { epoch, chunk_id })
-                                .await?;
+                                .await;
                         }
                         LogStoreReadItem::Barrier { .. } => {
                             self.bigquery_future_manager
                                 .add_offset(TruncateOffset::Barrier { epoch })
-                                .await?;
+                                .await;
                         }
                         LogStoreReadItem::UpdateVnodeBitmap(_) => {}
                     }
                 }
-                Either::Right(offset) => {
-                    log_reader.truncate(offset?)?;
-                }
-            }
+            )
         }
     }
 }
