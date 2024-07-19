@@ -517,15 +517,18 @@ mod tests {
             .step_by(10)
             .map(|idx| (idx, test_epoch(idx)))
             .collect_vec();
+        let mut prev_epoch = 0;
+        let prev_epoch = &mut prev_epoch;
         let barriers: HashMap<_, _> = epochs
             .iter()
             .map(|(_, epoch)| {
-                let barrier = Barrier::new_test_barrier(*epoch);
+                let barrier = Barrier::with_prev_epoch_for_test(*epoch, *prev_epoch);
+                *prev_epoch = *epoch;
                 barrier_test_env.inject_barrier(&barrier, [], [actor_id]);
                 (*epoch, barrier)
             })
             .collect();
-        let b2 = Barrier::new_test_barrier(test_epoch(1000))
+        let b2 = Barrier::with_prev_epoch_for_test(test_epoch(1000), *prev_epoch)
             .with_mutation(Mutation::Stop(HashSet::default()));
         barrier_test_env.inject_barrier(&b2, [], [actor_id]);
 
