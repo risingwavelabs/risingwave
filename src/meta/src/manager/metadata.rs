@@ -29,7 +29,7 @@ use risingwave_pb::stream_plan::{PbDispatchStrategy, StreamActor};
 use risingwave_pb::stream_service::BuildActorInfo;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::oneshot;
-use tokio::time::sleep;
+use tokio::time::{sleep, Instant};
 use tracing::warn;
 
 use crate::barrier::Reschedule;
@@ -104,14 +104,21 @@ impl ActiveStreamingWorkerNodes {
     pub(crate) async fn wait_changed(
         &mut self,
         verbose_internal: Duration,
+        verbose_timeout: Duration,
         verbose_fn: impl Fn(&Self),
-    ) -> ActiveStreamingWorkerChange {
+    ) -> Option<ActiveStreamingWorkerChange> {
+        let start = Instant::now();
         loop {
             if let Either::Left((change, _)) =
                 select(pin!(self.changed()), pin!(sleep(verbose_internal))).await
             {
-                break change;
+                break Some(change);
             }
+
+            if start.elapsed() > verbose_timeout {
+                break None;
+            }
+
             verbose_fn(self)
         }
     }
