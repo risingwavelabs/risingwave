@@ -77,7 +77,7 @@ impl<S: StateStore> Execute for WatermarkFilterExecutor<S> {
         self.execute_inner().boxed()
     }
 }
-const UPDATE_GLOBAL_WATERMARK_FREQUENCY_WHEN_IDLE: usize = 10;
+const UPDATE_GLOBAL_WATERMARK_FREQUENCY_WHEN_IDLE: usize = 5;
 
 impl<S: StateStore> WatermarkFilterExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
