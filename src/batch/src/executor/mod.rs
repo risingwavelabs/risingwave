@@ -87,6 +87,7 @@ pub use values::*;
 use self::log_row_seq_scan::LogStoreRowSeqScanExecutorBuilder;
 use self::test_utils::{BlockExecutorBuilder, BusyLoopExecutorBuilder};
 use crate::error::Result;
+use crate::executor::s3_file_scan::FileScanExecutorBuilder;
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
@@ -241,6 +242,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::Source => SourceExecutor,
             NodeBody::SortOverWindow => SortOverWindowExecutor,
             NodeBody::MaxOneRow => MaxOneRowExecutor,
+            NodeBody::FileScan => FileScanExecutorBuilder,
             // Follow NodeBody only used for test
             NodeBody::BlockExecutor => BlockExecutorBuilder,
             NodeBody::BusyLoopExecutor => BusyLoopExecutorBuilder,

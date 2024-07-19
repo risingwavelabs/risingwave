@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod extra;
+
 use std::borrow::Cow;
 use std::error::Error;
 use std::sync::Arc;
@@ -24,6 +26,7 @@ use tonic::metadata::{MetadataMap, MetadataValue};
 const ERROR_KEY: &str = "risingwave-error-bin";
 
 /// The service name that the error is from. Used to provide better error message.
+// TODO: also make it a field of `Extra`?
 type ServiceName = Cow<'static, str>;
 
 /// The error produced by the gRPC server and sent to the client on the wire.
@@ -31,6 +34,7 @@ type ServiceName = Cow<'static, str>;
 struct ServerError {
     error: serde_error::Error,
     service_name: Option<ServiceName>,
+    extra: extra::Extra,
 }
 
 impl std::fmt::Display for ServerError {
@@ -42,6 +46,10 @@ impl std::fmt::Display for ServerError {
 impl std::error::Error for ServerError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         self.error.source()
+    }
+
+    fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
+        self.extra.provide(request);
     }
 }
 
@@ -55,6 +63,7 @@ where
     let source = ServerError {
         error: serde_error::Error::new(error),
         service_name,
+        extra: extra::Extra::new(error),
     };
     let serialized = bincode::serialize(&source).unwrap();
 
@@ -203,6 +212,13 @@ impl std::error::Error for TonicStatusWrapper {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         // Delegate to `self.inner` as if we're transparent.
         self.inner.source()
+    }
+
+    fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
+        // The source error, typically a `ServerError`, may provide additional information through `extra`.
+        if let Some(source) = self.source() {
+            source.provide(request);
+        }
     }
 }
 

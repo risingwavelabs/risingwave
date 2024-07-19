@@ -20,7 +20,7 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_common::monitor::rwlock::MonitoredRwLock;
+use risingwave_common::monitor::MonitoredRwLock;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
@@ -61,6 +61,7 @@ pub(crate) mod checkpoint;
 mod commit_epoch;
 mod compaction;
 pub mod sequence;
+mod time_travel;
 mod timer_task;
 mod transaction;
 mod utils;
@@ -288,6 +289,7 @@ impl HummockManager {
             compaction_state: CompactionState::new(),
         };
         let instance = Arc::new(instance);
+        instance.init_time_travel_state().await?;
         instance.start_worker(rx).await;
         instance.load_meta_store_state().await?;
         instance.release_invalid_contexts().await?;
@@ -463,8 +465,8 @@ impl HummockManager {
         };
 
         self.delete_object_tracker.clear();
-        // Not delete stale objects when archive is enabled
-        if !self.env.opts.enable_hummock_data_archive {
+        // Not delete stale objects when archive or time travel is enabled
+        if !self.env.opts.enable_hummock_data_archive && !self.env.opts.enable_hummock_time_travel {
             versioning_guard.mark_objects_for_deletion(context_info, &self.delete_object_tracker);
         }
 

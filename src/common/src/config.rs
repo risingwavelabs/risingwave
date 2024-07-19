@@ -223,6 +223,20 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::enable_hummock_data_archive")]
     pub enable_hummock_data_archive: bool,
 
+    /// If enabled, time travel query is available.
+    #[serde(default = "default::meta::enable_hummock_time_travel")]
+    pub enable_hummock_time_travel: bool,
+
+    /// The data retention period for time travel.
+    #[serde(default = "default::meta::hummock_time_travel_retention_ms")]
+    pub hummock_time_travel_retention_ms: u64,
+
+    /// The interval at which a Hummock version snapshot is taken for time travel.
+    ///
+    /// Larger value indicates less storage overhead but worse query performance.
+    #[serde(default = "default::meta::hummock_time_travel_snapshot_interval")]
+    pub hummock_time_travel_snapshot_interval: u64,
+
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected.
     #[serde(default = "default::meta::min_delta_log_num_for_hummock_version_checkpoint")]
@@ -369,9 +383,6 @@ pub struct MetaConfig {
     /// Whether compactor should rewrite row to remove dropped column.
     #[serde(default = "default::meta::enable_dropped_column_reclaim")]
     pub enable_dropped_column_reclaim: bool,
-
-    #[serde(default = "default::meta::secret_store_private_key")]
-    pub secret_store_private_key: Vec<u8>,
 }
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -1281,7 +1292,7 @@ pub mod default {
         }
 
         pub fn vacuum_spin_interval_ms() -> u64 {
-            10
+            200
         }
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
@@ -1290,6 +1301,18 @@ pub mod default {
 
         pub fn enable_hummock_data_archive() -> bool {
             false
+        }
+
+        pub fn enable_hummock_time_travel() -> bool {
+            false
+        }
+
+        pub fn hummock_time_travel_retention_ms() -> u64 {
+            24 * 3600 * 1000
+        }
+
+        pub fn hummock_time_travel_snapshot_interval() -> u64 {
+            100
         }
 
         pub fn min_delta_log_num_for_hummock_version_checkpoint() -> u64 {
@@ -1398,10 +1421,6 @@ pub mod default {
 
         pub fn enable_dropped_column_reclaim() -> bool {
             false
-        }
-
-        pub fn secret_store_private_key() -> Vec<u8> {
-            "demo-secret-private-key".as_bytes().to_vec()
         }
     }
 

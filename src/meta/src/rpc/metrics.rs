@@ -717,7 +717,7 @@ impl Default for MetaMetrics {
 
 pub fn start_worker_info_monitor(
     metadata_manager: MetadataManager,
-    election_client: Option<ElectionClientRef>,
+    election_client: ElectionClientRef,
     interval: Duration,
     meta_metrics: Arc<MetaMetrics>,
 ) -> (JoinHandle<()>, Sender<()>) {
@@ -754,9 +754,7 @@ pub fn start_worker_info_monitor(
                     .with_label_values(&[(worker_type.as_str_name())])
                     .set(worker_num as i64);
             }
-            if let Some(client) = &election_client
-                && let Ok(meta_members) = client.get_members().await
-            {
+            if let Ok(meta_members) = election_client.get_members().await {
                 meta_metrics
                     .worker_num
                     .with_label_values(&[WorkerType::Meta.as_str_name()])

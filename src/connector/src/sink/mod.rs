@@ -38,7 +38,6 @@ pub mod pulsar;
 pub mod redis;
 pub mod remote;
 pub mod snowflake;
-pub mod snowflake_connector;
 pub mod sqlserver;
 pub mod starrocks;
 pub mod test_sink;
@@ -59,6 +58,7 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
 };
+use risingwave_common::secret::{LocalSecretManager, SecretError};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
@@ -231,25 +231,42 @@ impl SinkParam {
             fields: self.columns.iter().map(Field::from).collect(),
         }
     }
-}
 
-impl From<SinkCatalog> for SinkParam {
-    fn from(sink_catalog: SinkCatalog) -> Self {
+    // `SinkParams` should only be used when there is a secret context.
+    // FIXME: Use a new type for `SinkFormatDesc` with properties contain filled secrets.
+    pub fn fill_secret_for_format_desc(
+        format_desc: Option<SinkFormatDesc>,
+    ) -> Result<Option<SinkFormatDesc>> {
+        match format_desc {
+            Some(mut format_desc) => {
+                format_desc.options = LocalSecretManager::global()
+                    .fill_secrets(format_desc.options, format_desc.secret_refs.clone())?;
+                Ok(Some(format_desc))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Try to convert a `SinkCatalog` to a `SinkParam` and fill the secrets to properties.
+    pub fn try_from_sink_catalog(sink_catalog: SinkCatalog) -> Result<Self> {
         let columns = sink_catalog
             .visible_columns()
             .map(|col| col.column_desc.clone())
             .collect();
-        Self {
+        let properties_with_secret = LocalSecretManager::global()
+            .fill_secrets(sink_catalog.properties, sink_catalog.secret_refs)?;
+        let format_desc_with_secret = Self::fill_secret_for_format_desc(sink_catalog.format_desc)?;
+        Ok(Self {
             sink_id: sink_catalog.id,
             sink_name: sink_catalog.name,
-            properties: sink_catalog.properties,
+            properties: properties_with_secret,
             columns,
             downstream_pk: sink_catalog.downstream_pk,
             sink_type: sink_catalog.sink_type,
-            format_desc: sink_catalog.format_desc,
+            format_desc: format_desc_with_secret,
             db_name: sink_catalog.db_name,
             sink_from_name: sink_catalog.sink_from_name,
-        }
+        })
     }
 }
 
@@ -597,6 +614,12 @@ pub enum SinkError {
         #[from]
         #[backtrace]
         ConnectorError,
+    ),
+    #[error("Secret error: {0}")]
+    Secret(
+        #[from]
+        #[backtrace]
+        SecretError,
     ),
     #[error("Mongodb error: {0}")]
     Mongodb(

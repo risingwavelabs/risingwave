@@ -94,6 +94,7 @@ aws-config = { version = "1", default-features = false, features = [
 aws-credential-types = { version = "1", default-features = false, features = [
     "hardcoded-credentials",
 ] }
+aws-sdk-glue = "1"
 aws-sdk-kinesis = { version = "1", default-features = false, features = [
     "rt-tokio",
     "rustls",
@@ -143,6 +144,7 @@ arrow-cast-iceberg = { package = "arrow-cast", version = "52" }
 # After apache/iceberg-rust#411 is merged, we move to the upstream version.
 iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0c6e133e6f4655ff9ce4ad57b577dc7f692dd902" }
 iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0c6e133e6f4655ff9ce4ad57b577dc7f692dd902" }
+opendal = "0.47"
 arrow-array = "50"
 arrow-arith = "50"
 arrow-cast = "50"
@@ -333,8 +335,6 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
-# patch: unlimit 4MB message size for grpc client
-etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
 # patch to remove preserve_order from serde_json
 deno_core = { git = "https://github.com/bakjos/deno_core", rev = "9b241c6" }
 # patch to user reqwest 0.12.2
