@@ -283,11 +283,14 @@ private_intra_doc_links = "allow"
 redundant_explicit_links = "allow"
 
 [profile.dev]
-lto = 'off'
+lto = "off"
 
 [profile.release]
 debug = "full"
 split-debuginfo = "packed"
+lto = "off"
+
+[profile.production]
 lto = "thin"
 
 # The profile used for CI in main branch.
