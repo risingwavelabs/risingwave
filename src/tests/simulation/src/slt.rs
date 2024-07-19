@@ -27,7 +27,7 @@ use crate::cluster::{Cluster, KillOpts};
 use crate::utils::TimedExt;
 
 // retry a maximum times until it succeed
-const MAX_RETRY: usize = 20;
+const MAX_RETRY: usize = 5;
 
 fn is_create_table_as(sql: &str) -> bool {
     let parts: Vec<String> = sql.split_whitespace().map(|s| s.to_lowercase()).collect();
