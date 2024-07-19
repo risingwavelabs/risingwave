@@ -495,7 +495,7 @@ pub async fn start_service_as_election_leader(
             prometheus_client,
             prometheus_selector,
             metadata_manager: metadata_manager.clone(),
-            compute_clients: ComputeClientPool::adhoc(),
+            compute_clients: ComputeClientPool::new(1), // typically no need for plural clients
             diagnose_command,
             trace_state,
         };
