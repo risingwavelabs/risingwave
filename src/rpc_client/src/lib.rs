@@ -88,14 +88,17 @@ pub struct RpcClientPool<S> {
     clients: Cache<HostAddr, Arc<Vec<S>>>,
 }
 
-impl<S> Default for RpcClientPool<S>
-where
-    S: RpcClient,
-{
-    fn default() -> Self {
-        Self::new(1)
+impl<S> std::fmt::Debug for RpcClientPool<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RpcClientPool")
+            .field("connection_pool_size", &self.connection_pool_size)
+            .field("type", &type_name::<S>())
+            .field("len", &self.clients.entry_count())
+            .finish()
     }
 }
+
+impl<S> !Default for RpcClientPool<S> {}
 
 impl<S> RpcClientPool<S>
 where
@@ -106,6 +109,14 @@ where
             connection_pool_size,
             clients: Cache::new(u64::MAX),
         }
+    }
+
+    pub fn for_test() -> Self {
+        Self::adhoc()
+    }
+
+    pub fn adhoc() -> Self {
+        Self::new(1)
     }
 
     /// Gets the RPC client for the given node. If the connection is not established, a

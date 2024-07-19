@@ -33,7 +33,7 @@ pub async fn cpu_profile(context: &CtlContext, sleep_s: u64) -> anyhow::Result<(
         .into_iter()
         .filter(|w| w.r#type() == WorkerType::ComputeNode);
 
-    let clients = ComputeClientPool::default();
+    let clients = ComputeClientPool::adhoc();
 
     let profile_root_path = std::env::var("PREFIX_PROFILING").unwrap_or_else(|_| {
         tracing::info!("PREFIX_PROFILING is not set, using current directory");
@@ -96,7 +96,7 @@ pub async fn heap_profile(context: &CtlContext, dir: Option<String>) -> anyhow::
         .into_iter()
         .filter(|w| w.r#type() == WorkerType::ComputeNode);
 
-    let clients = ComputeClientPool::default();
+    let clients = ComputeClientPool::adhoc();
 
     let mut profile_futs = vec![];
 
