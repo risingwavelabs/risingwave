@@ -179,20 +179,18 @@ impl ControlStreamManager {
     pub(super) async fn next_complete_barrier_response(
         &mut self,
     ) -> (WorkerId, MetaResult<BarrierCompleteResponse>) {
-        loop {
+        {
             let (worker_id, result) = pending_on_none(self.next_response()).await;
             match result {
                 Ok(resp) => match resp.response {
                     Some(streaming_control_stream_response::Response::CompleteBarrier(resp)) => {
                         assert_eq!(worker_id, resp.worker_id);
-                        return (worker_id, Ok(resp));
+                        (worker_id, Ok(resp))
                     }
-                    resp => {
-                        break (
-                            worker_id,
-                            Err(anyhow!("get unexpected resp: {:?}", resp).into()),
-                        );
-                    }
+                    resp => (
+                        worker_id,
+                        Err(anyhow!("get unexpected resp: {:?}", resp).into()),
+                    ),
                 },
                 Err(err) => {
                     let node = self
@@ -203,7 +201,7 @@ impl ControlStreamManager {
                     warn!(node = ?node.worker, err = %err.as_report(), "get error from response stream");
                     let errors = self.collect_errors(node.worker.id, err).await;
                     let err = merge_node_rpc_errors("get error from control stream", errors);
-                    break (worker_id, Err(err));
+                    (worker_id, Err(err))
                 }
             }
         }

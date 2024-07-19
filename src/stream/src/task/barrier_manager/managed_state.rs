@@ -244,6 +244,16 @@ impl PartialGraphManagedBarrierState {
             barrier_await_tree_reg,
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Self::new(
+            true,
+            StateStoreImpl::for_test(),
+            Arc::new(StreamingMetrics::unused()),
+            None,
+        )
+    }
 }
 
 pub(super) struct ManagedBarrierState {
@@ -260,15 +270,6 @@ pub(super) struct ManagedBarrierState {
 }
 
 impl ManagedBarrierState {
-    #[cfg(test)]
-    pub(crate) fn for_test() -> Self {
-        Self::new(
-            StateStoreImpl::for_test(),
-            Arc::new(StreamingMetrics::unused()),
-            None,
-        )
-    }
-
     /// Create a barrier manager state. This will be called only once.
     pub(super) fn new(
         state_store: StateStoreImpl,
@@ -451,20 +452,20 @@ impl ManagedBarrierState {
         })
     }
 
-    pub(super) fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) {
+    pub(super) fn collect(&mut self, actor_id: ActorId, epoch: EpochPair) {
         let actor_states = self.actor_states.get_mut(&actor_id).expect("should exist");
         let (prev_epoch, partial_graph_id) = actor_states
             .inflight_barriers
             .pop_first()
             .expect("should not be empty");
-        assert_eq!(prev_epoch, barrier.epoch.prev);
+        assert_eq!(prev_epoch, epoch.prev);
         if actor_states.is_stopped && actor_states.inflight_barriers.is_empty() {
             self.actor_states.remove(&actor_id);
         }
         self.graph_states
             .get_mut(&partial_graph_id)
             .expect("should exist")
-            .collect(actor_id, barrier);
+            .collect(actor_id, epoch);
     }
 }
 
@@ -783,7 +784,7 @@ impl PartialGraphManagedBarrierState {
 
     #[cfg(test)]
     async fn pop_next_completed_epoch(&mut self) -> u64 {
-        let epoch = self.next_completed_epoch().await;
+        let epoch = poll_fn(|cx| self.poll_next_completed_epoch(cx)).await;
         let _ = self.pop_completed_epoch(epoch).unwrap().unwrap();
         epoch
     }
@@ -796,11 +797,11 @@ mod tests {
     use risingwave_common::util::epoch::test_epoch;
 
     use crate::executor::Barrier;
-    use crate::task::barrier_manager::managed_state::ManagedBarrierState;
+    use crate::task::barrier_manager::managed_state::PartialGraphManagedBarrierState;
 
     #[tokio::test]
     async fn test_managed_state_add_actor() {
-        let mut managed_barrier_state = ManagedBarrierState::for_test();
+        let mut managed_barrier_state = PartialGraphManagedBarrierState::for_test();
         let barrier1 = Barrier::new_test_barrier(test_epoch(1));
         let barrier2 = Barrier::new_test_barrier(test_epoch(2));
         let barrier3 = Barrier::new_test_barrier(test_epoch(3));
@@ -850,7 +851,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_state_stop_actor() {
-        let mut managed_barrier_state = ManagedBarrierState::for_test();
+        let mut managed_barrier_state = PartialGraphManagedBarrierState::for_test();
         let barrier1 = Barrier::new_test_barrier(test_epoch(1));
         let barrier2 = Barrier::new_test_barrier(test_epoch(2));
         let barrier3 = Barrier::new_test_barrier(test_epoch(3));

@@ -1039,6 +1039,7 @@ impl LocalBarrierManager {
 
 #[cfg(test)]
 pub(crate) mod barrier_test_utils {
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     use assert_matches::assert_matches;
@@ -1046,7 +1047,7 @@ pub(crate) mod barrier_test_utils {
     use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
     use risingwave_pb::stream_service::{
         streaming_control_stream_request, streaming_control_stream_response, InjectBarrierRequest,
-        StreamingControlStreamRequest, StreamingControlStreamResponse,
+        PbPartialGraphInfo, StreamingControlStreamRequest, StreamingControlStreamResponse,
     };
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
     use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -1108,9 +1109,14 @@ pub(crate) mod barrier_test_utils {
                         InjectBarrierRequest {
                             request_id: "".to_string(),
                             barrier: Some(barrier.to_protobuf()),
-                            actor_ids_to_send: actor_to_send.into_iter().collect(),
-                            actor_ids_to_collect: actor_to_collect.into_iter().collect(),
-                            table_ids_to_sync: vec![],
+                            graph_info: HashMap::from_iter([(
+                                u32::MAX,
+                                PbPartialGraphInfo {
+                                    actor_ids_to_send: actor_to_send.into_iter().collect(),
+                                    actor_ids_to_collect: actor_to_collect.into_iter().collect(),
+                                    table_ids_to_sync: vec![],
+                                },
+                            )]),
                         },
                     )),
                 }))

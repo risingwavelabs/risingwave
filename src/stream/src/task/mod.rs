@@ -49,9 +49,9 @@ impl PartialGraphId {
     }
 }
 
-impl Into<u32> for PartialGraphId {
-    fn into(self) -> u32 {
-        self.0
+impl From<PartialGraphId> for u32 {
+    fn from(val: PartialGraphId) -> u32 {
+        val.0
     }
 }
 
