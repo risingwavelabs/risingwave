@@ -869,14 +869,11 @@ pub enum AccessBuilderImpl {
 }
 
 impl AccessBuilderImpl {
-    pub async fn new_default(
-        config: EncodingProperties,
-        kv: EncodingType,
-    ) -> ConnectorResult<Self> {
+    pub async fn new_default(config: EncodingProperties) -> ConnectorResult<Self> {
         let accessor = match config {
             EncodingProperties::Avro(_) => {
                 let config = AvroParserConfig::new(config).await?;
-                AccessBuilderImpl::Avro(AvroAccessBuilder::new(config, kv)?)
+                AccessBuilderImpl::Avro(AvroAccessBuilder::new(config)?)
             }
             EncodingProperties::Protobuf(_) => {
                 let config = ProtobufParserConfig::new(config).await?;

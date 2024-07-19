@@ -29,7 +29,7 @@ use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
 use crate::parser::util::bytes_from_url;
 use crate::parser::{
-    AccessBuilder, AvroProperties, EncodingProperties, EncodingType, MapHandling, SchemaLocation,
+    AccessBuilder, AvroProperties, EncodingProperties, MapHandling, SchemaLocation,
 };
 use crate::schema::schema_registry::{
     extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
@@ -55,17 +55,14 @@ impl AccessBuilder for AvroAccessBuilder {
 }
 
 impl AvroAccessBuilder {
-    pub fn new(config: AvroParserConfig, encoding_type: EncodingType) -> ConnectorResult<Self> {
+    pub fn new(config: AvroParserConfig) -> ConnectorResult<Self> {
         let AvroParserConfig {
             schema,
             writer_schema_cache,
             ..
         } = config;
         Ok(Self {
-            schema: match encoding_type {
-                EncodingType::Key => bail!("Avro with empty key schema"),
-                EncodingType::Value => schema,
-            },
+            schema,
             writer_schema_cache,
             value: None,
         })
