@@ -17,6 +17,7 @@ RisingWave tweaks some settings of the built-in profiles to better fit its needs
   - completely disables [LTO](https://doc.rust-lang.org/cargo/reference/profiles.html#lto) to speed up the build time
 
 - `release`: for local testing with near-production performance
+
   - completely disables LTO to speed up the build time
   - embeds full debug information to help with debugging in production
 
@@ -24,20 +25,26 @@ RisingWave tweaks some settings of the built-in profiles to better fit its needs
 
 RisingWave also defines some custom profiles that inherit from the built-in profiles, in the sections of `[profile.<custom-profile>]` in `Cargo.toml`. For example,
 
-- `ci-dev` and `ci-release`: for `pull-request` and `main` pipelines in CI
+- `production`: for distribution and production deployment
 
-  - inherits from the corresponding built-in profiles
+  - inherits from `release`
+  - enables aggressive code optimizations (like LTO) for maximum performance, at the cost of significantly increased build time
+
+- `ci-dev`: for `pull-request` pipelines in CI
+
+  - inherits from `dev`
   - tweaks some settings to reduce the build time and binary size
   - enables code optimizations for 3rd-party dependencies to improve CI performance
 
-- `ci-sim`: for `madsim` simulation tests in CI
+- `ci-release`: for `main` and `main-cron` pipelines in CI
 
-  - similar to `ci-dev`
-  - enables slight code optimizations for all crates to improve CI performance under single-threaded madsim simulation
-
-- `production`: for distribution and production deployment
   - inherits from `release`
-  - enables aggressive code optimizations (like LTO) for maximum performance, at the cost of significantly increased build time
+  - tweaks some settings to reduce the build time and binary size
+  - enables more runtime checks (like debug assertions and overflow checks) to catch potential bugs
+
+- `ci-sim`: for `madsim` simulation tests in CI
+  - similar to `ci-dev`
+  - enables slight code optimizations for all crates to improve CI performance under single-threaded madsim execution
 
 ## Comparisons
 
