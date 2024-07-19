@@ -289,10 +289,13 @@ lto = "off"
 
 [profile.release]
 debug = "full"
+incremental = true
 split-debuginfo = "packed"
 lto = "off"
 
 [profile.production]
+inherits = "release"
+incremental = false
 lto = "thin"
 
 [profile.ci-release]
