@@ -1863,3 +1863,11 @@
             └─StreamHashAgg { group_key: [t.a, t.b], aggs: [sum(t.c), sum(t.d), count(t.d), max(t.e), count] }
               └─StreamExchange { dist: HashShard(t.a, t.b) }
                 └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t.d, t.e, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- sql: |
+    CREATE TABLE t (v1 int);
+    SELECT approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) from t;
+  logical_plan: |-
+    LogicalProject { exprs: [approx_percentile($expr1 order_by(t.v1 ASC))] }
+    └─LogicalAgg { aggs: [approx_percentile($expr1 order_by(t.v1 ASC))] }
+      └─LogicalProject { exprs: [t.v1::Float64 as $expr1, t.v1] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
