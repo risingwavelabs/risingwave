@@ -17,9 +17,11 @@
 use std::error::Error;
 use std::fmt::Display;
 use std::hash::Hash;
-use std::io::Write;
+use std::io::{Cursor, Write};
 use std::str::FromStr;
 
+use anyhow::Context;
+use byteorder::{BigEndian, ReadBytesExt};
 use bytes::BytesMut;
 use chrono::{
     DateTime, Datelike, Days, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday,
@@ -450,6 +452,14 @@ impl Date {
             .num_days_from_ce()
     }
 
+    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<Date> {
+        let days = cur
+            .read_i32::<BigEndian>()
+            .context("failed to read i32 from Date buffer")?;
+
+        Ok(Date::with_days(days)?)
+    }
+
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output
             .write(&(self.0.num_days_from_ce()).to_be_bytes())
@@ -482,6 +492,14 @@ impl Time {
             NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
                 .ok_or_else(|| InvalidParamsError::time(secs, nano))?,
         ))
+    }
+
+    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<Time> {
+        let nano = cur
+            .read_u64::<BigEndian>()
+            .context("failed to read u64 from Time buffer")?;
+
+        Ok(Time::with_nano(nano)?)
     }
 
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
@@ -536,6 +554,14 @@ impl Timestamp {
                 .map(|t| t.naive_utc())
                 .ok_or_else(|| InvalidParamsError::datetime(secs, nsecs))?
         }))
+    }
+
+    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<Timestamp> {
+        let micros = cur
+            .read_i64::<BigEndian>()
+            .context("failed to read i64 from Timestamp buffer")?;
+
+        Ok(Timestamp::with_micros(micros)?)
     }
 
     /// Although `Timestamp` takes 12 bytes, we drop 4 bytes in protobuf encoding.
