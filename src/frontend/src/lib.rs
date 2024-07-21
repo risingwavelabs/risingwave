@@ -37,6 +37,7 @@
 #![feature(used_with_arg)]
 #![feature(entry_insert)]
 #![recursion_limit = "256"]
+#![feature(once_cell_try)]
 
 #[cfg(test)]
 risingwave_expr_impl::enable!();
@@ -74,6 +75,7 @@ mod user;
 pub mod health_service;
 mod monitor;
 
+pub mod rpc;
 mod telemetry;
 
 use std::ffi::OsString;
@@ -175,6 +177,8 @@ use std::pin::Pin;
 
 use pgwire::pg_protocol::TlsConfig;
 
+use crate::session::SESSION_MANAGER;
+
 /// Start frontend
 pub fn start(
     opts: FrontendOpts,
@@ -184,7 +188,9 @@ pub fn start(
     // slow compile in release mode.
     Box::pin(async move {
         let listen_addr = opts.listen_addr.clone();
-        let session_mgr = SessionManagerImpl::new(opts).await.unwrap();
+        let session_mgr = SESSION_MANAGER
+            .get_or_init(|| async { Arc::new(SessionManagerImpl::new(opts).await.unwrap()) })
+            .await;
         let redact_sql_option_keywords = Arc::new(
             session_mgr
                 .env()
@@ -197,7 +203,7 @@ pub fn start(
 
         pg_serve(
             &listen_addr,
-            session_mgr,
+            session_mgr.clone(),
             TlsConfig::new_default(),
             Some(redact_sql_option_keywords),
             shutdown,

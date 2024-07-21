@@ -14,6 +14,7 @@
 
 use crate::error::ConnectorError;
 
+pub mod auto_schema_change;
 pub mod avro;
 mod loader;
 pub mod protobuf;

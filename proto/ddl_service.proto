@@ -6,6 +6,7 @@ import "catalog.proto";
 import "common.proto";
 import "meta.proto";
 import "stream_plan.proto";
+import "plan_common.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
@@ -434,6 +435,18 @@ message CommentOnResponse {
   uint64 version = 2;
 }
 
+message SchemaChangeEnvelope {
+  string up_table_name = 1;
+  repeated plan_common.ColumnCatalog column_descs = 2;
+}
+
+message AutoSchemaChangeRequest {
+  SchemaChangeEnvelope schema_change = 1;
+}
+
+message AutoSchemaChangeResponse {}
+
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -472,4 +485,5 @@ service DdlService {
   rpc GetTables(GetTablesRequest) returns (GetTablesResponse);
   rpc Wait(WaitRequest) returns (WaitResponse);
   rpc CommentOn(CommentOnRequest) returns (CommentOnResponse);
+  rpc AutoSchemaChange(AutoSchemaChangeRequest) returns (AutoSchemaChangeResponse);
 }

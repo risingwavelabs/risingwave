@@ -12,21 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::ColumnCatalog;
+use crate::parser::schema_change::SchemaChangeEnvelope;
 
-#[derive(Debug)]
-pub struct SchemaChangeEnvelope {
-    pub table_changes: Vec<TableSchemaChange>,
-}
+/// client for auto schema change
+/// Can be a global client
+pub struct AutoSchemaChangeClient {}
 
-#[derive(Debug)]
-pub struct TableSchemaChange {
-    pub(crate) up_table_full_name: String,
-    pub(crate) columns: Vec<ColumnCatalog>,
-}
-
-impl SchemaChangeEnvelope {
-    pub fn to_protobuf(&self) {
-        todo!()
+impl AutoSchemaChangeClient {
+    pub fn submit_schema_change(&self, schema_change: SchemaChangeEnvelope) -> anyhow::Result<()> {
+        Ok(())
     }
 }
