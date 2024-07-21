@@ -293,7 +293,8 @@ impl LogicalAgg {
         let shared_input = LogicalShare::new(stream_input).to_stream(ctx)?;
         let (approx_percentile_agg_call, non_approx_percentile_agg_calls, lhs_mapping, rhs_mapping) =
             self.extract_approx_percentile();
-        let approx_percentile_agg = self.build_approx_percentile_agg(shared_input.clone());
+        let approx_percentile_agg =
+            self.build_approx_percentile_agg(shared_input.clone(), &approx_percentile_agg_call);
         let simple_agg_without_approx_percentile = Agg::new(
             non_approx_percentile_agg_calls,
             self.group_key().clone(),
@@ -337,10 +338,17 @@ impl LogicalAgg {
         )
     }
 
-    fn build_approx_percentile_agg(&self, input: PlanRef) -> PlanRef {
-        let local_approx_percentile = StreamLocalApproxPercentile::new(input);
-        let global_approx_percentile =
-            StreamGlobalApproxPercentile::new(local_approx_percentile.into());
+    fn build_approx_percentile_agg(
+        &self,
+        input: PlanRef,
+        approx_percentile_agg_call: &PlanAggCall,
+    ) -> PlanRef {
+        let local_approx_percentile =
+            StreamLocalApproxPercentile::new(input, &approx_percentile_agg_call);
+        let global_approx_percentile = StreamGlobalApproxPercentile::new(
+            local_approx_percentile.into(),
+            &approx_percentile_agg_call,
+        );
         global_approx_percentile.into()
     }
 

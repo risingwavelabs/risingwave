@@ -20,8 +20,8 @@ use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::{childless_record, watermark_pretty, Distill};
 use crate::optimizer::plan_node::{
-    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamHopWindow, StreamKeyedMerge,
-    StreamNode,
+    ExprRewritable, PlanAggCall, PlanBase, PlanTreeNodeUnary, Stream, StreamHopWindow,
+    StreamKeyedMerge, StreamNode,
 };
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
@@ -32,7 +32,7 @@ pub struct StreamGlobalApproxPercentile {
 }
 
 impl StreamGlobalApproxPercentile {
-    pub fn new(input: PlanRef) -> Self {
+    pub fn new(input: PlanRef, approx_percentile_agg_call: &PlanAggCall) -> Self {
         Self { base: todo!() }
     }
 }
