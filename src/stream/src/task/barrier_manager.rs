@@ -785,7 +785,8 @@ impl LocalBarrierWorker {
         let root_err = self.try_find_root_failure().await.unwrap(); // always `Some` because we just added one
 
         if let Some(actor_state) = self.state.actor_states.get(&actor_id)
-            && !actor_state.inflight_barriers.is_empty()
+            && let Some(inflight_barriers) = actor_state.inflight_barriers()
+            && !inflight_barriers.is_empty()
         {
             self.control_stream_handle.reset_stream_with_err(
                 anyhow!(root_err)
