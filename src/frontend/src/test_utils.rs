@@ -85,6 +85,14 @@ pub struct LocalFrontend {
 impl SessionManager for LocalFrontend {
     type Session = SessionImpl;
 
+    fn get_session(
+        &self,
+        database_id: u32,
+        user_name: &str,
+    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+        todo!()
+    }
+
     fn connect(
         &self,
         _database: &str,

@@ -916,6 +916,21 @@ impl DdlService for DdlServiceImpl {
 
         Ok(Response::new(AlterParallelismResponse {}))
     }
+
+    async fn auto_schema_change(
+        &self,
+        request: Request<AutoSchemaChangeRequest>,
+    ) -> Result<Response<AutoSchemaChangeResponse>, Status> {
+        let req = request.into_inner();
+
+        let schema_change = req.schema_change.unwrap();
+
+        // TODO: can we build a ReplaceTablePlan using the info in schema_change?
+
+        // send a request to the frontend to get the ReplaceTablePlan
+
+        Ok(Response::new(AutoSchemaChangeResponse {}))
+    }
 }
 
 impl DdlServiceImpl {

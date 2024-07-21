@@ -836,7 +836,12 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                     }
                 },
 
-                Ok(ParseResult::SchemaChange(_)) => todo!(),
+                Ok(ParseResult::SchemaChange(schema_change)) => {
+                    // TODO:
+                    // 1. block source executor
+                    // 2. send schema change to Meta
+                    // 3. wait for Meta to finish schema change
+                }
             }
         }
 
