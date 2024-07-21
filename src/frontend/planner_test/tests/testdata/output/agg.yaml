@@ -1867,14 +1867,14 @@
     CREATE TABLE t (v1 int);
     SELECT approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) from t;
   logical_plan: |-
-    LogicalProject { exprs: [approx_percentile($expr1 order_by(t.v1 ASC))] }
-    └─LogicalAgg { aggs: [approx_percentile($expr1 order_by(t.v1 ASC))] }
-      └─LogicalProject { exprs: [t.v1::Float64 as $expr1, t.v1] }
+    LogicalProject { exprs: [approx_percentile($expr1)] }
+    └─LogicalAgg { aggs: [approx_percentile($expr1)] }
+      └─LogicalProject { exprs: [t.v1::Float64 as $expr1] }
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |-
-    StreamMaterialize { columns: [approx_percentile], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [approx_percentile($expr1 order_by(t.v1 ASC))] }
-      └─StreamSimpleAgg { aggs: [approx_percentile($expr1 order_by(t.v1 ASC)), count] }
-        └─StreamExchange { dist: Single }
-          └─StreamProject { exprs: [t.v1::Float64 as $expr1, t.v1, t._row_id] }
+    StreamMaterialize { columns: [approx_percentile], stream_key: [approx_percentile], pk_columns: [approx_percentile], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(approx_percentile) }
+      └─StreamGlobalApproxPercentile
+        └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Decimal, relative_error: 0.01:Decimal }
+          └─StreamProject { exprs: [t.v1::Float64 as $expr1, t._row_id] }
             └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

@@ -47,6 +47,7 @@ impl StreamKeyedMerge {
         lhs_mapping: ColIndexMapping,
         rhs_mapping: ColIndexMapping,
     ) -> Self {
+        // FIXME: schema is wrong.
         let base = PlanBase::new_stream(
             lhs_input.ctx(),
             lhs_input.schema().clone(),

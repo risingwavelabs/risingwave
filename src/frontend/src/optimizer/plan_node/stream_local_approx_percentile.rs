@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -41,7 +42,6 @@ pub struct StreamLocalApproxPercentile {
     quantile: Literal,
     relative_error: Literal,
     percentile_col: InputRef,
-    order_type: OrderType,
 }
 
 impl StreamLocalApproxPercentile {
@@ -50,6 +50,8 @@ impl StreamLocalApproxPercentile {
             Field::new("bucket_id", DataType::Int64),
             Field::new("count", DataType::Int64),
         ]);
+        // FIXME(kwannoel): How does watermark work with FixedBitSet
+        let watermark_columns = FixedBitSet::with_capacity(2);
         let base = PlanBase::new_stream(
             input.ctx(),
             schema,
@@ -58,7 +60,7 @@ impl StreamLocalApproxPercentile {
             input.distribution().clone(),
             input.append_only(),
             input.emit_on_window_close(),
-            input.watermark_columns().clone(),
+            watermark_columns,
             input.columns_monotonicity().clone(),
         );
         Self {
@@ -67,7 +69,6 @@ impl StreamLocalApproxPercentile {
             quantile: approx_percentile_agg_call.direct_args[0].clone(),
             relative_error: approx_percentile_agg_call.direct_args[1].clone(),
             percentile_col: approx_percentile_agg_call.inputs[0].clone(),
-            order_type: approx_percentile_agg_call.order_by[0].order_type,
         }
     }
 }
@@ -84,7 +85,6 @@ impl Distill for StreamLocalApproxPercentile {
         ));
         out.push(("quantile", Pretty::debug(&self.quantile)));
         out.push(("relative_error", Pretty::debug(&self.relative_error)));
-        out.push(("order_type", Pretty::display(&self.order_type)));
         if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
             out.push(("output_watermarks", ow));
         }
@@ -104,7 +104,6 @@ impl PlanTreeNodeUnary for StreamLocalApproxPercentile {
             quantile: self.quantile.clone(),
             relative_error: self.relative_error.clone(),
             percentile_col: self.percentile_col.clone(),
-            order_type: self.order_type,
         }
     }
 }
@@ -129,6 +128,5 @@ impl ExprRewritable for StreamLocalApproxPercentile {
 
 impl ExprVisitable for StreamLocalApproxPercentile {
     fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
-        unimplemented!()
     }
 }

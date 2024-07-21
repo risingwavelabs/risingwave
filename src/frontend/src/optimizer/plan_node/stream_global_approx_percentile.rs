@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use fixedbitset::FixedBitSet;
 use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -38,15 +39,16 @@ pub struct StreamGlobalApproxPercentile {
 impl StreamGlobalApproxPercentile {
     pub fn new(input: PlanRef, approx_percentile_agg_call: &PlanAggCall) -> Self {
         let schema = Schema::new(vec![Field::new("approx_percentile", DataType::Float64)]);
+        let watermark_columns = FixedBitSet::with_capacity(1);
         let base = PlanBase::new_stream(
             input.ctx(),
             schema,
-            input.stream_key().map(|k| k.to_vec()),
+            Some(vec![0]),
             input.functional_dependency().clone(),
             input.distribution().clone(),
             input.append_only(),
             input.emit_on_window_close(),
-            input.watermark_columns().clone(),
+            watermark_columns,
             input.columns_monotonicity().clone(),
         );
         Self { base, input }
@@ -92,6 +94,5 @@ impl ExprRewritable for StreamGlobalApproxPercentile {
 
 impl ExprVisitable for StreamGlobalApproxPercentile {
     fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
-        unimplemented!()
     }
 }
