@@ -303,8 +303,12 @@ impl LogicalAgg {
         .with_grouping_sets(self.grouping_sets().clone())
         .with_enable_two_phase(self.core().enable_two_phase)
         .into();
-        let agg_merge =
-            StreamKeyedMerge::new(simple_agg_without_approx_percentile, approx_percentile_agg);
+        let agg_merge = StreamKeyedMerge::new(
+            simple_agg_without_approx_percentile,
+            approx_percentile_agg,
+            lhs_mapping,
+            rhs_mapping,
+        );
         Ok(agg_merge.into())
     }
 
