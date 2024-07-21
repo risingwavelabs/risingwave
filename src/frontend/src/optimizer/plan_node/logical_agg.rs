@@ -276,6 +276,7 @@ impl LogicalAgg {
     // NOTE(kwannoel): We can't split LocalApproxPercentile into Project + Agg, because
     // for the agg step, we need to count by bucket id, and not just dispatch a single record
     // downstream. So we need a custom executor for this logic.
+    // TODO: Ban distinct agg?
     fn gen_approx_percentile_plan(
         &self,
         stream_input: PlanRef,
@@ -290,21 +291,57 @@ impl LogicalAgg {
         }
 
         let shared_input = LogicalShare::new(stream_input).to_stream(ctx)?;
-        let (rewritten_simple_agg, lhs_mapping, rhs_mapping) =
-            Self::rewrite_simple_agg_for_approx_percentile(shared_input.clone())?;
-        let rewritten_approx_percentile = StreamLocalApproxPercentile::new(shared_input);
-        let global_approx_percentile =
-            StreamGlobalApproxPercentile::new(rewritten_approx_percentile.into());
+        let (approx_percentile_agg_call, non_approx_percentile_agg_calls, lhs_mapping, rhs_mapping) =
+            self.extract_approx_percentile();
+        let approx_percentile_agg = self.build_approx_percentile_agg(shared_input.clone());
+        let simple_agg_without_approx_percentile = Agg::new(
+            non_approx_percentile_agg_calls,
+            self.group_key().clone(),
+            shared_input,
+        )
+        .with_grouping_sets(self.grouping_sets().clone())
+        .with_enable_two_phase(self.core().enable_two_phase)
+        .into();
         let agg_merge =
-            StreamKeyedMerge::new(rewritten_simple_agg, global_approx_percentile.into());
+            StreamKeyedMerge::new(simple_agg_without_approx_percentile, approx_percentile_agg);
         Ok(agg_merge.into())
     }
 
-    /// Returns rewritten simple agg + Mapping of the lhs and rhs indices for keyed merge.
-    fn rewrite_simple_agg_for_approx_percentile(
-        input: PlanRef,
-    ) -> Result<(PlanRef, ColIndexMapping, ColIndexMapping)> {
-        todo!()
+    fn extract_approx_percentile(
+        &self,
+    ) -> (
+        PlanAggCall,
+        Vec<PlanAggCall>,
+        ColIndexMapping,
+        ColIndexMapping,
+    ) {
+        let mut approx_percentile_agg_call = None;
+        let estimated_len = self.agg_calls().len() - 1;
+        let mut remaining_agg_calls = Vec::with_capacity(estimated_len);
+        let mut approx_percentile_col_mapping = Vec::with_capacity(estimated_len);
+        let mut remaining_simple_agg_col_mapping = Vec::with_capacity(estimated_len);
+        for (output_idx, agg_call) in self.agg_calls().iter().enumerate() {
+            if agg_call.agg_kind == AggKind::ApproxPercentile {
+                approx_percentile_agg_call = Some(agg_call.clone());
+                approx_percentile_col_mapping.push(Some(output_idx));
+            } else {
+                remaining_agg_calls.push(agg_call.clone());
+                remaining_simple_agg_col_mapping.push(Some(output_idx));
+            }
+        }
+        (
+            approx_percentile_agg_call.expect("ApproxPercentile agg call not found"),
+            remaining_agg_calls,
+            ColIndexMapping::new(approx_percentile_col_mapping, self.agg_calls().len()),
+            ColIndexMapping::new(remaining_simple_agg_col_mapping, self.agg_calls().len()),
+        )
+    }
+
+    fn build_approx_percentile_agg(&self, input: PlanRef) -> PlanRef {
+        let local_approx_percentile = StreamLocalApproxPercentile::new(input);
+        let global_approx_percentile =
+            StreamGlobalApproxPercentile::new(local_approx_percentile.into());
+        global_approx_percentile.into()
     }
 
     pub fn core(&self) -> &Agg<PlanRef> {
@@ -653,6 +690,7 @@ impl LogicalAggBuilder {
     /// 2. Add the agg call to current `Agg`, and return an `InputRef` to it.
     ///
     /// Note that the rewriter does not traverse into inputs of agg calls.
+    /// FIXME(kwannoel): Rewrite the desc approx percentile for descending order.
     fn try_rewrite_agg_call(&mut self, mut agg_call: AggCall) -> Result<ExprImpl> {
         if matches!(agg_call.agg_kind, agg_kinds::must_have_order_by!())
             && agg_call.order_by.sort_exprs.is_empty()
