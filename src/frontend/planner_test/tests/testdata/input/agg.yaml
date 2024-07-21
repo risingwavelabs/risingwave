@@ -1005,3 +1005,4 @@
     SELECT approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) from t;
   expected_outputs:
     - logical_plan
+    - stream_plan

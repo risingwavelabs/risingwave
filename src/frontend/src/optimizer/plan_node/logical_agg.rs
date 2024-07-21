@@ -290,7 +290,7 @@ impl LogicalAgg {
             .into());
         }
 
-        let shared_input = LogicalShare::new(stream_input).to_stream(ctx)?;
+        let shared_input: PlanRef = StreamShare::new_from_input(stream_input).into();
         let (approx_percentile_agg_call, non_approx_percentile_agg_calls, lhs_mapping, rhs_mapping) =
             self.extract_approx_percentile();
         let approx_percentile_agg =

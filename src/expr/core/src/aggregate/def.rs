@@ -339,6 +339,7 @@ pub mod agg_kinds {
                 | PbAggKind::Count
                 | PbAggKind::Avg
                 | PbAggKind::ApproxCountDistinct
+                | PbAggKind::ApproxPercentile
                 | PbAggKind::VarPop
                 | PbAggKind::VarSamp
                 | PbAggKind::StddevPop
