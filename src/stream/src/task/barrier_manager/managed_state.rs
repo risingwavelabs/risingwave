@@ -671,17 +671,18 @@ impl PartialGraphManagedBarrierState {
                     "non empty table_ids at initial barrier: {:?}",
                     self.prev_barrier_table_ids
                 );
-                info!(epoch = ?barrier.epoch, "initialize at Initial barrier");
+                debug!(epoch = ?barrier.epoch, "initialize at Initial barrier");
                 self.prev_barrier_table_ids = Some((barrier.epoch, table_ids));
                 None
             }
             BarrierKind::Barrier => {
-                if let Some((prev_epoch, prev_table_ids)) = self.prev_barrier_table_ids.as_mut() {
-                    assert_eq!(prev_epoch.curr, barrier.epoch.prev);
+                if let Some((prev_epoch, prev_table_ids)) = self.prev_barrier_table_ids.as_mut()
+                    && prev_epoch.curr == barrier.epoch.prev
+                {
                     assert_eq!(prev_table_ids, &table_ids);
                     *prev_epoch = barrier.epoch;
                 } else {
-                    info!(epoch = ?barrier.epoch, "initialize at non-checkpoint barrier");
+                    debug!(epoch = ?barrier.epoch, "reinitialize at non-checkpoint barrier");
                     self.prev_barrier_table_ids = Some((barrier.epoch, table_ids));
                 }
                 None
@@ -690,11 +691,11 @@ impl PartialGraphManagedBarrierState {
                 if let Some((prev_epoch, prev_table_ids)) = self
                     .prev_barrier_table_ids
                     .replace((barrier.epoch, table_ids))
+                    && prev_epoch.curr == barrier.epoch.prev
                 {
-                    assert_eq!(prev_epoch.curr, barrier.epoch.prev);
                     prev_table_ids
                 } else {
-                    info!(epoch = ?barrier.epoch, "initialize at Checkpoint barrier");
+                    debug!(epoch = ?barrier.epoch, "reinitialize at Checkpoint barrier");
                     HashSet::new()
                 },
             ),
