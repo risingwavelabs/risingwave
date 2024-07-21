@@ -22,7 +22,9 @@ use crate::expr::{ExprRewriter, ExprVisitor, InputRef, InputRefDisplay, Literal}
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
-use crate::optimizer::plan_node::utils::{childless_record, Distill, IndicesDisplay, watermark_pretty};
+use crate::optimizer::plan_node::utils::{
+    childless_record, watermark_pretty, Distill, IndicesDisplay,
+};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanAggCall, PlanBase, PlanNode, PlanTreeNodeUnary, Stream,
     StreamGlobalApproxPercentile, StreamHopWindow, StreamNode,
@@ -30,6 +32,8 @@ use crate::optimizer::plan_node::{
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
+// Does not contain `core` because no other plan nodes share
+// common fields and schema, even GlobalApproxPercentile.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamLocalApproxPercentile {
     pub base: PlanBase<Stream>,
@@ -42,9 +46,13 @@ pub struct StreamLocalApproxPercentile {
 
 impl StreamLocalApproxPercentile {
     pub fn new(input: PlanRef, approx_percentile_agg_call: &PlanAggCall) -> Self {
+        let schema = Schema::new(vec![
+            Field::new("bucket_id", DataType::Int64),
+            Field::new("count", DataType::Int64),
+        ]);
         let base = PlanBase::new_stream(
             input.ctx(),
-            input.schema().clone(),
+            schema,
             input.stream_key().map(|k| k.to_vec()),
             input.functional_dependency().clone(),
             input.distribution().clone(),

@@ -29,11 +29,15 @@ use crate::PlanRef;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamGlobalApproxPercentile {
     pub base: PlanBase<Stream>,
+    input: PlanRef,
 }
 
 impl StreamGlobalApproxPercentile {
     pub fn new(input: PlanRef, approx_percentile_agg_call: &PlanAggCall) -> Self {
-        Self { base: todo!() }
+        Self {
+            base: todo!(),
+            input,
+        }
     }
 }
 

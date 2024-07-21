@@ -47,6 +47,15 @@ impl Field {
             name: self.name.to_string(),
         }
     }
+
+    pub fn new(name: impl Into<String>, data_type: DataType) -> Self {
+        Self {
+            data_type,
+            name: name.into(),
+            sub_fields: vec![],
+            type_name: String::new(),
+        }
+    }
 }
 
 impl From<&ColumnDesc> for Field {
