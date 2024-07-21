@@ -74,8 +74,7 @@ impl StreamLocalApproxPercentile {
 
 impl Distill for StreamLocalApproxPercentile {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let mut out = Vec::with_capacity(4);
-        let output_type = DataType::Float64;
+        let mut out = Vec::with_capacity(5);
         out.push((
             "percentile_col",
             Pretty::display(&InputRefDisplay {

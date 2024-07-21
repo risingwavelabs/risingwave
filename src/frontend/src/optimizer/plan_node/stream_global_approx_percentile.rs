@@ -13,11 +13,14 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::{childless_record, watermark_pretty, Distill};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanAggCall, PlanBase, PlanTreeNodeUnary, Stream, StreamHopWindow,
@@ -34,26 +37,38 @@ pub struct StreamGlobalApproxPercentile {
 
 impl StreamGlobalApproxPercentile {
     pub fn new(input: PlanRef, approx_percentile_agg_call: &PlanAggCall) -> Self {
-        Self {
-            base: todo!(),
-            input,
-        }
+        let schema = Schema::new(vec![Field::new("approx_percentile", DataType::Float64)]);
+        let base = PlanBase::new_stream(
+            input.ctx(),
+            schema,
+            input.stream_key().map(|k| k.to_vec()),
+            input.functional_dependency().clone(),
+            input.distribution().clone(),
+            input.append_only(),
+            input.emit_on_window_close(),
+            input.watermark_columns().clone(),
+            input.columns_monotonicity().clone(),
+        );
+        Self { base, input }
     }
 }
 
 impl Distill for StreamGlobalApproxPercentile {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        todo!()
+        childless_record("StreamGlobalApproxPercentile", vec![])
     }
 }
 
 impl PlanTreeNodeUnary for StreamGlobalApproxPercentile {
     fn input(&self) -> PlanRef {
-        todo!()
+        self.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        todo!()
+        Self {
+            base: self.base.clone(),
+            input,
+        }
     }
 }
 
@@ -67,16 +82,16 @@ impl StreamNode for StreamGlobalApproxPercentile {
 
 impl ExprRewritable for StreamGlobalApproxPercentile {
     fn has_rewritable_expr(&self) -> bool {
-        todo!()
+        false
     }
 
     fn rewrite_exprs(&self, _rewriter: &mut dyn ExprRewriter) -> PlanRef {
-        todo!()
+        unimplemented!()
     }
 }
 
 impl ExprVisitable for StreamGlobalApproxPercentile {
     fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
-        todo!()
+        unimplemented!()
     }
 }
