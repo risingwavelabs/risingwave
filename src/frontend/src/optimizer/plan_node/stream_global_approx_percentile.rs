@@ -44,7 +44,7 @@ impl StreamGlobalApproxPercentile {
         let base = PlanBase::new_stream(
             input.ctx(),
             schema,
-            Some(vec![0]),
+            Some(vec![]),
             input.functional_dependency().clone(),
             Distribution::Single,
             input.append_only(),

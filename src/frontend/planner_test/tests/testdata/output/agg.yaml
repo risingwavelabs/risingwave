@@ -1889,7 +1889,7 @@
       └─LogicalProject { exprs: [t.v1::Float64 as $expr1] }
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |-
-    StreamMaterialize { columns: [approx_percentile], stream_key: [approx_percentile], pk_columns: [approx_percentile], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [approx_percentile], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamGlobalApproxPercentile
       └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Decimal, relative_error: 0.01:Decimal }
         └─StreamProject { exprs: [t.v1::Float64 as $expr1, t._row_id] }
@@ -1904,7 +1904,7 @@
       └─LogicalProject { exprs: [t.v1::Float64 as $expr1, t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |-
-    StreamMaterialize { columns: [approx_percentile, sum], stream_key: [approx_percentile], pk_columns: [approx_percentile], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [approx_percentile, sum], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamKeyedMerge { output: [approx_percentile:Float64, sum(sum(t.v1)):Int64] }
       ├─StreamGlobalApproxPercentile
       │ └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Decimal, relative_error: 0.01:Decimal }
@@ -1927,7 +1927,7 @@
       └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1] }
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |-
-    StreamMaterialize { columns: [s1, approx_percentile, s2, count], stream_key: [s2], pk_columns: [s2], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [s1, approx_percentile, s2, count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(sum(t.v1)), approx_percentile, sum(sum(t.v1)), sum0(count(t.v1))] }
       └─StreamKeyedMerge { output: [sum(sum(t.v1)):Int64, approx_percentile:Float64, sum0(count(t.v1)):Int64] }
         ├─StreamGlobalApproxPercentile
