@@ -31,7 +31,7 @@ use risingwave_sqlparser::ast::{SetExpr, Statement};
 
 use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
 use super::{create_mv, PgResponseStream, RwPgResponse};
-use crate::binder::{Binder, BoundStatement};
+use crate::binder::{Binder, BoundCreateView, BoundStatement};
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::create_mv::gen_create_mv_plan;
@@ -107,35 +107,45 @@ pub async fn handle_execute(
             };
             execute(session, plan_fragmenter_result, result_formats).await
         }
-        Statement::CreateView {
-            or_replace, // not supported
-            materialized,
-            if_not_exists,
-            name,
-            columns,
-            query: _,
-            emit_mode,
-            with_options: _, // It is put in `handler_args` and will be used from `OptimizerContext`
-        } if materialized => {
-            if or_replace {
-                bail_not_implemented!("CREATE OR REPLACE VIEW");
-            }
+        Statement::CreateView { materialized, .. } if materialized => {
+            // Execute a CREATE MATERIALIZED VIEW
             let BoundResult {
                 bound,
                 dependent_relations,
                 ..
             } = bound_result;
-            let query = if let BoundStatement::CreateView(query) = bound {
-                *query
+            let create_mv = if let BoundStatement::CreateView(create_mv) = bound {
+                create_mv
             } else {
                 unreachable!("expect a BoundStatement::CreateView")
+            };
+            let BoundCreateView {
+                or_replace,
+                materialized: _,
+                if_not_exists,
+                name,
+                columns,
+                query,
+                emit_mode,
+                with_options,
+            } = *create_mv;
+            if or_replace {
+                bail_not_implemented!("CREATE OR REPLACE VIEW");
+            }
+
+            // Hack: replace the `with_options` with the bounded ones.
+            let handler_args = HandlerArgs {
+                session: handler_args.session.clone(),
+                sql: handler_args.sql.clone(),
+                normalized_sql: handler_args.normalized_sql.clone(),
+                with_options: crate::WithOptions::try_from(with_options.as_slice())?,
             };
 
             create_mv::handle_create_mv_bound(
                 handler_args,
                 if_not_exists,
                 name,
-                query,
+                *query,
                 dependent_relations,
                 columns,
                 emit_mode,

@@ -24,7 +24,7 @@ impl Planner {
             BoundStatement::Delete(d) => self.plan_delete(*d),
             BoundStatement::Update(u) => self.plan_update(*u),
             BoundStatement::Query(q) => self.plan_query(*q),
-            BoundStatement::CreateView(q) => self.plan_query(*q), /* not sure whether it works from streaming query */
+            BoundStatement::CreateView(c) => self.plan_query(*c.query),
         }
     }
 }
