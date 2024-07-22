@@ -61,9 +61,10 @@ impl LogicalAgg {
     /// Generate plan for stateless 2-phase streaming agg.
     /// Should only be used iff input is distributed. Input must be converted to stream form.
     fn gen_stateless_two_phase_streaming_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
-        println!("generating stateless simple agg plan");
         debug_assert!(self.group_key().is_empty());
         let mut core = self.core.clone();
+        let schema = self.base.schema().clone();
+        println!("agg schema: {:?}", schema);
 
         // First, handle approx percentile.
         let has_approx_percentile = self
@@ -77,34 +78,37 @@ impl LogicalAgg {
                 lhs_mapping,
                 rhs_mapping,
             ) = self.extract_approx_percentile();
-            if non_approx_percentile_agg_calls.is_empty() {
-                let approx_percentile_agg: PlanRef =
-                    self.build_approx_percentile_agg(stream_input.clone(), &approx_percentile_agg_call);
-                return Ok(approx_percentile_agg);
-            } else {
+            // FIXME(kwannoel): Handle case where there's multiple approx percentile also.
+            let requires_keyed_merge = !non_approx_percentile_agg_calls.is_empty();
+            if requires_keyed_merge {
                 let stream_input: PlanRef = StreamShare::new_from_input(stream_input).into();
-                let approx_percentile_agg: PlanRef =
-                    self.build_approx_percentile_agg(stream_input.clone(), &approx_percentile_agg_call);
+                let approx_percentile_agg: PlanRef = self
+                    .build_approx_percentile_agg(stream_input.clone(), &approx_percentile_agg_call);
 
                 core.input = stream_input;
                 core.agg_calls = non_approx_percentile_agg_calls;
                 Some((approx_percentile_agg, lhs_mapping, rhs_mapping))
+            } else {
+                let approx_percentile_agg: PlanRef = self
+                    .build_approx_percentile_agg(stream_input.clone(), &approx_percentile_agg_call);
+                return Ok(approx_percentile_agg);
             }
         } else {
             core.input = stream_input;
             None
         };
+        let total_agg_calls = core.agg_calls
+            .iter()
+            .enumerate()
+            .map(|(partial_output_idx, agg_call)| {
+                agg_call.partial_to_total_agg_call(partial_output_idx)
+            })
+            .collect_vec();
         let local_agg = StreamStatelessSimpleAgg::new(core);
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
         let global_agg = new_stream_simple_agg(Agg::new(
-            self.agg_calls()
-                .iter()
-                .enumerate()
-                .map(|(partial_output_idx, agg_call)| {
-                    agg_call.partial_to_total_agg_call(partial_output_idx)
-                })
-                .collect(),
+            total_agg_calls,
             IndexSet::empty(),
             exchange,
         ));
@@ -114,6 +118,7 @@ impl LogicalAgg {
                 approx_percentile_agg,
                 lhs_mapping,
                 rhs_mapping,
+                schema,
             );
             Ok(keyed_merge.into())
         } else {
@@ -297,62 +302,7 @@ impl LogicalAgg {
         }
     }
 
-    /// ------- REWRITES -------
-    ///
-    /// SimpleAgg { agg_calls: [count(*), approx_percentile(quantile, relative_error, v1), sum(v1)] }
-    /// -> Input
-    ///
-    /// -------- INTO ----------
-    ///
-    /// KeyedMerge { agg_calls: [count(*), approx_percentile(quantile, relative_error, v1), sum(v1)] }
-    /// -> SimpleAgg { agg_calls: [count(*)] }
-    ///    -> StreamShare { id: 0 }
-    ///       -> Input
-    /// -> GlobalApproxPercentile { args: [bucket_id, count] }
-    ///    -> LocalApproxPercentile { args: [relative_error, ] }
-    ///       -> StreamShare { id: 0 }
-    ///       -> Input
-    // NOTE(kwannoel): We can't split LocalApproxPercentile into Project + Agg, because
-    // for the agg step, we need to count by bucket id, and not just dispatch a single record
-    // downstream. So we need a custom executor for this logic.
-    // TODO: Ban distinct agg?
-    fn gen_two_phase_approx_percentile_plan(
-        &self,
-        stream_input: PlanRef,
-        ctx: &mut ToStreamContext,
-    ) -> Result<PlanRef> {
-        if !self.group_key().is_empty() {
-            return Err(ErrorCode::NotSupported(
-                "ApproxPercentile aggregation with GROUP BY is not supported".into(),
-                "try to remove GROUP BY".into(),
-            )
-            .into());
-        }
-
-        let shared_input: PlanRef = StreamShare::new_from_input(stream_input).into();
-        let (approx_percentile_agg_call, non_approx_percentile_agg_calls, lhs_mapping, rhs_mapping) =
-            self.extract_approx_percentile();
-        let approx_percentile_agg =
-            self.build_approx_percentile_agg(shared_input.clone(), &approx_percentile_agg_call);
-        let simple_agg_without_approx_percentile: PlanRef = Agg::new(
-            non_approx_percentile_agg_calls,
-            self.group_key().clone(),
-            shared_input,
-        )
-        .with_grouping_sets(self.grouping_sets().clone())
-        .with_enable_two_phase(self.core().enable_two_phase)
-        .into();
-        let simple_agg_without_approx_percentile =
-            simple_agg_without_approx_percentile.to_stream(ctx)?;
-        let agg_merge = StreamKeyedMerge::new(
-            simple_agg_without_approx_percentile,
-            approx_percentile_agg,
-            lhs_mapping,
-            rhs_mapping,
-        );
-        Ok(agg_merge.into())
-    }
-
+    // TODO(kwannoel): Handle multiple approx_percentile.
     fn extract_approx_percentile(
         &self,
     ) -> (
@@ -1295,8 +1245,17 @@ impl ToStream for LogicalAgg {
                 .into());
             }
             (plan.clone(), 1)
+        } else if let Some(stream_keyed_merge) = plan.as_stream_keyed_merge() {
+            if eowc {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "`EMIT ON WINDOW CLOSE` cannot be used for aggregation without `GROUP BY`"
+                        .to_string(),
+                )
+                .into());
+            }
+            (plan.clone(), stream_keyed_merge.base.schema().len())
         } else {
-            panic!("the root PlanNode must be either StreamHashAgg or StreamSimpleAgg");
+            panic!("the root PlanNode must be StreamHashAgg, StreamSimpleAgg, StreamGlobalApproxPercentile, or StreamKeyedMerge");
         };
 
         if self.agg_calls().len() == n_final_agg_calls {

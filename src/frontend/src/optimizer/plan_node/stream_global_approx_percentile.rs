@@ -27,6 +27,7 @@ use crate::optimizer::plan_node::{
     ExprRewritable, PlanAggCall, PlanBase, PlanTreeNodeUnary, Stream, StreamHopWindow,
     StreamKeyedMerge, StreamNode,
 };
+use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
@@ -45,7 +46,7 @@ impl StreamGlobalApproxPercentile {
             schema,
             Some(vec![0]),
             input.functional_dependency().clone(),
-            input.distribution().clone(),
+            Distribution::Single,
             input.append_only(),
             input.emit_on_window_close(),
             watermark_columns,
@@ -93,6 +94,5 @@ impl ExprRewritable for StreamGlobalApproxPercentile {
 }
 
 impl ExprVisitable for StreamGlobalApproxPercentile {
-    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
-    }
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {}
 }

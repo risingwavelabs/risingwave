@@ -127,6 +127,5 @@ impl ExprRewritable for StreamLocalApproxPercentile {
 }
 
 impl ExprVisitable for StreamLocalApproxPercentile {
-    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
-    }
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {}
 }

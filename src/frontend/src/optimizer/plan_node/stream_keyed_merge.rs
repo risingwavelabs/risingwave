@@ -13,15 +13,16 @@
 // limitations under the License.
 
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::Schema;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::HopWindowNode;
 
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::PhysicalPlanRef;
+use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
-use crate::optimizer::plan_node::utils::{childless_record, Distill};
+use crate::optimizer::plan_node::utils::{childless_record, Distill, IndicesDisplay};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanBase, PlanTreeNodeBinary, Stream, StreamHopWindow,
     StreamLocalApproxPercentile, StreamNode,
@@ -46,11 +47,13 @@ impl StreamKeyedMerge {
         rhs_input: PlanRef,
         lhs_mapping: ColIndexMapping,
         rhs_mapping: ColIndexMapping,
+        schema: Schema,
     ) -> Self {
+        println!("keyed merge schema: {:?}", schema);
         // FIXME: schema is wrong.
         let base = PlanBase::new_stream(
             lhs_input.ctx(),
-            lhs_input.schema().clone(),
+            schema,
             lhs_input.stream_key().map(|k| k.to_vec()),
             lhs_input.functional_dependency().clone(),
             lhs_input.distribution().clone(),
@@ -71,10 +74,17 @@ impl StreamKeyedMerge {
 
 impl Distill for StreamKeyedMerge {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let mut out = Vec::with_capacity(2);
-        out.push(("lhs_col_mapping", Pretty::debug(&self.lhs_mapping)));
-        out.push(("rhs_col_mapping", Pretty::debug(&self.rhs_mapping)));
+        let mut out = Vec::with_capacity(1);
+        // out.push(("lhs_col_mapping", Pretty::debug(&self.lhs_mapping)));
+        // out.push(("rhs_col_mapping", Pretty::debug(&self.rhs_mapping)));
+
+        if self.base.ctx().is_explain_verbose() {
+            let f = |t| Pretty::debug(&t);
+            let e = Pretty::Array(self.base.schema().fields().iter().map(f).collect());
+            out = vec![("output", e)];
+        }
         childless_record("StreamKeyedMerge", out)
+
     }
 }
 
@@ -118,6 +128,5 @@ impl ExprRewritable for StreamKeyedMerge {
 
 impl ExprVisitable for StreamKeyedMerge {
     fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
-        unimplemented!()
     }
 }
