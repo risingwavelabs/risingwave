@@ -57,7 +57,7 @@ impl Rule for DistinctAggRule {
                 c.agg_kind
             );
             let agg_kind_ok = !matches!(c.agg_kind, agg_kinds::simply_cannot_two_phase!());
-            let order_ok = matches!(c.agg_kind, agg_kinds::result_unaffected_by_order_by!())
+            let order_ok = matches!(c.agg_kind, agg_kinds::result_unaffected_by_order_by!() | AggKind::ApproxPercentile)
                 || c.order_by.is_empty();
             agg_kind_ok && order_ok
         }) {

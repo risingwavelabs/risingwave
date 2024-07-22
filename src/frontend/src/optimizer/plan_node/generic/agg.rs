@@ -105,7 +105,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
             && !self.agg_calls.is_empty()
             && self.agg_calls.iter().all(|call| {
                 let agg_kind_ok = !matches!(call.agg_kind, agg_kinds::simply_cannot_two_phase!());
-                let order_ok = matches!(call.agg_kind, agg_kinds::result_unaffected_by_order_by!())
+                let order_ok = matches!(call.agg_kind, agg_kinds::result_unaffected_by_order_by!() | AggKind::ApproxPercentile)
                     || call.order_by.is_empty();
                 let distinct_ok =
                     matches!(call.agg_kind, agg_kinds::result_unaffected_by_distinct!())

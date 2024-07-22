@@ -21,6 +21,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::HopWindowNode;
 
+use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
@@ -32,7 +33,6 @@ use crate::optimizer::plan_node::{
 };
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
-use crate::error::Result;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamKeyedMerge {
@@ -54,8 +54,12 @@ impl StreamKeyedMerge {
     ) -> Result<Self> {
         assert_eq!(lhs_mapping.target_size(), rhs_mapping.target_size());
         let mut schema_fields = Vec::with_capacity(lhs_mapping.target_size());
-        let mut o2i_lhs = lhs_mapping.inverse().ok_or_else(|| anyhow!("lhs_mapping should be invertible"))?;
-        let mut o2i_rhs = rhs_mapping.inverse().ok_or_else(|| anyhow!("rhs_mapping should be invertible"))?;
+        let mut o2i_lhs = lhs_mapping
+            .inverse()
+            .ok_or_else(|| anyhow!("lhs_mapping should be invertible"))?;
+        let mut o2i_rhs = rhs_mapping
+            .inverse()
+            .ok_or_else(|| anyhow!("rhs_mapping should be invertible"))?;
         for output_idx in 0..lhs_mapping.target_size() {
             if let Some(lhs_idx) = o2i_lhs.try_map(output_idx) {
                 schema_fields.push(lhs_input.schema().fields()[lhs_idx].clone());
@@ -63,7 +67,10 @@ impl StreamKeyedMerge {
                 println!("rhs schema: {:?}", rhs_input.schema().fields());
                 schema_fields.push(rhs_input.schema().fields()[rhs_idx].clone());
             } else {
-                bail!("output index {} not found in either lhs or rhs mapping", output_idx);
+                bail!(
+                    "output index {} not found in either lhs or rhs mapping",
+                    output_idx
+                );
             }
         }
         let schema = Schema::new(schema_fields);
@@ -103,7 +110,6 @@ impl Distill for StreamKeyedMerge {
             out = vec![("output", e)];
         }
         childless_record("StreamKeyedMerge", out)
-
     }
 }
 
@@ -146,6 +152,5 @@ impl ExprRewritable for StreamKeyedMerge {
 }
 
 impl ExprVisitable for StreamKeyedMerge {
-    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
-    }
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {}
 }

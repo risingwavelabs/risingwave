@@ -1049,3 +1049,10 @@
   expected_outputs:
     - logical_plan
     - stream_plan
+- name: test simple approx_percentile with descending order
+  sql: |
+    CREATE TABLE t (v1 int, v2 int);
+    SELECT sum(v1) as s1, approx_percentile(0.2, 0.01) WITHIN GROUP (order by v1 desc) from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan

@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::expr::OrderByExpr;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::{bail_not_implemented, not_implemented};
 use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
 
@@ -42,7 +43,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{
-    ColIndexMapping, ColIndexMappingRewriteExt, Condition, GroupBy, IndexSet, Substitute,
+    ColIndexMapping, ColIndexMappingRewriteExt, Condition, DynEq, GroupBy, IndexSet, Substitute,
 };
 
 pub struct SeparatedAggInfo {
@@ -86,22 +87,31 @@ impl LogicalAgg {
             let requires_keyed_merge = !non_approx_percentile_agg_calls.is_empty();
             if requires_keyed_merge {
                 let stream_input: PlanRef = StreamShare::new_from_input(stream_input).into();
-                let approx_percentile_agg: PlanRef = self
-                    .build_approx_percentile_aggs(stream_input.clone(), &approx_percentile_agg_calls);
+                let approx_percentile_agg: PlanRef = self.build_approx_percentile_aggs(
+                    stream_input.clone(),
+                    &approx_percentile_agg_calls,
+                );
 
                 core.input = stream_input;
                 core.agg_calls = non_approx_percentile_agg_calls;
-                Some((approx_percentile_agg, approx_percentile_col_mapping, non_approx_percentile_col_mapping))
+                Some((
+                    approx_percentile_agg,
+                    approx_percentile_col_mapping,
+                    non_approx_percentile_col_mapping,
+                ))
             } else {
-                let approx_percentile_agg: PlanRef = self
-                    .build_approx_percentile_aggs(stream_input.clone(), &approx_percentile_agg_calls);
+                let approx_percentile_agg: PlanRef = self.build_approx_percentile_aggs(
+                    stream_input.clone(),
+                    &approx_percentile_agg_calls,
+                );
                 return Ok(approx_percentile_agg);
             }
         } else {
             core.input = stream_input;
             None
         };
-        let total_agg_calls = core.agg_calls
+        let total_agg_calls = core
+            .agg_calls
             .iter()
             .enumerate()
             .map(|(partial_output_idx, agg_call)| {
@@ -111,11 +121,8 @@ impl LogicalAgg {
         let local_agg = StreamStatelessSimpleAgg::new(core);
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
-        let global_agg = new_stream_simple_agg(Agg::new(
-            total_agg_calls,
-            IndexSet::empty(),
-            exchange,
-        ));
+        let global_agg =
+            new_stream_simple_agg(Agg::new(total_agg_calls, IndexSet::empty(), exchange));
         if let Some((approx_percentile_agg, lhs_mapping, rhs_mapping)) = approx_percentile_info {
             let keyed_merge = StreamKeyedMerge::new(
                 approx_percentile_agg,
@@ -298,9 +305,7 @@ impl LogicalAgg {
     }
 
     // TODO(kwannoel): Handle multiple approx_percentile.
-    fn separate_normal_and_special_agg(
-        &self,
-    ) -> SeparatedAggInfo {
+    fn separate_normal_and_special_agg(&self) -> SeparatedAggInfo {
         let estimated_len = self.agg_calls().len() - 1;
         let mut approx_percentile_agg_calls = Vec::with_capacity(estimated_len);
         let mut non_approx_percentile_agg_calls = Vec::with_capacity(estimated_len);
@@ -318,8 +323,14 @@ impl LogicalAgg {
         SeparatedAggInfo {
             approx_percentile_agg_calls,
             non_approx_percentile_agg_calls,
-            approx_percentile_col_mapping: ColIndexMapping::new(approx_percentile_col_mapping, self.agg_calls().len()),
-            non_approx_percentile_col_mapping: ColIndexMapping::new(non_approx_percentile_col_mapping, self.agg_calls().len()),
+            approx_percentile_col_mapping: ColIndexMapping::new(
+                approx_percentile_col_mapping,
+                self.agg_calls().len(),
+            ),
+            non_approx_percentile_col_mapping: ColIndexMapping::new(
+                non_approx_percentile_col_mapping,
+                self.agg_calls().len(),
+            ),
         }
     }
 
@@ -364,8 +375,13 @@ impl LogicalAgg {
         let mut acc = iter.next().unwrap();
         for (current_size, plan) in iter.enumerate().map(|(i, p)| (i + 1, p)) {
             let new_size = current_size + 1;
-            let keyed_merge = StreamKeyedMerge::new(acc, plan, ColIndexMapping::identity_or_none(current_size, new_size), ColIndexMapping::new(vec![Some(current_size)], new_size))
-                .expect("failed to build keyed merge");
+            let keyed_merge = StreamKeyedMerge::new(
+                acc,
+                plan,
+                ColIndexMapping::identity_or_none(current_size, new_size),
+                ColIndexMapping::new(vec![Some(current_size)], new_size),
+            )
+            .expect("failed to build keyed merge");
             acc = keyed_merge.into();
         }
         acc
@@ -639,6 +655,33 @@ impl LogicalAggBuilder {
                         )?))
                     }
                     _ => unreachable!(),
+                }
+            }
+            AggKind::ApproxPercentile
+                =>
+            {
+                if agg_call.order_by.sort_exprs[0].order_type == OrderType::descending() {
+                    let prev_percentile = agg_call.direct_args[0].clone();
+                    let new_percentile = 1.0 - prev_percentile.get_data().as_ref().unwrap().as_float64().into_inner();
+                    let new_percentile = Some(ScalarImpl::Float64(new_percentile.into()));
+                    let new_percentile = Literal::new(
+                        new_percentile,
+                        DataType::Float64,
+                    );
+                    let new_direct_args = vec![new_percentile, agg_call.direct_args[1].clone()];
+
+                    let new_agg_call = AggCall {
+                        order_by: OrderBy::any(),
+                        direct_args: new_direct_args,
+                        ..agg_call
+                    };
+                    Ok(push_agg_call(new_agg_call)?.into())
+                } else {
+                    let new_agg_call = AggCall {
+                        order_by: OrderBy::any(),
+                        ..agg_call
+                    };
+                    Ok(push_agg_call(new_agg_call)?.into())
                 }
             }
             _ => Ok(push_agg_call(agg_call)?.into()),
