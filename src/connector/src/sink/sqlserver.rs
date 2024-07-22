@@ -504,8 +504,15 @@ impl SqlClient {
         config.database(&msconfig.database);
         config.trust_cert();
 
-        let tcp = TcpStream::connect(config.get_addr()).await.unwrap();
-        tcp.set_nodelay(true).unwrap();
+        let tcp = TcpStream::connect(config.get_addr()).await.map_err(|e| {
+            SinkError::SqlServer(anyhow!(format!("Connect to SQL Server error: {}", e)))
+        })?;
+        tcp.set_nodelay(true).map_err(|e| {
+            SinkError::SqlServer(anyhow!(format!(
+                "Setting node delay error when connecting to SQL Server, error: {}",
+                e
+            )))
+        })?;
         let client = Client::connect(config, tcp.compat_write()).await?;
         Ok(Self { client })
     }
