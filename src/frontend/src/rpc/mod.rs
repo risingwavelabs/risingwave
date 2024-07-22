@@ -12,13 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pgwire::pg_server::SessionManager;
+use futures::TryStreamExt;
+use pgwire::pg_server::{BoxedError, SessionManager};
+use risingwave_pb::ddl_service::SchemaChangeEnvelope;
 use risingwave_pb::frontend_service::schema_change_request::Request;
 use risingwave_pb::frontend_service::schema_change_service_server::SchemaChangeService;
 use risingwave_pb::frontend_service::{SchemaChangeRequest, SchemaChangeResponse};
+use risingwave_rpc_client::error::ToTonicStatus;
+use risingwave_sqlparser::ast::ObjectName;
 use tonic::{Request as RpcRequest, Response as RpcResponse, Status};
 
+use crate::error::RwError;
+use crate::handler::{get_new_table_definition_for_cdc_table, get_replace_table_plan};
 use crate::session::SESSION_MANAGER;
+
+#[derive(thiserror::Error, Debug)]
+pub enum AutoSchemaChangeError {
+    #[error("frontend error")]
+    FrontendError(
+        #[from]
+        #[backtrace]
+        RwError,
+    ),
+}
+
+impl From<BoxedError> for AutoSchemaChangeError {
+    fn from(err: BoxedError) -> Self {
+        AutoSchemaChangeError::FrontendError(RwError::from(err))
+    }
+}
+
+impl From<AutoSchemaChangeError> for tonic::Status {
+    fn from(err: AutoSchemaChangeError) -> Self {
+        err.to_status(tonic::Code::Internal, "frontend")
+    }
+}
 
 #[derive(Default)]
 pub struct SchemaChangeServiceImpl {}
@@ -38,20 +66,41 @@ impl SchemaChangeService for SchemaChangeServiceImpl {
         let req = request.into_inner();
 
         match req.request.unwrap() {
-            Request::ReplaceTablePlan(req) => {
+            Request::GetNewTablePlan(req) => {
                 let change = req.schema_change.expect("schema_change");
-                // get a session object
-                let session_mgr = SESSION_MANAGER
-                    .get()
-                    .expect("session manager has been initialized");
-                let _session = session_mgr
-                    .get_session(req.database_id, &req.owner)
-                    .map_err(|e| Status::internal(format!("Failed to get session: {}", e)))?;
-
-                // call the handle alter method
+                get_new_table_plan(change, req.table_name, req.database_id, req.owner).await?;
             }
         };
 
         Ok(RpcResponse::new(SchemaChangeResponse { response: None }))
     }
+}
+
+async fn get_new_table_plan(
+    change: SchemaChangeEnvelope,
+    table_name: String,
+    database_id: u32,
+    owner: String,
+) -> Result<(), AutoSchemaChangeError> {
+    // get a session object
+    let session_mgr = SESSION_MANAGER
+        .get()
+        .expect("session manager has been initialized");
+    let session = session_mgr.get_session(database_id, &owner)?;
+
+    // call the handle alter method
+    let new_columns = change.column_descs.into_iter().map(|c| c.into()).collect();
+    let table_name = ObjectName::from(vec![table_name.as_str().into()]);
+    let (new_table_definition, original_catalog) =
+        get_new_table_definition_for_cdc_table(&session, table_name.clone(), new_columns).await?;
+    let (_, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
+        &session,
+        table_name,
+        new_table_definition,
+        &original_catalog,
+        None,
+    )
+    .await?;
+
+    Ok(())
 }

@@ -69,4 +69,4 @@ macro_rules! impl_from_status {
     };
 }
 
-impl_from_status!(stream, batch, meta, compute, compactor, connector);
+impl_from_status!(stream, batch, meta, compute, compactor, connector, frontend);
