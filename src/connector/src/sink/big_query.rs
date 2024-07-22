@@ -71,7 +71,7 @@ const CONNECT_TIMEOUT: Option<Duration> = Some(Duration::from_secs(30));
 const CONNECTION_TIMEOUT: Option<Duration> = None;
 const BIGQUERY_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 65536;
 // < 10MB, we set 8MB
-const MAX_ROW_SIZE: usize =  8*1024*1024;
+const MAX_ROW_SIZE: usize = 8 * 1024 * 1024;
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -107,8 +107,8 @@ impl BigQueryFutureManager {
         }
     }
 
-    pub fn add_offset(&mut self, offset: TruncateOffset,mut resp_num: usize) {
-        while resp_num >1 {
+    pub fn add_offset(&mut self, offset: TruncateOffset, mut resp_num: usize) {
+        while resp_num > 1 {
             self.offset_queue.push_back(None);
             resp_num -= 1;
         }
@@ -675,20 +675,20 @@ impl BigQuerySinkWriter {
         let mut result = Vec::new();
         let mut result_inner = Vec::new();
         let mut size_count = 0;
-        for i in serialized_rows{
+        for i in serialized_rows {
             size_count += i.len();
             if size_count > MAX_ROW_SIZE {
                 result.push(result_inner);
                 result_inner = Vec::new();
-                size_count =  i.len();
+                size_count = i.len();
             }
             result_inner.push(i);
         }
-        if !result_inner.is_empty(){
+        if !result_inner.is_empty() {
             result.push(result_inner);
         }
         let len = result.len();
-        for serialized_rows in result{
+        for serialized_rows in result {
             let rows = AppendRowsRequestRows::ProtoRows(ProtoData {
                 writer_schema: Some(self.writer_pb_schema.clone()),
                 rows: Some(ProtoRows { serialized_rows }),
@@ -720,20 +720,21 @@ pub async fn resp_to_stream(
         if let Some(append_rows_response) = resp_stream
             .message()
             .await
-            .map_err(|e| SinkError::BigQuery(e.into()))?{
-                if !append_rows_response.row_errors.is_empty() {
-                    return Err(SinkError::BigQuery(anyhow::anyhow!(
-                        "bigquery insert error {:?}",
-                        append_rows_response.row_errors
-                    )));
-                }
-                if let Some(google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_response::Response::Error(status)) = append_rows_response.response{
+            .map_err(|e| SinkError::BigQuery(e.into()))?
+        {
+            if !append_rows_response.row_errors.is_empty() {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "bigquery insert error {:?}",
+                    append_rows_response.row_errors
+                )));
+            }
+            if let Some(google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_response::Response::Error(status)) = append_rows_response.response{
                     return Err(SinkError::BigQuery(anyhow::anyhow!(
                         "bigquery insert error {:?}",
                         status
                     )));
                 }
-            }
+        }
         yield ();
     }
 }
