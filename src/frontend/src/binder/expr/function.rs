@@ -535,7 +535,7 @@ impl Binder {
                         "direct arg in `{}` must between 0.0 and 1.0",
                         kind
                     ))
-                        .into());
+                    .into());
                 }
                 // note that the fraction can be NULL
                 *percentile = Literal::new(percentile_datum, DataType::Float64).into();
@@ -562,7 +562,7 @@ impl Binder {
                         "direct arg in `{}` must between 0.0 and 1.0",
                         kind
                     ))
-                        .into());
+                    .into());
                 }
                 // note that the fraction can be NULL
                 *relative_error = Literal::new(relative_error_datum, DataType::Float64).into();

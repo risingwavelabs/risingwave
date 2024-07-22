@@ -20,12 +20,11 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
-use crate::optimizer::plan_node::utils::{childless_record, watermark_pretty, Distill};
+use crate::optimizer::plan_node::utils::{childless_record, Distill};
 use crate::optimizer::plan_node::{
-    ExprRewritable, PlanAggCall, PlanBase, PlanTreeNodeUnary, Stream, StreamHopWindow,
-    StreamKeyedMerge, StreamNode,
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
 };
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -38,7 +37,7 @@ pub struct StreamGlobalApproxPercentile {
 }
 
 impl StreamGlobalApproxPercentile {
-    pub fn new(input: PlanRef, approx_percentile_agg_call: &PlanAggCall) -> Self {
+    pub fn new(input: PlanRef) -> Self {
         let schema = Schema::new(vec![Field::new("approx_percentile", DataType::Float64)]);
         let watermark_columns = FixedBitSet::with_capacity(1);
         let base = PlanBase::new_stream(
@@ -94,5 +93,5 @@ impl ExprRewritable for StreamGlobalApproxPercentile {
 }
 
 impl ExprVisitable for StreamGlobalApproxPercentile {
-    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {}
+    fn visit_exprs(&self, _v: &mut dyn ExprVisitor) {}
 }

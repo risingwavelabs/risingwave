@@ -16,19 +16,15 @@ use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use crate::expr::{ExprRewriter, ExprVisitor, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
-use crate::optimizer::plan_node::utils::{
-    childless_record, watermark_pretty, Distill, IndicesDisplay,
-};
+use crate::optimizer::plan_node::utils::{childless_record, watermark_pretty, Distill};
 use crate::optimizer::plan_node::{
-    ExprRewritable, PlanAggCall, PlanBase, PlanNode, PlanTreeNodeUnary, Stream,
-    StreamGlobalApproxPercentile, StreamHopWindow, StreamNode,
+    ExprRewritable, PlanAggCall, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
 };
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
@@ -127,5 +123,5 @@ impl ExprRewritable for StreamLocalApproxPercentile {
 }
 
 impl ExprVisitable for StreamLocalApproxPercentile {
-    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {}
+    fn visit_exprs(&self, _v: &mut dyn ExprVisitor) {}
 }

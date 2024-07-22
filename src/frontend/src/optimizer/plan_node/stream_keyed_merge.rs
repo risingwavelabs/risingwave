@@ -19,17 +19,15 @@ use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::HopWindowNode;
 
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
-use crate::optimizer::plan_node::utils::{childless_record, Distill, IndicesDisplay};
+use crate::optimizer::plan_node::utils::{childless_record, Distill};
 use crate::optimizer::plan_node::{
-    ExprRewritable, PlanBase, PlanTreeNodeBinary, Stream, StreamHopWindow,
-    StreamLocalApproxPercentile, StreamNode,
+    ExprRewritable, PlanBase, PlanTreeNodeBinary, Stream, StreamNode,
 };
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
@@ -54,10 +52,10 @@ impl StreamKeyedMerge {
     ) -> Result<Self> {
         assert_eq!(lhs_mapping.target_size(), rhs_mapping.target_size());
         let mut schema_fields = Vec::with_capacity(lhs_mapping.target_size());
-        let mut o2i_lhs = lhs_mapping
+        let o2i_lhs = lhs_mapping
             .inverse()
             .ok_or_else(|| anyhow!("lhs_mapping should be invertible"))?;
-        let mut o2i_rhs = rhs_mapping
+        let o2i_rhs = rhs_mapping
             .inverse()
             .ok_or_else(|| anyhow!("rhs_mapping should be invertible"))?;
         for output_idx in 0..lhs_mapping.target_size() {
@@ -152,5 +150,5 @@ impl ExprRewritable for StreamKeyedMerge {
 }
 
 impl ExprVisitable for StreamKeyedMerge {
-    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {}
+    fn visit_exprs(&self, _v: &mut dyn ExprVisitor) {}
 }

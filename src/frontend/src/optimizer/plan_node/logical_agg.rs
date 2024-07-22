@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::expr::OrderByExpr;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
@@ -23,8 +22,8 @@ use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
-    BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, Logical, LogicalShare, PlanBase,
-    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamProject, StreamShare,
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamProject, StreamShare,
     StreamSimpleAgg, StreamStatelessSimpleAgg, ToBatch, ToStream,
 };
 use crate::error::{ErrorCode, Result, RwError};
@@ -43,7 +42,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{
-    ColIndexMapping, ColIndexMappingRewriteExt, Condition, DynEq, GroupBy, IndexSet, Substitute,
+    ColIndexMapping, ColIndexMappingRewriteExt, Condition, GroupBy, IndexSet, Substitute,
 };
 
 pub struct SeparatedAggInfo {
@@ -225,11 +224,7 @@ impl LogicalAgg {
     }
 
     /// Generates distributed stream plan.
-    fn gen_dist_stream_agg_plan(
-        &self,
-        stream_input: PlanRef,
-        ctx: &mut ToStreamContext,
-    ) -> Result<PlanRef> {
+    fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         use super::stream::prelude::*;
 
         let input_dist = stream_input.distribution();
@@ -340,24 +335,22 @@ impl LogicalAgg {
         approx_percentile_agg_call: &PlanAggCall,
     ) -> PlanRef {
         let local_approx_percentile =
-            StreamLocalApproxPercentile::new(input, &approx_percentile_agg_call);
-        let global_approx_percentile = StreamGlobalApproxPercentile::new(
-            local_approx_percentile.into(),
-            &approx_percentile_agg_call,
-        );
+            StreamLocalApproxPercentile::new(input, approx_percentile_agg_call);
+        let global_approx_percentile =
+            StreamGlobalApproxPercentile::new(local_approx_percentile.into());
         global_approx_percentile.into()
     }
 
     /// If only 1 approx percentile, just return it.
-    /// Otherwise build a tree of approx percentile with KeyedMerge.
+    /// Otherwise build a tree of approx percentile with `KeyedMerge`.
     /// e.g.
     /// ApproxPercentile(col1, 0.5) as x,
     /// ApproxPercentile(col2, 0.5) as y,
     /// ApproxPercentile(col3, 0.5) as z
     /// will be built as
-    ///        KeyedMerge
+    ///        `KeyedMerge`
     ///       /          \
-    ///  KeyedMerge       z
+    ///  `KeyedMerge`       z
     ///  /        \
     /// x          y
 
@@ -370,7 +363,7 @@ impl LogicalAgg {
             .iter()
             .map(|agg_call| self.build_approx_percentile_agg(input.clone(), agg_call))
             .collect_vec();
-        assert!(approx_percentile_plans.len() >= 1);
+        assert!(!approx_percentile_plans.is_empty());
         let mut iter = approx_percentile_plans.into_iter();
         let mut acc = iter.next().unwrap();
         for (current_size, plan) in iter.enumerate().map(|(i, p)| (i + 1, p)) {
@@ -657,17 +650,18 @@ impl LogicalAggBuilder {
                     _ => unreachable!(),
                 }
             }
-            AggKind::ApproxPercentile
-                =>
-            {
+            AggKind::ApproxPercentile => {
                 if agg_call.order_by.sort_exprs[0].order_type == OrderType::descending() {
                     let prev_percentile = agg_call.direct_args[0].clone();
-                    let new_percentile = 1.0 - prev_percentile.get_data().as_ref().unwrap().as_float64().into_inner();
+                    let new_percentile = 1.0
+                        - prev_percentile
+                            .get_data()
+                            .as_ref()
+                            .unwrap()
+                            .as_float64()
+                            .into_inner();
                     let new_percentile = Some(ScalarImpl::Float64(new_percentile.into()));
-                    let new_percentile = Literal::new(
-                        new_percentile,
-                        DataType::Float64,
-                    );
+                    let new_percentile = Literal::new(new_percentile, DataType::Float64);
                     let new_direct_args = vec![new_percentile, agg_call.direct_args[1].clone()];
 
                     let new_agg_call = AggCall {
@@ -1283,7 +1277,7 @@ impl ToStream for LogicalAgg {
             return logical_dedup.to_stream(ctx);
         }
 
-        let plan = self.gen_dist_stream_agg_plan(stream_input, ctx)?;
+        let plan = self.gen_dist_stream_agg_plan(stream_input)?;
 
         let (plan, n_final_agg_calls) = if let Some(final_agg) = plan.as_stream_simple_agg() {
             if eowc {
@@ -1303,7 +1297,7 @@ impl ToStream for LogicalAgg {
                 },
                 final_agg.agg_calls().len(),
             )
-        } else if let Some(approx_percentile_agg) = plan.as_stream_global_approx_percentile() {
+        } else if let Some(_approx_percentile_agg) = plan.as_stream_global_approx_percentile() {
             if eowc {
                 return Err(ErrorCode::InvalidInputSyntax(
                     "`EMIT ON WINDOW CLOSE` cannot be used for aggregation without `GROUP BY`"
