@@ -28,6 +28,8 @@ pub enum BoundStatement {
     Delete(Box<BoundDelete>),
     Update(Box<BoundUpdate>),
     Query(Box<BoundQuery>),
+    // note(eric): Let's try BoundQuery first....
+    CreateView(Box<BoundQuery>),
 }
 
 impl BoundStatement {
@@ -46,6 +48,9 @@ impl BoundStatement {
                 .as_ref()
                 .map_or(vec![], |s| s.fields().into()),
             BoundStatement::Query(q) => q.schema().fields().into(),
+            BoundStatement::CreateView(_) => {
+                vec![]
+            }
         }
     }
 }
@@ -83,6 +88,18 @@ impl Binder {
 
             Statement::Query(q) => Ok(BoundStatement::Query(self.bind_query(*q)?.into())),
 
+            // Note(eric): Can I just bind CreateView to Query??
+            Statement::CreateView {
+                or_replace,
+                materialized,
+                if_not_exists,
+                name,
+                columns,
+                query,
+                emit_mode,
+                with_options,
+            } => Ok(BoundStatement::CreateView(self.bind_query(*query)?.into())),
+
             _ => bail_not_implemented!("unsupported statement {:?}", stmt),
         }
     }
@@ -99,6 +116,7 @@ impl RewriteExprsRecursive for BoundStatement {
             BoundStatement::Delete(inner) => inner.rewrite_exprs_recursive(rewriter),
             BoundStatement::Update(inner) => inner.rewrite_exprs_recursive(rewriter),
             BoundStatement::Query(inner) => inner.rewrite_exprs_recursive(rewriter),
+            BoundStatement::CreateView(inner) => inner.rewrite_exprs_recursive(rewriter),
         }
     }
 }
