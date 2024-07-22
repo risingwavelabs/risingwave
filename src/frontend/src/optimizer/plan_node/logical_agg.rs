@@ -79,7 +79,9 @@ impl LogicalAgg {
             non_approx_percentile_col_mapping,
         } = self.separate_normal_and_special_agg();
 
-        let needs_keyed_merge = (non_approx_percentile_agg_calls.len() >= 1 && approx_percentile_agg_calls.len() >= 1) || approx_percentile_agg_calls.len() >= 2;
+        let needs_keyed_merge = (!non_approx_percentile_agg_calls.is_empty()
+            && !approx_percentile_agg_calls.is_empty())
+            || approx_percentile_agg_calls.len() >= 2;
         core.input = if needs_keyed_merge {
             // If there's keyed merge, we need to share the input.
             StreamShare::new_from_input(stream_input.clone()).into()
@@ -88,10 +90,8 @@ impl LogicalAgg {
         };
         core.agg_calls = non_approx_percentile_agg_calls;
 
-        let approx_percentile = self.build_approx_percentile_aggs(
-            core.input.clone(),
-            &approx_percentile_agg_calls,
-        );
+        let approx_percentile =
+            self.build_approx_percentile_aggs(core.input.clone(), &approx_percentile_agg_calls);
 
         // ====== Handle normal aggs
         let total_agg_calls = core
@@ -119,7 +119,7 @@ impl LogicalAgg {
                 )?;
                 Ok(keyed_merge.into())
             } else {
-                Ok(approx_percentile.into())
+                Ok(approx_percentile)
             }
         } else {
             Ok(global_agg.into())
