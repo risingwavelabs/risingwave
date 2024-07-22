@@ -290,7 +290,6 @@ impl LogicalAgg {
         }
     }
 
-    // TODO(kwannoel): Handle multiple approx_percentile.
     fn separate_normal_and_special_agg(&self) -> SeparatedAggInfo {
         let estimated_len = self.agg_calls().len() - 1;
         let mut approx_percentile_agg_calls = Vec::with_capacity(estimated_len);
@@ -748,7 +747,6 @@ impl LogicalAggBuilder {
     /// 2. Add the agg call to current `Agg`, and return an `InputRef` to it.
     ///
     /// Note that the rewriter does not traverse into inputs of agg calls.
-    /// FIXME(kwannoel): Rewrite the desc approx percentile for descending order.
     fn try_rewrite_agg_call(&mut self, mut agg_call: AggCall) -> Result<ExprImpl> {
         if matches!(agg_call.agg_kind, agg_kinds::must_have_order_by!())
             && agg_call.order_by.sort_exprs.is_empty()
