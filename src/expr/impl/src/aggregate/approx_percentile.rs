@@ -21,45 +21,6 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{AggCall, AggStateDyn, AggregateFunction, AggregateState};
 use risingwave_expr::{build_aggregate, Result};
 
-/// Computes the approx percentile, a value corresponding to the specified fraction within the
-/// ordered set of aggregated argument values. This will interpolate between adjacent input items if
-/// needed.
-///
-/// ```slt
-/// statement ok
-/// create table t(x int, y bigint, z real, w double, v varchar);
-///
-/// statement ok
-/// insert into t values(1,10,100,1000,'10000'),(2,20,200,2000,'20000'),(3,30,300,3000,'30000');
-///
-/// query R
-/// select percentile_cont(0.45) within group (order by x desc) from t;
-/// ----
-/// 2.1
-///
-/// query R
-/// select percentile_cont(0.45) within group (order by y desc) from t;
-/// ----
-/// 21
-///
-/// query R
-/// select percentile_cont(0.45) within group (order by z desc) from t;
-/// ----
-/// 210
-///
-/// query R
-/// select percentile_cont(0.45) within group (order by w desc) from t;
-/// ----
-/// 2100
-///
-/// query R
-/// select percentile_cont(NULL) within group (order by w desc) from t;
-/// ----
-/// NULL
-///
-/// statement ok
-/// drop table t;
-/// ```
 #[build_aggregate("approx_percentile(float8) -> float8")]
 fn build(agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
     let fraction = agg.direct_args[0]
