@@ -57,7 +57,7 @@ use risingwave_storage::store::{
     ReadLogOptions, ReadOptions, SealCurrentEpochOptions, StateStoreIter, StateStoreIterExt,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
-use risingwave_storage::table::{deserialize_log_stream, KeyedRow, TableDistribution};
+use risingwave_storage::table::{ChangeLogRow, deserialize_log_stream, KeyedRow, TableDistribution};
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tracing::{trace, Instrument};
@@ -1589,7 +1589,7 @@ where
         vnode: VirtualNode,
         epoch_range: (u64, u64),
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
-    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<(Op, OwnedRow)>> + '_> {
+    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<ChangeLogRow>> + '_> {
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
         let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
         Ok(deserialize_log_stream(

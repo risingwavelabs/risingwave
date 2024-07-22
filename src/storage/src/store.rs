@@ -25,6 +25,7 @@ use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use futures_async_stream::try_stream;
 use prost::Message;
+use risingwave_common::array::Op;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
@@ -187,6 +188,24 @@ impl<T> ChangeLogValue<T> {
                 old_value: f(old_value)?,
             },
             ChangeLogValue::Delete(value) => ChangeLogValue::Delete(f(value)?),
+        })
+    }
+
+    pub fn into_op_value_iter(self) -> impl Iterator<Item = (Op, T)> {
+        std::iter::from_coroutine(move || match self {
+            Self::Insert(row) => {
+                yield (Op::Insert, row);
+            }
+            Self::Delete(row) => {
+                yield (Op::Delete, row);
+            }
+            Self::Update {
+                old_value,
+                new_value,
+            } => {
+                yield (Op::UpdateDelete, old_value);
+                yield (Op::UpdateInsert, new_value);
+            }
         })
     }
 }
