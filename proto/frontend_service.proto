@@ -9,25 +9,26 @@ option optimize_for = SPEED;
 
 
 message SchemaChangeRequest {
-  message GetReplaceTablePlanRequest {
+  message GetNewTablePlanRequest {
     uint32 database_id = 1;
     string owner = 2;
-    ddl_service.SchemaChangeEnvelope schema_change = 3;
+    string table_name = 3;
+    ddl_service.SchemaChangeEnvelope schema_change = 4;
   }
 
   oneof request {
-    GetReplaceTablePlanRequest replace_table_plan = 1;
+    GetNewTablePlanRequest get_new_table_plan = 1;
   }
 
 }
 
 message SchemaChangeResponse {
-  message GetReplaceTablePlanResponse {
+  message GetNewTablePlanResponse {
     ddl_service.ReplaceTablePlan table_plan = 1;
   }
 
   oneof response {
-    GetReplaceTablePlanResponse replace_table_plan = 1;
+    GetNewTablePlanResponse replace_table_plan = 1;
   }
 
 }

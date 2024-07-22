@@ -14,13 +14,19 @@
 
 use std::sync::Arc;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::{bail, bail_not_implemented};
+use risingwave_pb::catalog::{Source, Table};
+use risingwave_pb::ddl_service::TableJobType;
+use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
-    AlterTableOperation, ColumnOption, ConnectorSchema, Encode, ObjectName, Statement,
+    AlterTableOperation, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType, Encode,
+    ObjectName, Statement, StructField,
 };
 use risingwave_sqlparser::parser::Parser;
 
@@ -30,7 +36,7 @@ use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
-use crate::error::{ErrorCode, Result};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::ExprImpl;
 use crate::session::SessionImpl;
 use crate::{Binder, TableCatalog, WithOptions};
@@ -42,6 +48,112 @@ pub async fn replace_table_with_definition(
     original_catalog: &Arc<TableCatalog>,
     source_schema: Option<ConnectorSchema>,
 ) -> Result<()> {
+    let (source, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
+        session,
+        table_name,
+        definition,
+        original_catalog,
+        source_schema,
+    )
+    .await?;
+
+    let catalog_writer = session.catalog_writer()?;
+
+    catalog_writer
+        .replace_table(source, table, graph, col_index_mapping, job_type)
+        .await?;
+    Ok(())
+}
+
+pub async fn get_new_table_definition_for_cdc_table(
+    session: &Arc<SessionImpl>,
+    table_name: ObjectName,
+    new_columns: Vec<ColumnCatalog>,
+) -> Result<(Statement, Arc<TableCatalog>)> {
+    let original_catalog = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
+
+    // Retrieve the original table definition and parse it to AST.
+    let [mut definition]: [_; 1] = Parser::parse_sql(&original_catalog.definition)
+        .context("unable to parse original table definition")?
+        .try_into()
+        .unwrap();
+    let Statement::CreateTable {
+        columns: original_columns,
+        source_schema,
+        ..
+    } = &mut definition
+    else {
+        panic!("unexpected statement: {:?}", definition);
+    };
+
+    assert!(
+        source_schema.is_none(),
+        "source schema should be None for CDC table"
+    );
+    if original_columns.is_empty() {
+        Err(ErrorCode::NotSupported(
+            "alter a table with empty column definitions".to_string(),
+            "Please recreate the table with column definitions.".to_string(),
+        ))?
+    }
+
+    // since the DDL is committed on upstream, so we can safely replace the original columns with new columns
+    // replace original columns with new columns
+    let mut new_column_defs = vec![];
+    for col in new_columns.into_iter() {
+        let ty = to_ast_data_type(col.data_type())?;
+        new_column_defs.push(ColumnDef::new(col.name().into(), ty, None, vec![]));
+    }
+    *original_columns = new_column_defs;
+
+    Ok((definition, original_catalog))
+}
+
+fn to_ast_data_type(ty: &DataType) -> Result<AstDataType> {
+    match ty {
+        DataType::Boolean => Ok(AstDataType::Boolean),
+        DataType::Int16 => Ok(AstDataType::SmallInt),
+        DataType::Int32 => Ok(AstDataType::Int),
+        DataType::Int64 => Ok(AstDataType::BigInt),
+        DataType::Float32 => Ok(AstDataType::Real),
+        DataType::Float64 => Ok(AstDataType::Double),
+        DataType::Date => Ok(AstDataType::Date),
+        DataType::Time => Ok(AstDataType::Time(false)),
+        DataType::Timestamp => Ok(AstDataType::Timestamp(false)),
+        DataType::Timestamptz => Ok(AstDataType::Timestamp(true)),
+        DataType::Interval => Ok(AstDataType::Interval),
+        DataType::Jsonb => Ok(AstDataType::Jsonb),
+        DataType::Bytea => Ok(AstDataType::Bytea),
+        DataType::List(item_ty) => Ok(AstDataType::Array(Box::new(to_ast_data_type(item_ty)?))),
+        DataType::Struct(fields) => {
+            let fields = fields
+                .iter()
+                .map(|(name, ty)| {
+                    Ok::<StructField, RwError>(StructField {
+                        name: name.into(),
+                        data_type: to_ast_data_type(ty)?,
+                    })
+                })
+                .try_collect()?;
+            Ok(AstDataType::Struct(fields))
+        }
+        _ => Err(anyhow!("unsupported data type: {:?}", ty).context("to_ast_data_type"))?,
+    }
+}
+
+pub async fn get_replace_table_plan(
+    session: &Arc<SessionImpl>,
+    table_name: ObjectName,
+    definition: Statement,
+    original_catalog: &Arc<TableCatalog>,
+    source_schema: Option<ConnectorSchema>,
+) -> Result<(
+    Option<Source>,
+    Table,
+    StreamFragmentGraph,
+    ColIndexMapping,
+    TableJobType,
+)> {
     // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
     let col_id_gen = ColumnIdGenerator::new_alter(original_catalog);
@@ -92,12 +204,7 @@ pub async fn replace_table_with_definition(
         table.columns.len(),
     );
 
-    let catalog_writer = session.catalog_writer()?;
-
-    catalog_writer
-        .replace_table(source, table, graph, col_index_mapping, job_type)
-        .await?;
-    Ok(())
+    Ok((source, table, graph, col_index_mapping, job_type))
 }
 
 /// Handle `ALTER TABLE [ADD|DROP] COLUMN` statements. The `operation` must be either `AddColumn` or
