@@ -268,6 +268,7 @@ CREATE TABLE person_new (
     city varchar
 ) FROM pg_source TABLE 'person';
 
+statement ok
 CREATE TABLE orders_shared (
     id int PRIMARY KEY,
     name varchar,
