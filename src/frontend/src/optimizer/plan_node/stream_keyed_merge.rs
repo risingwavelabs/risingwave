@@ -74,7 +74,6 @@ impl StreamKeyedMerge {
         let schema = Schema::new(schema_fields);
         let watermark_columns = FixedBitSet::with_capacity(schema.fields.len());
 
-        // FIXME: schema is wrong.
         let base = PlanBase::new_stream(
             lhs_input.ctx(),
             schema,
@@ -99,8 +98,6 @@ impl StreamKeyedMerge {
 impl Distill for StreamKeyedMerge {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let mut out = Vec::with_capacity(1);
-        // out.push(("lhs_col_mapping", Pretty::debug(&self.lhs_mapping)));
-        // out.push(("rhs_col_mapping", Pretty::debug(&self.rhs_mapping)));
 
         if self.base.ctx().is_explain_verbose() {
             let f = |t| Pretty::debug(&t);

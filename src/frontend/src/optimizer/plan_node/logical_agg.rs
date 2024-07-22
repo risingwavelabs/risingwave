@@ -645,6 +645,7 @@ impl LogicalAggBuilder {
             }
             AggKind::ApproxPercentile => {
                 if agg_call.order_by.sort_exprs[0].order_type == OrderType::descending() {
+                    // Rewrite DESC into 1.0-percentile for approx_percentile.
                     let prev_percentile = agg_call.direct_args[0].clone();
                     let new_percentile = 1.0
                         - prev_percentile
