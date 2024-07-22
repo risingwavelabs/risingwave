@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::TryStreamExt;
 use pgwire::pg_server::{BoxedError, SessionManager};
-use risingwave_pb::ddl_service::SchemaChangeEnvelope;
+use risingwave_pb::ddl_service::{ReplaceTablePlan, SchemaChangeEnvelope};
 use risingwave_pb::frontend_service::schema_change_request::Request;
+use risingwave_pb::frontend_service::schema_change_response::{GetNewTablePlanResponse, Response};
 use risingwave_pb::frontend_service::schema_change_service_server::SchemaChangeService;
 use risingwave_pb::frontend_service::{SchemaChangeRequest, SchemaChangeResponse};
 use risingwave_rpc_client::error::ToTonicStatus;
@@ -65,14 +65,20 @@ impl SchemaChangeService for SchemaChangeServiceImpl {
     ) -> Result<RpcResponse<SchemaChangeResponse>, Status> {
         let req = request.into_inner();
 
-        match req.request.unwrap() {
-            Request::GetNewTablePlan(req) => {
-                let change = req.schema_change.expect("schema_change");
+        if let Some(Request::GetNewTablePlan(req)) = req.request {
+            let change = req
+                .schema_change
+                .expect("schema change message is required");
+            let replace_plan =
                 get_new_table_plan(change, req.table_name, req.database_id, req.owner).await?;
-            }
-        };
-
-        Ok(RpcResponse::new(SchemaChangeResponse { response: None }))
+            Ok(RpcResponse::new(SchemaChangeResponse {
+                response: Some(Response::ReplaceTablePlan(GetNewTablePlanResponse {
+                    table_plan: Some(replace_plan),
+                })),
+            }))
+        } else {
+            Err(Status::invalid_argument("invalid schema change request"))
+        }
     }
 }
 
@@ -81,11 +87,12 @@ async fn get_new_table_plan(
     table_name: String,
     database_id: u32,
     owner: String,
-) -> Result<(), AutoSchemaChangeError> {
-    // get a session object
+) -> Result<ReplaceTablePlan, AutoSchemaChangeError> {
     let session_mgr = SESSION_MANAGER
         .get()
         .expect("session manager has been initialized");
+
+    // get a session object for the corresponding user and database
     let session = session_mgr.get_session(database_id, &owner)?;
 
     // call the handle alter method
@@ -102,5 +109,11 @@ async fn get_new_table_plan(
     )
     .await?;
 
-    Ok(())
+    Ok(ReplaceTablePlan {
+        table: Some(table),
+        fragment_graph: Some(graph),
+        table_col_index_mapping: Some(col_index_mapping.to_protobuf()),
+        source: None,
+        job_type: job_type as _,
+    })
 }
