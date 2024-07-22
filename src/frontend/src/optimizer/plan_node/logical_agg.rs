@@ -71,44 +71,29 @@ impl LogicalAgg {
         debug_assert!(self.group_key().is_empty());
         let mut core = self.core.clone();
 
-        // First, handle approx percentile.
-        let has_approx_percentile = self
-            .agg_calls()
-            .iter()
-            .any(|agg_call| agg_call.agg_kind == AggKind::ApproxPercentile);
-        let approx_percentile_info = if has_approx_percentile {
-            let SeparatedAggInfo {
-                approx_percentile_agg_calls,
-                non_approx_percentile_agg_calls,
-                approx_percentile_col_mapping,
-                non_approx_percentile_col_mapping,
-            } = self.separate_normal_and_special_agg();
-            let requires_keyed_merge = !non_approx_percentile_agg_calls.is_empty();
-            if requires_keyed_merge {
-                let stream_input: PlanRef = StreamShare::new_from_input(stream_input).into();
-                let approx_percentile_agg: PlanRef = self.build_approx_percentile_aggs(
-                    stream_input.clone(),
-                    &approx_percentile_agg_calls,
-                );
+        // ====== Handle approx percentile aggs
+        let SeparatedAggInfo {
+            approx_percentile_agg_calls,
+            non_approx_percentile_agg_calls,
+            approx_percentile_col_mapping,
+            non_approx_percentile_col_mapping,
+        } = self.separate_normal_and_special_agg();
 
-                core.input = stream_input;
-                core.agg_calls = non_approx_percentile_agg_calls;
-                Some((
-                    approx_percentile_agg,
-                    approx_percentile_col_mapping,
-                    non_approx_percentile_col_mapping,
-                ))
-            } else {
-                let approx_percentile_agg: PlanRef = self.build_approx_percentile_aggs(
-                    stream_input.clone(),
-                    &approx_percentile_agg_calls,
-                );
-                return Ok(approx_percentile_agg);
-            }
+        let needs_keyed_merge = (non_approx_percentile_agg_calls.len() >= 1 && approx_percentile_agg_calls.len() >= 1) || approx_percentile_agg_calls.len() >= 2;
+        core.input = if needs_keyed_merge {
+            // If there's keyed merge, we need to share the input.
+            StreamShare::new_from_input(stream_input.clone()).into()
         } else {
-            core.input = stream_input;
-            None
+            stream_input
         };
+        core.agg_calls = non_approx_percentile_agg_calls;
+
+        let approx_percentile = self.build_approx_percentile_aggs(
+            core.input.clone(),
+            &approx_percentile_agg_calls,
+        );
+
+        // ====== Handle normal aggs
         let total_agg_calls = core
             .agg_calls
             .iter()
@@ -122,14 +107,20 @@ impl LogicalAgg {
             RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
         let global_agg =
             new_stream_simple_agg(Agg::new(total_agg_calls, IndexSet::empty(), exchange));
-        if let Some((approx_percentile_agg, lhs_mapping, rhs_mapping)) = approx_percentile_info {
-            let keyed_merge = StreamKeyedMerge::new(
-                approx_percentile_agg,
-                global_agg.into(),
-                lhs_mapping,
-                rhs_mapping,
-            )?;
-            Ok(keyed_merge.into())
+
+        // ====== Merge approx percentile and normal aggs
+        if let Some(approx_percentile) = approx_percentile {
+            if needs_keyed_merge {
+                let keyed_merge = StreamKeyedMerge::new(
+                    approx_percentile,
+                    global_agg.into(),
+                    approx_percentile_col_mapping,
+                    non_approx_percentile_col_mapping,
+                )?;
+                Ok(keyed_merge.into())
+            } else {
+                Ok(approx_percentile.into())
+            }
         } else {
             Ok(global_agg.into())
         }
@@ -358,7 +349,10 @@ impl LogicalAgg {
         &self,
         input: PlanRef,
         approx_percentile_agg_call: &[PlanAggCall],
-    ) -> PlanRef {
+    ) -> Option<PlanRef> {
+        if approx_percentile_agg_call.is_empty() {
+            return None;
+        }
         let approx_percentile_plans = approx_percentile_agg_call
             .iter()
             .map(|agg_call| self.build_approx_percentile_agg(input.clone(), agg_call))
@@ -377,7 +371,7 @@ impl LogicalAgg {
             .expect("failed to build keyed merge");
             acc = keyed_merge.into();
         }
-        acc
+        Some(acc)
     }
 
     pub fn core(&self) -> &Agg<PlanRef> {

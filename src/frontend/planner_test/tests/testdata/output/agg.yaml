@@ -1969,14 +1969,23 @@
   stream_plan: |-
     StreamMaterialize { columns: [x, y], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamKeyedMerge { output: [approx_percentile:Float64, approx_percentile:Float64] }
-      ├─StreamGlobalApproxPercentile
-      │ └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
-      │   └─StreamProject { exprs: [t.v1::Float64 as $expr1, t.v2::Float64 as $expr2, t._row_id] }
-      │     └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-      └─StreamGlobalApproxPercentile
-        └─StreamLocalApproxPercentile { percentile_col: $expr4, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
-          └─StreamProject { exprs: [t.v1::Float64 as $expr3, t.v2::Float64 as $expr4, t._row_id] }
-            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      ├─StreamKeyedMerge { output: [approx_percentile:Float64, approx_percentile:Float64] }
+      │ ├─StreamGlobalApproxPercentile
+      │ │ └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
+      │ │   └─StreamShare { id: 2 }
+      │ │     └─StreamProject { exprs: [t.v1::Float64 as $expr1, t.v2::Float64 as $expr2, t._row_id] }
+      │ │       └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      │ └─StreamGlobalApproxPercentile
+      │   └─StreamLocalApproxPercentile { percentile_col: $expr2, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
+      │     └─StreamShare { id: 2 }
+      │       └─StreamProject { exprs: [t.v1::Float64 as $expr1, t.v2::Float64 as $expr2, t._row_id] }
+      │         └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamSimpleAgg { aggs: [count] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessSimpleAgg { aggs: [] }
+            └─StreamShare { id: 2 }
+              └─StreamProject { exprs: [t.v1::Float64 as $expr1, t.v2::Float64 as $expr2, t._row_id] }
+                └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: test simple approx_percentile with different approx_percentile interleaved with stateless simple aggs
   sql: |
     CREATE TABLE t (v1 int, v2 int);
