@@ -590,7 +590,7 @@ message GetStreamingJobsStatusResponse {
     bool backfill_done = 3;
   }
 
-  Status streaming_job_statuse = 1;
+  repeated Status streaming_job_statuses = 1;
 }
 
 service ScaleService {
