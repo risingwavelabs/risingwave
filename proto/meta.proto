@@ -90,6 +90,25 @@ message TableFragments {
     // so we pre-generate and store it here, this member will only be initialized when creating the Fragment
     // and modified when creating the mv-on-mv
     repeated uint32 upstream_fragment_ids = 7;
+
+    // If a materialize view, sink, or table has a node_label, its actors can only be scheduled 
+    // on compute nodes with that label.
+    // If it does not have a node_label (empty map or null value) it can be scheduled on any 
+    // compute node without a label. The node has to have both a matching key and value.
+    // E.g. {"some":"value"} can be scheduled on a node with the labels
+    // { 
+    //   "other":"thing",
+    //   "some":"value"
+    // }
+    // but {"some":"thing"} can not be scheduled on that node.
+    // A materialized view or sink or table with an empty node_labels map can only be scheduled on nodes with 
+    // empty node_labels map. 
+    // A node with an empty node_labels map can only host streaming jobs with an empty node_labels map. 
+    map<string, string> node_labels = 101;
+
+    // If this is a materialized view: True if backfill is done, else false.
+    // If this is a regular table: Always true.
+    bool backfill_done = 102;
   }
   uint32 table_id = 1;
   State state = 2;
