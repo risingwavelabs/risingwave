@@ -872,18 +872,17 @@ impl PartialGraphManagedBarrierState {
                     "non empty table_ids at initial barrier: {:?}",
                     self.prev_barrier_table_ids
                 );
-                debug!(epoch = ?barrier.epoch, "initialize at Initial barrier");
+                info!(epoch = ?barrier.epoch, "initialize at Initial barrier");
                 self.prev_barrier_table_ids = Some((barrier.epoch, table_ids));
                 None
             }
             BarrierKind::Barrier => {
-                if let Some((prev_epoch, prev_table_ids)) = self.prev_barrier_table_ids.as_mut()
-                    && prev_epoch.curr == barrier.epoch.prev
-                {
+                if let Some((prev_epoch, prev_table_ids)) = self.prev_barrier_table_ids.as_mut() {
+                    assert_eq!(prev_epoch.curr, barrier.epoch.prev);
                     assert_eq!(prev_table_ids, &table_ids);
                     *prev_epoch = barrier.epoch;
                 } else {
-                    debug!(epoch = ?barrier.epoch, "reinitialize at non-checkpoint barrier");
+                    info!(epoch = ?barrier.epoch, "initialize at non-checkpoint barrier");
                     self.prev_barrier_table_ids = Some((barrier.epoch, table_ids));
                 }
                 None
