@@ -210,7 +210,7 @@ impl CatalogController {
         for mut actor in pb_actors {
             let mut upstream_actors = BTreeMap::new();
 
-            let node = actor.nodes.as_mut().context("nodes is empty")?;
+            let node = actor.nodes.as_mut().context("nodes are empty")?;
 
             visit_stream_node(node, |body| {
                 if let NodeBody::Merge(m) = body {

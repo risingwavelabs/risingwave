@@ -386,7 +386,7 @@ impl DdlController {
                 .await?
                 .is_empty()
         {
-            bail!("There are background creating jobs, please try again later")
+            bail!("The system is creating jobs in the background, please try again later")
         }
 
         self.stream_manager

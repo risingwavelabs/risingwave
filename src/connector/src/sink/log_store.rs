@@ -85,7 +85,7 @@ impl TruncateOffset {
             } => {
                 if epoch != *offset_epoch {
                     bail!(
-                        "new item epoch {} not match current chunk offset epoch {}",
+                        "new item epoch {} does not match current chunk offset epoch {}",
                         epoch,
                         offset_epoch
                     );

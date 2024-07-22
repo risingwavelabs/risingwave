@@ -133,7 +133,7 @@ impl MqttConfig {
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY {
             Err(SinkError::Config(anyhow!(
-                "Mqtt sink only support append-only mode"
+                "Mqtt sink only supports append-only mode"
             )))
         } else {
             Ok(config)
@@ -175,7 +175,7 @@ impl Sink for MqttSink {
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
             return Err(SinkError::Mqtt(anyhow!(
-                "Mqtt sink only support append-only mode"
+                "Mqtt sink only supports append-only mode"
             )));
         }
 
@@ -261,7 +261,7 @@ impl MqttSinkWriter {
             },
             _ => {
                 return Err(SinkError::Config(anyhow!(
-                    "Mqtt sink only support append-only mode"
+                    "Mqtt sink only supports append-only mode"
                 )))
             }
         };

@@ -403,8 +403,8 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         let (range, _latest_is_lower, is_insert) = self.get_range(&curr, prev);
 
                         if !is_insert && self.condition_always_relax {
-                            bail!("The optimizer inferred that the right side's change always make the condition more relaxed.\
-                                But the right changes make the conditions stricter.");
+                            bail!("The optimizer incorrectly assumed that changes on the right side always relax the condition.\
+                                But they actually make it stricter.");
                         }
 
                         let range = (Self::to_row_bound(range.0), Self::to_row_bound(range.1));

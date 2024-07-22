@@ -91,7 +91,7 @@ public class CassandraUtil {
                 throw Status.FAILED_PRECONDITION
                         .withDescription(
                                 String.format(
-                                        "Don't match in the name, rw is %s cassandra can't find it",
+                                        "Name mismatch. %s of RisingWave is not found in Cassandra.",
                                         columnDesc.getName()))
                         .asRuntimeException();
             }

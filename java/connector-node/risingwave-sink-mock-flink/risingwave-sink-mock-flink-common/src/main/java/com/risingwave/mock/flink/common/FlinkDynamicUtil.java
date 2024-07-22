@@ -120,14 +120,14 @@ public class FlinkDynamicUtil {
                 throw Status.FAILED_PRECONDITION
                         .withDescription(
                                 String.format(
-                                        "Don't match in the name, rw is %s", columnDesc.getName()))
+                                        "Name mismatch. RisingWave is %s", columnDesc.getName()))
                         .asRuntimeException();
             }
             if (!checkType(columnDesc.getDataType(), flinkColumnMap.get(columnDesc.getName()))) {
                 throw Status.FAILED_PRECONDITION
                         .withDescription(
                                 String.format(
-                                        "Don't match in the type, name is %s, Sink is %s, rw is %s",
+                                        "Type mismatch. Name is %s, Sink is %s, RisingWave is %s",
                                         columnDesc.getName(),
                                         flinkColumnMap.get(columnDesc.getName()),
                                         columnDesc.getDataType().getTypeName()))

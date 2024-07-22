@@ -255,7 +255,7 @@ impl DatabaseManager {
                 && x.name.eq(&relation_key.2)
         }) {
             if t.stream_job_status == StreamJobStatus::Creating as i32 {
-                bail!("table is in creating procedure, table id: {}", t.id);
+                bail!("Creating the table, table id: {}", t.id);
             } else {
                 Err(MetaError::catalog_duplicated("table", &relation_key.2))
             }
