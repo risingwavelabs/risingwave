@@ -383,6 +383,8 @@ pub trait LocalStateStore: StaticSendSync {
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_;
 
+    fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes>;
+
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
     fn insert(
         &mut self,

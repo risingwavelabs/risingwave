@@ -19,6 +19,7 @@ use bytes::Bytes;
 use futures::{Future, FutureExt};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
@@ -231,6 +232,10 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     // TODO: add trace span
     fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
         self.inner.update_vnode_bitmap(vnodes)
+    }
+
+    fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+        self.inner.get_table_watermark(vnode)
     }
 }
 
