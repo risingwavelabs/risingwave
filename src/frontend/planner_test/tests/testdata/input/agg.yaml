@@ -1000,6 +1000,13 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: test duplicate agg
+  sql: |
+    CREATE TABLE t (v1 int);
+    SELECT sum(v1) as x, count(v1) as y, sum(v1) as z, count(v1) as w from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
 - name: test simple approx_percentile alone
   sql: |
     CREATE TABLE t (v1 int);
@@ -1017,7 +1024,7 @@
 - name: test simple approx_percentile with other simple aggs (sum, count)
   sql: |
     CREATE TABLE t (v1 int);
-    SELECT approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1), sum(v1), count(v1) from t;
+    SELECT sum(v1) as s1, approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1), sum(v1) as s2, count(v1) from t;
   expected_outputs:
     - logical_plan
     - stream_plan

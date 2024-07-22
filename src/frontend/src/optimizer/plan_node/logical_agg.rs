@@ -63,8 +63,6 @@ impl LogicalAgg {
     fn gen_stateless_two_phase_streaming_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         debug_assert!(self.group_key().is_empty());
         let mut core = self.core.clone();
-        let schema = self.base.schema().clone();
-        println!("agg schema: {:?}", schema);
 
         // First, handle approx percentile.
         let has_approx_percentile = self
@@ -114,12 +112,11 @@ impl LogicalAgg {
         ));
         if let Some((approx_percentile_agg, lhs_mapping, rhs_mapping)) = approx_percentile_info {
             let keyed_merge = StreamKeyedMerge::new(
-                global_agg.into(),
                 approx_percentile_agg,
+                global_agg.into(),
                 lhs_mapping,
                 rhs_mapping,
-                schema,
-            );
+            )?;
             Ok(keyed_merge.into())
         } else {
             Ok(global_agg.into())

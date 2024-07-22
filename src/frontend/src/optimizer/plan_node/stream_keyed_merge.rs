@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
+use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -29,6 +32,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
+use crate::error::Result;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamKeyedMerge {
@@ -47,9 +51,24 @@ impl StreamKeyedMerge {
         rhs_input: PlanRef,
         lhs_mapping: ColIndexMapping,
         rhs_mapping: ColIndexMapping,
-        schema: Schema,
-    ) -> Self {
-        println!("keyed merge schema: {:?}", schema);
+    ) -> Result<Self> {
+        assert_eq!(lhs_mapping.target_size(), rhs_mapping.target_size());
+        let mut schema_fields = Vec::with_capacity(lhs_mapping.target_size());
+        let mut o2i_lhs = lhs_mapping.inverse().ok_or_else(|| anyhow!("lhs_mapping should be invertible"))?;
+        let mut o2i_rhs = rhs_mapping.inverse().ok_or_else(|| anyhow!("rhs_mapping should be invertible"))?;
+        for output_idx in 0..lhs_mapping.target_size() {
+            if let Some(lhs_idx) = o2i_lhs.try_map(output_idx) {
+                schema_fields.push(lhs_input.schema().fields()[lhs_idx].clone());
+            } else if let Some(rhs_idx) = o2i_rhs.try_map(output_idx) {
+                println!("rhs schema: {:?}", rhs_input.schema().fields());
+                schema_fields.push(rhs_input.schema().fields()[rhs_idx].clone());
+            } else {
+                bail!("output index {} not found in either lhs or rhs mapping", output_idx);
+            }
+        }
+        let schema = Schema::new(schema_fields);
+        let watermark_columns = FixedBitSet::with_capacity(schema.fields.len());
+
         // FIXME: schema is wrong.
         let base = PlanBase::new_stream(
             lhs_input.ctx(),
@@ -59,16 +78,16 @@ impl StreamKeyedMerge {
             lhs_input.distribution().clone(),
             lhs_input.append_only(),
             lhs_input.emit_on_window_close(),
-            lhs_input.watermark_columns().clone(),
+            watermark_columns,
             lhs_input.columns_monotonicity().clone(),
         );
-        Self {
+        Ok(Self {
             base,
             lhs_input,
             rhs_input,
             lhs_mapping,
             rhs_mapping,
-        }
+        })
     }
 }
 
