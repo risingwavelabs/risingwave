@@ -295,6 +295,7 @@ impl Binder {
                         SetExpr::SetOperation {
                             op: SetOperator::Union,
                             all,
+                            corresponding,
                             left,
                             right,
                         },
@@ -306,6 +307,12 @@ impl Binder {
                         )
                         .into());
                     };
+
+                    // validated in `validate_rcte`
+                    assert!(
+                        !corresponding.is_corresponding(),
+                        "`CORRESPONDING` is not supported in recursive CTE"
+                    );
 
                     let entry = self
                         .context
@@ -396,6 +403,7 @@ impl Binder {
         let SetExpr::SetOperation {
             op: SetOperator::Union,
             all,
+            corresponding,
             left,
             right,
         } = body
@@ -412,10 +420,18 @@ impl Binder {
             .into());
         }
 
+        if corresponding.is_corresponding() {
+            return Err(ErrorCode::BindError(
+                "`CORRESPONDING` is not supported in recursive CTE".to_string(),
+            )
+            .into());
+        }
+
         Ok((
             SetExpr::SetOperation {
                 op: SetOperator::Union,
                 all,
+                corresponding,
                 left,
                 right,
             },

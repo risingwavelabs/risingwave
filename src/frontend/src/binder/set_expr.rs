@@ -202,6 +202,7 @@ impl Binder {
             SetExpr::SetOperation {
                 op,
                 all,
+                corresponding,
                 left,
                 right,
             } => {

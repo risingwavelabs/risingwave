@@ -4082,6 +4082,7 @@ impl Parser<'_> {
                 // Unexpected token or EOF => stop parsing the query body
                 None => break,
             };
+            let corresponding = self.parse_corresponding()?;
             if precedence >= next_precedence {
                 break;
             }
@@ -4089,6 +4090,7 @@ impl Parser<'_> {
             expr = SetExpr::SetOperation {
                 left: Box::new(expr),
                 op: op.unwrap(),
+                corresponding,
                 all: self.parse_keyword(Keyword::ALL),
                 right: Box::new(self.parse_query_body(next_precedence)?),
             };
@@ -4104,6 +4106,20 @@ impl Parser<'_> {
             Token::Word(w) if w.keyword == Keyword::INTERSECT => Some(SetOperator::Intersect),
             _ => None,
         }
+    }
+
+    fn parse_corresponding(&mut self) -> PResult<Corresponding> {
+        let corresponding = if self.parse_keyword(Keyword::CORRESPONDING) {
+            let column_list = if self.parse_keyword(Keyword::BY) {
+                Some(self.parse_parenthesized_column_list(IsOptional::Mandatory)?)
+            } else {
+                None
+            };
+            Corresponding::with_column_list(column_list)
+        } else {
+            Corresponding::none()
+        };
+        Ok(corresponding)
     }
 
     /// Parse a restricted `SELECT` statement (no CTEs / `UNION` / `ORDER BY`),
