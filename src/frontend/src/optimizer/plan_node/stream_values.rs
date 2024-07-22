@@ -23,7 +23,7 @@ use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, LogicalValues, PlanBase, StreamNode};
 use crate::expr::{Expr, ExprImpl, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, MonotonicityMap};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamValues` implements `LogicalValues.to_stream()`
@@ -48,6 +48,7 @@ impl StreamValues {
             true,
             false,
             FixedBitSet::with_capacity(logical.schema().len()),
+            MonotonicityMap::new(),
         );
         Self { base, logical }
     }

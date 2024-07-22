@@ -98,7 +98,6 @@ impl DdlServiceImpl {
             .map(ColIndexMapping::from_protobuf);
 
         let stream_job = StreamingJob::Table(source, table, job_type);
-
         ReplaceTableInfo {
             streaming_job: stream_job,
             fragment_graph,
