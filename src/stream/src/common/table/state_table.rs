@@ -57,7 +57,9 @@ use risingwave_storage::store::{
     ReadLogOptions, ReadOptions, SealCurrentEpochOptions, StateStoreIter, StateStoreIterExt,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
-use risingwave_storage::table::{ChangeLogRow, deserialize_log_stream, KeyedRow, TableDistribution};
+use risingwave_storage::table::{
+    deserialize_log_stream, ChangeLogRow, KeyedRow, TableDistribution,
+};
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tracing::{trace, Instrument};
