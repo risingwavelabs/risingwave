@@ -20,6 +20,7 @@ use etcd_client::ConnectOptions;
 use otlp_embedded::TraceServiceServer;
 use regex::Regex;
 use risingwave_common::monitor::{RouterExt, TcpConfig};
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -29,7 +30,9 @@ use risingwave_common_service::{MetricsManager, TracingExtractLayer};
 use risingwave_meta::barrier::StreamRpcManager;
 use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::cluster::ClusterController;
-use risingwave_meta::manager::{MetaStoreImpl, MetadataManager, SystemParamsManagerImpl};
+use risingwave_meta::manager::{
+    MetaStoreImpl, MetadataManager, SystemParamsManagerImpl, META_NODE_ID,
+};
 use risingwave_meta::rpc::election::dummy::DummyElectionClient;
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
 use risingwave_meta::rpc::ElectionClientRef;
@@ -508,6 +511,31 @@ pub async fn start_service_as_election_leader(
         system_params_reader.checkpoint_frequency() as usize,
     );
 
+    // Initialize services.
+    let backup_manager = BackupManager::new(
+        env.clone(),
+        hummock_manager.clone(),
+        meta_metrics.clone(),
+        system_params_reader.backup_storage_url(),
+        system_params_reader.backup_storage_directory(),
+    )
+    .await?;
+
+    LocalSecretManager::init(
+        opts.temp_secret_file_dir,
+        env.cluster_id().to_string(),
+        META_NODE_ID,
+    );
+
+    let notification_srv = NotificationServiceImpl::new(
+        env.clone(),
+        metadata_manager.clone(),
+        hummock_manager.clone(),
+        backup_manager.clone(),
+        serving_vnode_mapping.clone(),
+    )
+    .await?;
+
     let source_manager = Arc::new(
         SourceManager::new(
             barrier_scheduler.clone(),
@@ -567,15 +595,6 @@ pub async fn start_service_as_election_leader(
         .await
         .unwrap();
 
-    // Initialize services.
-    let backup_manager = BackupManager::new(
-        env.clone(),
-        hummock_manager.clone(),
-        meta_metrics.clone(),
-        system_params_reader.backup_storage_url(),
-        system_params_reader.backup_storage_directory(),
-    )
-    .await?;
     let vacuum_manager = Arc::new(hummock::VacuumManager::new(
         env.clone(),
         hummock_manager.clone(),
@@ -612,7 +631,8 @@ pub async fn start_service_as_election_leader(
         scale_controller.clone(),
     );
 
-    let cluster_srv = ClusterServiceImpl::new(metadata_manager.clone());
+    let cluster_srv =
+        ClusterServiceImpl::new(metadata_manager.clone(), barrier_manager.context().clone());
     let stream_srv = StreamServiceImpl::new(
         env.clone(),
         barrier_scheduler.clone(),
@@ -625,13 +645,7 @@ pub async fn start_service_as_election_leader(
         vacuum_manager.clone(),
         metadata_manager.clone(),
     );
-    let notification_srv = NotificationServiceImpl::new(
-        env.clone(),
-        metadata_manager.clone(),
-        hummock_manager.clone(),
-        backup_manager.clone(),
-        serving_vnode_mapping.clone(),
-    );
+
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
     let telemetry_srv = TelemetryInfoServiceImpl::new(env.meta_store());

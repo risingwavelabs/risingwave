@@ -52,6 +52,7 @@ use tokio::task::JoinHandle;
 use crate::manager::{
     LocalNotification, MetaSrvEnv, StreamingClusterInfo, WorkerKey, META_NODE_ID,
 };
+use crate::model::ClusterId;
 use crate::{MetaError, MetaResult};
 
 pub type ClusterControllerRef = Arc<ClusterController>;
@@ -391,6 +392,10 @@ impl ClusterController {
             .read()
             .await
             .get_worker_extra_info_by_id(worker_id)
+    }
+
+    pub fn cluster_id(&self) -> &ClusterId {
+        self.env.cluster_id()
     }
 }
 

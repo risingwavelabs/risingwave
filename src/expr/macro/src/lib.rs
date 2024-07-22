@@ -637,6 +637,8 @@ pub fn capture_context(attr: TokenStream, item: TokenStream) -> TokenStream {
     fn inner(attr: TokenStream, item: TokenStream) -> Result<TokenStream2> {
         let attr: CaptureContextAttr = syn::parse(attr)?;
         let user_fn: ItemFn = syn::parse(item)?;
+
+        // Generate captured function
         generate_captured_function(attr, user_fn)
     }
     match inner(attr, item) {

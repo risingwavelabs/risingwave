@@ -266,6 +266,11 @@ impl Binder {
             );
         }
 
+        // file_scan table function
+        if function_name.eq_ignore_ascii_case("file_scan") {
+            self.ensure_table_function_allowed()?;
+            return Ok(TableFunction::new_file_scan(inputs)?.into());
+        }
         // table function
         if let Ok(function_type) = TableFunctionType::from_str(function_name.as_str()) {
             self.ensure_table_function_allowed()?;
@@ -1423,7 +1428,8 @@ impl Binder {
                 ("col_description", raw_call(ExprType::ColDescription)),
                 ("obj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("shobj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
-                ("pg_is_in_recovery", raw_literal(ExprImpl::literal_bool(false))),
+                ("pg_is_in_recovery", raw_call(ExprType::PgIsInRecovery)),
+                ("rw_recovery_status", raw_call(ExprType::RwRecoveryStatus)),
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 ("rw_test_paid_tier", raw_call(ExprType::TestPaidTier)), // for testing purposes

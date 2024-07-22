@@ -23,12 +23,15 @@ use crate::manager::{ActiveStreamingWorkerNodes, ActorInfos, InflightFragmentInf
 use crate::model::{ActorId, FragmentId};
 
 #[derive(Debug, Clone)]
+pub(crate) struct CommandNewFragmentInfo {
+    pub new_actors: HashMap<ActorId, WorkerId>,
+    pub table_ids: HashSet<TableId>,
+    pub is_injectable: bool,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) enum CommandFragmentChanges {
-    NewFragment {
-        new_actors: HashMap<ActorId, WorkerId>,
-        table_ids: HashSet<TableId>,
-        is_injectable: bool,
-    },
+    NewFragment(CommandNewFragmentInfo),
     Reschedule {
         new_actors: HashMap<ActorId, WorkerId>,
         to_remove: HashSet<ActorId>,
@@ -149,11 +152,12 @@ impl InflightActorInfo {
             let mut to_add = HashMap::new();
             for (fragment_id, change) in fragment_changes {
                 match change {
-                    CommandFragmentChanges::NewFragment {
+                    CommandFragmentChanges::NewFragment(CommandNewFragmentInfo {
                         new_actors,
                         table_ids,
                         is_injectable,
-                    } => {
+                        ..
+                    }) => {
                         for (actor_id, node_id) in &new_actors {
                             assert!(to_add
                                 .insert(*actor_id, (*node_id, is_injectable))
@@ -232,7 +236,7 @@ impl InflightActorInfo {
             let mut all_to_remove = HashSet::new();
             for (fragment_id, changes) in fragment_changes.fragment_changes {
                 match changes {
-                    CommandFragmentChanges::NewFragment { .. } => {}
+                    CommandFragmentChanges::NewFragment(_) => {}
                     CommandFragmentChanges::Reschedule { to_remove, .. } => {
                         let info = self
                             .fragment_infos

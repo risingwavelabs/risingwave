@@ -29,6 +29,7 @@ use risingwave_common::config::{
 };
 use risingwave_common::lru::init_global_sequencer_args;
 use risingwave_common::monitor::{RouterExt, TcpConfig};
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -214,6 +215,12 @@ pub async fn compute_node_serve(
     )
     .await
     .unwrap();
+
+    LocalSecretManager::init(
+        opts.temp_secret_file_dir,
+        meta_client.cluster_id().to_string(),
+        worker_id,
+    );
 
     // Initialize observer manager.
     let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params.clone()));
