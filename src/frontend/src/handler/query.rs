@@ -34,7 +34,6 @@ use super::{create_mv, PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundCreateView, BoundStatement};
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::handler::create_mv::gen_create_mv_plan;
 use crate::handler::flush::do_flush;
 use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};

@@ -12,14 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query, SqlOption};
+use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, SqlOption};
 
 use crate::binder::statement::RewriteExprsRecursive;
-use crate::binder::{BoundDelete, BoundQuery};
-use crate::error::Result;
+use crate::binder::BoundQuery;
 use crate::expr::ExprRewriter;
-use crate::optimizer::PlanRoot;
-use crate::Planner;
 
 /// Represents a bounded `CREATE MATERIALIZED VIEW` statement.
 #[derive(Debug, Clone)]
