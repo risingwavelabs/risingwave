@@ -133,12 +133,14 @@ impl TableFunction {
                 .into());
             }
 
-            if cfg!(madsim) {
-                return Err(crate::error::ErrorCode::BindError(
-                    "file_scan can't be used in the madsim mode".to_string(),
-                )
-                .into());
-            } else {
+            #[cfg(madsim)]
+            return Err(crate::error::ErrorCode::BindError(
+                "file_scan can't be used in the madsim mode".to_string(),
+            )
+            .into());
+
+            #[cfg(not(madsim))]
+            {
                 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
                     tokio::runtime::Builder::new_multi_thread()
                         .thread_name("rw-file-scan")
