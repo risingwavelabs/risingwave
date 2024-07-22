@@ -1028,3 +1028,24 @@
   expected_outputs:
     - logical_plan
     - stream_plan
+- name: test simple approx_percentile with duplicate approx_percentile
+  sql: |
+    CREATE TABLE t (v1 int);
+    SELECT approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) as x, approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) as y from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+- name: test simple approx_percentile with different approx_percentile
+  sql: |
+    CREATE TABLE t (v1 int, v2 int);
+    SELECT approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) as x, approx_percentile(0.5, 0.01) WITHIN GROUP (order by v2) as y from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+- name: test simple approx_percentile with different approx_percentile interleaved with stateless simple aggs
+  sql: |
+    CREATE TABLE t (v1 int, v2 int);
+    SELECT sum(v1) as s1, approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) as x, count(*), sum(v2) as s2, approx_percentile(0.5, 0.01) WITHIN GROUP (order by v2) as y from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan

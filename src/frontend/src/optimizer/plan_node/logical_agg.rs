@@ -45,6 +45,13 @@ use crate::utils::{
     ColIndexMapping, ColIndexMappingRewriteExt, Condition, GroupBy, IndexSet, Substitute,
 };
 
+pub struct SeparatedAggInfo {
+    pub approx_percentile_agg_calls: Vec<PlanAggCall>,
+    pub non_approx_percentile_agg_calls: Vec<PlanAggCall>,
+    pub approx_percentile_col_mapping: ColIndexMapping,
+    pub non_approx_percentile_col_mapping: ColIndexMapping,
+}
+
 /// `LogicalAgg` groups input data by their group key and computes aggregation functions.
 ///
 /// It corresponds to the `GROUP BY` operator in a SQL query statement together with the aggregate
@@ -70,25 +77,24 @@ impl LogicalAgg {
             .iter()
             .any(|agg_call| agg_call.agg_kind == AggKind::ApproxPercentile);
         let approx_percentile_info = if has_approx_percentile {
-            let (
-                approx_percentile_agg_call,
+            let SeparatedAggInfo {
+                approx_percentile_agg_calls,
                 non_approx_percentile_agg_calls,
-                lhs_mapping,
-                rhs_mapping,
-            ) = self.extract_approx_percentile();
-            // FIXME(kwannoel): Handle case where there's multiple approx percentile also.
+                approx_percentile_col_mapping,
+                non_approx_percentile_col_mapping,
+            } = self.separate_normal_and_special_agg();
             let requires_keyed_merge = !non_approx_percentile_agg_calls.is_empty();
             if requires_keyed_merge {
                 let stream_input: PlanRef = StreamShare::new_from_input(stream_input).into();
                 let approx_percentile_agg: PlanRef = self
-                    .build_approx_percentile_agg(stream_input.clone(), &approx_percentile_agg_call);
+                    .build_approx_percentile_aggs(stream_input.clone(), &approx_percentile_agg_calls);
 
                 core.input = stream_input;
                 core.agg_calls = non_approx_percentile_agg_calls;
-                Some((approx_percentile_agg, lhs_mapping, rhs_mapping))
+                Some((approx_percentile_agg, approx_percentile_col_mapping, non_approx_percentile_col_mapping))
             } else {
                 let approx_percentile_agg: PlanRef = self
-                    .build_approx_percentile_agg(stream_input.clone(), &approx_percentile_agg_call);
+                    .build_approx_percentile_aggs(stream_input.clone(), &approx_percentile_agg_calls);
                 return Ok(approx_percentile_agg);
             }
         } else {
@@ -240,14 +246,6 @@ impl LogicalAgg {
         } else {
             self.core.can_two_phase_agg()
         });
-        // // Handle 2-phase approx_percentile aggregation.
-        // if self
-        //     .agg_calls()
-        //     .iter()
-        //     .any(|agg_call| agg_call.agg_kind == AggKind::ApproxPercentile)
-        // {
-        //     return self.gen_two_phase_approx_percentile_plan(stream_input, ctx);
-        // }
 
         // Stateless 2-phase simple agg
         // can be applied on stateless simple agg calls,
@@ -300,34 +298,29 @@ impl LogicalAgg {
     }
 
     // TODO(kwannoel): Handle multiple approx_percentile.
-    fn extract_approx_percentile(
+    fn separate_normal_and_special_agg(
         &self,
-    ) -> (
-        PlanAggCall,
-        Vec<PlanAggCall>,
-        ColIndexMapping,
-        ColIndexMapping,
-    ) {
-        let mut approx_percentile_agg_call = None;
+    ) -> SeparatedAggInfo {
         let estimated_len = self.agg_calls().len() - 1;
-        let mut remaining_agg_calls = Vec::with_capacity(estimated_len);
+        let mut approx_percentile_agg_calls = Vec::with_capacity(estimated_len);
+        let mut non_approx_percentile_agg_calls = Vec::with_capacity(estimated_len);
         let mut approx_percentile_col_mapping = Vec::with_capacity(estimated_len);
-        let mut remaining_simple_agg_col_mapping = Vec::with_capacity(estimated_len);
+        let mut non_approx_percentile_col_mapping = Vec::with_capacity(estimated_len);
         for (output_idx, agg_call) in self.agg_calls().iter().enumerate() {
             if agg_call.agg_kind == AggKind::ApproxPercentile {
-                approx_percentile_agg_call = Some(agg_call.clone());
+                approx_percentile_agg_calls.push(agg_call.clone());
                 approx_percentile_col_mapping.push(Some(output_idx));
             } else {
-                remaining_agg_calls.push(agg_call.clone());
-                remaining_simple_agg_col_mapping.push(Some(output_idx));
+                non_approx_percentile_agg_calls.push(agg_call.clone());
+                non_approx_percentile_col_mapping.push(Some(output_idx));
             }
         }
-        (
-            approx_percentile_agg_call.expect("ApproxPercentile agg call not found"),
-            remaining_agg_calls,
-            ColIndexMapping::new(approx_percentile_col_mapping, self.agg_calls().len()),
-            ColIndexMapping::new(remaining_simple_agg_col_mapping, self.agg_calls().len()),
-        )
+        SeparatedAggInfo {
+            approx_percentile_agg_calls,
+            non_approx_percentile_agg_calls,
+            approx_percentile_col_mapping: ColIndexMapping::new(approx_percentile_col_mapping, self.agg_calls().len()),
+            non_approx_percentile_col_mapping: ColIndexMapping::new(non_approx_percentile_col_mapping, self.agg_calls().len()),
+        }
     }
 
     fn build_approx_percentile_agg(
@@ -342,6 +335,40 @@ impl LogicalAgg {
             &approx_percentile_agg_call,
         );
         global_approx_percentile.into()
+    }
+
+    /// If only 1 approx percentile, just return it.
+    /// Otherwise build a tree of approx percentile with KeyedMerge.
+    /// e.g.
+    /// ApproxPercentile(col1, 0.5) as x,
+    /// ApproxPercentile(col2, 0.5) as y,
+    /// ApproxPercentile(col3, 0.5) as z
+    /// will be built as
+    ///        KeyedMerge
+    ///       /          \
+    ///  KeyedMerge       z
+    ///  /        \
+    /// x          y
+
+    fn build_approx_percentile_aggs(
+        &self,
+        input: PlanRef,
+        approx_percentile_agg_call: &[PlanAggCall],
+    ) -> PlanRef {
+        let approx_percentile_plans = approx_percentile_agg_call
+            .iter()
+            .map(|agg_call| self.build_approx_percentile_agg(input.clone(), agg_call))
+            .collect_vec();
+        assert!(approx_percentile_plans.len() >= 1);
+        let mut iter = approx_percentile_plans.into_iter();
+        let mut acc = iter.next().unwrap();
+        for (current_size, plan) in iter.enumerate().map(|(i, p)| (i + 1, p)) {
+            let new_size = current_size + 1;
+            let keyed_merge = StreamKeyedMerge::new(acc, plan, ColIndexMapping::identity_or_none(current_size, new_size), ColIndexMapping::new(vec![Some(current_size)], new_size))
+                .expect("failed to build keyed merge");
+            acc = keyed_merge.into();
+        }
+        acc
     }
 
     pub fn core(&self) -> &Agg<PlanRef> {
