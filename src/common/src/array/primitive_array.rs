@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-use std::io::Write;
+use std::io::{Cursor, Write};
 use std::mem::size_of;
 
+use anyhow::Context;
+use byteorder::{BigEndian, ReadBytesExt};
 use risingwave_common_estimate_size::{EstimateSize, ZeroHeapSize};
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
@@ -50,6 +52,7 @@ where
 
     // item methods
     fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize>;
+    fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<Self>;
 }
 
 macro_rules! impl_array_methods {
@@ -81,13 +84,19 @@ macro_rules! impl_array_methods {
 }
 
 macro_rules! impl_primitive_for_native_types {
-    ($({ $naive_type:ty, $scalar_type:ident } ),*) => {
+    ($({ $naive_type:ty, $scalar_type:ident, $read_fn:ident } ),*) => {
         $(
             impl PrimitiveArrayItemType for $naive_type {
                 impl_array_methods!($naive_type, $scalar_type, $scalar_type);
 
                 fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
                     NativeType::to_protobuf(self, output)
+                }
+                fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<Self> {
+                    let v = cur
+                        .$read_fn::<BigEndian>()
+                        .context("failed to read value from buffer")?;
+                    Ok(v.into())
                 }
             }
         )*
@@ -105,6 +114,9 @@ macro_rules! impl_primitive_for_others {
 
                 fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
                     <$scalar_type>::to_protobuf(self, output)
+                }
+                fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<Self> {
+                    <$scalar_type>::from_protobuf(cur)
                 }
             }
         )*

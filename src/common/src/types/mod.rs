@@ -619,12 +619,12 @@ impl_self_as_scalar_ref! { &str, &[u8], Int256Ref<'_>, JsonbRef<'_>, ListRef<'_>
 macro_rules! for_all_native_types {
     ($macro:ident) => {
         $macro! {
-            { i16, Int16 },
-            { i32, Int32 },
-            { i64, Int64 },
-            { Serial, Serial },
-            { $crate::types::F32, Float32 },
-            { $crate::types::F64, Float64 }
+            { i16, Int16, read_i16 },
+            { i32, Int32, read_i32 },
+            { i64, Int64, read_i64 },
+            { Serial, Serial, read_i64 },
+            { $crate::types::F32, Float32, read_f32 },
+            { $crate::types::F64, Float64, read_f64 }
         }
     };
 }
