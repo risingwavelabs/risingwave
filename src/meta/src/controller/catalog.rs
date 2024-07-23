@@ -2838,6 +2838,22 @@ impl CatalogController {
             .collect())
     }
 
+    pub async fn get_table_by_cdc_table_name(
+        &self,
+        cdc_table_name: String,
+    ) -> MetaResult<Vec<PbTable>> {
+        let inner = self.inner.read().await;
+        let table_objs = Table::find()
+            .find_also_related(Object)
+            .filter(table::Column::CdcTableName.eq(cdc_table_name))
+            .all(&inner.db)
+            .await?;
+        Ok(table_objs
+            .into_iter()
+            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .collect())
+    }
+
     pub async fn get_created_table_ids(&self) -> MetaResult<Vec<TableId>> {
         let inner = self.inner.read().await;
 

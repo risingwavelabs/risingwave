@@ -1136,13 +1136,22 @@ impl SessionManager for SessionManagerImpl {
     fn get_session(
         &self,
         database_id: u32,
-        user_name: &str,
+        user_id: u32,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         let dumb_addr = Address::Tcp(SocketAddr::new(
             IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
             5691, // port of meta
         ));
-        self.connect_inner(database_id, user_name, Arc::new(dumb_addr))
+        let user_reader = self.env.user_info_reader();
+        let reader = user_reader.read_guard();
+        if let Some(user_name) = reader.get_user_name_by_id(user_id) {
+            self.connect_inner(database_id, user_name.as_str(), Arc::new(dumb_addr))
+        } else {
+            Err(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Role id {} does not exist", user_id),
+            )))
+        }
     }
 
     fn connect(

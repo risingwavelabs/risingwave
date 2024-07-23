@@ -16,6 +16,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::MetadataManager;
@@ -25,10 +27,13 @@ use risingwave_pb::catalog::connection::private_link_service::{
 };
 use risingwave_pb::catalog::connection::PbPrivateLinkService;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{connection, Comment, Connection, CreateType, Secret};
+use risingwave_pb::catalog::{connection, Comment, Connection, CreateType, Secret, Table};
+use risingwave_pb::common::worker_node::State;
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
+use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
@@ -49,7 +54,6 @@ pub struct DdlServiceImpl {
     sink_manager: SinkCoordinatorManager,
     ddl_controller: DdlController,
     aws_client: Arc<Option<AwsEc2Client>>,
-    // frontend_client:
 }
 
 impl DdlServiceImpl {
@@ -925,10 +929,44 @@ impl DdlService for DdlServiceImpl {
         let req = request.into_inner();
 
         let schema_change = req.schema_change.unwrap();
+        let cdc_table_name = schema_change.cdc_table_name.clone();
 
-        // TODO: can we build a ReplaceTablePlan using the info in schema_change?
+        // get the table catalog corresponding to the
+        let tables: Vec<Table> = self
+            .metadata_manager
+            .get_table_catalog_by_cdc_table_name(cdc_table_name)
+            .await?;
 
         // send a request to the frontend to get the ReplaceTablePlan
+        let mut workers = self
+            .metadata_manager
+            .list_worker_node(Some(WorkerType::Frontend), Some(State::Running))
+            .await?;
+        workers.shuffle(&mut thread_rng());
+        let worker = workers
+            .first()
+            .ok_or_else(|| anyhow!("no frontend worker available"))?;
+        let client = self.env.frontend_client_pool().get(worker).await?;
+
+        for table in tables {
+            let resp = client
+                .get_table_replace_plan(GetTableReplacePlanRequest {
+                    database_id: table.database_id,
+                    owner: table.owner,
+                    table_name: table.name,
+                    schema_change: Some(schema_change),
+                })
+                .await?;
+
+            if let Some(plan) = resp.table_plan {
+                // start the schema change procedure
+                self.ddl_controller
+                    .run_command(DdlCommand::ReplaceTable(Self::extract_replace_table_info(
+                        plan,
+                    )))
+                    .await?;
+            }
+        }
 
         Ok(Response::new(AutoSchemaChangeResponse {}))
     }

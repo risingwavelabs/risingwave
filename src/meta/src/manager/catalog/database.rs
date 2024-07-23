@@ -248,6 +248,15 @@ impl DatabaseManager {
             .collect()
     }
 
+    pub fn get_table_by_cdc_table_name(&self, cdc_table_name: String) -> Vec<Table> {
+        let cdc_table_name = Some(cdc_table_name);
+        self.tables
+            .values()
+            .filter(|t| t.cdc_table_name == cdc_table_name)
+            .cloned()
+            .collect()
+    }
+
     pub fn check_relation_name_duplicated(&self, relation_key: &RelationKey) -> MetaResult<()> {
         if let Some(t) = self.tables.values().find(|x| {
             x.database_id == relation_key.0
