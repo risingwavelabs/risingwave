@@ -196,6 +196,7 @@ impl ControlStreamManager {
                             .expect("should exist when get collect resp");
                         break Ok((worker_id, command.prev_epoch.value().0, resp));
                     }
+                    // TODO: then directly handle shutdown message here
                     resp => {
                         break Err(anyhow!("get unexpected resp: {:?}", resp).into());
                     }

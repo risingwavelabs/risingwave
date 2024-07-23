@@ -129,6 +129,7 @@ impl ControlStreamHandle {
             ScoredStreamError::new(StreamError::shutdown()).to_status_unnamed(Code::Cancelled);
 
         if let Some((sender, _)) = self.pair.take() {
+            // TODO: Shall we send a specific message of shutdown?
             if sender.send(Err(err)).is_err() {
                 warn!("failed to notify shutdown of control stream");
             } else {
