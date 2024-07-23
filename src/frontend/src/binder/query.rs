@@ -32,7 +32,7 @@ use crate::binder::{Binder, BoundSetExpr};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter};
 
-/// A validated (batch) sql query, including order and union.
+/// A validated sql query, including order and union.
 /// An example of its relationship with `BoundSetExpr` and `BoundSelect` can be found here: <https://bit.ly/3GQwgPz>
 #[derive(Debug, Clone)]
 pub struct BoundQuery {

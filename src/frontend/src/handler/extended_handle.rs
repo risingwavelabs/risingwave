@@ -57,7 +57,7 @@ pub struct PreparedResult {
 /// A portal represents a ready-to-execute or already-partially-executed statement,
 /// with any missing parameter values filled in.
 ///
-/// Reference: https://www.postgresql.org/docs/current/protocol-overview.html#PROTOCOL-QUERY-CONCEPTS
+/// Reference: <https://www.postgresql.org/docs/current/protocol-overview.html#PROTOCOL-QUERY-CONCEPTS>
 #[expect(clippy::enum_variant_names)]
 #[derive(Clone)]
 pub enum Portal {
