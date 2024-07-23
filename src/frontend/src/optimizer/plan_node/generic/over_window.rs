@@ -115,7 +115,7 @@ impl PlanWindowFunction {
         use risingwave_pb::expr::window_function::{PbGeneralType, PbType};
         use WindowFuncKind::*;
 
-        let r#type = match self.kind {
+        let r#type = match &self.kind {
             RowNumber => PbType::General(PbGeneralType::RowNumber as _),
             Rank => PbType::General(PbGeneralType::Rank as _),
             DenseRank => PbType::General(PbGeneralType::DenseRank as _),
