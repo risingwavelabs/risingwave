@@ -188,7 +188,7 @@ impl FrontendEnv {
         let meta_client = Arc::new(MockFrontendMetaClient {});
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
         let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
-        let compute_client_pool = Arc::new(ComputeClientPool::default());
+        let compute_client_pool = Arc::new(ComputeClientPool::for_test());
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             compute_client_pool,
@@ -198,7 +198,7 @@ impl FrontendEnv {
             None,
         );
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
-        let client_pool = Arc::new(ComputeClientPool::default());
+        let client_pool = Arc::new(ComputeClientPool::for_test());
         let creating_streaming_tracker = StreamingJobTracker::new(meta_client.clone());
         let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(
             Builder::new_multi_thread()

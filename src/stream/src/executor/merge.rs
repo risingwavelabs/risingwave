@@ -808,7 +808,7 @@ mod tests {
         let test_env = LocalBarrierTestEnv::for_test().await;
 
         let remote_input = {
-            let pool = ComputeClientPool::default();
+            let pool = ComputeClientPool::for_test();
             RemoteInput::new(
                 test_env.shared_context.local_barrier_manager.clone(),
                 pool,

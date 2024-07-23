@@ -278,4 +278,4 @@ impl RpcClient for ComputeClient {
 }
 
 pub type ComputeClientPool = RpcClientPool<ComputeClient>;
-pub type ComputeClientPoolRef = Arc<ComputeClientPool>;
+pub type ComputeClientPoolRef = Arc<ComputeClientPool>; // TODO: no need for `Arc` since clone is cheap and shared
