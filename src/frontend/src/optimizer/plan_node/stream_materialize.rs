@@ -132,10 +132,11 @@ impl StreamMaterialize {
         row_id_index: Option<usize>,
         version: Option<TableVersion>,
         retention_seconds: Option<NonZeroU32>,
+        cdc_table_name: Option<String>,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
-        let table = Self::derive_table_catalog(
+        let mut table = Self::derive_table_catalog(
             input.clone(),
             name,
             user_order_by,
@@ -151,6 +152,8 @@ impl StreamMaterialize {
             retention_seconds,
             CreateType::Foreground,
         )?;
+
+        table.cdc_table_name = cdc_table_name;
 
         Ok(Self::new(input, table))
     }
@@ -278,6 +281,7 @@ impl StreamMaterialize {
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             retention_seconds: retention_seconds.map(|i| i.into()),
+            cdc_table_name: None,
         })
     }
 
