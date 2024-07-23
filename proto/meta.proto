@@ -104,24 +104,12 @@ message TableFragments {
   stream_plan.StreamContext ctx = 6;
   TableParallelism parallelism = 7;
 
-  // If a materialize view, sink, or table has a node_label, its actors can only be scheduled 
-  // on compute nodes with that label.
-  // If it does not have a node_label (empty map or null value) it can be scheduled on any 
-  // compute node without a label. The node has to have both a matching key and value.
-  // E.g. {"some":"value"} can be scheduled on a node with the labels
-  // { 
-  //   "other":"thing",
-  //   "some":"value"
-  // }
-  // but {"some":"thing"} can not be scheduled on that node.
-  // A materialized view or sink or table with an empty node_labels map can only be scheduled on nodes with 
-  // empty node_labels map. 
-  // A node with an empty node_labels map can only host streaming jobs with an empty node_labels map. 
-  map<string, string> node_labels = 101;
+  // Actors of a materialize view, sink, or table can only be scheduled on nodes with matching node_label.
+  string node_label = 8;
 
   // If this is a materialized view: True if backfill is done, else false.
   // If this is a regular table: Always true.
-  bool backfill_done = 102;
+  bool backfill_done = 9;
 }
 
 /// Worker slot mapping with fragment id, used for notification.
@@ -570,19 +558,18 @@ message TableParallelism {
   }
 }
 
-// Changes a streaming job in place by
-// overwriting the labels of a materialized view/table/sink with the given id
-message UpdateStreamingJobRequest {
+// Changes a streaming job in place by overwriting its node_label.
+// This may cause the re-scheduling of the streaming job actors.
+message UpdateStreamingJobNodeLabelsRequest {
   // Id of the materialized view, table, or sink which we want to update
   uint32 id = 1;
 
-  // replace the node_labels map of the streaming job with a given id 
-  // with below map
-  map<string, string> node_labels = 2;
+  // replace the node_label of the streaming job with a given id with below value
+  string node_label = 2;
 }
 
 // We do not need to add an explicit status field here, we can just use the RPC status
-message UpdateStreamingJobResponse {}
+message UpdateStreamingJobNodeLabelsResponse {}
 
 message GetStreamingJobsStatusRequest {}
 
@@ -590,7 +577,7 @@ message GetStreamingJobsStatusRequest {}
 message GetStreamingJobsStatusResponse {
   message Status {
     uint32 table_id = 1;
-    map<string, string> node_labels = 2;
+    string node_label = 2;
     bool backfill_done = 3;
   }
 
@@ -600,7 +587,7 @@ message GetStreamingJobsStatusResponse {
 service ScaleService {
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
-  rpc UpdateStreamingJob(UpdateStreamingJobRequest) returns (UpdateStreamingJobResponse); 
+  rpc UpdateStreamingJobNodeLabels(UpdateStreamingJobNodeLabelsRequest) returns (UpdateStreamingJobNodeLabelsResponse); 
   rpc GetStreamingJobsStatus(GetStreamingJobsStatusRequest) returns (GetStreamingJobsStatusResponse); 
 }
 

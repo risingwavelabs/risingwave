@@ -85,7 +85,7 @@ message WorkerNode {
 
   // Meta may assign labels to worker nodes to partition workload by label.
   // This is used for serverless backfilling of materialized views.
-  string node_labels = 11;
+  string node_label = 11;
 }
 
 message Buffer {
