@@ -345,7 +345,9 @@ pub async fn compute_node_serve(
     ));
 
     // Initialize batch environment.
-    let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
+    let batch_client_pool = Arc::new(ComputeClientPool::new(
+        config.batch_exchange_connection_pool_size(),
+    ));
     let batch_env = BatchEnvironment::new(
         batch_mgr.clone(),
         advertise_addr.clone(),
@@ -354,7 +356,7 @@ pub async fn compute_node_serve(
         state_store.clone(),
         batch_task_metrics.clone(),
         batch_executor_metrics.clone(),
-        client_pool,
+        batch_client_pool,
         dml_mgr.clone(),
         source_metrics.clone(),
         batch_spill_metrics.clone(),
@@ -362,6 +364,9 @@ pub async fn compute_node_serve(
     );
 
     // Initialize the streaming environment.
+    let stream_client_pool = Arc::new(ComputeClientPool::new(
+        config.streaming_exchange_connection_pool_size(),
+    ));
     let stream_env = StreamEnvironment::new(
         advertise_addr.clone(),
         stream_config,
@@ -371,6 +376,7 @@ pub async fn compute_node_serve(
         system_params_manager.clone(),
         source_metrics,
         meta_client.clone(),
+        stream_client_pool,
     );
 
     let stream_mgr = LocalStreamManager::new(
