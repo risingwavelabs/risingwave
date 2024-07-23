@@ -174,9 +174,7 @@ impl CreateStreamingJobCommandInfo {
                                     .actor_status
                                     .get(&actor.actor_id)
                                     .expect("should exist")
-                                    .get_parallel_unit()
-                                    .expect("should set")
-                                    .worker_node_id,
+                                    .worker_id(),
                             )
                         })
                         .collect(),
