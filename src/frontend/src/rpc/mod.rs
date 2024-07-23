@@ -14,13 +14,11 @@
 
 use pgwire::pg_server::{BoxedError, SessionManager};
 use risingwave_pb::ddl_service::{ReplaceTablePlan, SchemaChangeEnvelope};
-use risingwave_pb::frontend_service::schema_change_request::Request;
-use risingwave_pb::frontend_service::schema_change_response::{GetNewTablePlanResponse, Response};
-use risingwave_pb::frontend_service::schema_change_service_server::SchemaChangeService;
-use risingwave_pb::frontend_service::{SchemaChangeRequest, SchemaChangeResponse};
+use risingwave_pb::frontend_service::frontend_service_server::FrontendService;
+use risingwave_pb::frontend_service::{GetTableReplacePlanRequest, GetTableReplacePlanResponse};
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_sqlparser::ast::ObjectName;
-use tonic::{Request as RpcRequest, Response as RpcResponse, Status};
+use tonic::{Request as RpcRequest, Response as RpcResponse, Response, Status};
 
 use crate::error::RwError;
 use crate::handler::{get_new_table_definition_for_cdc_table, get_replace_table_plan};
@@ -49,36 +47,30 @@ impl From<AutoSchemaChangeError> for tonic::Status {
 }
 
 #[derive(Default)]
-pub struct SchemaChangeServiceImpl {}
+pub struct FrontendServiceImpl {}
 
-impl SchemaChangeServiceImpl {
+impl FrontendServiceImpl {
     pub fn new() -> Self {
         Self {}
     }
 }
 
 #[async_trait::async_trait]
-impl SchemaChangeService for SchemaChangeServiceImpl {
-    async fn get_new_table_streaming_graph(
+impl FrontendService for FrontendServiceImpl {
+    async fn get_table_replace_plan(
         &self,
-        request: RpcRequest<SchemaChangeRequest>,
-    ) -> Result<RpcResponse<SchemaChangeResponse>, Status> {
+        request: RpcRequest<GetTableReplacePlanRequest>,
+    ) -> Result<RpcResponse<GetTableReplacePlanResponse>, Status> {
         let req = request.into_inner();
 
-        if let Some(Request::GetNewTablePlan(req)) = req.request {
-            let change = req
-                .schema_change
-                .expect("schema change message is required");
-            let replace_plan =
-                get_new_table_plan(change, req.table_name, req.database_id, req.owner).await?;
-            Ok(RpcResponse::new(SchemaChangeResponse {
-                response: Some(Response::ReplaceTablePlan(GetNewTablePlanResponse {
-                    table_plan: Some(replace_plan),
-                })),
-            }))
-        } else {
-            Err(Status::invalid_argument("invalid schema change request"))
-        }
+        let change = req
+            .schema_change
+            .expect("schema change message is required");
+        let replace_plan =
+            get_new_table_plan(change, req.table_name, req.database_id, req.owner).await?;
+        Ok(RpcResponse::new(GetTableReplacePlanResponse {
+            table_plan: Some(replace_plan),
+        }))
     }
 }
 
