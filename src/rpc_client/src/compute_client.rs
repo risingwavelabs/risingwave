@@ -48,6 +48,12 @@ use tonic::Streaming;
 use crate::error::{Result, RpcError};
 use crate::{RpcClient, RpcClientPool};
 
+// TODO: this client has too many roles, e.g.
+// - batch MPP task query execution
+// - batch exchange
+// - streaming exchange
+// - general services specific to compute node, like monitoring, profiling, debugging, etc.
+// We should consider splitting them into different clients.
 #[derive(Clone)]
 pub struct ComputeClient {
     pub exchange_client: ExchangeServiceClient<Channel>,
@@ -278,4 +284,4 @@ impl RpcClient for ComputeClient {
 }
 
 pub type ComputeClientPool = RpcClientPool<ComputeClient>;
-pub type ComputeClientPoolRef = Arc<ComputeClientPool>;
+pub type ComputeClientPoolRef = Arc<ComputeClientPool>; // TODO: no need for `Arc` since clone is cheap and shared

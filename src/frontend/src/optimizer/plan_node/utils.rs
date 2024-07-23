@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::default::Default;
 use std::vec;
 
+use anyhow::anyhow;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
@@ -103,11 +104,6 @@ impl TableCatalogBuilder {
 
     pub fn set_value_indices(&mut self, value_indices: Vec<usize>) {
         self.value_indices = Some(value_indices);
-    }
-
-    #[allow(dead_code)]
-    pub fn set_watermark_columns(&mut self, watermark_columns: FixedBitSet) {
-        self.watermark_columns = Some(watermark_columns);
     }
 
     pub fn set_dist_key_in_pk(&mut self, dist_key_in_pk: Vec<usize>) {
@@ -235,21 +231,22 @@ pub(crate) fn watermark_pretty<'a>(
     watermark_columns: &FixedBitSet,
     schema: &Schema,
 ) -> Option<Pretty<'a>> {
-    if watermark_columns.count_ones(..) > 0 {
-        Some(watermark_fields_pretty(watermark_columns.ones(), schema))
-    } else {
-        None
-    }
+    iter_fields_pretty(watermark_columns.ones(), schema)
 }
-pub(crate) fn watermark_fields_pretty<'a>(
-    watermark_columns: impl Iterator<Item = usize>,
+
+pub(crate) fn iter_fields_pretty<'a>(
+    columns: impl Iterator<Item = usize>,
     schema: &Schema,
-) -> Pretty<'a> {
-    let arr = watermark_columns
+) -> Option<Pretty<'a>> {
+    let arr = columns
         .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
         .map(|d| Pretty::display(&d))
-        .collect();
-    Pretty::Array(arr)
+        .collect::<Vec<_>>();
+    if arr.is_empty() {
+        None
+    } else {
+        Some(Pretty::Array(arr))
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -323,7 +320,8 @@ macro_rules! plan_node_name {
     };
 }
 pub(crate) use plan_node_name;
-use risingwave_common::types::DataType;
+use risingwave_common::license::Feature;
+use risingwave_common::types::{DataType, Interval};
 use risingwave_expr::aggregate::PbAggKind;
 use risingwave_pb::plan_common::as_of::AsOfType;
 use risingwave_pb::plan_common::{as_of, PbAsOf};
@@ -395,19 +393,44 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
     let Some(ref a) = a else {
         return Ok(None);
     };
+    Feature::TimeTravel
+        .check_available()
+        .map_err(|e| anyhow::anyhow!(e))?;
     let as_of_type = match a {
-        AsOf::ProcessTime => AsOfType::ProcessTime(as_of::ProcessTime {}),
+        AsOf::ProcessTime => {
+            return Err(ErrorCode::NotSupported(
+                "do not support as of proctime".to_string(),
+                "please use as of timestamp".to_string(),
+            )
+            .into());
+        }
         AsOf::TimestampNum(ts) => AsOfType::Timestamp(as_of::Timestamp { timestamp: *ts }),
-        AsOf::TimestampString(ts) => AsOfType::Timestamp(as_of::Timestamp {
-            // should already have been validated by the parser
-            timestamp: ts.parse().unwrap(),
-        }),
+        AsOf::TimestampString(ts) => {
+            let date_time = speedate::DateTime::parse_str_rfc3339(ts)
+                .map_err(|_e| anyhow!("fail to parse timestamp"))?;
+            AsOfType::Timestamp(as_of::Timestamp {
+                timestamp: date_time.timestamp_tz(),
+            })
+        }
         AsOf::VersionNum(_) | AsOf::VersionString(_) => {
             return Err(ErrorCode::NotSupported(
                 "do not support as of version".to_string(),
                 "please use as of timestamp".to_string(),
             )
             .into());
+        }
+        AsOf::ProcessTimeWithInterval((value, leading_field)) => {
+            let interval = Interval::parse_with_fields(
+                value,
+                Some(crate::Binder::bind_date_time_field(leading_field.clone())),
+            )
+            .map_err(|_| anyhow!("fail to parse interval"))?;
+            let interval_sec = (interval.epoch_in_micros() / 1_000_000) as i64;
+            let timestamp = chrono::Utc::now()
+                .timestamp()
+                .checked_sub(interval_sec)
+                .ok_or_else(|| anyhow!("invalid timestamp"))?;
+            AsOfType::Timestamp(as_of::Timestamp { timestamp })
         }
     };
     Ok(Some(PbAsOf {

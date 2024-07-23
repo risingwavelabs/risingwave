@@ -384,6 +384,7 @@ message CompactTask {
     TTL = 5;
     TOMBSTONE = 6;
     EMERGENCY = 7;
+    VNODE_WATERMARK = 8;
   }
 
   // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
@@ -905,7 +906,7 @@ message CompactionConfig {
   bool enable_emergency_picker = 20;
 
   // The limitation of the level count of l0 compaction
-  uint32 max_l0_compact_level_count = 21;
+  optional uint32 max_l0_compact_level_count = 21;
 }
 
 message TableStats {

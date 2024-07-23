@@ -180,7 +180,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         // check primary key
         // reference: https://wiki.postgresql.org/wiki/Retrieve_primary_key_columns
         try (var stmt = jdbcConnection.prepareStatement(ValidatorUtils.getSql("postgres.pk"))) {
-            stmt.setString(1, this.schemaName + "." + this.tableName);
+            stmt.setString(1, String.format("\"%s\".\"%s\"", this.schemaName, this.tableName));
             var res = stmt.executeQuery();
             var pkFields = new HashSet<String>();
             while (res.next()) {
@@ -521,7 +521,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
         String alterPublicationSql =
                 String.format(
-                        "ALTER PUBLICATION %s ADD TABLE %s", pubName, schemaName + "." + tableName);
+                        "ALTER PUBLICATION %s ADD TABLE %s",
+                        pubName, String.format("\"%s\".\"%s\"", this.schemaName, this.tableName));
         try (var stmt = jdbcConnection.createStatement()) {
             LOG.info("Altered publication with statement: {}", alterPublicationSql);
             stmt.execute(alterPublicationSql);

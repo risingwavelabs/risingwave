@@ -81,8 +81,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::plan_visitor::TemporalJoinValidator;
 use crate::optimizer::property::Distribution;
-use crate::utils::ColIndexMappingRewriteExt;
-use crate::WithOptions;
+use crate::utils::{ColIndexMappingRewriteExt, WithOptionsSecResolved};
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
 /// and required distribution and order. And `PlanRoot` can generate corresponding streaming or
@@ -925,7 +924,7 @@ impl PlanRoot {
         &mut self,
         sink_name: String,
         definition: String,
-        properties: WithOptions,
+        properties: WithOptionsSecResolved,
         emit_on_window_close: bool,
         db_name: String,
         sink_from_table_name: String,

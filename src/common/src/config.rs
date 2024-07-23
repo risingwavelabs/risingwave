@@ -383,9 +383,6 @@ pub struct MetaConfig {
     /// Whether compactor should rewrite row to remove dropped column.
     #[serde(default = "default::meta::enable_dropped_column_reclaim")]
     pub enable_dropped_column_reclaim: bool,
-
-    #[serde(default = "default::meta::secret_store_private_key")]
-    pub secret_store_private_key: Vec<u8>,
 }
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -486,8 +483,14 @@ pub struct ServerConfig {
     #[serde(default = "default::server::heartbeat_interval_ms")]
     pub heartbeat_interval_ms: u32,
 
+    /// The default number of the connections when connecting to a gRPC server.
+    ///
+    /// For the connections used in streaming or batch exchange, please refer to the entries in
+    /// `[stream.developer]` and `[batch.developer]` sections. This value will be used if they
+    /// are not specified.
     #[serde(default = "default::server::connection_pool_size")]
-    pub connection_pool_size: u16,
+    // Intentionally made private to avoid abuse. Check the related methods on `RwConfig`.
+    connection_pool_size: u16,
 
     /// Used for control the metrics level, similar to log level.
     #[serde(default = "default::server::metrics_level")]
@@ -1015,6 +1018,11 @@ pub struct StreamingDeveloperConfig {
     /// Actor tokio metrics is enabled if `enable_actor_tokio_metrics` is set or metrics level >= Debug.
     #[serde(default = "default::developer::enable_actor_tokio_metrics")]
     pub enable_actor_tokio_metrics: bool,
+
+    /// The number of the connections for streaming remote exchange between two nodes.
+    /// If not specified, the value of `server.connection_pool_size` will be used.
+    #[serde(default = "default::developer::stream_exchange_connection_pool_size")]
+    pub exchange_connection_pool_size: Option<u16>,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1034,6 +1042,11 @@ pub struct BatchDeveloperConfig {
     /// The size of a chunk produced by `RowSeqScanExecutor`
     #[serde(default = "default::developer::batch_chunk_size")]
     pub chunk_size: usize,
+
+    /// The number of the connections for batch remote exchange between two nodes.
+    /// If not specified, the value of `server.connection_pool_size` will be used.
+    #[serde(default = "default::developer::batch_exchange_connection_pool_size")]
+    exchange_connection_pool_size: Option<u16>,
 }
 
 macro_rules! define_system_config {
@@ -1270,6 +1283,30 @@ impl SystemConfig {
     }
 }
 
+impl RwConfig {
+    pub const fn default_connection_pool_size(&self) -> u16 {
+        self.server.connection_pool_size
+    }
+
+    /// Returns [`StreamingDeveloperConfig::exchange_connection_pool_size`] if set,
+    /// otherwise [`ServerConfig::connection_pool_size`].
+    pub fn streaming_exchange_connection_pool_size(&self) -> u16 {
+        self.streaming
+            .developer
+            .exchange_connection_pool_size
+            .unwrap_or_else(|| self.default_connection_pool_size())
+    }
+
+    /// Returns [`BatchDeveloperConfig::exchange_connection_pool_size`] if set,
+    /// otherwise [`ServerConfig::connection_pool_size`].
+    pub fn batch_exchange_connection_pool_size(&self) -> u16 {
+        self.batch
+            .developer
+            .exchange_connection_pool_size
+            .unwrap_or_else(|| self.default_connection_pool_size())
+    }
+}
+
 pub mod default {
     pub mod meta {
         use crate::config::{DefaultParallelism, MetaBackend};
@@ -1424,10 +1461,6 @@ pub mod default {
 
         pub fn enable_dropped_column_reclaim() -> bool {
             false
-        }
-
-        pub fn secret_store_private_key() -> Vec<u8> {
-            "demo-secret-private-key".as_bytes().to_vec()
         }
     }
 
@@ -1755,6 +1788,12 @@ pub mod default {
             1024
         }
 
+        /// Default to unset to be compatible with the behavior before this config is introduced,
+        /// that is, follow the value of `server.connection_pool_size`.
+        pub fn batch_exchange_connection_pool_size() -> Option<u16> {
+            None
+        }
+
         pub fn stream_enable_executor_row_count() -> bool {
             false
         }
@@ -1849,6 +1888,11 @@ pub mod default {
 
         pub fn stream_high_join_amplification_threshold() -> usize {
             2048
+        }
+
+        /// Default to 1 to be compatible with the behavior before this config is introduced.
+        pub fn stream_exchange_connection_pool_size() -> Option<u16> {
+            Some(1)
         }
 
         pub fn enable_actor_tokio_metrics() -> bool {
