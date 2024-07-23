@@ -44,10 +44,6 @@
         </dependency>
         <dependency>
             <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-iceberg</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
             <artifactId>risingwave-sink-deltalake</artifactId>
         </dependency>
         <dependency>
