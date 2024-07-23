@@ -65,8 +65,8 @@ message TableFragments {
       // Running normally
       RUNNING = 2;
     }
-    // Current on which parallel unit
-    common.ParallelUnit parallel_unit = 1;
+    // Current on which worker
+    common.ActorLocation location = 1;
     // Current state
     ActorState state = 2;
   }
@@ -103,16 +103,6 @@ message TableFragments {
 
   stream_plan.StreamContext ctx = 6;
   TableParallelism parallelism = 7;
-}
-
-/// Parallel unit mapping with fragment id, used for notification.
-message FragmentParallelUnitMapping {
-  uint32 fragment_id = 1;
-  common.ParallelUnitMapping mapping = 2;
-}
-
-message FragmentParallelUnitMappings {
-  repeated FragmentParallelUnitMapping mappings = 1;
 }
 
 /// Worker slot mapping with fragment id, used for notification.

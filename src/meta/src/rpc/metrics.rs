@@ -966,17 +966,11 @@ pub fn start_fragment_info_monitor(
                         if let Some(actor_status) =
                             table_fragments.actor_status.get(&actor.actor_id)
                         {
-                            if let Some(pu) = &actor_status.parallel_unit {
-                                if let Some(address) = workers.get(&pu.worker_node_id) {
-                                    meta_metrics
-                                        .actor_info
-                                        .with_label_values(&[
-                                            &actor_id_str,
-                                            &fragment_id_str,
-                                            address,
-                                        ])
-                                        .set(1);
-                                }
+                            if let Some(address) = workers.get(&actor_status.worker_id()) {
+                                meta_metrics
+                                    .actor_info
+                                    .with_label_values(&[&actor_id_str, &fragment_id_str, address])
+                                    .set(1);
                             }
                         }
 

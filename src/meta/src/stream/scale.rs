@@ -31,7 +31,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_meta_model_v2::StreamingParallelism;
-use risingwave_pb::common::{ActorInfo, Buffer, ParallelUnit, WorkerNode, WorkerType};
+use risingwave_pb::common::{ActorInfo, Buffer, PbActorLocation, WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::{
@@ -530,10 +530,7 @@ impl ScaleController {
             }
 
             for (actor_id, status) in &table_fragments.actor_status {
-                actor_status.insert(
-                    *actor_id,
-                    status.get_parallel_unit().unwrap().get_worker_node_id(),
-                );
+                actor_status.insert(*actor_id, status.worker_id());
             }
 
             fragment_to_table.extend(
@@ -861,7 +858,7 @@ impl ScaleController {
             }
         }
 
-        // Index for fragment -> { actor -> parallel_unit } after reschedule.
+        // Index for fragment -> { actor -> worker_id } after reschedule.
         // Since we need to organize the upstream and downstream relationships of NoShuffle,
         // we need to organize the actor distribution after a scaling.
         let mut fragment_actors_after_reschedule = HashMap::with_capacity(reschedules.len());
@@ -1455,10 +1452,7 @@ impl ScaleController {
                     (
                         actor,
                         ActorStatus {
-                            parallel_unit: Some(ParallelUnit {
-                                id: u32::MAX,
-                                worker_node_id: *worker_id,
-                            }),
+                            location: PbActorLocation::from_worker(*worker_id),
                             state: ActorState::Inactive as i32,
                         },
                     ),
@@ -1930,10 +1924,7 @@ impl ScaleController {
                 }
 
                 for (actor_id, status) in &table_fragments.actor_status {
-                    actor_location.insert(
-                        *actor_id,
-                        status.get_parallel_unit().unwrap().get_worker_node_id(),
-                    );
+                    actor_location.insert(*actor_id, status.worker_id());
                 }
             }
 

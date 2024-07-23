@@ -566,7 +566,7 @@ impl LocalQueryExecution {
                             self.get_fragment_id(&side_table_desc.table_id.into())?,
                         )?;
 
-                        // TODO: should we use `pb::ParallelUnitMapping` here?
+                        // TODO: should we use `pb::WorkerSlotMapping` here?
                         node.inner_side_vnode_mapping =
                             mapping.to_expanded().into_iter().map(u64::from).collect();
                         node.worker_nodes = self.worker_node_manager.manager.list_worker_nodes();

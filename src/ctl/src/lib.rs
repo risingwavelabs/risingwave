@@ -405,16 +405,16 @@ enum MetaCommands {
     SourceSplitInfo,
     /// Reschedule the parallel unit in the stream graph
     ///
-    /// The format is `fragment_id-[removed]+[added]`
-    /// You can provide either `removed` only or `added` only, but `removed` should be preceded by
+    /// The format is `fragment_id-[worker_id:count]+[worker_id:count]`
+    /// You can provide either decreased `worker_ids` only or increased only, but decreased should be preceded by
     /// `added` when both are provided.
     ///
-    /// For example, for plan `100-[1,2,3]+[4,5]` the follow request will be generated:
+    /// For example, for plan `100-[1:1]+[4:1]` the follow request will be generated:
     /// ```text
     /// {
-    ///     100: Reschedule {
-    ///         added_parallel_units: [4,5],
-    ///         removed_parallel_units: [1,2,3],
+    ///     100: WorkerReschedule {
+    ///         increased_actor_count: { 1: 1 },
+    ///         decreased_actor_count: { 4: 1 },
     ///     }
     /// }
     /// ```

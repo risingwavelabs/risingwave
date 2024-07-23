@@ -26,7 +26,7 @@ use itertools::Itertools;
 use rand::seq::{IteratorRandom, SliceRandom};
 use rand::{thread_rng, Rng};
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{ParallelUnitId, WorkerSlotId};
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
@@ -249,12 +249,9 @@ impl Fragment {
             .table_fragments
             .iter()
             .flat_map(|tf| {
-                tf.actor_status.iter().map(|(&actor_id, status)| {
-                    (
-                        actor_id,
-                        status.get_parallel_unit().unwrap().get_worker_node_id(),
-                    )
-                })
+                tf.actor_status
+                    .iter()
+                    .map(|(&actor_id, status)| (actor_id, status.worker_id()))
             })
             .collect();
 

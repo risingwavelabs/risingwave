@@ -100,9 +100,7 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
                     .actor_status
                     .get(&actor.actor_id)
                     .unwrap()
-                    .get_parallel_unit()
-                    .unwrap()
-                    .get_worker_node_id();
+                    .worker_id();
 
                 fragments
                     .entry(id)

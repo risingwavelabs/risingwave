@@ -530,7 +530,7 @@ impl ActorGraphBuildStateInner {
             DispatcherType::Hash | DispatcherType::Broadcast | DispatcherType::Simple => {
                 // Add dispatchers for the upstream actors.
                 let dispatcher = if let DispatcherType::Hash = dt {
-                    // Transform the `ParallelUnitMapping` from the downstream distribution to the
+                    // Transform the `WorkerSlotMapping` from the downstream distribution to the
                     // `ActorMapping`, used for the `HashDispatcher` for the upstream actors.
                     let downstream_locations: HashMap<WorkerSlotId, ActorId> = downstream
                         .actor_ids

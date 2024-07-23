@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_connector::source::SplitImpl;
-use risingwave_pb::common::ParallelUnit;
+use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::table_parallelism::{
@@ -174,9 +174,11 @@ impl MetadataModel for TableFragments {
             parallelism: Some(Parallelism::Custom(PbCustomParallelism {})),
         };
 
+        let state = prost.state();
+
         Self {
             table_id: TableId::new(prost.table_id),
-            state: prost.state(),
+            state,
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
             actor_splits: build_actor_split_impls(&prost.actor_splits),
@@ -217,10 +219,7 @@ impl TableFragments {
                 (
                     actor_id,
                     ActorStatus {
-                        parallel_unit: Some(ParallelUnit {
-                            id: u32::MAX,
-                            worker_node_id: worker_slot_id.worker_id(),
-                        }),
+                        location: PbActorLocation::from_worker(worker_slot_id.worker_id()),
                         state: ActorState::Inactive as i32,
                     },
                 )
@@ -478,7 +477,7 @@ impl TableFragments {
     pub fn worker_actor_states(&self) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
         let mut map = BTreeMap::default();
         for (&actor_id, actor_status) in &self.actor_status {
-            let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
+            let node_id = actor_status.worker_id() as WorkerId;
             map.entry(node_id)
                 .or_insert_with(Vec::new)
                 .push((actor_id, actor_status.state()));
@@ -490,7 +489,7 @@ impl TableFragments {
     pub fn worker_actor_ids(&self) -> BTreeMap<WorkerId, Vec<ActorId>> {
         let mut map = BTreeMap::default();
         for (&actor_id, actor_status) in &self.actor_status {
-            let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
+            let node_id = actor_status.worker_id() as WorkerId;
             map.entry(node_id).or_insert_with(Vec::new).push(actor_id);
         }
         map
@@ -501,10 +500,7 @@ impl TableFragments {
         let mut actors = BTreeMap::default();
         for fragment in self.fragments.values() {
             for actor in &fragment.actors {
-                let node_id = self.actor_status[&actor.actor_id]
-                    .get_parallel_unit()
-                    .unwrap()
-                    .worker_node_id as WorkerId;
+                let node_id = self.actor_status[&actor.actor_id].worker_id() as WorkerId;
                 if !include_inactive
                     && self.actor_status[&actor.actor_id].state == ActorState::Inactive as i32
                 {

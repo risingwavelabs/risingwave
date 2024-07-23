@@ -27,7 +27,7 @@ use risingwave_common::util::stream_graph_visitor::{
 use risingwave_common::util::worker_util::WorkerNodeId;
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model_v2::SourceId;
-use risingwave_pb::common::ParallelUnit;
+use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -87,7 +87,7 @@ impl FragmentManagerCore {
                         .exactly_one()
                         .expect("single actor");
                     let status = table_fragment.actor_status.get(&actor.actor_id).unwrap();
-                    let worker_id = status.get_parallel_unit().unwrap().get_worker_node_id();
+                    let worker_id = status.worker_id();
                     result.push(FragmentWorkerSlotMapping {
                         fragment_id: fragment.fragment_id,
                         mapping: Some(
@@ -110,7 +110,7 @@ impl FragmentManagerCore {
                             ActorState::Running => {}
                         }
 
-                        let worker_id = status.get_parallel_unit().unwrap().get_worker_node_id();
+                        let worker_id = status.worker_id();
                         actor_bitmaps.insert(
                             actor.actor_id as ActorId,
                             Bitmap::from(actor.vnode_bitmap.as_ref().unwrap()),
@@ -789,13 +789,7 @@ impl FragmentManager {
                                 .get(&actor.actor_id)
                                 .expect("should exist");
                             if status.state == ActorState::Running as i32 {
-                                Some((
-                                    actor.actor_id,
-                                    status
-                                        .get_parallel_unit()
-                                        .expect("should set")
-                                        .worker_node_id,
-                                ))
+                                Some((actor.actor_id, status.worker_id()))
                             } else {
                                 None
                             }
@@ -835,9 +829,7 @@ impl FragmentManager {
                     .actor_status
                     .get(&actor.actor_id)
                     .unwrap()
-                    .get_parallel_unit()
-                    .unwrap()
-                    .get_worker_node_id();
+                    .worker_id();
 
                 let fragment_ref = worker_fragment_map.entry(worker).or_insert(HashMap::new());
                 fragment_ref
@@ -863,10 +855,7 @@ impl FragmentManager {
                     .actor_status
                     .get_mut(&actor)
                     .expect("should exist");
-                status.parallel_unit = Some(ParallelUnit {
-                    id: u32::MAX,
-                    worker_node_id: target.worker_id(),
-                })
+                status.location = PbActorLocation::from_worker(target.worker_id());
             }
         }
 
@@ -901,9 +890,7 @@ impl FragmentManager {
             .values()
             .filter(|tf| {
                 for status in tf.actor_status.values() {
-                    if expired_workers
-                        .contains(&status.get_parallel_unit().unwrap().get_worker_node_id())
-                    {
+                    if expired_workers.contains(&status.worker_id()) {
                         return true;
                     }
                 }
@@ -933,9 +920,7 @@ impl FragmentManager {
                         .actor_status
                         .get(&actor.actor_id)
                         .unwrap()
-                        .get_parallel_unit()
-                        .unwrap()
-                        .get_worker_node_id();
+                        .worker_id();
 
                     let fragment_ref = worker_fragment_map.entry(worker).or_insert(HashMap::new());
                     *fragment_ref.entry(fragment.fragment_id).or_insert(0) += 1;
@@ -986,10 +971,8 @@ impl FragmentManager {
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
             for actor_status in fragments.actor_status.values() {
-                if let Some(pu) = &actor_status.parallel_unit {
-                    let e = actor_count.entry(pu.worker_node_id).or_insert(0);
-                    *e += 1;
-                }
+                let e = actor_count.entry(actor_status.worker_id()).or_insert(0);
+                *e += 1;
             }
         }
 
@@ -1361,7 +1344,7 @@ impl FragmentManager {
                 let mut actor_to_vnode_bitmap = HashMap::with_capacity(fragment.actors.len());
                 for actor in &fragment.actors {
                     let actor_status = &actor_status[&actor.actor_id];
-                    let worker_id = actor_status.parallel_unit.as_ref().unwrap().worker_node_id;
+                    let worker_id = actor_status.worker_id();
                     actor_to_worker.insert(actor.actor_id, worker_id);
 
                     if let Some(vnode_bitmap) = &actor.vnode_bitmap {
@@ -1593,10 +1576,7 @@ impl FragmentManager {
                 .actor_status
                 .iter()
                 .for_each(|(actor_id, status)| {
-                    actor_locations.insert(
-                        *actor_id,
-                        status.get_parallel_unit().unwrap().worker_node_id,
-                    );
+                    actor_locations.insert(*actor_id, status.worker_id());
                 });
         }
 
@@ -1656,10 +1636,7 @@ impl FragmentManager {
                 .actor_status
                 .iter()
                 .for_each(|(actor_id, status)| {
-                    actor_locations.insert(
-                        *actor_id,
-                        status.get_parallel_unit().unwrap().worker_node_id,
-                    );
+                    actor_locations.insert(*actor_id, status.worker_id());
                 });
         });
 

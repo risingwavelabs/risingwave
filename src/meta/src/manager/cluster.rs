@@ -945,13 +945,13 @@ mod tests {
     }
 
     async fn assert_cluster_manager(cluster_manager: &ClusterManager, parallel_count: usize) {
-        let parallel_units: usize = cluster_manager
+        let parallelism: usize = cluster_manager
             .list_active_serving_compute_nodes()
             .await
             .into_iter()
             .map(|w| w.parallelism as usize)
             .sum();
-        assert_eq!(parallel_units, parallel_count);
+        assert_eq!(parallelism, parallel_count);
     }
 
     // This test takes seconds because the TTL is measured in seconds.
