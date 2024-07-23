@@ -410,6 +410,12 @@ impl HummockReadVersion {
         }
     }
 
+    pub fn latest_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+        self.table_watermarks
+            .as_ref()
+            .and_then(|watermark_index| watermark_index.latest_watermark(vnode))
+    }
+
     pub fn is_replicated(&self) -> bool {
         self.is_replicated
     }
