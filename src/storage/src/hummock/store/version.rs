@@ -252,7 +252,13 @@ impl HummockReadVersion {
                 .map(|table_watermarks| {
                     TableWatermarksIndex::new_committed(
                         table_watermarks.clone(),
-                        committed_version.max_committed_epoch(),
+                        committed_version
+                            .version()
+                            .state_table_info
+                            .info()
+                            .get(&table_id)
+                            .expect("should exist")
+                            .committed_epoch,
                     )
                 }),
             staging: StagingVersion {
@@ -313,17 +319,28 @@ impl HummockReadVersion {
 
                     // old data comes first
                     for imm_id in imms.iter().rev() {
-                        let valid = match self.staging.imm.pop_back() {
-                            None => false,
-                            Some(prev_imm_id) => prev_imm_id.batch_id() == *imm_id,
+                        let check_err = match self.staging.imm.pop_back() {
+                            None => Some("empty".to_string()),
+                            Some(prev_imm_id) => {
+                                if prev_imm_id.batch_id() == *imm_id {
+                                    None
+                                } else {
+                                    Some(format!(
+                                        "miss match id {} {}",
+                                        prev_imm_id.batch_id(),
+                                        *imm_id
+                                    ))
+                                }
+                            }
                         };
                         assert!(
-                            valid,
+                            check_err.is_none(),
                             "should be valid staging_sst.size {},
                                     staging_sst.imm_ids {:?},
                                     staging_sst.epochs {:?},
                                     local_imm_ids {:?},
-                                    instance_id {}",
+                                    instance_id {}
+                                    check_err {:?}",
                             staging_sst_ref.imm_size,
                             staging_sst_ref.imm_ids,
                             staging_sst_ref.epochs,
@@ -333,6 +350,7 @@ impl HummockReadVersion {
                                 .map(|imm| imm.batch_id())
                                 .collect_vec(),
                             self.instance_id,
+                            check_err
                         );
                     }
 
@@ -341,54 +359,78 @@ impl HummockReadVersion {
             },
 
             VersionUpdate::CommittedSnapshot(committed_version) => {
-                let max_committed_epoch = committed_version.max_committed_epoch();
-                self.committed = committed_version;
-
+                if let Some(info) = committed_version
+                    .version()
+                    .state_table_info
+                    .info()
+                    .get(&self.table_id)
                 {
-                    // TODO: remove it when support update staging local_sst
-                    self.staging
-                        .imm
-                        .retain(|imm| imm.min_epoch() > max_committed_epoch);
+                    let committed_epoch = info.committed_epoch;
+                    self.staging.imm.retain(|imm| {
+                        if self.is_replicated {
+                            imm.min_epoch() > committed_epoch
+                        } else {
+                            assert!(imm.min_epoch() > committed_epoch);
+                            true
+                        }
+                    });
 
                     self.staging.sst.retain(|sst| {
-                        sst.epochs.first().expect("epochs not empty") > &max_committed_epoch
+                        sst.epochs.first().expect("epochs not empty") > &committed_epoch
                     });
 
                     // check epochs.last() > MCE
                     assert!(self.staging.sst.iter().all(|sst| {
-                        sst.epochs.last().expect("epochs not empty") > &max_committed_epoch
+                        sst.epochs.last().expect("epochs not empty") > &committed_epoch
                     }));
-                }
 
-                if let Some(committed_watermarks) = self
-                    .committed
-                    .version()
-                    .table_watermarks
-                    .get(&self.table_id)
-                {
-                    if let Some(watermark_index) = &mut self.table_watermarks {
-                        watermark_index.apply_committed_watermarks(
-                            committed_watermarks.clone(),
-                            self.committed.max_committed_epoch(),
-                        );
-                    } else {
-                        self.table_watermarks = Some(TableWatermarksIndex::new_committed(
-                            committed_watermarks.clone(),
-                            self.committed.max_committed_epoch(),
-                        ));
+                    if let Some(committed_watermarks) = self
+                        .committed
+                        .version()
+                        .table_watermarks
+                        .get(&self.table_id)
+                    {
+                        if let Some(watermark_index) = &mut self.table_watermarks {
+                            watermark_index.apply_committed_watermarks(
+                                committed_watermarks.clone(),
+                                committed_epoch,
+                            );
+                        } else {
+                            self.table_watermarks = Some(TableWatermarksIndex::new_committed(
+                                committed_watermarks.clone(),
+                                committed_epoch,
+                            ));
+                        }
                     }
                 }
+
+                self.committed = committed_version;
             }
             VersionUpdate::NewTableWatermark {
                 direction,
                 epoch,
                 vnode_watermarks,
-            } => self
-                .table_watermarks
-                .get_or_insert_with(|| {
-                    TableWatermarksIndex::new(direction, self.committed.max_committed_epoch())
-                })
-                .add_epoch_watermark(epoch, Arc::from(vnode_watermarks), direction),
+            } => {
+                if let Some(watermark_index) = &mut self.table_watermarks {
+                    watermark_index.add_epoch_watermark(
+                        epoch,
+                        Arc::from(vnode_watermarks),
+                        direction,
+                    );
+                } else {
+                    self.table_watermarks = Some(TableWatermarksIndex::new(
+                        direction,
+                        epoch,
+                        vnode_watermarks,
+                        self.committed
+                            .version()
+                            .state_table_info
+                            .info()
+                            .get(&self.table_id)
+                            .map(|info| info.committed_epoch),
+                    ));
+                }
+            }
         }
     }
 
@@ -408,6 +450,12 @@ impl HummockReadVersion {
         if let Some(watermark_index) = &self.table_watermarks {
             watermark_index.filter_regress_watermarks(watermarks)
         }
+    }
+
+    pub fn latest_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+        self.table_watermarks
+            .as_ref()
+            .and_then(|watermark_index| watermark_index.latest_watermark(vnode))
     }
 
     pub fn is_replicated(&self) -> bool {

@@ -12,24 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::{Bound, Deref};
+use std::ops::Deref;
 use std::sync::Arc;
 
 use futures::prelude::stream::StreamExt;
 use futures_async_stream::try_stream;
 use futures_util::pin_mut;
-use itertools::Itertools;
 use prometheus::Histogram;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
-use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::{collect_data_chunk, KeyedRow, TableDistribution};
+use risingwave_storage::table::{collect_data_chunk, TableDistribution};
 use risingwave_storage::{dispatch_state_store, StateStore};
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -188,45 +187,26 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         histogram: Option<impl Deref<Target = Histogram>>,
         schema: Arc<Schema>,
     ) {
-        let pk_prefix = OwnedRow::default();
-
-        let order_type = table.pk_serializer().get_order_types()[pk_prefix.len()];
         // Range Scan.
         let iter = table
-            .batch_iter_log_with_pk_bounds(
-                old_epoch.into(),
-                new_epoch.into(),
-                &pk_prefix,
-                (
-                    if order_type.nulls_are_first() {
-                        // `NULL`s are at the start bound side, we should exclude them to meet SQL semantics.
-                        Bound::Excluded(OwnedRow::new(vec![None]))
-                    } else {
-                        // Both start and end are unbounded, so we need to select all rows.
-                        Bound::Unbounded
-                    },
-                    if order_type.nulls_are_last() {
-                        // `NULL`s are at the end bound side, we should exclude them to meet SQL semantics.
-                        Bound::Excluded(OwnedRow::new(vec![None]))
-                    } else {
-                        // Both start and end are unbounded, so we need to select all rows.
-                        Bound::Unbounded
-                    },
-                ),
-            )
+            .batch_iter_log_with_pk_bounds(old_epoch.into(), new_epoch.into())
             .await?
-            .map(|r| match r {
-                Ok((op, value)) => {
-                    let (k, row) = value.into_owned_row_key();
-                    // Todo! To avoid create a full row.
-                    let full_row = row
-                        .into_iter()
-                        .chain(vec![Some(ScalarImpl::Int16(op.to_i16()))])
-                        .collect_vec();
-                    let row = OwnedRow::new(full_row);
-                    Ok(KeyedRow::<_>::new(k, row))
-                }
-                Err(e) => Err(e),
+            .flat_map(|r| {
+                futures::stream::iter(std::iter::from_coroutine(move || {
+                    match r {
+                        Ok(change_log_row) => {
+                            fn with_op(op: Op, row: impl Row) -> impl Row {
+                                row.chain([Some(ScalarImpl::Int16(op.to_i16()))])
+                            }
+                            for (op, row) in change_log_row.into_op_value_iter() {
+                                yield Ok(with_op(op, row));
+                            }
+                        }
+                        Err(e) => {
+                            yield Err(e);
+                        }
+                    };
+                }))
             });
 
         pin_mut!(iter);

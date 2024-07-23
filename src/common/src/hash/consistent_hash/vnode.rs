@@ -22,10 +22,6 @@ use crate::types::{DataType, Datum, DatumRef, ScalarImpl, ScalarRefImpl};
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::row_id::extract_vnode_id_from_row_id;
 
-/// Parallel unit is the minimal scheduling unit.
-// TODO: make it a newtype
-pub type ParallelUnitId = u32;
-
 /// `VirtualNode` (a.k.a. Vnode) is a minimal partition that a set of keys belong to. It is used for
 /// consistent hashing.
 #[repr(transparent)]
