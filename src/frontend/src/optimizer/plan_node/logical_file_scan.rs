@@ -47,7 +47,7 @@ impl LogicalFileScan {
         s3_region: String,
         s3_access_key: String,
         s3_secret_key: String,
-        file_location: String,
+        file_location: Vec<String>,
     ) -> Self {
         assert!("parquet".eq_ignore_ascii_case(&file_format));
         assert!("s3".eq_ignore_ascii_case(&storage_type));

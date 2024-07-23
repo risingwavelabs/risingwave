@@ -402,40 +402,45 @@ impl LocalQueryExecution {
                         };
                         sources.push(exchange_source);
                     }
-                } else if let Some(_file_scan_info) = &second_stage.file_scan_info {
-                    let second_stage_plan_node = self.convert_plan_node(
-                        &second_stage.root,
-                        &mut None,
-                        Some(PartitionInfo::File),
-                        next_executor_id.clone(),
-                    )?;
-                    let second_stage_plan_fragment = PlanFragment {
-                        root: Some(second_stage_plan_node),
-                        exchange_info: Some(ExchangeInfo {
-                            mode: DistributionMode::Single as i32,
-                            ..Default::default()
-                        }),
-                    };
-                    let local_execute_plan = LocalExecutePlan {
-                        plan: Some(second_stage_plan_fragment),
-                        epoch: Some(self.snapshot.batch_query_epoch()),
-                        tracing_context: tracing_context.clone(),
-                    };
-                    // NOTE: select a random work node here.
-                    let worker_node = self.worker_node_manager.next_random_worker()?;
-                    let exchange_source = ExchangeSource {
-                        task_output_id: Some(TaskOutputId {
-                            task_id: Some(PbTaskId {
-                                task_id: 0_u64,
-                                stage_id: exchange_source_stage_id,
-                                query_id: self.query.query_id.id.clone(),
+                } else if let Some(file_scan_info) = &second_stage.file_scan_info {
+                    let chunk_size = (file_scan_info.file_location.len() as f32
+                        / (self.worker_node_manager.schedule_unit_count()) as f32)
+                        .ceil() as usize;
+                    for (id, files) in file_scan_info.file_location.chunks(chunk_size).enumerate() {
+                        let second_stage_plan_node = self.convert_plan_node(
+                            &second_stage.root,
+                            &mut None,
+                            Some(PartitionInfo::File(files.to_vec())),
+                            next_executor_id.clone(),
+                        )?;
+                        let second_stage_plan_fragment = PlanFragment {
+                            root: Some(second_stage_plan_node),
+                            exchange_info: Some(ExchangeInfo {
+                                mode: DistributionMode::Single as i32,
+                                ..Default::default()
                             }),
-                            output_id: 0,
-                        }),
-                        host: Some(worker_node.host.as_ref().unwrap().clone()),
-                        local_execute_plan: Some(Plan(local_execute_plan)),
-                    };
-                    sources.push(exchange_source);
+                        };
+                        let local_execute_plan = LocalExecutePlan {
+                            plan: Some(second_stage_plan_fragment),
+                            epoch: Some(self.snapshot.batch_query_epoch()),
+                            tracing_context: tracing_context.clone(),
+                        };
+                        // NOTE: select a random work node here.
+                        let worker_node = self.worker_node_manager.next_random_worker()?;
+                        let exchange_source = ExchangeSource {
+                            task_output_id: Some(TaskOutputId {
+                                task_id: Some(PbTaskId {
+                                    task_id: id as u64,
+                                    stage_id: exchange_source_stage_id,
+                                    query_id: self.query.query_id.id.clone(),
+                                }),
+                                output_id: 0,
+                            }),
+                            host: Some(worker_node.host.as_ref().unwrap().clone()),
+                            local_execute_plan: Some(Plan(local_execute_plan)),
+                        };
+                        sources.push(exchange_source);
+                    }
                 } else {
                     let second_stage_plan_node = self.convert_plan_node(
                         &second_stage.root,
@@ -518,6 +523,26 @@ impl LocalQueryExecution {
                                 .into_table()
                                 .expect("PartitionInfo should be TablePartitionInfo here");
                             scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+
+                Ok(PbPlanNode {
+                    children: vec![],
+                    identity,
+                    node_body: Some(node_body),
+                })
+            }
+            PlanNodeType::BatchFileScan => {
+                let mut node_body = execution_plan_node.node.clone();
+                match &mut node_body {
+                    NodeBody::FileScan(ref mut file_scan_node) => {
+                        if let Some(partition) = partition {
+                            let partition = partition
+                                .into_file()
+                                .expect("PartitionInfo should be FilePartitionInfo here");
+                            file_scan_node.file_location = partition;
                         }
                     }
                     _ => unreachable!(),
