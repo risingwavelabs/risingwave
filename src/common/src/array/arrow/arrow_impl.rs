@@ -47,13 +47,16 @@ use chrono::{DateTime, NaiveDateTime, NaiveTime};
 use itertools::Itertools;
 
 // This is important because we want to use the arrow version specified by the outer mod.
-use super::{arrow_array, arrow_buffer, arrow_cast, arrow_schema};
+use super::{arrow_array, arrow_buffer, arrow_cast, arrow_schema, ArrowIntervalType};
 // Other import should always use the absolute path.
 use crate::array::*;
 use crate::types::*;
 use crate::util::iter_util::ZipEqFast;
 
 /// Defines how to convert RisingWave arrays to Arrow arrays.
+///
+/// This trait allows for customized conversion logic for different external systems using Arrow.
+/// The default implementation is based on the `From` implemented in this mod.
 pub trait ToArrow {
     /// Converts RisingWave `DataChunk` to Arrow `RecordBatch` with specified schema.
     ///
@@ -524,8 +527,11 @@ pub trait FromArrow {
             Float64 => self.from_float64_array(array.as_any().downcast_ref().unwrap()),
             Date32 => self.from_date32_array(array.as_any().downcast_ref().unwrap()),
             Time64(Microsecond) => self.from_time64us_array(array.as_any().downcast_ref().unwrap()),
-            Timestamp(Microsecond, _) => {
+            Timestamp(Microsecond, None) => {
                 self.from_timestampus_array(array.as_any().downcast_ref().unwrap())
+            }
+            Timestamp(Microsecond, Some(_)) => {
+                self.from_timestampus_some_array(array.as_any().downcast_ref().unwrap())
             }
             Interval(MonthDayNano) => {
                 self.from_interval_array(array.as_any().downcast_ref().unwrap())
@@ -626,6 +632,13 @@ pub trait FromArrow {
         array: &arrow_array::TimestampMicrosecondArray,
     ) -> Result<ArrayImpl, ArrayError> {
         Ok(ArrayImpl::Timestamp(array.into()))
+    }
+
+    fn from_timestampus_some_array(
+        &self,
+        array: &arrow_array::TimestampMicrosecondArray,
+    ) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Timestamptz(array.into()))
     }
 
     fn from_interval_array(
@@ -767,7 +780,7 @@ converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @map);
 converts!(SerialArray, arrow_array::Int64Array, @map);
 
 /// Converts RisingWave value from and into Arrow value.
-pub trait FromIntoArrow {
+trait FromIntoArrow {
     /// The corresponding element type in the Arrow array.
     type ArrowType;
     fn from_arrow(value: Self::ArrowType) -> Self;
@@ -875,29 +888,14 @@ impl FromIntoArrow for Timestamptz {
 }
 
 impl FromIntoArrow for Interval {
-    type ArrowType = i128;
+    type ArrowType = ArrowIntervalType;
 
     fn from_arrow(value: Self::ArrowType) -> Self {
-        // XXX: the arrow-rs decoding is incorrect
-        // let (months, days, ns) = arrow_array::types::IntervalMonthDayNanoType::to_parts(value);
-        let months = value as i32;
-        let days = (value >> 32) as i32;
-        let ns = (value >> 64) as i64;
-        Interval::from_month_day_usec(months, days, ns / 1000)
+        <ArrowIntervalType as crate::array::arrow::ArrowIntervalTypeTrait>::to_interval(value)
     }
 
     fn into_arrow(self) -> Self::ArrowType {
-        // XXX: the arrow-rs encoding is incorrect
-        // arrow_array::types::IntervalMonthDayNanoType::make_value(
-        //     self.months(),
-        //     self.days(),
-        //     // TODO: this may overflow and we need `try_into`
-        //     self.usecs() * 1000,
-        // )
-        let m = self.months() as u128 & u32::MAX as u128;
-        let d = (self.days() as u128 & u32::MAX as u128) << 32;
-        let n = ((self.usecs() * 1000) as u128 & u64::MAX as u128) << 64;
-        (m | d | n) as i128
+        <ArrowIntervalType as crate::array::arrow::ArrowIntervalTypeTrait>::from_interval(self)
     }
 }
 

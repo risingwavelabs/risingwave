@@ -21,7 +21,7 @@ use futures_util::pin_mut;
 use itertools::Itertools;
 use prometheus::Histogram;
 use risingwave_common::array::DataChunk;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::ScalarImpl;

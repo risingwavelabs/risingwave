@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
-use arrow_array::{Int32Array, Int64Array, RecordBatch};
+use arrow_array_iceberg::{Int32Array, Int64Array, RecordBatch};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -27,7 +27,7 @@ use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
-use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
+use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ROWID_PREFIX;
 use risingwave_common::{bail, ensure};
@@ -522,7 +522,7 @@ impl PulsarIcebergReader {
         }
 
         let data_chunk = IcebergArrowConvert
-            .from_record_batch(&record_batch.project(&field_indices)?)
+            .chunk_from_record_batch(&record_batch.project(&field_indices)?)
             .context("failed to convert arrow record batch to data chunk")?;
 
         let stream_chunk = StreamChunk::from(data_chunk);

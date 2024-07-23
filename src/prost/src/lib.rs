@@ -204,6 +204,13 @@ impl stream_plan::MaterializeNode {
     }
 }
 
+// Encapsulating the use of parallel_units.
+impl common::WorkerNode {
+    pub fn parallelism(&self) -> usize {
+        self.parallel_units.len()
+    }
+}
+
 impl stream_plan::SourceNode {
     pub fn column_ids(&self) -> Option<Vec<i32>> {
         Some(

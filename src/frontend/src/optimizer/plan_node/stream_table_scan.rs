@@ -31,10 +31,10 @@ use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, ExprVisitor, FunctionCall};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
-use crate::optimizer::property::{Distribution, DistributionDisplay};
+use crate::optimizer::property::{Distribution, DistributionDisplay, MonotonicityMap};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::{Explain, TableCatalog};
+use crate::TableCatalog;
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to stream scan + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -74,6 +74,7 @@ impl StreamTableScan {
             core.append_only(),
             false,
             core.watermark_columns(),
+            MonotonicityMap::new(),
         );
         Self {
             base,
@@ -241,12 +242,7 @@ impl StreamTableScan {
 
         let stream_key = self
             .stream_key()
-            .unwrap_or_else(|| {
-                panic!(
-                    "should always have a stream key in the stream plan but not, sub plan: {}",
-                    PlanRef::from(self.clone()).explain_to_string()
-                )
-            })
+            .unwrap_or(&[])
             .iter()
             .map(|x| *x as u32)
             .collect_vec();

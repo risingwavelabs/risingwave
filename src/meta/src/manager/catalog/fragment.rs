@@ -18,7 +18,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::stream_graph_visitor::{
@@ -70,10 +70,13 @@ impl FragmentManagerCore {
                     .values()
                     .map(move |fragment| FragmentWorkerSlotMapping {
                         fragment_id: fragment.fragment_id,
-                        mapping: Some(FragmentManager::convert_mapping(
-                            &table_fragments.actor_status,
-                            fragment.vnode_mapping.as_ref().unwrap(),
-                        )),
+                        mapping: Some(
+                            FragmentManager::convert_mapping(
+                                &table_fragments.actor_status,
+                                fragment.vnode_mapping.as_ref().unwrap(),
+                            )
+                            .unwrap(),
+                        ),
                     })
             })
     }
@@ -208,15 +211,23 @@ impl FragmentManager {
     async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
         // Notify all fragment mapping to frontend nodes
         for fragment in table_fragment.fragments.values() {
-            let fragment_mapping = FragmentWorkerSlotMapping {
-                fragment_id: fragment.fragment_id,
-                mapping: Some(Self::convert_mapping(
-                    &table_fragment.actor_status,
-                    fragment
-                        .vnode_mapping
-                        .as_ref()
-                        .expect("no data distribution found"),
-                )),
+            let vnode_mapping = fragment
+                .vnode_mapping
+                .as_ref()
+                .expect("no data distribution found");
+
+            let fragment_mapping = if let Operation::Delete = operation {
+                FragmentWorkerSlotMapping {
+                    fragment_id: fragment.fragment_id,
+                    mapping: None,
+                }
+            } else {
+                FragmentWorkerSlotMapping {
+                    fragment_id: fragment.fragment_id,
+                    mapping: Some(
+                        Self::convert_mapping(&table_fragment.actor_status, vnode_mapping).unwrap(),
+                    ),
+                }
             };
 
             self.env
@@ -1289,7 +1300,7 @@ impl FragmentManager {
 
                 *fragment.vnode_mapping.as_mut().unwrap() = vnode_mapping.clone();
 
-                let worker_slot_mapping = Self::convert_mapping(&actor_status, &vnode_mapping);
+                let worker_slot_mapping = Self::convert_mapping(&actor_status, &vnode_mapping)?;
 
                 // Notify fragment mapping to frontend nodes.
                 let fragment_mapping = FragmentWorkerSlotMapping {
@@ -1426,7 +1437,7 @@ impl FragmentManager {
     fn convert_mapping(
         actor_status: &BTreeMap<ActorId, ActorStatus>,
         vnode_mapping: &PbParallelUnitMapping,
-    ) -> PbWorkerSlotMapping {
+    ) -> MetaResult<PbWorkerSlotMapping> {
         let parallel_unit_to_worker = actor_status
             .values()
             .map(|actor_status| {
@@ -1435,9 +1446,9 @@ impl FragmentManager {
             })
             .collect();
 
-        ParallelUnitMapping::from_protobuf(vnode_mapping)
-            .to_worker_slot(&parallel_unit_to_worker)
-            .to_protobuf()
+        Ok(ParallelUnitMapping::from_protobuf(vnode_mapping)
+            .to_worker_slot(&parallel_unit_to_worker)?
+            .to_protobuf())
     }
 
     pub async fn table_node_actors(

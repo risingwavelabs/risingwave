@@ -324,6 +324,20 @@ pub struct ColumnCatalog {
 }
 
 impl ColumnCatalog {
+    pub fn visible(column_desc: ColumnDesc) -> Self {
+        Self {
+            column_desc,
+            is_hidden: false,
+        }
+    }
+
+    pub fn hidden(column_desc: ColumnDesc) -> Self {
+        Self {
+            column_desc,
+            is_hidden: true,
+        }
+    }
+
     /// Get the column catalog's is hidden.
     pub fn is_hidden(&self) -> bool {
         self.is_hidden

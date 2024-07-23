@@ -35,7 +35,6 @@ mod stream_chunk_iter;
 pub mod stream_record;
 pub mod struct_array;
 mod utf8_array;
-mod value_reader;
 
 use std::convert::From;
 use std::hash::{Hash, Hasher};
@@ -65,7 +64,7 @@ pub use utf8_array::*;
 
 pub use self::error::ArrayError;
 pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
-use crate::buffer::Bitmap;
+use crate::bitmap::Bitmap;
 use crate::types::*;
 use crate::{dispatch_array_builder_variants, dispatch_array_variants, for_all_array_variants};
 pub type ArrayResult<T> = Result<T, ArrayError>;
@@ -706,7 +705,7 @@ mod test_util {
     use std::hash::{BuildHasher, Hasher};
 
     use super::Array;
-    use crate::buffer::Bitmap;
+    use crate::bitmap::Bitmap;
     use crate::util::iter_util::ZipEqFast;
 
     pub fn hash_finish<H: Hasher>(hashers: &[H]) -> Vec<u64> {

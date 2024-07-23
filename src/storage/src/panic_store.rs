@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 
@@ -89,15 +91,6 @@ impl StateStoreWrite for PanicStateStore {
 impl LocalStateStore for PanicStateStore {
     type Iter<'a> = PanicStateStoreIter<StateStoreIterItem>;
     type RevIter<'a> = PanicStateStoreIter<StateStoreIterItem>;
-
-    #[allow(clippy::unused_async)]
-    async fn may_exist(
-        &self,
-        _key_range: TableKeyRange,
-        _read_options: ReadOptions,
-    ) -> StorageResult<bool> {
-        panic!("should not call may_exist from the state store!");
-    }
 
     #[allow(clippy::unused_async)]
     async fn get(
@@ -180,7 +173,7 @@ impl StateStore for PanicStateStore {
     }
 
     #[allow(clippy::unused_async)]
-    fn sync(&self, _epoch: u64) -> impl SyncFuture {
+    fn sync(&self, _epoch: u64, _table_ids: HashSet<TableId>) -> impl SyncFuture {
         async { panic!("should not await sync epoch from the panic state store!") }
     }
 

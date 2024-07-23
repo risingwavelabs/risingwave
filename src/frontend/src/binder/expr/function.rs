@@ -266,6 +266,11 @@ impl Binder {
             );
         }
 
+        // file_scan table function
+        if function_name.eq_ignore_ascii_case("file_scan") {
+            self.ensure_table_function_allowed()?;
+            return Ok(TableFunction::new_file_scan(inputs)?.into());
+        }
         // table function
         if let Ok(function_type) = TableFunctionType::from_str(function_name.as_str()) {
             self.ensure_table_function_allowed()?;
@@ -1423,9 +1428,11 @@ impl Binder {
                 ("col_description", raw_call(ExprType::ColDescription)),
                 ("obj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("shobj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
-                ("pg_is_in_recovery", raw_literal(ExprImpl::literal_bool(false))),
+                ("pg_is_in_recovery", raw_call(ExprType::PgIsInRecovery)),
+                ("rw_recovery_status", raw_call(ExprType::RwRecoveryStatus)),
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
+                ("rw_test_paid_tier", raw_call(ExprType::TestPaidTier)), // for testing purposes
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(current_cluster_version()))),
                 // non-deterministic
@@ -1572,11 +1579,15 @@ impl Binder {
         if self.is_for_stream()
             && !matches!(
                 self.context.clause,
-                Some(Clause::Where) | Some(Clause::Having) | Some(Clause::JoinOn)
+                Some(Clause::Where)
+                    | Some(Clause::Having)
+                    | Some(Clause::JoinOn)
+                    | Some(Clause::From)
             )
         {
             return Err(ErrorCode::InvalidInputSyntax(format!(
-                "For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: {:?}. Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information",
+                "For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING`, `ON` and `FROM`. Found in clause: {:?}. \
+                Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information",
                 self.context.clause
             ))
             .into());

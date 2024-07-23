@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{valid_table_name, FunctionId, IndexId, TableId};
+use risingwave_common::catalog::{valid_table_name, FunctionId, IndexId, StreamJobStatus, TableId};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
 pub use risingwave_expr::sig::*;
@@ -128,9 +128,11 @@ impl SchemaCatalog {
         let name = prost.name.clone();
         let id = prost.id.into();
         let old_index = self.index_by_id.get(&id).unwrap();
-        let index_table = self.get_table_by_id(&prost.index_table_id.into()).unwrap();
+        let index_table = self
+            .get_created_table_by_id(&prost.index_table_id.into())
+            .unwrap();
         let primary_table = self
-            .get_table_by_id(&prost.primary_table_id.into())
+            .get_created_table_by_id(&prost.primary_table_id.into())
             .unwrap();
         let index: IndexCatalog = IndexCatalog::build_from(prost, index_table, primary_table);
         let index_ref = Arc::new(index);
@@ -166,10 +168,9 @@ impl SchemaCatalog {
     pub fn create_index(&mut self, prost: &PbIndex) {
         let name = prost.name.clone();
         let id = prost.id.into();
-
         let index_table = self.get_table_by_id(&prost.index_table_id.into()).unwrap();
         let primary_table = self
-            .get_table_by_id(&prost.primary_table_id.into())
+            .get_created_table_by_id(&prost.primary_table_id.into())
             .unwrap();
         let index: IndexCatalog = IndexCatalog::build_from(prost, index_table, primary_table);
         let index_ref = Arc::new(index);
@@ -556,10 +557,10 @@ impl SchemaCatalog {
     }
 
     /// Iterate all materialized views, excluding the indices.
-    pub fn iter_mv(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+    pub fn iter_created_mvs(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| v.is_mview() && valid_table_name(&v.name))
+            .filter(|(_, v)| v.is_mview() && valid_table_name(&v.name) && v.is_created())
             .map(|(_, v)| v)
     }
 
@@ -605,8 +606,20 @@ impl SchemaCatalog {
         self.table_by_name.get(table_name)
     }
 
+    pub fn get_created_table_by_name(&self, table_name: &str) -> Option<&Arc<TableCatalog>> {
+        self.table_by_name
+            .get(table_name)
+            .filter(|&table| table.stream_job_status == StreamJobStatus::Created)
+    }
+
     pub fn get_table_by_id(&self, table_id: &TableId) -> Option<&Arc<TableCatalog>> {
         self.table_by_id.get(table_id)
+    }
+
+    pub fn get_created_table_by_id(&self, table_id: &TableId) -> Option<&Arc<TableCatalog>> {
+        self.table_by_id
+            .get(table_id)
+            .filter(|&table| table.stream_job_status == StreamJobStatus::Created)
     }
 
     pub fn get_view_by_name(&self, view_name: &str) -> Option<&Arc<ViewCatalog>> {
@@ -765,7 +778,7 @@ impl SchemaCatalog {
 
     pub fn get_grant_object_by_oid(&self, oid: u32) -> Option<Object> {
         #[allow(clippy::manual_map)]
-        if self.get_table_by_id(&TableId::new(oid)).is_some()
+        if self.get_created_table_by_id(&TableId::new(oid)).is_some()
             || self.get_index_by_id(&IndexId::new(oid)).is_some()
         {
             Some(Object::TableId(oid))

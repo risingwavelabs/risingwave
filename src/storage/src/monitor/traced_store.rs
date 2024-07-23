@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::{Future, FutureExt};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
@@ -107,14 +109,6 @@ impl<S> TracedStateStore<S> {
 impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
-
-    fn may_exist(
-        &self,
-        key_range: TableKeyRange,
-        read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
-        self.inner.may_exist(key_range, read_options)
-    }
 
     fn get(
         &self,
@@ -253,10 +247,10 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         res
     }
 
-    fn sync(&self, epoch: u64) -> impl SyncFuture {
-        let span: MayTraceSpan = TraceSpan::new_sync_span(epoch, self.storage_type);
+    fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
+        let span: MayTraceSpan = TraceSpan::new_sync_span(epoch, &table_ids, self.storage_type);
 
-        let future = self.inner.sync(epoch);
+        let future = self.inner.sync(epoch, table_ids);
 
         future.map(move |sync_result| {
             span.may_send_result(OperationResult::Sync(

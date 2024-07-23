@@ -28,6 +28,8 @@ env_scripts = [
 
   set_env ENABLE_TELEMETRY "false"
   set_env RW_TELEMETRY_TYPE "test"
+  set_env RW_SECRET_STORE_PRIVATE_KEY_HEX "0123456789abcdef"
+  set_env RW_TEMP_SECRET_FILE_DIR "${PREFIX_SECRET}"
 
   is_sanitizer_enabled = get_env ENABLE_SANITIZER
   is_hdfs_backend = get_env ENABLE_HDFS
@@ -144,6 +146,7 @@ rm -rf "${PREFIX_DATA}"
 rm -rf "${PREFIX_LOG}"
 rm -rf "${PREFIX_CONFIG}"
 rm -rf "${PREFIX_PROFILING}"
+rm -rf "${PREFIX_SECRET}"
 '''
 
 [tasks.reset-rw]
@@ -578,7 +581,7 @@ set -euo pipefail
 RC_ENV_FILE="${PREFIX_CONFIG}/risedev-env"
 
 if [ ! -f "${RC_ENV_FILE}" ]; then
-  echo "risedev-env file not found. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0) or $(tput setaf 4)\`./risedev p\`$(tput sgr0)?"
+  echo "risedev-env file not found at ${RC_ENV_FILE}. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0) or $(tput setaf 4)\`./risedev p\`$(tput sgr0)?"
   exit 1
 fi
 '''
@@ -710,10 +713,10 @@ if ! ${TMUX} ls &>/dev/null ; then
   exit 0
 fi
 
-# Kill other components with Ctrl+C/Ctrl+D
+# Kill tmux components with Ctrl+C
 ${TMUX} list-windows -F "#{window_name} #{pane_id}" \
 | awk '{ print $2 }' \
-| xargs -I {} ${TMUX} send-keys -t {} C-c C-d
+| xargs -I {} ${TMUX} send-keys -t {} C-c
 
 # Stop docker components
 containers=$(docker ps -a -q -f name=risedev- 2>/dev/null) || true
@@ -1135,7 +1138,7 @@ fi
 private = true
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
-install_crate = { min_version = "1.20.4", crate_name = "typos-cli", binary = "typos", test_arg = [
+install_crate = { min_version = "1.23.2", crate_name = "typos-cli", binary = "typos", test_arg = [
     "--help",
 ], install_command = "binstall" }
 script = """
@@ -1258,7 +1261,7 @@ echo If you still feel this is not enough, you may copy $(tput setaf 4)risedev$(
 [tasks.ci-start]
 category = "RiseDev - CI"
 dependencies = ["clean-data", "pre-start-dev"]
-command = "target/${BUILD_MODE_DIR}/risedev-dev"
+command = "target/debug/risedev-dev" # `risedev-dev` is always built in dev profile
 args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
 
@@ -1294,7 +1297,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - Test - SQLLogicTest"
-install_crate = { version = "0.20.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { min_version = "0.21.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
     "--help",
 ], install_command = "binstall" }
 dependencies = ["check-and-load-risedev-env-file"]
@@ -1308,6 +1311,7 @@ SLT_PORT = "${RISEDEV_RW_FRONTEND_PORT}"
 SLT_DB = "dev"
 PATH = "${PWD}/e2e_test/commands:${PATH}"
 RUST_BACKTRACE = "0" # slt backtrace is useless
+RUST_LOG = "sqllogictest=warn,sqllogictest::system_command=info"
 
 [tasks.slt-clean]
 category = "RiseDev - Test - SQLLogicTest"

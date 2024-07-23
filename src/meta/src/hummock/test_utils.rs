@@ -47,12 +47,7 @@ use crate::rpc::metrics::MetaMetrics;
 
 pub fn to_local_sstable_info(ssts: &[SstableInfo]) -> Vec<LocalSstableInfo> {
     ssts.iter()
-        .map(|sst| {
-            LocalSstableInfo::with_compaction_group(
-                StaticCompactionGroupId::StateDefault.into(),
-                sst.clone(),
-            )
-        })
+        .map(|sst| LocalSstableInfo::for_test(sst.clone()))
         .collect_vec()
 }
 

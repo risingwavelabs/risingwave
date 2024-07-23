@@ -16,6 +16,7 @@ use std::cell::RefCell;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::config::default::compaction_config;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel};
@@ -166,7 +167,9 @@ impl LevelCompactionPicker {
             self.config.level0_max_compact_file_number,
             overlap_strategy.clone(),
             self.developer_config.enable_check_task_level_overlap,
-            self.config.max_l0_compact_level_count as usize,
+            self.config
+                .max_l0_compact_level_count
+                .unwrap_or(compaction_config::max_l0_compact_level_count()) as usize,
         );
 
         let mut max_vnode_partition_idx = 0;

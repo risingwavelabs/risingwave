@@ -17,44 +17,21 @@ use std::iter::once;
 use std::pin::pin;
 use std::task::Poll;
 
-use assert_matches::assert_matches;
 use futures::future::join_all;
 use futures::FutureExt;
 use risingwave_common::util::epoch::test_epoch;
-use risingwave_pb::stream_service::{streaming_control_stream_request, InjectBarrierRequest};
-use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::*;
+use crate::task::barrier_test_utils::LocalBarrierTestEnv;
 
 #[tokio::test]
 async fn test_managed_barrier_collection() -> StreamResult<()> {
-    let actor_op_tx = LocalBarrierManager::spawn_for_test();
+    let mut test_env = LocalBarrierTestEnv::for_test().await;
 
-    let (request_tx, request_rx) = unbounded_channel();
-    let (response_tx, mut response_rx) = unbounded_channel();
-
-    actor_op_tx.send_event(LocalActorOperation::NewControlStream {
-        handle: ControlStreamHandle::new(
-            response_tx,
-            UnboundedReceiverStream::new(request_rx).boxed(),
-        ),
-        init_request: InitRequest { prev_epoch: 0 },
-    });
-
-    assert_matches!(
-        response_rx.recv().await.unwrap().unwrap().response.unwrap(),
-        streaming_control_stream_response::Response::Init(_)
-    );
-
-    let context = actor_op_tx
-        .send_and_await(LocalActorOperation::GetCurrentSharedContext)
-        .await
-        .unwrap();
-
-    let manager = &context.local_barrier_manager;
+    let manager = &test_env.shared_context.local_barrier_manager;
 
     let register_sender = |actor_id: u32| {
-        let actor_op_tx = &actor_op_tx;
+        let actor_op_tx = &test_env.actor_op_tx;
         async move {
             let (barrier_tx, barrier_rx) = unbounded_channel();
             actor_op_tx
@@ -79,18 +56,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
     let barrier = Barrier::new_test_barrier(curr_epoch);
     let epoch = barrier.epoch.prev;
 
-    request_tx
-        .send(Ok(StreamingControlStreamRequest {
-            request: Some(streaming_control_stream_request::Request::InjectBarrier(
-                InjectBarrierRequest {
-                    request_id: "".to_string(),
-                    barrier: Some(barrier.to_protobuf()),
-                    actor_ids_to_send: actor_ids.clone(),
-                    actor_ids_to_collect: actor_ids,
-                },
-            )),
-        }))
-        .unwrap();
+    test_env.inject_barrier(&barrier, actor_ids.clone(), actor_ids);
 
     // Collect barriers from actors
     let collected_barriers = join_all(rxs.iter_mut().map(|(actor_id, rx)| async move {
@@ -100,7 +66,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
     }))
     .await;
 
-    let mut await_epoch_future = pin!(response_rx.recv().map(|result| {
+    let mut await_epoch_future = pin!(test_env.response_rx.recv().map(|result| {
         let resp: StreamingControlStreamResponse = result.unwrap().unwrap();
         let resp = resp.response.unwrap();
         match resp {
@@ -123,33 +89,12 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
 
 #[tokio::test]
 async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
-    let actor_op_tx = LocalBarrierManager::spawn_for_test();
+    let mut test_env = LocalBarrierTestEnv::for_test().await;
 
-    let (request_tx, request_rx) = unbounded_channel();
-    let (response_tx, mut response_rx) = unbounded_channel();
-
-    actor_op_tx.send_event(LocalActorOperation::NewControlStream {
-        handle: ControlStreamHandle::new(
-            response_tx,
-            UnboundedReceiverStream::new(request_rx).boxed(),
-        ),
-        init_request: InitRequest { prev_epoch: 0 },
-    });
-
-    assert_matches!(
-        response_rx.recv().await.unwrap().unwrap().response.unwrap(),
-        streaming_control_stream_response::Response::Init(_)
-    );
-
-    let context = actor_op_tx
-        .send_and_await(LocalActorOperation::GetCurrentSharedContext)
-        .await
-        .unwrap();
-
-    let manager = &context.local_barrier_manager;
+    let manager = &test_env.shared_context.local_barrier_manager;
 
     let register_sender = |actor_id: u32| {
-        let actor_op_tx = &actor_op_tx;
+        let actor_op_tx = &test_env.actor_op_tx;
         async move {
             let (barrier_tx, barrier_rx) = unbounded_channel();
             actor_op_tx
@@ -178,28 +123,19 @@ async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
 
     // Prepare the barrier
     let curr_epoch = test_epoch(2);
-    let barrier = Barrier::new_test_barrier(curr_epoch);
-    let epoch = barrier.epoch.prev;
+    let barrier = Barrier::new_test_barrier(curr_epoch).with_stop();
+
+    let mut mutation_subscriber =
+        manager.subscribe_barrier_mutation(extra_actor_id, &barrier.clone().into_dispatcher());
 
     // Read the mutation after receiving the barrier from remote input.
-    let mut mutation_reader = pin!(manager.read_barrier_mutation(&barrier));
+    let mut mutation_reader = pin!(mutation_subscriber.recv());
     assert!(poll_fn(|cx| Poll::Ready(mutation_reader.as_mut().poll(cx).is_pending())).await);
 
-    request_tx
-        .send(Ok(StreamingControlStreamRequest {
-            request: Some(streaming_control_stream_request::Request::InjectBarrier(
-                InjectBarrierRequest {
-                    request_id: "".to_string(),
-                    barrier: Some(barrier.to_protobuf()),
-                    actor_ids_to_send,
-                    actor_ids_to_collect,
-                },
-            )),
-        }))
-        .unwrap();
+    test_env.inject_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect);
 
-    let mutation = mutation_reader.await.unwrap();
-    assert_eq!(mutation, barrier.mutation);
+    let (epoch, mutation) = mutation_reader.await.unwrap();
+    assert_eq!((epoch, &mutation), (barrier.epoch.prev, &barrier.mutation));
 
     // Collect a barrier before sending
     manager.collect(extra_actor_id, &barrier);
@@ -212,7 +148,7 @@ async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
     }))
     .await;
 
-    let mut await_epoch_future = pin!(response_rx.recv().map(|result| {
+    let mut await_epoch_future = pin!(test_env.response_rx.recv().map(|result| {
         let resp: StreamingControlStreamResponse = result.unwrap().unwrap();
         let resp = resp.response.unwrap();
         match resp {

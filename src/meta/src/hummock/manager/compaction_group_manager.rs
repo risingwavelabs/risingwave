@@ -363,7 +363,7 @@ impl HummockManager {
             version.latest_version(),
         )));
         commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
-
+        // No need to handle DeltaType::GroupDestroy during time travel.
         Ok(())
     }
 
@@ -579,7 +579,8 @@ impl HummockManager {
             new_version_delta.pre_apply();
             commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
         }
-
+        // Instead of handling DeltaType::GroupConstruct for time travel, simply enforce a version snapshot.
+        versioning.mark_next_time_travel_version_snapshot();
         let mut canceled_tasks = vec![];
         for task_assignment in compaction_guard.compact_task_assignment.values() {
             if let Some(task) = task_assignment.compact_task.as_ref() {
@@ -760,7 +761,7 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
                     .clone_from(&c.compression_algorithm);
             }
             MutableConfig::MaxL0CompactLevelCount(c) => {
-                target.max_l0_compact_level_count = *c;
+                target.max_l0_compact_level_count = Some(*c);
             }
         }
     }

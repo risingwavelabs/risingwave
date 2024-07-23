@@ -30,7 +30,9 @@ use winnow::{PResult, Parser as _};
 use crate::ast::*;
 use crate::keywords::{self, Keyword};
 use crate::parser_v2;
-use crate::parser_v2::{keyword, literal_i64, literal_uint, single_quoted_string, ParserExt as _};
+use crate::parser_v2::{
+    dollar_quoted_string, keyword, literal_i64, literal_uint, single_quoted_string, ParserExt as _,
+};
 use crate::tokenizer::*;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -185,6 +187,8 @@ pub enum Precedence {
     PlusMinus, // 30 in upstream
     MulDiv,    // 40 in upstream
     Exp,
+    At,
+    Collate,
     UnaryPosNeg,
     PostfixFactorial,
     Array,
@@ -1396,11 +1400,14 @@ impl Parser<'_> {
                     }
                 }
                 Keyword::AT => {
-                    let time_zone = preceded(
-                        (Keyword::TIME, Keyword::ZONE),
-                        cut_err(Self::parse_literal_string),
-                    )
-                    .parse_next(self)?;
+                    assert_eq!(precedence, Precedence::At);
+                    let time_zone = Box::new(
+                        preceded(
+                            (Keyword::TIME, Keyword::ZONE),
+                            cut_err(|p: &mut Self| p.parse_subexpr(precedence)),
+                        )
+                        .parse_next(self)?,
+                    );
                     Ok(Expr::AtTimeZone {
                         timestamp: Box::new(expr),
                         time_zone,
@@ -1657,7 +1664,7 @@ impl Parser<'_> {
                     (Token::Word(w), Token::Word(w2))
                         if w.keyword == Keyword::TIME && w2.keyword == Keyword::ZONE =>
                     {
-                        Ok(P::Other)
+                        Ok(P::At)
                     }
                     _ => Ok(P::Zero),
                 }
@@ -3488,6 +3495,18 @@ impl Parser<'_> {
                     Some('\'') => Ok(Value::SingleQuotedString(w.value)),
                     _ => self.expected_at(checkpoint, "A value")?,
                 },
+                Keyword::SECRET => {
+                    let secret_name = self.parse_object_name()?;
+                    let ref_as = if self.parse_keywords(&[Keyword::AS, Keyword::FILE]) {
+                        SecretRefAsType::File
+                    } else {
+                        SecretRefAsType::Text
+                    };
+                    Ok(Value::Ref(SecretRef {
+                        secret_name,
+                        ref_as,
+                    }))
+                }
                 _ => self.expected_at(checkpoint, "a concrete value"),
             },
             Token::Number(ref n) => Ok(Value::Number(n.clone())),
@@ -3545,16 +3564,13 @@ impl Parser<'_> {
     }
 
     pub fn parse_function_definition(&mut self) -> PResult<FunctionDefinition> {
-        let peek_token = self.peek_token();
-        match peek_token.token {
-            Token::DollarQuotedString(value) => {
-                self.next_token();
-                Ok(FunctionDefinition::DoubleDollarDef(value.value))
-            }
-            _ => Ok(FunctionDefinition::SingleQuotedDef(
-                self.parse_literal_string()?,
-            )),
-        }
+        alt((
+            single_quoted_string.map(FunctionDefinition::SingleQuotedDef),
+            dollar_quoted_string.map(FunctionDefinition::DoubleDollarDef),
+            Self::parse_identifier.map(|i| FunctionDefinition::Identifier(i.value)),
+            fail.expect("function definition"),
+        ))
+        .parse_next(self)
     }
 
     /// Parse a literal string
@@ -3562,11 +3578,6 @@ impl Parser<'_> {
         let checkpoint = *self;
         let token = self.next_token();
         match token.token {
-            Token::Word(Word {
-                value,
-                keyword: Keyword::NoKeyword,
-                ..
-            }) => Ok(value),
             Token::SingleQuotedString(s) => Ok(s),
             _ => self.expected_at(checkpoint, "literal string"),
         }
@@ -3650,10 +3661,41 @@ impl Parser<'_> {
                 (Keyword::SYSTEM_TIME, Keyword::AS, Keyword::OF),
                 cut_err(
                     alt((
-                        (
-                            Self::parse_identifier.verify(|ident| {
-                                ident.real_value() == "proctime" || ident.real_value() == "now"
+                        preceded(
+                            (
+                                Self::parse_identifier.verify(|ident| ident.real_value() == "now"),
+                                cut_err(Token::LParen),
+                                cut_err(Token::RParen),
+                                Token::Minus,
+                            ),
+                            Self::parse_literal_interval.try_map(|e| match e {
+                                Expr::Value(v) => match v {
+                                    Value::Interval {
+                                        value,
+                                        leading_field,
+                                        ..
+                                    } => {
+                                        let Some(leading_field) = leading_field else {
+                                            return Err(StrError("expect duration unit".into()));
+                                        };
+                                        Ok(AsOf::ProcessTimeWithInterval((value, leading_field)))
+                                    }
+                                    _ => Err(StrError("expect Value::Interval".into())),
+                                },
+                                _ => Err(StrError("expect Expr::Value".into())),
                             }),
+                        ),
+                        (
+                            Self::parse_identifier.verify(|ident| ident.real_value() == "now"),
+                            cut_err(Token::LParen),
+                            cut_err(Token::RParen),
+                        )
+                            .value(AsOf::ProcessTimeWithInterval((
+                                "0".to_owned(),
+                                DateTimeField::Second,
+                            ))),
+                        (
+                            Self::parse_identifier.verify(|ident| ident.real_value() == "proctime"),
                             cut_err(Token::LParen),
                             cut_err(Token::RParen),
                         )
@@ -3973,37 +4015,36 @@ impl Parser<'_> {
     /// Parse a CTE (`alias [( col1, col2, ... )] AS (subquery)`)
     fn parse_cte(&mut self) -> PResult<Cte> {
         let name = self.parse_identifier_non_reserved()?;
-
-        let mut cte = if self.parse_keyword(Keyword::AS) {
-            self.expect_token(&Token::LParen)?;
-            let query = self.parse_query()?;
-            self.expect_token(&Token::RParen)?;
+        let cte = if self.parse_keyword(Keyword::AS) {
+            let cte_inner = self.parse_cte_inner()?;
             let alias = TableAlias {
                 name,
                 columns: vec![],
             };
-            Cte {
-                alias,
-                query,
-                from: None,
-            }
+            Cte { alias, cte_inner }
         } else {
             let columns = self.parse_parenthesized_column_list(Optional)?;
             self.expect_keyword(Keyword::AS)?;
-            self.expect_token(&Token::LParen)?;
+            let cte_inner = self.parse_cte_inner()?;
+            let alias = TableAlias { name, columns };
+            Cte { alias, cte_inner }
+        };
+        Ok(cte)
+    }
+
+    fn parse_cte_inner(&mut self) -> PResult<CteInner> {
+        if let Ok(()) = self.expect_token(&Token::LParen) {
             let query = self.parse_query()?;
             self.expect_token(&Token::RParen)?;
-            let alias = TableAlias { name, columns };
-            Cte {
-                alias,
-                query,
-                from: None,
+            Ok(CteInner::Query(query))
+        } else {
+            let changelog = self.parse_identifier_non_reserved()?;
+            if changelog.to_string().to_lowercase() != "changelog" {
+                parser_err!("Expected 'changelog' but found '{}'", changelog);
             }
-        };
-        if self.parse_keyword(Keyword::FROM) {
-            cte.from = Some(self.parse_identifier()?);
+            self.expect_keyword(Keyword::FROM)?;
+            Ok(CteInner::ChangeLog(self.parse_identifier()?))
         }
-        Ok(cte)
     }
 
     /// Parse a "query body", which is an expression with roughly the

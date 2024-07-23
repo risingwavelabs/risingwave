@@ -21,7 +21,7 @@ use thiserror_ext::AsReport;
 
 use super::create_index::{gen_create_index_plan, resolve_index_schema};
 use super::create_mv::gen_create_mv_plan;
-use super::create_sink::{gen_sink_plan, get_partition_compute_info};
+use super::create_sink::gen_sink_plan;
 use super::query::gen_batch_plan_by_statement;
 use super::util::SourceSchemaCompatExt;
 use super::{RwPgResponse, RwPgResponseBuilderExt};
@@ -87,9 +87,8 @@ async fn do_handle_explain(
                 (Ok(plan), context)
             }
             Statement::CreateSink { stmt } => {
-                let partition_info = get_partition_compute_info(&handler_args.with_options).await?;
-                let context = OptimizerContext::new(handler_args, explain_options);
-                let plan = gen_sink_plan(&session, context.into(), stmt, partition_info)
+                let plan = gen_sink_plan(handler_args, stmt, Some(explain_options))
+                    .await
                     .map(|plan| plan.sink_plan)?;
                 let context = plan.ctx();
                 (Ok(plan), context)

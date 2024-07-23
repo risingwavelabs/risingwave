@@ -60,7 +60,7 @@ pub enum Value {
     /// `NULL` value
     Null,
     /// name of the reference to secret
-    Ref(ObjectName),
+    Ref(SecretRef),
 }
 
 impl fmt::Display for Value {
@@ -115,7 +115,7 @@ impl fmt::Display for Value {
                 Ok(())
             }
             Value::Null => write!(f, "NULL"),
-            Value::Ref(v) => write!(f, "ref secret {}", v),
+            Value::Ref(v) => write!(f, "secret {}", v),
         }
     }
 }
@@ -237,4 +237,26 @@ impl fmt::Display for JsonPredicateType {
             Scalar => " SCALAR",
         })
     }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct SecretRef {
+    pub secret_name: ObjectName,
+    pub ref_as: SecretRefAsType,
+}
+
+impl fmt::Display for SecretRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.ref_as {
+            SecretRefAsType::Text => write!(f, "{}", self.secret_name),
+            SecretRefAsType::File => write!(f, "{} AS FILE", self.secret_name),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SecretRefAsType {
+    Text,
+    File,
 }

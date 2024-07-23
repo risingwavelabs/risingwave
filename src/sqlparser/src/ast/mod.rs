@@ -46,14 +46,14 @@ pub use self::legacy_source::{
 };
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
-    Cte, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView, OrderByExpr, Query,
-    Select, SelectItem, SetExpr, SetOperator, TableAlias, TableFactor, TableWithJoins, Top, Values,
-    With,
+    Cte, CteInner, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView, OrderByExpr,
+    Query, Select, SelectItem, SetExpr, SetOperator, TableAlias, TableFactor, TableWithJoins, Top,
+    Values, With,
 };
 pub use self::statement::*;
 pub use self::value::{
-    CstyleEscapedString, DateTimeField, DollarQuotedString, JsonPredicateType, TrimWhereField,
-    Value,
+    CstyleEscapedString, DateTimeField, DollarQuotedString, JsonPredicateType, SecretRef,
+    SecretRefAsType, TrimWhereField, Value,
 };
 pub use crate::ast::ddl::{
     AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterSubscriptionOperation,
@@ -417,7 +417,7 @@ pub enum Expr {
     /// explicitly specified zone
     AtTimeZone {
         timestamp: Box<Expr>,
-        time_zone: String,
+        time_zone: Box<Expr>,
     },
     /// `EXTRACT(DateTimeField FROM <expr>)`
     Extract {
@@ -667,7 +667,7 @@ impl fmt::Display for Expr {
             Expr::AtTimeZone {
                 timestamp,
                 time_zone,
-            } => write!(f, "{} AT TIME ZONE '{}'", timestamp, time_zone),
+            } => write!(f, "{} AT TIME ZONE {}", timestamp, time_zone),
             Expr::Extract { field, expr } => write!(f, "EXTRACT({} FROM {})", field, expr),
             Expr::Collate { expr, collation } => write!(f, "{} COLLATE {}", expr, collation),
             Expr::Nested(ast) => write!(f, "({})", ast),
@@ -2885,6 +2885,7 @@ impl fmt::Display for FunctionBehavior {
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FunctionDefinition {
+    Identifier(String),
     SingleQuotedDef(String),
     DoubleDollarDef(String),
 }
@@ -2892,6 +2893,7 @@ pub enum FunctionDefinition {
 impl fmt::Display for FunctionDefinition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            FunctionDefinition::Identifier(s) => write!(f, "{s}")?,
             FunctionDefinition::SingleQuotedDef(s) => write!(f, "'{s}'")?,
             FunctionDefinition::DoubleDollarDef(s) => write!(f, "$${s}$$")?,
         }
@@ -2903,6 +2905,7 @@ impl FunctionDefinition {
     /// Returns the function definition as a string slice.
     pub fn as_str(&self) -> &str {
         match self {
+            FunctionDefinition::Identifier(s) => s,
             FunctionDefinition::SingleQuotedDef(s) => s,
             FunctionDefinition::DoubleDollarDef(s) => s,
         }
@@ -2911,6 +2914,7 @@ impl FunctionDefinition {
     /// Returns the function definition as a string.
     pub fn into_string(self) -> String {
         match self {
+            FunctionDefinition::Identifier(s) => s,
             FunctionDefinition::SingleQuotedDef(s) => s,
             FunctionDefinition::DoubleDollarDef(s) => s,
         }
@@ -3149,6 +3153,8 @@ impl fmt::Display for SetVariableValueSingle {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AsOf {
     ProcessTime,
+    // used by time travel
+    ProcessTimeWithInterval((String, DateTimeField)),
     // the number of seconds that have elapsed since the Unix epoch, which is January 1, 1970 at 00:00:00 Coordinated Universal Time (UTC).
     TimestampNum(i64),
     TimestampString(String),
@@ -3161,6 +3167,11 @@ impl fmt::Display for AsOf {
         use AsOf::*;
         match self {
             ProcessTime => write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()"),
+            ProcessTimeWithInterval((value, leading_field)) => write!(
+                f,
+                " FOR SYSTEM_TIME AS OF NOW() - {} {}",
+                value, leading_field
+            ),
             TimestampNum(ts) => write!(f, " FOR SYSTEM_TIME AS OF {}", ts),
             TimestampString(ts) => write!(f, " FOR SYSTEM_TIME AS OF '{}'", ts),
             VersionNum(v) => write!(f, " FOR SYSTEM_VERSION AS OF {}", v),

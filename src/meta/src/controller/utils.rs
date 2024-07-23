@@ -16,7 +16,6 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::fragment::DistributionType;
@@ -28,8 +27,14 @@ use risingwave_meta_model_v2::{
     view, worker_property, ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping,
     I32Array, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, UserId, WorkerId,
 };
-use risingwave_pb::catalog::{PbConnection, PbFunction, PbSecret, PbSubscription};
-use risingwave_pb::meta::{PbFragmentParallelUnitMapping, PbFragmentWorkerSlotMapping};
+use risingwave_pb::catalog::{
+    PbConnection, PbFunction, PbIndex, PbSecret, PbSink, PbSource, PbSubscription, PbTable, PbView,
+};
+use risingwave_pb::meta::relation::PbRelationInfo;
+use risingwave_pb::meta::subscribe_response::Info as NotificationInfo;
+use risingwave_pb::meta::{
+    PbFragmentParallelUnitMapping, PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup,
+};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
@@ -43,8 +48,8 @@ use sea_orm::{
     Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
 };
 
+use crate::controller::catalog::CatalogController;
 use crate::{MetaError, MetaResult};
-
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
 ///
 /// # Examples
@@ -852,17 +857,7 @@ where
         .all(db)
         .await?;
 
-    Ok(fragment_mappings
-        .into_iter()
-        .map(|(fragment_id, mapping)| PbFragmentWorkerSlotMapping {
-            fragment_id: fragment_id as _,
-            mapping: Some(
-                ParallelUnitMapping::from_protobuf(&mapping.to_protobuf())
-                    .to_worker_slot(&parallel_unit_to_worker)
-                    .to_protobuf(),
-            ),
-        })
-        .collect())
+    CatalogController::convert_fragment_mappings(fragment_mappings, &parallel_unit_to_worker)
 }
 
 /// `get_fragment_mappings_by_jobs` returns the fragment vnode mappings of the given job list.
@@ -892,6 +887,24 @@ where
             mapping: Some(mapping.to_protobuf()),
         })
         .collect())
+}
+
+pub async fn get_fragment_ids_by_jobs<C>(
+    db: &C,
+    job_ids: Vec<ObjectId>,
+) -> MetaResult<Vec<FragmentId>>
+where
+    C: ConnectionTrait,
+{
+    let fragment_ids: Vec<FragmentId> = Fragment::find()
+        .select_only()
+        .column(fragment::Column::FragmentId)
+        .filter(fragment::Column::JobId.is_in(job_ids))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    Ok(fragment_ids)
 }
 
 /// `get_fragment_actor_ids` returns the fragment actor ids of the given fragments.
@@ -1017,4 +1030,72 @@ where
         .collect::<HashMap<_, _>>();
 
     Ok(parallel_unit_to_worker)
+}
+
+pub(crate) fn build_relation_group(relation_objects: Vec<PartialObject>) -> NotificationInfo {
+    let mut relations = vec![];
+    for obj in relation_objects {
+        match obj.obj_type {
+            ObjectType::Table => relations.push(PbRelation {
+                relation_info: Some(PbRelationInfo::Table(PbTable {
+                    id: obj.oid as _,
+                    schema_id: obj.schema_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap() as _,
+                    ..Default::default()
+                })),
+            }),
+            ObjectType::Source => relations.push(PbRelation {
+                relation_info: Some(PbRelationInfo::Source(PbSource {
+                    id: obj.oid as _,
+                    schema_id: obj.schema_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap() as _,
+                    ..Default::default()
+                })),
+            }),
+            ObjectType::Sink => relations.push(PbRelation {
+                relation_info: Some(PbRelationInfo::Sink(PbSink {
+                    id: obj.oid as _,
+                    schema_id: obj.schema_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap() as _,
+                    ..Default::default()
+                })),
+            }),
+            ObjectType::Subscription => relations.push(PbRelation {
+                relation_info: Some(PbRelationInfo::Subscription(PbSubscription {
+                    id: obj.oid as _,
+                    schema_id: obj.schema_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap() as _,
+                    ..Default::default()
+                })),
+            }),
+            ObjectType::View => relations.push(PbRelation {
+                relation_info: Some(PbRelationInfo::View(PbView {
+                    id: obj.oid as _,
+                    schema_id: obj.schema_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap() as _,
+                    ..Default::default()
+                })),
+            }),
+            ObjectType::Index => {
+                relations.push(PbRelation {
+                    relation_info: Some(PbRelationInfo::Index(PbIndex {
+                        id: obj.oid as _,
+                        schema_id: obj.schema_id.unwrap() as _,
+                        database_id: obj.database_id.unwrap() as _,
+                        ..Default::default()
+                    })),
+                });
+                relations.push(PbRelation {
+                    relation_info: Some(PbRelationInfo::Table(PbTable {
+                        id: obj.oid as _,
+                        schema_id: obj.schema_id.unwrap() as _,
+                        database_id: obj.database_id.unwrap() as _,
+                        ..Default::default()
+                    })),
+                });
+            }
+            _ => unreachable!("only relations will be dropped."),
+        }
+    }
+    NotificationInfo::RelationGroup(PbRelationGroup { relations })
 }

@@ -1,3 +1,5 @@
+# FIXME: this file is not well maintained compared to the main Dockerfile and may not work as expected.
+
 FROM ubuntu:24.04 AS base
 
 ENV LANG en_US.utf8
@@ -102,15 +104,15 @@ ENV OPENSSL_STATIC=1
 RUN cargo fetch && \
   cargo build -p risingwave_cmd_all --release -p risingwave_object_store --features hdfs-backend --features "rw-static-link" --features all-udf && \
   mkdir -p /risingwave/bin && \
-    mv /risingwave/target/release/risingwave /risingwave/bin/ && \
-    mv /risingwave/target/release/risingwave.dwp /risingwave/bin/ && \
+  mv /risingwave/target/release/risingwave /risingwave/bin/ && \
+  mv /risingwave/target/release/risingwave.dwp /risingwave/bin/ && \
   cp ./target/release/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
   chmod +x /risingwave/bin/jeprof && \
   mkdir -p /risingwave/lib && cargo clean
 
 RUN cd /risingwave/java && mvn -B package -Dmaven.test.skip=true -Dno-build-rust && \
-    mkdir -p /risingwave/bin/connector-node && \
-    tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
+  mkdir -p /risingwave/bin/connector-node && \
+  tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
 
 FROM ubuntu:24.04 as image-base
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install ca-certificates openjdk-17-jdk wget libsasl2-dev && rm -rf /var/lib/{apt,dpkg,cache,log}/
