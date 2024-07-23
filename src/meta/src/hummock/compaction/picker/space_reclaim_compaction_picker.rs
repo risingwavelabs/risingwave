@@ -173,6 +173,7 @@ mod test {
 
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
     use risingwave_pb::hummock::compact_task;
     pub use risingwave_pb::hummock::{Level, LevelType};
 
@@ -187,6 +188,7 @@ mod test {
     };
     use crate::hummock::compaction::CompactionDeveloperConfig;
     use crate::hummock::model::CompactionGroup;
+    use crate::hummock::test_utils::compaction_selector_context;
 
     #[test]
     fn test_space_reclaim_compaction_selector() {
@@ -252,13 +254,17 @@ mod test {
             let task = selector
                 .pick_compaction(
                     1,
-                    &group_config,
-                    &levels,
-                    &member_table_ids,
-                    &mut levels_handler,
-                    &mut local_stats,
-                    HashMap::default(),
-                    Arc::new(CompactionDeveloperConfig::default()),
+                    compaction_selector_context(
+                        &group_config,
+                        &levels,
+                        &member_table_ids,
+                        &mut levels_handler,
+                        &mut local_stats,
+                        &HashMap::default(),
+                        Arc::new(CompactionDeveloperConfig::default()),
+                        &Default::default(),
+                        &HummockVersionStateTableInfo::empty(),
+                    ),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -269,13 +275,17 @@ mod test {
             let task = selector
                 .pick_compaction(
                     1,
-                    &group_config,
-                    &levels,
-                    &member_table_ids,
-                    &mut levels_handler,
-                    &mut local_stats,
-                    HashMap::default(),
-                    Arc::new(CompactionDeveloperConfig::default()),
+                    compaction_selector_context(
+                        &group_config,
+                        &levels,
+                        &member_table_ids,
+                        &mut levels_handler,
+                        &mut local_stats,
+                        &HashMap::default(),
+                        Arc::new(CompactionDeveloperConfig::default()),
+                        &Default::default(),
+                        &HummockVersionStateTableInfo::empty(),
+                    ),
                 )
                 .unwrap();
             assert_eq!(task.input.input_levels.len(), 2);
@@ -310,13 +320,17 @@ mod test {
             let task = selector
                 .pick_compaction(
                     1,
-                    &group_config,
-                    &levels,
-                    &member_table_ids,
-                    &mut levels_handler,
-                    &mut local_stats,
-                    HashMap::default(),
-                    Arc::new(CompactionDeveloperConfig::default()),
+                    compaction_selector_context(
+                        &group_config,
+                        &levels,
+                        &member_table_ids,
+                        &mut levels_handler,
+                        &mut local_stats,
+                        &HashMap::default(),
+                        Arc::new(CompactionDeveloperConfig::default()),
+                        &Default::default(),
+                        &HummockVersionStateTableInfo::empty(),
+                    ),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -337,13 +351,17 @@ mod test {
             assert!(selector
                 .pick_compaction(
                     1,
-                    &group_config,
-                    &levels,
-                    &member_table_ids,
-                    &mut levels_handler,
-                    &mut local_stats,
-                    HashMap::default(),
-                    Arc::new(CompactionDeveloperConfig::default()),
+                    compaction_selector_context(
+                        &group_config,
+                        &levels,
+                        &member_table_ids,
+                        &mut levels_handler,
+                        &mut local_stats,
+                        &HashMap::default(),
+                        Arc::new(CompactionDeveloperConfig::default()),
+                        &Default::default(),
+                        &HummockVersionStateTableInfo::empty(),
+                    ),
                 )
                 .is_none())
         }
@@ -365,13 +383,17 @@ mod test {
             // pick space reclaim
             let task = selector.pick_compaction(
                 1,
-                &group_config,
-                &levels,
-                &member_table_ids,
-                &mut levels_handler,
-                &mut local_stats,
-                HashMap::default(),
-                Arc::new(CompactionDeveloperConfig::default()),
+                compaction_selector_context(
+                    &group_config,
+                    &levels,
+                    &member_table_ids,
+                    &mut levels_handler,
+                    &mut local_stats,
+                    &HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
+                    &Default::default(),
+                    &HummockVersionStateTableInfo::empty(),
+                ),
             );
             assert!(task.is_none());
         }
@@ -389,13 +411,17 @@ mod test {
             let task = selector
                 .pick_compaction(
                     1,
-                    &group_config,
-                    &levels,
-                    &member_table_ids,
-                    &mut levels_handler,
-                    &mut local_stats,
-                    HashMap::default(),
-                    Arc::new(CompactionDeveloperConfig::default()),
+                    compaction_selector_context(
+                        &group_config,
+                        &levels,
+                        &member_table_ids,
+                        &mut levels_handler,
+                        &mut local_stats,
+                        &HashMap::default(),
+                        Arc::new(CompactionDeveloperConfig::default()),
+                        &Default::default(),
+                        &HummockVersionStateTableInfo::empty(),
+                    ),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -428,13 +454,17 @@ mod test {
                 let task = selector
                     .pick_compaction(
                         1,
-                        &group_config,
-                        &levels,
-                        &member_table_ids,
-                        &mut levels_handler,
-                        &mut local_stats,
-                        HashMap::default(),
-                        Arc::new(CompactionDeveloperConfig::default()),
+                        compaction_selector_context(
+                            &group_config,
+                            &levels,
+                            &member_table_ids,
+                            &mut levels_handler,
+                            &mut local_stats,
+                            &HashMap::default(),
+                            Arc::new(CompactionDeveloperConfig::default()),
+                            &Default::default(),
+                            &HummockVersionStateTableInfo::empty(),
+                        ),
                     )
                     .unwrap();
 
@@ -485,13 +515,17 @@ mod test {
                 let task = selector
                     .pick_compaction(
                         1,
-                        &group_config,
-                        &levels,
-                        &member_table_ids,
-                        &mut levels_handler,
-                        &mut local_stats,
-                        HashMap::default(),
-                        Arc::new(CompactionDeveloperConfig::default()),
+                        compaction_selector_context(
+                            &group_config,
+                            &levels,
+                            &member_table_ids,
+                            &mut levels_handler,
+                            &mut local_stats,
+                            &HashMap::default(),
+                            Arc::new(CompactionDeveloperConfig::default()),
+                            &Default::default(),
+                            &HummockVersionStateTableInfo::empty(),
+                        ),
                     )
                     .unwrap();
 
