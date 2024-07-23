@@ -47,11 +47,8 @@ pub type SessionId = (ProcessId, SecretKey);
 pub trait SessionManager: Send + Sync + 'static {
     type Session: Session;
 
-    fn get_session(
-        &self,
-        database_id: u32,
-        user_name: &str,
-    ) -> Result<Arc<Self::Session>, BoxedError>;
+    fn get_session(&self, database_id: u32, user_id: u32)
+        -> Result<Arc<Self::Session>, BoxedError>;
 
     fn connect(
         &self,
@@ -389,7 +386,7 @@ mod tests {
         fn get_session(
             &self,
             database_id: u32,
-            user_name: &str,
+            user_name: u32,
         ) -> Result<Arc<Self::Session>, BoxedError> {
             todo!()
         }

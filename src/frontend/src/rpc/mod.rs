@@ -78,14 +78,14 @@ async fn get_new_table_plan(
     change: SchemaChangeEnvelope,
     table_name: String,
     database_id: u32,
-    owner: String,
+    owner: u32,
 ) -> Result<ReplaceTablePlan, AutoSchemaChangeError> {
     let session_mgr = SESSION_MANAGER
         .get()
         .expect("session manager has been initialized");
 
     // get a session object for the corresponding user and database
-    let session = session_mgr.get_session(database_id, &owner)?;
+    let session = session_mgr.get_session(database_id, owner)?;
 
     // call the handle alter method
     let new_columns = change.column_descs.into_iter().map(|c| c.into()).collect();
