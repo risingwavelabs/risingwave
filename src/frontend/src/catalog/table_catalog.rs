@@ -168,6 +168,8 @@ pub struct TableCatalog {
     pub created_at_cluster_version: Option<String>,
 
     pub initialized_at_cluster_version: Option<String>,
+
+    pub cdc_table_name: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -425,6 +427,7 @@ impl TableCatalog {
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             retention_seconds: self.retention_seconds,
+            cdc_table_name: self.cdc_table_name.clone(),
         }
     }
 
@@ -580,6 +583,7 @@ impl From<PbTable> for TableCatalog {
                 .into_iter()
                 .map(TableId::from)
                 .collect_vec(),
+            cdc_table_name: tb.cdc_table_name,
         }
     }
 }

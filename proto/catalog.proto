@@ -406,6 +406,8 @@ message Table {
   // conflict" operations.
   optional uint32 version_column_index = 38;
 
+  optional string cdc_table_name = 39;
+
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for
   // notification service.
