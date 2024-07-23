@@ -14,25 +14,31 @@
 
 #![cfg(any(test, feature = "test"))]
 
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::table_watermark::TableWatermarks;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionStateTableInfo};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, KeyRange, SstableInfo};
 use risingwave_pb::meta::add_worker_node_request::Property;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use crate::hummock::compaction::selector::default_compaction_selector;
+use crate::hummock::compaction::selector::{default_compaction_selector, LocalSelectorStatistic};
+use crate::hummock::compaction::{CompactionDeveloperConfig, CompactionSelectorContext};
+use crate::hummock::level_handler::LevelHandler;
+use crate::hummock::model::CompactionGroup;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
 use crate::manager::{
     ClusterManager, ClusterManagerRef, FragmentManager, MetaSrvEnv, META_NODE_ID,
@@ -401,4 +407,28 @@ pub async fn add_ssts(
         .await
         .unwrap();
     test_tables
+}
+
+pub fn compaction_selector_context<'a>(
+    group: &'a CompactionGroup,
+    levels: &'a Levels,
+    member_table_ids: &'a BTreeSet<TableId>,
+    level_handlers: &'a mut [LevelHandler],
+    selector_stats: &'a mut LocalSelectorStatistic,
+    table_id_to_options: &'a HashMap<u32, TableOption>,
+    developer_config: Arc<CompactionDeveloperConfig>,
+    table_watermarks: &'a HashMap<TableId, Arc<TableWatermarks>>,
+    state_table_info: &'a HummockVersionStateTableInfo,
+) -> CompactionSelectorContext<'a> {
+    CompactionSelectorContext {
+        group,
+        levels,
+        member_table_ids,
+        level_handlers,
+        selector_stats,
+        table_id_to_options,
+        developer_config,
+        table_watermarks,
+        state_table_info,
+    }
 }

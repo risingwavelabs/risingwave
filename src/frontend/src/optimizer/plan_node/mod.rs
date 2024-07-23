@@ -49,7 +49,7 @@ use self::batch::BatchPlanRef;
 use self::generic::{GenericPlanRef, PhysicalPlanRef};
 use self::stream::StreamPlanRef;
 use self::utils::Distill;
-use super::property::{Distribution, FunctionalDependencySet, Order};
+use super::property::{Distribution, FunctionalDependencySet, MonotonicityMap, Order};
 use crate::error::{ErrorCode, Result};
 use crate::optimizer::ExpressionSimplifyRewriter;
 use crate::session::current::notice_to_user;
@@ -608,6 +608,10 @@ impl StreamPlanRef for PlanRef {
 
     fn watermark_columns(&self) -> &FixedBitSet {
         self.plan_base().watermark_columns()
+    }
+
+    fn columns_monotonicity(&self) -> &MonotonicityMap {
+        self.plan_base().columns_monotonicity()
     }
 }
 

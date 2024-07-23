@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use prost::Message;
-use risingwave_pb::common::ParallelUnit;
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_pb::meta::PbMigrationPlan;
 
 use crate::storage::{MetaStore, MetaStoreError, MetaStoreResult, Snapshot, DEFAULT_COLUMN_FAMILY};
@@ -25,11 +25,9 @@ pub const MIGRATION_PLAN_KEY: &[u8] = &[
     109, 105, 103, 114, 97, 116, 105, 111, 110, 95, 112, 108, 97, 110,
 ];
 
-type ParallelUnitId = u32;
-
 #[derive(Debug, Default, Clone)]
 pub struct MigrationPlan {
-    pub parallel_unit_plan: HashMap<ParallelUnitId, ParallelUnit>,
+    pub worker_slot_plan: HashMap<WorkerSlotId, WorkerSlotId>,
 }
 
 impl MigrationPlan {
@@ -75,7 +73,11 @@ impl MigrationPlan {
 impl From<PbMigrationPlan> for MigrationPlan {
     fn from(plan: PbMigrationPlan) -> Self {
         MigrationPlan {
-            parallel_unit_plan: plan.parallel_unit_migration_plan,
+            worker_slot_plan: plan
+                .worker_slot_migration_plan
+                .into_iter()
+                .map(|(k, v)| (WorkerSlotId::from(k), WorkerSlotId::from(v)))
+                .collect(),
         }
     }
 }
@@ -83,7 +85,11 @@ impl From<PbMigrationPlan> for MigrationPlan {
 impl From<MigrationPlan> for PbMigrationPlan {
     fn from(plan: MigrationPlan) -> Self {
         PbMigrationPlan {
-            parallel_unit_migration_plan: plan.parallel_unit_plan,
+            worker_slot_migration_plan: plan
+                .worker_slot_plan
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect(),
         }
     }
 }

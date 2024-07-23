@@ -19,6 +19,7 @@ mod utils;
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::iter;
+use std::mem::take;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -44,6 +45,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{Action, ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
+use tokio::sync::oneshot::Sender;
 use tokio::sync::{Mutex, MutexGuard};
 use user::*;
 
@@ -165,6 +167,89 @@ impl CatalogManagerCore {
         let user = UserManager::new(env.clone(), &database).await?;
         Ok(Self { database, user })
     }
+
+    pub(crate) fn register_finish_notifier(
+        &mut self,
+        id: TableId,
+        sender: Sender<MetaResult<NotificationVersion>>,
+    ) {
+        self.database
+            .creating_table_finish_notifier
+            .entry(id)
+            .or_default()
+            .push(sender);
+    }
+
+    pub(crate) fn streaming_job_is_finished(&mut self, job: &StreamingJob) -> MetaResult<bool> {
+        fn gen_err(job: &StreamingJob, name: &String) -> MetaError {
+            MetaError::catalog_id_not_found(
+                job.job_type_str(),
+                format!("{} may have been dropped/cancelled", name),
+            )
+        }
+        let (job_status, name) = match job {
+            StreamingJob::MaterializedView(table) | StreamingJob::Table(_, table, _) => (
+                self.database
+                    .tables
+                    .get(&table.id)
+                    .map(|table| table.stream_job_status),
+                &table.name,
+            ),
+            StreamingJob::Sink(sink, _) => (
+                self.database
+                    .sinks
+                    .get(&sink.id)
+                    .map(|sink| sink.stream_job_status),
+                &sink.name,
+            ),
+            StreamingJob::Index(index, _) => (
+                self.database
+                    .indexes
+                    .get(&index.id)
+                    .map(|index| index.stream_job_status),
+                &index.name,
+            ),
+            StreamingJob::Source(source) => {
+                return Ok(self.database.sources.contains_key(&source.id));
+            }
+        };
+
+        job_status
+            .map(|status| status == StreamJobStatus::Created as i32)
+            .or_else(|| {
+                if self
+                    .database
+                    .in_progress_creation_streaming_job
+                    .contains_key(&job.id())
+                {
+                    Some(false)
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| gen_err(job, name))
+    }
+
+    pub(crate) fn notify_finish(&mut self, id: TableId, version: NotificationVersion) {
+        for tx in self
+            .database
+            .creating_table_finish_notifier
+            .remove(&id)
+            .into_iter()
+            .flatten()
+        {
+            let _ = tx.send(Ok(version));
+        }
+    }
+
+    pub(crate) fn notify_finish_failed(&mut self, err: &MetaError) {
+        for tx in take(&mut self.database.creating_table_finish_notifier)
+            .into_values()
+            .flatten()
+        {
+            let _ = tx.send(Err(err.clone()));
+        }
+    }
 }
 
 impl CatalogManager {
@@ -180,6 +265,10 @@ impl CatalogManager {
         self.init_database().await?;
         self.source_backward_compat_check().await?;
         Ok(())
+    }
+
+    pub async fn current_notification_version(&self) -> NotificationVersion {
+        self.env.notification_manager().current_version().await
     }
 
     pub async fn get_catalog_core_guard(&self) -> MutexGuard<'_, CatalogManagerCore> {
@@ -1173,18 +1262,21 @@ impl CatalogManager {
         &self,
         mut stream_job: StreamingJob,
         internal_tables: Vec<Table>,
-    ) -> MetaResult<u64> {
+    ) -> MetaResult<()> {
         // 1. finish procedure.
         let mut creating_internal_table_ids = internal_tables.iter().map(|t| t.id).collect_vec();
 
         // Update the corresponding 'created_at' field.
         stream_job.mark_created();
 
-        let version = match stream_job {
+        let (version, table_id) = match stream_job {
             StreamingJob::MaterializedView(table) => {
                 creating_internal_table_ids.push(table.id);
-                self.finish_create_materialized_view_procedure(internal_tables, table)
-                    .await?
+                let table_id = table.id;
+                let version = self
+                    .finish_create_materialized_view_procedure(internal_tables, table)
+                    .await?;
+                (version, table_id)
             }
             StreamingJob::Sink(sink, target_table) => {
                 let sink_id = sink.id;
@@ -1199,26 +1291,34 @@ impl CatalogManager {
                         .await?;
                 }
 
-                version
+                (version, sink_id)
             }
             StreamingJob::Table(source, table, ..) => {
                 creating_internal_table_ids.push(table.id);
-                if let Some(source) = source {
+                let table_id = table.id;
+                let version = if let Some(source) = source {
                     self.finish_create_table_procedure_with_source(source, table, internal_tables)
                         .await?
                 } else {
                     self.finish_create_table_procedure(internal_tables, table)
                         .await?
-                }
+                };
+                (version, table_id)
             }
             StreamingJob::Index(index, table) => {
                 creating_internal_table_ids.push(table.id);
-                self.finish_create_index_procedure(internal_tables, index, table)
-                    .await?
+                let table_id = table.id;
+                let version = self
+                    .finish_create_index_procedure(internal_tables, index, table)
+                    .await?;
+                (version, table_id)
             }
             StreamingJob::Source(source) => {
-                self.finish_create_source_procedure(source, internal_tables)
-                    .await?
+                let table_id = source.id;
+                let version = self
+                    .finish_create_source_procedure(source, internal_tables)
+                    .await?;
+                (version, table_id)
             }
         };
 
@@ -1226,7 +1326,10 @@ impl CatalogManager {
         self.unmark_creating_tables(&creating_internal_table_ids, false)
             .await;
 
-        Ok(version)
+        // 3. notify create streaming job finish
+        self.core.lock().await.notify_finish(table_id, version);
+
+        Ok(())
     }
 
     /// This is used for `CREATE TABLE`.
@@ -1382,6 +1485,18 @@ impl CatalogManager {
             for &dependent_relation_id in &table.dependent_relations {
                 database_core.decrease_relation_ref_count(dependent_relation_id);
             }
+        }
+
+        for tx in core
+            .database
+            .creating_table_finish_notifier
+            .remove(&table_id)
+            .into_iter()
+            .flatten()
+        {
+            let _ = tx.send(Err(MetaError::cancelled(format!(
+                "materialized view {table_id} has been cancelled"
+            ))));
         }
 
         // FIXME(kwannoel): Propagate version to fe
@@ -3627,7 +3742,7 @@ impl CatalogManager {
         }
     }
 
-    /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
+    /// This is used for `ALTER TABLE ADD/DROP COLUMN` and `SINK INTO TABLE`.
     pub async fn finish_replace_table_procedure(
         &self,
         source: &Option<Source>,

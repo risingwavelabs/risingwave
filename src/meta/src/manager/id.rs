@@ -128,7 +128,6 @@ pub mod IdCategory {
     pub const Actor: IdCategoryType = 6;
     pub const Backup: IdCategoryType = 7;
     pub const HummockSstableId: IdCategoryType = 8;
-    pub const ParallelUnit: IdCategoryType = 9;
     pub const _Source: IdCategoryType = 10;
     pub const HummockCompactionTask: IdCategoryType = 11;
     pub const User: IdCategoryType = 12;
@@ -159,7 +158,6 @@ pub struct IdGeneratorManager {
     backup: Arc<StoredIdGenerator>,
     hummock_ss_table_id: Arc<StoredIdGenerator>,
     hummock_compaction_task: Arc<StoredIdGenerator>,
-    parallel_unit: Arc<StoredIdGenerator>,
     compaction_group: Arc<StoredIdGenerator>,
     connection: Arc<StoredIdGenerator>,
     secret: Arc<StoredIdGenerator>,
@@ -198,9 +196,6 @@ impl IdGeneratorManager {
                 StoredIdGenerator::new(meta_store.clone(), "hummock_compaction_task", Some(1))
                     .await,
             ),
-            parallel_unit: Arc::new(
-                StoredIdGenerator::new(meta_store.clone(), "parallel_unit", None).await,
-            ),
             compaction_group: Arc::new(
                 StoredIdGenerator::new(
                     meta_store.clone(),
@@ -230,7 +225,6 @@ impl IdGeneratorManager {
             IdCategory::Backup => &self.backup,
             IdCategory::Worker => &self.worker,
             IdCategory::HummockSstableId => &self.hummock_ss_table_id,
-            IdCategory::ParallelUnit => &self.parallel_unit,
             IdCategory::HummockCompactionTask => &self.hummock_compaction_task,
             IdCategory::CompactionGroup => &self.compaction_group,
             IdCategory::Connection => &self.connection,

@@ -39,6 +39,7 @@ macro_rules! for_all_variants {
     ($macro:ident $(, $x:tt)*) => {
         $macro! {
             $($x, )*
+            //data_type     variant_name  suffix_name   scalar                      scalar_ref                          array                               builder
             { Int16,        Int16,        int16,        i16,                        i16,                                $crate::array::I16Array,            $crate::array::I16ArrayBuilder          },
             { Int32,        Int32,        int32,        i32,                        i32,                                $crate::array::I32Array,            $crate::array::I32ArrayBuilder          },
             { Int64,        Int64,        int64,        i64,                        i64,                                $crate::array::I64Array,            $crate::array::I64ArrayBuilder          },

@@ -26,7 +26,7 @@ use super::utils::{childless_record, Distill, TableCatalogBuilder};
 use super::{generic, ExprRewritable, PlanBase, StreamNode};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, Monotonicity, MonotonicityMap};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -39,12 +39,17 @@ impl StreamNow {
     pub fn new(core: generic::Now) -> Self {
         let mut watermark_columns = FixedBitSet::with_capacity(1);
         watermark_columns.set(0, true);
+
+        let mut columns_monotonicity = MonotonicityMap::new();
+        columns_monotonicity.insert(0, Monotonicity::NonDecreasing);
+
         let base = PlanBase::new_stream_with_core(
             &core,
             Distribution::Single,
             core.mode.is_generate_series(), // append only
             core.mode.is_generate_series(), // emit on window close
             watermark_columns,
+            columns_monotonicity,
         );
         Self { base, core }
     }

@@ -8,6 +8,7 @@
 # Building and debugging RisingWave
 
 - [Building and Running](./build-and-run/intro.md)
+    - [Profiles](./build-and-run/profiles.md)
 - [Testing](./tests/intro.md)
 - [Debugging](./debugging.md)
 - [Observability](./observability.md)

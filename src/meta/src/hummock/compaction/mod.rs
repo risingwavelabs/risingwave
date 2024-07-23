@@ -26,11 +26,13 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use picker::{LevelCompactionPicker, TierCompactionPicker};
-use risingwave_hummock_sdk::{can_concat, CompactionGroupId, HummockCompactionTaskId};
+use risingwave_hummock_sdk::table_watermark::TableWatermarks;
+use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, LevelType};
-pub use selector::CompactionSelector;
+pub use selector::{CompactionSelector, CompactionSelectorContext};
 
 use self::selector::{EmergencySelector, LocalSelectorStatistic};
 use super::check_cg_write_limit;
@@ -89,6 +91,7 @@ impl CompactStatus {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn get_compact_task(
         &mut self,
         levels: &Levels,
@@ -97,38 +100,44 @@ impl CompactStatus {
         group: &CompactionGroup,
         stats: &mut LocalSelectorStatistic,
         selector: &mut Box<dyn CompactionSelector>,
-        table_id_to_options: HashMap<u32, TableOption>,
+        table_id_to_options: &HashMap<u32, TableOption>,
         developer_config: Arc<CompactionDeveloperConfig>,
+        table_watermarks: &HashMap<TableId, Arc<TableWatermarks>>,
+        state_table_info: &HummockVersionStateTableInfo,
     ) -> Option<CompactionTask> {
-        // When we compact the files, we must make the result of compaction meet the following
-        // conditions, for any user key, the epoch of it in the file existing in the lower
-        // layer must be larger.
-        if let Some(task) = selector.pick_compaction(
-            task_id,
+        let selector_context = CompactionSelectorContext {
             group,
             levels,
             member_table_ids,
-            &mut self.level_handlers,
-            stats,
-            table_id_to_options.clone(),
-            developer_config.clone(),
-        ) {
+            level_handlers: &mut self.level_handlers,
+            selector_stats: stats,
+            table_id_to_options,
+            developer_config: developer_config.clone(),
+            table_watermarks,
+            state_table_info,
+        };
+        // When we compact the files, we must make the result of compaction meet the following
+        // conditions, for any user key, the epoch of it in the file existing in the lower
+        // layer must be larger.
+        if let Some(task) = selector.pick_compaction(task_id, selector_context) {
             return Some(task);
         } else {
             let compaction_group_config = &group.compaction_config;
             if check_cg_write_limit(levels, compaction_group_config.as_ref()).is_write_stop()
                 && compaction_group_config.enable_emergency_picker
             {
-                return EmergencySelector::default().pick_compaction(
-                    task_id,
+                let selector_context = CompactionSelectorContext {
                     group,
                     levels,
                     member_table_ids,
-                    &mut self.level_handlers,
-                    stats,
+                    level_handlers: &mut self.level_handlers,
+                    selector_stats: stats,
                     table_id_to_options,
                     developer_config,
-                );
+                    table_watermarks,
+                    state_table_info,
+                };
+                return EmergencySelector::default().pick_compaction(task_id, selector_context);
             }
         }
 
@@ -140,10 +149,7 @@ impl CompactStatus {
             return false;
         }
 
-        if task.input_ssts.len() == 1 {
-            return task.input_ssts[0].level_idx == 0
-                && can_concat(&task.input_ssts[0].table_infos);
-        } else if task.input_ssts.len() != 2
+        if task.input_ssts.len() != 2
             || task.input_ssts[0].level_type() != LevelType::Nonoverlapping
         {
             return false;
@@ -166,6 +172,10 @@ impl CompactStatus {
     }
 
     pub fn is_trivial_reclaim(task: &CompactTask) -> bool {
+        // Currently all VnodeWatermark tasks are trivial reclaim.
+        if task.task_type() == TaskType::VnodeWatermark {
+            return true;
+        }
         let exist_table_ids = HashSet::<u32>::from_iter(task.existing_table_ids.clone());
         task.input_ssts.iter().all(|level| {
             level.table_infos.iter().all(|sst| {
