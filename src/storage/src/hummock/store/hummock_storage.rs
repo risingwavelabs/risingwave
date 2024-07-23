@@ -74,7 +74,7 @@ impl Drop for HummockStorageShutdownGuard {
         let _ = self
             .shutdown_sender
             .send(HummockEvent::Shutdown)
-            .inspect_err(|e| tracing::warn!(event = ?e.0, "unable to send shutdown"));
+            .inspect_err(|e| tracing::debug!(event = ?e.0, "unable to send shutdown"));
     }
 }
 

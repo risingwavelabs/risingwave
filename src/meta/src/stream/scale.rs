@@ -2618,14 +2618,23 @@ impl GlobalStreamManager {
                 notification = local_notification_rx.recv() => {
                     let notification = notification.expect("local notification channel closed in loop of stream manager");
 
+                    // Only maintain the cache for streaming compute nodes.
+                    let worker_is_streaming_compute = |worker: &WorkerNode| {
+                        worker.get_type() == Ok(WorkerType::ComputeNode)
+                            && worker
+                                .property
+                                .as_ref()
+                                .map(|p| p.is_streaming)
+                                .unwrap_or(false)
+                    };
+
                     match notification {
                         LocalNotification::WorkerNodeActivated(worker) => {
-                            match (worker.get_type(), worker.property.as_ref()) {
-                                (Ok(WorkerType::ComputeNode), Some(prop)) if prop.is_streaming => {
-                                    tracing::info!("worker {} activated notification received", worker.id);
-                                }
-                                _ => continue
+                            if !worker_is_streaming_compute(&worker) {
+                                continue;
                             }
+
+                            tracing::info!("worker {} activated notification received", worker.id);
 
                             let prev_worker = worker_cache.insert(worker.id, worker.clone());
 
@@ -2645,11 +2654,14 @@ impl GlobalStreamManager {
                         // Since our logic for handling passive scale-in is within the barrier manager,
                         // there’s not much we can do here. All we can do is proactively remove the entries from our cache.
                         LocalNotification::WorkerNodeDeleted(worker) => {
+                            if !worker_is_streaming_compute(&worker) {
+                                continue;
+                            }
+
                             match worker_cache.remove(&worker.id) {
                                 Some(prev_worker) => {
                                     tracing::info!(worker = prev_worker.id, "worker removed from stream manager cache");
                                 }
-
                                 None => {
                                     tracing::warn!(worker = worker.id, "worker not found in stream manager cache, but it was removed");
                                 }
