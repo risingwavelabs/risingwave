@@ -410,20 +410,27 @@ impl HummockReadVersion {
                 direction,
                 epoch,
                 vnode_watermarks,
-            } => self
-                .table_watermarks
-                .get_or_insert_with(|| {
-                    TableWatermarksIndex::new(
+            } => {
+                if let Some(watermark_index) = &mut self.table_watermarks {
+                    watermark_index.add_epoch_watermark(
+                        epoch,
+                        Arc::from(vnode_watermarks),
                         direction,
+                    );
+                } else {
+                    self.table_watermarks = Some(TableWatermarksIndex::new(
+                        direction,
+                        epoch,
+                        vnode_watermarks,
                         self.committed
                             .version()
                             .state_table_info
                             .info()
                             .get(&self.table_id)
                             .map(|info| info.committed_epoch),
-                    )
-                })
-                .add_epoch_watermark(epoch, Arc::from(vnode_watermarks), direction),
+                    ));
+                }
+            }
         }
     }
 
