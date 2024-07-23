@@ -15,8 +15,8 @@
 #![cfg(madsim)]
 
 use std::time::Duration;
-use risingwave_hummock_sdk::CompactionGroupId;
 
+use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, Session};
 
 fn cluster_config(interval_sec: usize) -> Configuration {
@@ -89,7 +89,12 @@ async fn test_no_vnode_watermark_reclaim() {
     assert_compaction_group_sst_count(compaction_group_id, 6, 1, &mut session).await;
 }
 
-async fn assert_compaction_group_sst_count(compaction_group_id: CompactionGroupId, level_id: usize, expected: usize, session: &mut Session) {
+async fn assert_compaction_group_sst_count(
+    compaction_group_id: CompactionGroupId,
+    level_id: usize,
+    expected: usize,
+    session: &mut Session,
+) {
     let count = session
         .run(format!("SELECT COUNT(*) FROM rw_hummock_sstables WHERE compaction_group_id={compaction_group_id} and level_id={level_id};"))
         .await
@@ -97,7 +102,10 @@ async fn assert_compaction_group_sst_count(compaction_group_id: CompactionGroupI
     assert_eq!(count.parse::<usize>().unwrap(), expected);
 }
 
-async fn test_vnode_watermark_reclaim_impl(cluster: &mut Cluster, session: &mut Session) -> CompactionGroupId {
+async fn test_vnode_watermark_reclaim_impl(
+    cluster: &mut Cluster,
+    session: &mut Session,
+) -> CompactionGroupId {
     session
         .run("CREATE TABLE t2 (ts timestamptz, v INT);")
         .await
@@ -133,7 +141,10 @@ async fn test_vnode_watermark_reclaim_impl(cluster: &mut Cluster, session: &mut 
     assert_compaction_group_sst_count(compaction_group_id, 0, 1, session).await;
     assert_compaction_group_sst_count(compaction_group_id, 6, 0, session).await;
     // Compact data to L6 so that vnode watermark picker can take effects.
-    cluster.trigger_manual_compaction(compaction_group_id, 0).await.unwrap();
+    cluster
+        .trigger_manual_compaction(compaction_group_id, 0)
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_secs(5)).await;
     assert_compaction_group_sst_count(compaction_group_id, 0, 0, session).await;
     assert_compaction_group_sst_count(compaction_group_id, 6, 1, session).await;

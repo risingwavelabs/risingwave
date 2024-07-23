@@ -15,8 +15,7 @@
 use std::collections::BTreeMap;
 
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::table_watermark::ReadTableWatermark;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{InputLevel, SstableInfo};
@@ -89,23 +88,16 @@ fn should_delete_sst_by_watermark(
     let Some(watermarks) = table_watermarks.get(&left_key.user_key.table_id) else {
         return false;
     };
-    should_delete_key_by_watermark(
-        left_key.user_key.table_key.vnode_part(),
-        left_key.user_key.table_key.key_part(),
-        watermarks,
-    ) && should_delete_key_by_watermark(
-        right_key.user_key.table_key.vnode_part(),
-        right_key.user_key.table_key.key_part(),
-        watermarks,
-    )
+    should_delete_key_by_watermark(&left_key.user_key.table_key, watermarks)
+        && should_delete_key_by_watermark(&right_key.user_key.table_key, watermarks)
 }
 
 fn should_delete_key_by_watermark(
-    key_vnode: VirtualNode,
-    key: &[u8],
+    table_key: &TableKey<&[u8]>,
     watermark: &ReadTableWatermark,
 ) -> bool {
-    let Some(w) = watermark.vnode_watermarks.get(&key_vnode) else {
+    let (vnode, key) = table_key.split_vnode();
+    let Some(w) = watermark.vnode_watermarks.get(&vnode) else {
         return false;
     };
     watermark.direction.filter_by_watermark(key, w)
