@@ -27,6 +27,7 @@ use rand::seq::{IteratorRandom, SliceRandom};
 use rand::{thread_rng, Rng};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ParallelUnitId;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
@@ -426,6 +427,50 @@ impl Cluster {
                 if let Some(rate_limit) = rate_limit {
                     command.push(rate_limit.to_string());
                 }
+                start_ctl(command).await
+            })
+            .await??;
+        Ok(())
+    }
+
+    #[cfg_or_panic(madsim)]
+    pub async fn split_compaction_group(
+        &mut self,
+        compaction_group_id: CompactionGroupId,
+        table_id: HummockSstableId,
+    ) -> Result<()> {
+        self.ctl
+            .spawn(async move {
+                let mut command: Vec<String> = vec![
+                    "hummock".into(),
+                    "split-compaction-group".into(),
+                    "--compaction-group-id".into(),
+                    compaction_group_id.to_string(),
+                    "--table-ids".into(),
+                    table_id.to_string(),
+                ];
+                start_ctl(command).await
+            })
+            .await??;
+        Ok(())
+    }
+
+    #[cfg_or_panic(madsim)]
+    pub async fn trigger_manual_compaction(
+        &mut self,
+        compaction_group_id: CompactionGroupId,
+        level_id: u32,
+    ) -> Result<()> {
+        self.ctl
+            .spawn(async move {
+                let mut command: Vec<String> = vec![
+                    "hummock".into(),
+                    "trigger-manual-compaction".into(),
+                    "--compaction-group-id".into(),
+                    compaction_group_id.to_string(),
+                    "--level".into(),
+                    level_id.to_string(),
+                ];
                 start_ctl(command).await
             })
             .await??;
