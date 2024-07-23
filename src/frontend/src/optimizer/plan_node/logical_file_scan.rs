@@ -106,13 +106,13 @@ impl ToBatch for LogicalFileScan {
 
 impl ToStream for LogicalFileScan {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        bail!("FileScan is not supported in streaming mode")
+        bail!("file_scan function is not supported in streaming mode")
     }
 
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        bail!("FileScan is not supported in streaming mode")
+        bail!("file_scan function is not supported in streaming mode")
     }
 }

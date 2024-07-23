@@ -168,6 +168,10 @@ impl NotificationServiceImpl {
     }
 
     fn decrypt_secrets(&self, secrets: Vec<Secret>) -> MetaResult<Vec<Secret>> {
+        // Skip getting `secret_store_private_key` if there is no secret
+        if secrets.is_empty() {
+            return Ok(vec![]);
+        }
         let secret_store_private_key = self
             .env
             .opts

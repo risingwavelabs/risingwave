@@ -89,7 +89,7 @@ impl StreamEnvironment {
         use risingwave_dml::dml_manager::DmlManager;
         use risingwave_storage::monitor::MonitoredStorageMetrics;
         StreamEnvironment {
-            server_addr: "127.0.0.1:5688".parse().unwrap(),
+            server_addr: "127.0.0.1:2333".parse().unwrap(),
             config: Arc::new(StreamingConfig::default()),
             worker_id: WorkerNodeId::default(),
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(

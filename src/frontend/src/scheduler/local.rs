@@ -402,6 +402,40 @@ impl LocalQueryExecution {
                         };
                         sources.push(exchange_source);
                     }
+                } else if let Some(_file_scan_info) = &second_stage.file_scan_info {
+                    let second_stage_plan_node = self.convert_plan_node(
+                        &second_stage.root,
+                        &mut None,
+                        Some(PartitionInfo::File),
+                        next_executor_id.clone(),
+                    )?;
+                    let second_stage_plan_fragment = PlanFragment {
+                        root: Some(second_stage_plan_node),
+                        exchange_info: Some(ExchangeInfo {
+                            mode: DistributionMode::Single as i32,
+                            ..Default::default()
+                        }),
+                    };
+                    let local_execute_plan = LocalExecutePlan {
+                        plan: Some(second_stage_plan_fragment),
+                        epoch: Some(self.snapshot.batch_query_epoch()),
+                        tracing_context: tracing_context.clone(),
+                    };
+                    // NOTE: select a random work node here.
+                    let worker_node = self.worker_node_manager.next_random_worker()?;
+                    let exchange_source = ExchangeSource {
+                        task_output_id: Some(TaskOutputId {
+                            task_id: Some(PbTaskId {
+                                task_id: 0_u64,
+                                stage_id: exchange_source_stage_id,
+                                query_id: self.query.query_id.id.clone(),
+                            }),
+                            output_id: 0,
+                        }),
+                        host: Some(worker_node.host.as_ref().unwrap().clone()),
+                        local_execute_plan: Some(Plan(local_execute_plan)),
+                    };
+                    sources.push(exchange_source);
                 } else {
                     let second_stage_plan_node = self.convert_plan_node(
                         &second_stage.root,
