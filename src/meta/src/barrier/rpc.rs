@@ -207,16 +207,22 @@ impl ControlStreamManager {
                         .expect("should exist when get collect resp");
                     // Note: No need to use `?` as the backtrace is from meta and not useful.
                     warn!(node = ?node.worker, err = %err.as_report(), "get error from response stream");
+
+                    // TODO: this future can be cancelled during collection, so may not work as expected.
+                    let errors = self.collect_errors(node.worker.id, err).await;
+                    let err = merge_node_rpc_errors("get error from control stream", errors);
+
                     if let Some(command) = node.inflight_barriers.pop_front() {
-                        let errors = self.collect_errors(node.worker.id, err).await;
-                        let err = merge_node_rpc_errors("get error from control stream", errors);
-                        self.context.report_collect_failure(&command, &err);
-                        break Err(err);
+                        self.context.report_collect_failure(
+                            command.prev_epoch.value().0,
+                            command.curr_epoch.value().0,
+                            &err,
+                        );
                     } else {
-                        // for node with no inflight barrier, simply ignore the error
-                        info!(node = ?node.worker, "no inflight barrier no node. Ignore error");
-                        continue;
+                        self.context.report_collect_failure(0, 0, &err);
                     }
+
+                    break Err(err);
                 }
             }
         }
@@ -239,6 +245,7 @@ impl ControlStreamManager {
             })
             .await;
         }
+        tracing::debug!(?errors, "collected stream errors");
         errors
     }
 }
@@ -366,12 +373,12 @@ impl GlobalBarrierManagerContext {
     }
 
     /// Send barrier-complete-rpc and wait for responses from all CNs
-    fn report_collect_failure(&self, command_context: &CommandContext, error: &MetaError) {
+    fn report_collect_failure(&self, prev_epoch: u64, curr_epoch: u64, error: &MetaError) {
         // Record failure in event log.
         use risingwave_pb::meta::event_log;
         let event = event_log::EventCollectBarrierFail {
-            prev_epoch: command_context.prev_epoch.value().0,
-            cur_epoch: command_context.curr_epoch.value().0,
+            prev_epoch,
+            cur_epoch: curr_epoch,
             error: error.to_report_string(),
         };
         self.env

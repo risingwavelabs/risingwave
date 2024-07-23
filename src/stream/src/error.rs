@@ -86,18 +86,23 @@ pub enum ErrorKind {
         actor_id: ActorId,
         reason: &'static str,
     },
+
     #[error("Secret error: {0}")]
     Secret(
         #[from]
         #[backtrace]
         SecretError,
     ),
+
     #[error(transparent)]
     Uncategorized(
         #[from]
         #[backtrace]
         anyhow::Error,
     ),
+
+    #[error("the compute node is asked to shutdown")]
+    Shutdown,
 }
 
 impl From<PbFieldNotFound> for StreamError {

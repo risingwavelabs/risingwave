@@ -119,7 +119,27 @@ impl ControlStreamHandle {
 
             let err = err.into_inner();
             if sender.send(Err(err)).is_err() {
-                warn!("failed to notify finish of control stream");
+                warn!("failed to notify reset of control stream");
+            }
+        }
+    }
+
+    async fn shutdown_stream(&mut self) {
+        let err =
+            ScoredStreamError::new(StreamError::shutdown()).to_status_unnamed(Code::Cancelled);
+
+        if let Some((sender, _)) = self.pair.take() {
+            if sender.send(Err(err)).is_err() {
+                warn!("failed to notify shutdown of control stream");
+            } else {
+                // We should always unregister the current node from the meta service before
+                // calling this method. So upon next recovery, the meta service will not involve
+                // us anymore and drop the connection to us.
+                //
+                // We detect this by waiting the stream to be closed. This is to ensure that the
+                // `Shutdown` error has been acknowledged by the meta service, for more precise
+                // error report.
+                sender.closed().await;
             }
         }
     }
@@ -242,6 +262,9 @@ pub(super) enum LocalActorOperation {
     },
     InspectState {
         result_sender: oneshot::Sender<String>,
+    },
+    Shutdown {
+        result_sender: oneshot::Sender<()>,
     },
 }
 
@@ -452,7 +475,7 @@ impl LocalBarrierWorker {
                                 });
                             }
                             actor_op => {
-                                self.handle_actor_op(actor_op);
+                                self.handle_actor_op(actor_op).await;
                             }
                         }
                     }
@@ -534,7 +557,7 @@ impl LocalBarrierWorker {
         }
     }
 
-    fn handle_actor_op(&mut self, actor_op: LocalActorOperation) {
+    async fn handle_actor_op(&mut self, actor_op: LocalActorOperation) {
         match actor_op {
             LocalActorOperation::NewControlStream { .. } => {
                 unreachable!("NewControlStream event should be handled separately in async context")
@@ -582,6 +605,13 @@ impl LocalBarrierWorker {
             LocalActorOperation::InspectState { result_sender } => {
                 let debug_info = self.to_debug_info();
                 let _ = result_sender.send(debug_info.to_string());
+            }
+            LocalActorOperation::Shutdown { result_sender } => {
+                if !self.actor_manager_state.handles.is_empty() {
+                    tracing::warn!("shutdown with running actors");
+                }
+                self.control_stream_handle.shutdown_stream().await;
+                let _ = result_sender.send(());
             }
         }
     }
@@ -1009,6 +1039,9 @@ impl ScoredStreamError {
 
                 // `BarrierSend` is likely to be caused by actor exit and not the root cause.
                 ErrorKind::BarrierSend { .. } => 1,
+
+                // Asked to shutdown by user, likely to be the root cause.
+                ErrorKind::Shutdown => 3000,
 
                 // Executor errors first.
                 ErrorKind::Executor(ee) => 2000 + stream_executor_error_score(ee),
