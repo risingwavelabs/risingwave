@@ -417,7 +417,7 @@ impl WholeLevelCompactionPicker {
 
 #[cfg(test)]
 pub mod tests {
-    use risingwave_hummock_sdk::version::{Level, Levels};
+    use risingwave_hummock_sdk::version::Level;
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -539,7 +539,7 @@ pub mod tests {
                 ..Default::default()
             };
             let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
-            levels_handler[1].add_pending_task(100, 1, levels.levels[0].table_infos());
+            levels_handler[1].add_pending_task(100, 1, &levels.levels[0].table_infos);
             let config = Arc::new(
                 CompactionConfigBuilder::new()
                     .level0_sub_level_compact_level_count(1)
@@ -587,7 +587,7 @@ pub mod tests {
                 ..Default::default()
             };
             let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
-            levels_handler[1].add_pending_task(100, 1, levels.levels[0].table_infos());
+            levels_handler[1].add_pending_task(100, 1, &levels.levels[0].table_infos);
             let config = Arc::new(
                 CompactionConfigBuilder::new()
                     .level0_sub_level_compact_level_count(1)
@@ -658,7 +658,7 @@ pub mod tests {
                 ..Default::default()
             };
             let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
-            levels_handler[1].add_pending_task(100, 1, levels.levels[0].table_infos());
+            levels_handler[1].add_pending_task(100, 1, &levels.levels[0].table_infos);
             let config = Arc::new(
                 CompactionConfigBuilder::new()
                     .level0_sub_level_compact_level_count(1)
@@ -715,7 +715,7 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .level0_tier_compact_file_number(2)
-                .tarfile_size_base(30)
+                .target_file_size_base(30)
                 .level0_sub_level_compact_level_count(20) // reject intra
                 .build(),
         );
@@ -732,7 +732,7 @@ pub mod tests {
             levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
             ..Default::default()
         };
-        levels_handler[1].add_pending_task(100, 1, levels.levels[0].table_infos());
+        levels_handler[1].add_pending_task(100, 1, &levels.levels[0].table_infos);
         let mut local_stats = LocalPickerStatistic::default();
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
         assert!(ret.is_none());
@@ -860,15 +860,11 @@ pub mod tests {
         let input = ret.as_ref().unwrap();
         assert_eq!(input.input_levels.len(), 2);
         assert_ne!(
-            levels.l0.as_ref().unwrap().sub_levels()[0]
-                .table_infos
-                .len(),
+            levels.l0.as_ref().unwrap().sub_levels[0].table_infos.len(),
             input.input_levels[0].table_infos.len()
         );
         assert_ne!(
-            levels.l0.as_ref().unwrap().sub_levels()[1]
-                .table_infos
-                .len(),
+            levels.l0.as_ref().unwrap().sub_levels[1].table_infos.len(),
             input.input_levels[1].table_infos.len()
         );
     }

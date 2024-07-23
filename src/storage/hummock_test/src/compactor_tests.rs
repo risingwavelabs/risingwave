@@ -315,7 +315,7 @@ pub(crate) mod tests {
                 .report_compact_task_for_test(
                     result_task.task_id,
                     Some(compact_task),
-                    result_tasktask_status,
+                    result_task.task_status,
                     result_task.sorted_output_ssts,
                     Some(to_prost_table_stats_map(task_stats)),
                 )
@@ -470,7 +470,7 @@ pub(crate) mod tests {
             hummock_manager_ref
                 .report_compact_task(
                     result_task.task_id,
-                    result_tasktask_status,
+                    result_task.task_status,
                     result_task.sorted_output_ssts,
                     Some(to_prost_table_stats_map(task_stats)),
                 )
@@ -804,7 +804,7 @@ pub(crate) mod tests {
         hummock_manager_ref
             .report_compact_task(
                 result_task.task_id,
-                result_tasktask_status,
+                result_task.task_status,
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
             )
@@ -1003,7 +1003,7 @@ pub(crate) mod tests {
         hummock_manager_ref
             .report_compact_task(
                 result_task.task_id,
-                result_tasktask_status,
+                result_task.task_status,
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
             )
@@ -1195,7 +1195,7 @@ pub(crate) mod tests {
         hummock_manager_ref
             .report_compact_task(
                 result_task.task_id,
-                result_tasktask_status,
+                result_task.task_status,
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
             )
@@ -1366,7 +1366,7 @@ pub(crate) mod tests {
         hummock_manager_ref
             .report_compact_task(
                 result_task.task_id,
-                result_tasktask_status,
+                result_task.task_status,
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
             )
@@ -1895,13 +1895,11 @@ pub(crate) mod tests {
         table_watermarks.insert(
             1,
             TableWatermarks {
-                epoch_watermarks: vec![PbEpochNewWatermarks {
-                    watermarks: vec![
-                        VnodeWatermark::new(bitmap.clone(), watermark_key.clone()).to_protobuf()
-                    ],
-                    epoch: test_epoch(500),
-                }],
-                is_ascending: true,
+                watermarks: vec![(
+                    test_epoch(500),
+                    vec![VnodeWatermark::new(bitmap.clone(), watermark_key.clone())].into(),
+                )],
+                direction: WatermarkDirection::Ascending,
             },
         );
 

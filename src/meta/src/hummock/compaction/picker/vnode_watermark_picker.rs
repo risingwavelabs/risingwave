@@ -107,8 +107,9 @@ mod tests {
     use bytes::{BufMut, Bytes, BytesMut};
     use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
+    use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
-    use risingwave_pb::hummock::{KeyRange, SstableInfo};
+    use risingwave_hummock_sdk::version::SstableInfo;
 
     use crate::hummock::compaction::picker::vnode_watermark_picker::should_delete_sst_by_watermark;
 
@@ -133,11 +134,15 @@ mod tests {
         let sst_info = SstableInfo {
             object_id: 1,
             sst_id: 1,
-            key_range: Some(KeyRange {
-                left: FullKey::new(2.into(), table_key(16, "some_watermark_key_1"), 0).encode(),
-                right: FullKey::new(2.into(), table_key(16, "some_watermark_key_2"), 0).encode(),
+            key_range: KeyRange {
+                left: FullKey::new(2.into(), table_key(16, "some_watermark_key_1"), 0)
+                    .encode()
+                    .into(),
+                right: FullKey::new(2.into(), table_key(16, "some_watermark_key_2"), 0)
+                    .encode()
+                    .into(),
                 right_exclusive: true,
-            }),
+            },
             table_ids: vec![2],
             ..Default::default()
         };
@@ -149,11 +154,15 @@ mod tests {
         let sst_info = SstableInfo {
             object_id: 1,
             sst_id: 1,
-            key_range: Some(KeyRange {
-                left: FullKey::new(1.into(), table_key(13, "some_watermark_key_1"), 0).encode(),
-                right: FullKey::new(1.into(), table_key(14, "some_watermark_key_2"), 0).encode(),
+            key_range: KeyRange {
+                left: FullKey::new(1.into(), table_key(13, "some_watermark_key_1"), 0)
+                    .encode()
+                    .into(),
+                right: FullKey::new(1.into(), table_key(14, "some_watermark_key_2"), 0)
+                    .encode()
+                    .into(),
                 right_exclusive: true,
-            }),
+            },
             table_ids: vec![1],
             ..Default::default()
         };
@@ -165,11 +174,15 @@ mod tests {
         let sst_info = SstableInfo {
             object_id: 1,
             sst_id: 1,
-            key_range: Some(KeyRange {
-                left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0).encode(),
-                right: FullKey::new(1.into(), table_key(17, "some_watermark_key_2"), 0).encode(),
+            key_range: KeyRange {
+                left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0)
+                    .encode()
+                    .into(),
+                right: FullKey::new(1.into(), table_key(17, "some_watermark_key_2"), 0)
+                    .encode()
+                    .into(),
                 right_exclusive: true,
-            }),
+            },
             table_ids: vec![1],
             ..Default::default()
         };
@@ -181,11 +194,15 @@ mod tests {
         let sst_info = SstableInfo {
             object_id: 1,
             sst_id: 1,
-            key_range: Some(KeyRange {
-                left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0).encode(),
-                right: FullKey::new(1.into(), table_key(16, "some_watermark_key_9"), 0).encode(),
+            key_range: KeyRange {
+                left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0)
+                    .encode()
+                    .into(),
+                right: FullKey::new(1.into(), table_key(16, "some_watermark_key_9"), 0)
+                    .encode()
+                    .into(),
                 right_exclusive: true,
-            }),
+            },
             table_ids: vec![1],
             ..Default::default()
         };
@@ -197,11 +214,15 @@ mod tests {
         let sst_info = SstableInfo {
             object_id: 1,
             sst_id: 1,
-            key_range: Some(KeyRange {
-                left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0).encode(),
-                right: FullKey::new(1.into(), table_key(16, "some_watermark_key_2"), 0).encode(),
+            key_range: KeyRange {
+                left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0)
+                    .encode()
+                    .into(),
+                right: FullKey::new(1.into(), table_key(16, "some_watermark_key_2"), 0)
+                    .encode()
+                    .into(),
                 right_exclusive: true,
-            }),
+            },
             table_ids: vec![1],
             ..Default::default()
         };

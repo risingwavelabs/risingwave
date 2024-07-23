@@ -347,7 +347,7 @@ mod test {
         {
             let sst_10 = levels[3].table_infos.get_mut(8).unwrap();
             assert_eq!(10, sst_10.sst_id);
-            sst_10.key_range.as_mut().unwrap().right_exclusive = true;
+            sst_10.key_range.right_exclusive = true;
         }
 
         assert_eq!(levels.len(), 4);

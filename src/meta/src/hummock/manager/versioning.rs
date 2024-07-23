@@ -539,11 +539,11 @@ mod tests {
     #[test]
     fn test_estimate_table_stats() {
         let sst = SstableInfo {
-            key_range: Some(KeyRange {
+            key_range: KeyRange {
                 left: vec![1; 10].into(),
                 right: vec![1; 20].into(),
                 ..Default::default()
-            }),
+            },
             table_ids: vec![1, 2, 3],
             total_key_count: 6000,
             uncompressed_file_size: 6_000_000,
@@ -601,11 +601,11 @@ mod tests {
     #[test]
     fn test_estimate_table_stats_large_key_range() {
         let sst = SstableInfo {
-            key_range: Some(KeyRange {
+            key_range: KeyRange {
                 left: vec![1; 1000].into(),
                 right: vec![1; 2000].into(),
                 ..Default::default()
-            }),
+            },
             table_ids: vec![1, 2, 3],
             total_key_count: 6000,
             uncompressed_file_size: 60_000,

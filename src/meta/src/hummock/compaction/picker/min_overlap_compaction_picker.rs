@@ -529,7 +529,6 @@ pub mod tests {
     use std::collections::BTreeSet;
 
     use risingwave_common::config::default::compaction_config;
-    pub use risingwave_pb::hummock::LevelType;
 
     use super::*;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;

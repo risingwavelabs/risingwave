@@ -213,7 +213,7 @@ pub async fn compact_once(
     hummock_manager_ref
         .report_compact_task(
             result_task.task_id,
-            result_tasktask_status,
+            result_task.task_status,
             result_task.sorted_output_ssts,
             Some(to_prost_table_stats_map(task_stats)),
         )

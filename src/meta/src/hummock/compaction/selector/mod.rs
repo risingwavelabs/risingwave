@@ -187,11 +187,11 @@ pub mod tests {
         SstableInfo {
             object_id: id,
             sst_id: id,
-            key_range: Some(KeyRange {
+            key_range: KeyRange {
                 left: iterator_test_key_of_epoch(table_prefix, left, epoch).into(),
                 right: iterator_test_key_of_epoch(table_prefix, right, epoch).into(),
                 right_exclusive: false,
-            }),
+            },
             file_size: (right - left + 1) as u64,
             table_ids: vec![table_prefix as u32],
             uncompressed_file_size: (right - left + 1) as u64,
@@ -214,11 +214,11 @@ pub mod tests {
         SstableInfo {
             object_id: id,
             sst_id: id,
-            key_range: Some(KeyRange {
+            key_range: KeyRange {
                 left: iterator_test_key_of_epoch(table_prefix, left, epoch).into(),
                 right: iterator_test_key_of_epoch(table_prefix, right, epoch).into(),
                 right_exclusive: false,
-            }),
+            },
             file_size: (right - left + 1) as u64,
             table_ids,
             uncompressed_file_size: (right - left + 1) as u64,

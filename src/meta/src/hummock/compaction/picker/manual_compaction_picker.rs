@@ -329,7 +329,6 @@ pub mod tests {
     use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
     use risingwave_pb::hummock::compact_task;
-    pub use risingwave_pb::hummock::LevelType;
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
