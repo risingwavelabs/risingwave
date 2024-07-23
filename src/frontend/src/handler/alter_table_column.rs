@@ -131,7 +131,7 @@ pub async fn handle_alter_table_column(
         .clone()
         .map(|source_schema| source_schema.into_v2_with_warning());
 
-    let check_schema_has_schema_registry = || {
+    let fail_if_has_schema_registry = || {
         if let Some(source_schema) = &source_schema
             && schema_has_schema_registry(source_schema)
         {
@@ -155,9 +155,10 @@ pub async fn handle_alter_table_column(
         AlterTableOperation::AddColumn {
             column_def: new_column,
         } => {
+            fail_if_has_schema_registry()?;
+
             // Duplicated names can actually be checked by `StreamMaterialize`. We do here for
             // better error reporting.
-            check_schema_has_schema_registry()?;
             let new_column_name = new_column.name.real_value();
             if columns
                 .iter()
@@ -194,7 +195,7 @@ pub async fn handle_alter_table_column(
             // Check if the column to drop is referenced by any generated columns.
             for column in original_catalog.columns() {
                 if column_name.real_value() == column.name() && !column.is_generated() {
-                    check_schema_has_schema_registry()?;
+                    fail_if_has_schema_registry()?;
                 }
 
                 if let Some(expr) = column.generated_expr() {
