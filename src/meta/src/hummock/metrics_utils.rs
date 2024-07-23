@@ -227,7 +227,7 @@ pub fn trigger_sst_stat(
                 level.l0.as_ref().map(|l0| {
                     l0.sub_levels
                         .iter()
-                        .filter(|sub_level| sub_level.level_type() == LevelType::Overlapping)
+                        .filter(|sub_level| sub_level.level_type == LevelType::Overlapping)
                         .count()
                 })
             })
@@ -240,7 +240,7 @@ pub fn trigger_sst_stat(
                 level.l0.as_ref().map(|l0| {
                     l0.sub_levels
                         .iter()
-                        .filter(|sub_level| sub_level.level_type() == LevelType::Nonoverlapping)
+                        .filter(|sub_level| sub_level.level_type == LevelType::Nonoverlapping)
                         .count()
                 })
             })
@@ -254,7 +254,7 @@ pub fn trigger_sst_stat(
                     l0.sub_levels
                         .iter()
                         .filter(|sub_level| {
-                            sub_level.level_type() == LevelType::Nonoverlapping
+                            sub_level.level_type == LevelType::Nonoverlapping
                                 && sub_level.vnode_partition_count > 0
                         })
                         .count()
@@ -480,16 +480,16 @@ pub fn trigger_lsm_stat(
     {
         // compact_level_compression_ratio
         let level_compression_ratio = levels
-            .get_levels()
+            .levels
             .iter()
             .map(|level| {
-                let ratio = if level.get_uncompressed_file_size() == 0 {
+                let ratio = if level.uncompressed_file_size == 0 {
                     0.0
                 } else {
-                    level.get_total_file_size() as f64 / level.get_uncompressed_file_size() as f64
+                    level.total_file_size as f64 / level.uncompressed_file_size as f64
                 };
 
-                (level.get_level_idx(), ratio)
+                (level.level_idx, ratio)
             })
             .collect_vec();
 

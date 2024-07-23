@@ -572,7 +572,7 @@ impl SstableStore {
         sst: &SstableInfo,
         stats: &mut StoreLocalStatistic,
     ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static {
-        let object_id = sst.get_object_id();
+        let object_id = sst.object_id;
 
         let entry = self.meta_cache.fetch(object_id, || {
             let store = self.store.clone();

@@ -76,8 +76,8 @@ fn should_delete_sst_by_watermark(
 ) -> bool {
     // Both table id and vnode must be identical for both the left and right keys in a SST.
     // As more data is written to the bottommost level, they will eventually become identical.
-    let left_key = FullKey::decode(&sst_info.key_range.as_ref().unwrap().left);
-    let right_key = FullKey::decode(&sst_info.key_range.as_ref().unwrap().right);
+    let left_key = FullKey::decode(&sst_info.key_range.left);
+    let right_key = FullKey::decode(&sst_info.key_range.right);
     if left_key.user_key.table_id != right_key.user_key.table_id {
         return false;
     }

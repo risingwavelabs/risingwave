@@ -380,7 +380,7 @@ fn estimate_table_stats(sst: &SstableInfo) -> HashMap<u32, TableStats> {
     let mut changes: HashMap<u32, TableStats> = HashMap::default();
     let weighted_value =
         |value: i64| -> i64 { (value as f64 / sst.table_ids.len() as f64).ceil() as i64 };
-    let key_range = sst.key_range.as_ref().unwrap();
+    let key_range = &sst.key_range;
     let estimated_key_size: u64 = (key_range.left.len() + key_range.right.len()) as u64 / 2;
     let mut estimated_total_key_size = estimated_key_size * sst.total_key_count;
     if estimated_total_key_size > sst.uncompressed_file_size {

@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
+use compact_task::PbTaskStatus;
 use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableId, SYS_CATALOG_START_ID};
@@ -225,7 +226,6 @@ impl HummockManagerService for HummockServiceImpl {
         &self,
         request: Request<TriggerManualCompactionRequest>,
     ) -> Result<Response<TriggerManualCompactionResponse>, Status> {
-        use bytes::Bytes;
         let request = request.into_inner();
         let compaction_group_id = request.compaction_group_id;
         let mut option = ManualCompactionOption {
@@ -238,8 +238,8 @@ impl HummockManagerService for HummockServiceImpl {
         match request.key_range {
             Some(pb_key_range) => {
                 option.key_range = KeyRange {
-                    left: Bytes::from(pb_key_range.left),
-                    right: Bytes::from(pb_key_range.right),
+                    left: pb_key_range.left.into(),
+                    right: pb_key_range.right.into(),
                     right_exclusive: pb_key_range.right_exclusive,
                 };
             }
@@ -666,7 +666,10 @@ impl HummockManagerService for HummockServiceImpl {
         let request = request.into_inner();
         let ret = self
             .hummock_manager
-            .cancel_compact_task(request.task_id, request.task_status())
+            .cancel_compact_task(
+                request.task_id,
+                PbTaskStatus::try_from(request.task_status).unwrap(),
+            )
             .await?;
 
         let response = Response::new(CancelCompactTaskResponse { ret });

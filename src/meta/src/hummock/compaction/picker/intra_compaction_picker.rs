@@ -142,7 +142,7 @@ impl IntraCompactionPicker {
         }
 
         for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type() != LevelType::Nonoverlapping
+            if level.level_type != LevelType::Nonoverlapping
                 || level.total_file_size > self.config.sub_level_max_compaction_bytes
             {
                 continue;
@@ -344,7 +344,7 @@ impl WholeLevelCompactionPicker {
             return None;
         }
         for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type() != LevelType::Nonoverlapping
+            if level.level_type != LevelType::Nonoverlapping
                 || level.vnode_partition_count == partition_count
             {
                 continue;
@@ -539,7 +539,7 @@ pub mod tests {
                 ..Default::default()
             };
             let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
-            levels_handler[1].add_pending_task(100, 1, levels.levels[0].get_table_infos());
+            levels_handler[1].add_pending_task(100, 1, levels.levels[0].table_infos());
             let config = Arc::new(
                 CompactionConfigBuilder::new()
                     .level0_sub_level_compact_level_count(1)
@@ -587,7 +587,7 @@ pub mod tests {
                 ..Default::default()
             };
             let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
-            levels_handler[1].add_pending_task(100, 1, levels.levels[0].get_table_infos());
+            levels_handler[1].add_pending_task(100, 1, levels.levels[0].table_infos());
             let config = Arc::new(
                 CompactionConfigBuilder::new()
                     .level0_sub_level_compact_level_count(1)
@@ -610,9 +610,9 @@ pub mod tests {
                 3
             );
 
-            assert_eq!(4, ret.input_levels[0].table_infos[0].get_sst_id());
-            assert_eq!(3, ret.input_levels[1].table_infos[0].get_sst_id());
-            assert_eq!(1, ret.input_levels[2].table_infos[0].get_sst_id());
+            assert_eq!(4, ret.input_levels[0].table_infos[0].sst_id);
+            assert_eq!(3, ret.input_levels[1].table_infos[0].sst_id);
+            assert_eq!(1, ret.input_levels[2].table_infos[0].sst_id);
 
             // will pick sst [2, 6, 5]
             let ret2 = picker
@@ -627,9 +627,9 @@ pub mod tests {
                 3
             );
 
-            assert_eq!(5, ret2.input_levels[0].table_infos[0].get_sst_id());
-            assert_eq!(6, ret2.input_levels[1].table_infos[0].get_sst_id());
-            assert_eq!(2, ret2.input_levels[2].table_infos[0].get_sst_id());
+            assert_eq!(5, ret2.input_levels[0].table_infos[0].sst_id);
+            assert_eq!(6, ret2.input_levels[1].table_infos[0].sst_id);
+            assert_eq!(2, ret2.input_levels[2].table_infos[0].sst_id);
         }
 
         {
@@ -658,7 +658,7 @@ pub mod tests {
                 ..Default::default()
             };
             let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
-            levels_handler[1].add_pending_task(100, 1, levels.levels[0].get_table_infos());
+            levels_handler[1].add_pending_task(100, 1, levels.levels[0].table_infos());
             let config = Arc::new(
                 CompactionConfigBuilder::new()
                     .level0_sub_level_compact_level_count(1)
@@ -681,9 +681,9 @@ pub mod tests {
                 3
             );
 
-            assert_eq!(11, ret.input_levels[0].table_infos[0].get_sst_id());
-            assert_eq!(9, ret.input_levels[1].table_infos[0].get_sst_id());
-            assert_eq!(7, ret.input_levels[2].table_infos[0].get_sst_id());
+            assert_eq!(11, ret.input_levels[0].table_infos[0].sst_id);
+            assert_eq!(9, ret.input_levels[1].table_infos[0].sst_id);
+            assert_eq!(7, ret.input_levels[2].table_infos[0].sst_id);
 
             let ret2 = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -697,9 +697,9 @@ pub mod tests {
                 3
             );
 
-            assert_eq!(5, ret2.input_levels[0].table_infos[0].get_sst_id());
-            assert_eq!(10, ret2.input_levels[1].table_infos[0].get_sst_id());
-            assert_eq!(2, ret2.input_levels[2].table_infos[0].get_sst_id());
+            assert_eq!(5, ret2.input_levels[0].table_infos[0].sst_id);
+            assert_eq!(10, ret2.input_levels[1].table_infos[0].sst_id);
+            assert_eq!(2, ret2.input_levels[2].table_infos[0].sst_id);
         }
     }
 
@@ -715,7 +715,7 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .level0_tier_compact_file_number(2)
-                .target_file_size_base(30)
+                .tarfile_size_base(30)
                 .level0_sub_level_compact_level_count(20) // reject intra
                 .build(),
         );
@@ -732,7 +732,7 @@ pub mod tests {
             levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
             ..Default::default()
         };
-        levels_handler[1].add_pending_task(100, 1, levels.levels[0].get_table_infos());
+        levels_handler[1].add_pending_task(100, 1, levels.levels[0].table_infos());
         let mut local_stats = LocalPickerStatistic::default();
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
         assert!(ret.is_none());
@@ -860,13 +860,13 @@ pub mod tests {
         let input = ret.as_ref().unwrap();
         assert_eq!(input.input_levels.len(), 2);
         assert_ne!(
-            levels.l0.as_ref().unwrap().get_sub_levels()[0]
+            levels.l0.as_ref().unwrap().sub_levels()[0]
                 .table_infos
                 .len(),
             input.input_levels[0].table_infos.len()
         );
         assert_ne!(
-            levels.l0.as_ref().unwrap().get_sub_levels()[1]
+            levels.l0.as_ref().unwrap().sub_levels()[1]
                 .table_infos
                 .len(),
             input.input_levels[1].table_infos.len()

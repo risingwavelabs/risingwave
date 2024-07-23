@@ -478,7 +478,7 @@ impl HummockIterator for ConcatSstableIterator {
 
             // Note that we need to use `<` instead of `<=` to ensure that all keys in an SST
             // (including its max. key) produce the same search result.
-            let max_sst_key = &table.key_range.as_ref().unwrap().right;
+            let max_sst_key = &table.key_range.right;
             FullKey::decode(max_sst_key).cmp(&seek_key) == Ordering::Less
         });
 

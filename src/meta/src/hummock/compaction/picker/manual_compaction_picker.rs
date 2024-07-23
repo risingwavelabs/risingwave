@@ -16,7 +16,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::version::{InputLevel, Level, Levels, OverlappingLevel, SstableInfo};
 use risingwave_pb::hummock::LevelType;
 
@@ -181,7 +180,7 @@ impl ManualCompactionPicker {
         let mut hint_sst_ids: HashSet<u64> = HashSet::new();
         hint_sst_ids.extend(self.option.sst_ids.iter());
         let tmp_sst_info = SstableInfo {
-            key_range: Some(self.option.key_range.clone()),
+            key_range: self.option.key_range.clone(),
             ..Default::default()
         };
         if self
@@ -233,7 +232,7 @@ impl CompactionPicker for ManualCompactionPicker {
         hint_sst_ids.extend(self.option.sst_ids.iter());
         let mut tmp_sst_info = SstableInfo::default();
         let mut range_overlap_info = RangeOverlapInfo::default();
-        tmp_sst_info.key_range = Some(self.option.key_range.clone());
+        tmp_sst_info.key_range = self.option.key_range.clone();
         range_overlap_info.update(&tmp_sst_info);
         let level = self.option.level;
         let target_level = self.target_level;
@@ -271,15 +270,13 @@ impl CompactionPicker for ManualCompactionPicker {
                 .get_level(level)
                 .table_infos
                 .iter()
-                .find_position(|p| {
-                    p.get_sst_id() == select_input_ssts.first().unwrap().get_sst_id()
-                })
+                .find_position(|p| p.sst_id == select_input_ssts.first().unwrap().sst_id)
                 .unwrap();
             let (right, _) = levels
                 .get_level(level)
                 .table_infos
                 .iter()
-                .find_position(|p| p.get_sst_id() == select_input_ssts.last().unwrap().get_sst_id())
+                .find_position(|p| p.sst_id == select_input_ssts.last().unwrap().sst_id)
                 .unwrap();
             select_input_ssts = levels.get_level(level).table_infos[left..=right].to_vec();
             vec![]
@@ -580,7 +577,7 @@ pub mod tests {
                 for t in &mut l.table_infos {
                     t.table_ids.clear();
                     if idx == 0 {
-                        t.table_ids.push(((t.get_sst_id() % 2) + 1) as _);
+                        t.table_ids.push(((t.sst_id % 2) + 1) as _);
                     } else {
                         t.table_ids.push(3);
                     }
@@ -704,7 +701,7 @@ pub mod tests {
                 result.input_levels[l]
                     .table_infos
                     .iter()
-                    .map(|s| s.get_sst_id())
+                    .map(|s| s.sst_id)
                     .collect_vec(),
                 *e
             );
@@ -740,7 +737,7 @@ pub mod tests {
                 result.input_levels[l]
                     .table_infos
                     .iter()
-                    .map(|s| s.get_sst_id())
+                    .map(|s| s.sst_id)
                     .collect_vec(),
                 *e
             );
@@ -792,7 +789,7 @@ pub mod tests {
                     result.input_levels[i]
                         .table_infos
                         .iter()
-                        .map(|s| s.get_sst_id())
+                        .map(|s| s.sst_id)
                         .collect_vec(),
                     *e
                 );
@@ -858,7 +855,7 @@ pub mod tests {
                     .iter()
                     .take(3)
                     .flat_map(|s| s.table_infos.clone())
-                    .map(|s| s.get_sst_id())
+                    .map(|s| s.sst_id)
                     .collect_vec(),
                 vec![9, 10, 7, 8, 5, 6]
             );
@@ -866,7 +863,7 @@ pub mod tests {
                 result.input_levels[3]
                     .table_infos
                     .iter()
-                    .map(|s| s.get_sst_id())
+                    .map(|s| s.sst_id)
                     .collect_vec(),
                 vec![3]
             );
@@ -900,7 +897,7 @@ pub mod tests {
                     .iter()
                     .take(3)
                     .flat_map(|s| s.table_infos.clone())
-                    .map(|s| s.get_sst_id())
+                    .map(|s| s.sst_id)
                     .collect_vec(),
                 vec![9, 10, 7, 8, 5, 6]
             );
@@ -908,7 +905,7 @@ pub mod tests {
                 result.input_levels[3]
                     .table_infos
                     .iter()
-                    .map(|s| s.get_sst_id())
+                    .map(|s| s.sst_id)
                     .collect_vec(),
                 vec![3]
             );
@@ -946,7 +943,7 @@ pub mod tests {
                     .iter()
                     .take(1)
                     .flat_map(|s| s.table_infos.clone())
-                    .map(|s| s.get_sst_id())
+                    .map(|s| s.sst_id)
                     .collect_vec(),
                 vec![5, 6]
             );
@@ -954,7 +951,7 @@ pub mod tests {
                 result.input_levels[1]
                     .table_infos
                     .iter()
-                    .map(|s| s.get_sst_id())
+                    .map(|s| s.sst_id)
                     .collect_vec(),
                 vec![3]
             );
@@ -1049,7 +1046,7 @@ pub mod tests {
                     result.input_levels[l]
                         .table_infos
                         .iter()
-                        .map(|s| s.get_sst_id())
+                        .map(|s| s.sst_id)
                         .collect_vec(),
                     *e
                 );
@@ -1092,7 +1089,7 @@ pub mod tests {
                     result.input_levels[i]
                         .table_infos
                         .iter()
-                        .map(|s| s.get_sst_id())
+                        .map(|s| s.sst_id)
                         .collect_vec(),
                     *e
                 );
@@ -1142,7 +1139,7 @@ pub mod tests {
                     result.input_levels[i]
                         .table_infos
                         .iter()
-                        .map(|s| s.get_sst_id())
+                        .map(|s| s.sst_id)
                         .collect_vec(),
                     *e
                 );

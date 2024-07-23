@@ -235,8 +235,8 @@ async fn test_read_version_basic() {
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(2, staging_ssts.len());
-        assert_eq!(1, staging_ssts[0].get_object_id());
-        assert_eq!(2, staging_ssts[1].get_object_id());
+        assert_eq!(1, staging_ssts[0].object_id);
+        assert_eq!(2, staging_ssts[1].object_id);
     }
 
     {
@@ -259,7 +259,7 @@ async fn test_read_version_basic() {
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(1, staging_ssts.len());
-        assert_eq!(2, staging_ssts[0].get_object_id());
+        assert_eq!(2, staging_ssts[0].object_id);
     }
 }
 

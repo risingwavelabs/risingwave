@@ -15,7 +15,6 @@
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::append_sstable_info_to_string;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::version::{InputLevel, Level, Levels, SstableInfo};
 use risingwave_pb::hummock::LevelType;
 
@@ -252,7 +251,7 @@ impl NonOverlapSubLevelPicker {
         // Pay attention to the order here: Make sure to select the lowest sub_level to meet the requirements of base compaction. If you break the assumption of this order, you need to redesign it.
         // TODO: Use binary selection to replace the step algorithm to optimize algorithm complexity
         'expand_new_level: for (target_index, target_level) in levels.iter().enumerate().skip(1) {
-            if target_level.level_type() != LevelType::Nonoverlapping {
+            if target_level.level_type != LevelType::Nonoverlapping {
                 break;
             }
 
@@ -309,7 +308,7 @@ impl NonOverlapSubLevelPicker {
                     }
                     basic_overlap_info.update(other);
 
-                    add_files_size += other.get_file_size();
+                    add_files_size += other.file_size;
                     add_files_count += 1;
                 }
 
@@ -344,11 +343,7 @@ impl NonOverlapSubLevelPicker {
 
             // sort sst per level due to reverse expand
             ret.sstable_infos.iter_mut().for_each(|level_ssts| {
-                level_ssts.sort_by(|sst1, sst2| {
-                    let a = sst1.key_range.as_ref().unwrap();
-                    let b = sst2.key_range.as_ref().unwrap();
-                    a.cmp(b)
-                });
+                level_ssts.sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
             });
         } else {
             ret.total_file_count = 1;
@@ -590,7 +585,7 @@ pub mod tests {
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 2);
+        assert_eq!(ret.input_levels[0].table_infos[0].sst_id, 2);
         assert_eq!(ret.input_levels[1].table_infos.len(), 0);
         ret.add_pending_task(0, &mut level_handlers);
 
@@ -600,18 +595,18 @@ pub mod tests {
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 0);
+        assert_eq!(ret.input_levels[0].table_infos[0].sst_id, 0);
         assert_eq!(ret.input_levels[1].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 4);
+        assert_eq!(ret.input_levels[1].table_infos[0].sst_id, 4);
         ret.add_pending_task(1, &mut level_handlers);
 
         let ret = picker
             .pick_compaction(&levels, &level_handlers, &mut local_stats)
             .unwrap();
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 1);
+        assert_eq!(ret.input_levels[0].table_infos[0].sst_id, 1);
         assert_eq!(ret.input_levels[1].table_infos.len(), 2);
-        assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 5);
+        assert_eq!(ret.input_levels[1].table_infos[0].sst_id, 5);
     }
 
     #[test]
@@ -663,11 +658,11 @@ pub mod tests {
         assert_eq!(ret.input_levels[1].level_idx, 2);
 
         assert_eq!(ret.input_levels[0].table_infos.len(), 2);
-        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 0);
-        assert_eq!(ret.input_levels[0].table_infos[1].get_sst_id(), 1);
+        assert_eq!(ret.input_levels[0].table_infos[0].sst_id, 0);
+        assert_eq!(ret.input_levels[0].table_infos[1].sst_id, 1);
 
         assert_eq!(ret.input_levels[1].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 4);
+        assert_eq!(ret.input_levels[1].table_infos[0].sst_id, 4);
     }
 
     #[test]
@@ -885,7 +880,7 @@ pub mod tests {
             for plan in ret {
                 let mut sst_id_set = BTreeSet::default();
                 for sst in &plan.sstable_infos {
-                    sst_id_set.insert(sst[0].get_sst_id());
+                    sst_id_set.insert(sst[0].sst_id);
                 }
                 assert!(sst_id_set.len() <= max_file_count as usize);
             }
@@ -909,7 +904,7 @@ pub mod tests {
             for plan in ret {
                 let mut sst_id_set = BTreeSet::default();
                 for sst in &plan.sstable_infos {
-                    sst_id_set.insert(sst[0].get_sst_id());
+                    sst_id_set.insert(sst[0].sst_id);
                 }
                 assert!(plan.sstable_infos.len() >= min_depth);
             }

@@ -328,7 +328,7 @@ impl HummockManager {
                         new_version_delta
                             .latest_version()
                             .get_compaction_group_levels(group_id)
-                            .get_levels()
+                            .levels
                             .len(),
                     ));
                 }

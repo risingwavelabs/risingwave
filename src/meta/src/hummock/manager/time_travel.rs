@@ -325,7 +325,7 @@ impl HummockManager {
                 .await?;
             for sst_info in sst_infos {
                 let sst_info: SstableInfo = sst_info.sstable_info.to_protobuf().into();
-                sst_id_to_info.insert(sst_info.get_sst_id(), sst_info);
+                sst_id_to_info.insert(sst_info.sst_id, sst_info);
             }
         }
         if sst_count != sst_id_to_info.len() {

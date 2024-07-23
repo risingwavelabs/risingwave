@@ -55,7 +55,7 @@ impl TierCompactionPicker {
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type() != LevelType::Overlapping {
+            if level.level_type != LevelType::Overlapping {
                 continue;
             }
 

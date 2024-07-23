@@ -18,7 +18,6 @@ use std::mem::{replace, size_of};
 use std::ops::Deref;
 use std::sync::{Arc, LazyLock};
 
-use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
@@ -30,9 +29,9 @@ use risingwave_pb::hummock::subscribe_compaction_event_request::PbReportTask;
 use risingwave_pb::hummock::{
     BloomFilterType, CompactionConfig, LevelType, PbCompactTask, PbGroupConstruct, PbGroupDelta,
     PbGroupDestroy, PbGroupMetaChange, PbGroupTableChange, PbHummockVersion, PbHummockVersionDelta,
-    PbInputLevel, PbIntraLevelDelta, PbKeyRange, PbLevel, PbLevelType, PbOverlappingLevel,
-    PbSstableInfo, PbStateTableInfo, PbTableStats, PbValidationTask, StateTableInfo,
-    StateTableInfoDelta, TableOption, TableSchema,
+    PbInputLevel, PbIntraLevelDelta, PbKeyRange, PbLevel, PbOverlappingLevel, PbSstableInfo,
+    PbStateTableInfo, PbTableStats, PbValidationTask, StateTableInfo, StateTableInfoDelta,
+    TableOption, TableSchema,
 };
 use tracing::warn;
 
@@ -114,12 +113,6 @@ impl OverlappingLevel {
             .sum::<usize>()
             + size_of::<u64>()
             + size_of::<u64>()
-    }
-}
-
-impl OverlappingLevel {
-    pub fn get_sub_levels(&self) -> &Vec<Level> {
-        &self.sub_levels
     }
 }
 
@@ -222,32 +215,6 @@ impl Level {
     }
 }
 
-impl Level {
-    pub fn get_table_infos(&self) -> &Vec<SstableInfo> {
-        &self.table_infos
-    }
-
-    pub fn level_type(&self) -> LevelType {
-        self.level_type
-    }
-
-    pub fn get_sub_level_id(&self) -> u64 {
-        self.sub_level_id
-    }
-
-    pub fn get_level_idx(&self) -> u32 {
-        self.level_idx
-    }
-
-    pub fn get_total_file_size(&self) -> u64 {
-        self.total_file_size
-    }
-
-    pub fn get_uncompressed_file_size(&self) -> u64 {
-        self.uncompressed_file_size
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Levels {
     pub levels: Vec<Level>,
@@ -260,8 +227,32 @@ pub struct Levels {
 }
 
 impl Levels {
-    pub fn get_levels(&self) -> &Vec<Level> {
-        &self.levels
+    pub fn level0(&self) -> &OverlappingLevel {
+        self.l0.as_ref().unwrap()
+    }
+
+    pub fn get_level(&self, level_idx: usize) -> &Level {
+        &self.levels[level_idx - 1]
+    }
+
+    pub fn get_level_mut(&mut self, level_idx: usize) -> &mut Level {
+        &mut self.levels[level_idx - 1]
+    }
+
+    pub fn is_last_level(&self, level_idx: u32) -> bool {
+        self.levels
+            .last()
+            .as_ref()
+            .map_or(false, |level| level.level_idx == level_idx)
+    }
+
+    pub fn count_ssts(&self) -> usize {
+        self.level0()
+            .sub_levels
+            .iter()
+            .chain(self.levels.iter())
+            .map(|level| level.table_infos.len())
+            .sum()
     }
 }
 
@@ -805,9 +796,7 @@ impl HummockVersionDelta {
                 group_deltas.group_deltas.iter().flat_map(|group_delta| {
                     static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
                     let sst_slice = match group_delta {
-                        GroupDelta::IntraLevel(level_delta) => {
-                            level_delta.get_inserted_table_infos()
-                        }
+                        GroupDelta::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
                         GroupDelta::GroupConstruct(_)
                         | GroupDelta::GroupDestroy(_)
                         | GroupDelta::GroupMetaChange(_)
@@ -1068,7 +1057,7 @@ impl From<PbHummockVersionDelta> for HummockVersionDelta {
 pub struct SstableInfo {
     pub object_id: u64,
     pub sst_id: u64,
-    pub key_range: Option<KeyRange>,
+    pub key_range: KeyRange,
     pub file_size: u64,
     pub table_ids: Vec<u32>,
     pub meta_offset: u64,
@@ -1095,10 +1084,7 @@ impl SstableInfo {
             + size_of::<u64>() // uncompressed_file_size
             + size_of::<u64>() // range_tombstone_count
             + size_of::<u32>(); // bloom_filter_kind
-
-        if let Some(key_range) = &self.key_range {
-            basic += key_range.left.len() + key_range.right.len() + size_of::<bool>();
-        }
+        basic += self.key_range.left.len() + self.key_range.right.len() + size_of::<bool>();
 
         basic
     }
@@ -1113,18 +1099,14 @@ impl From<PbSstableInfo> for SstableInfo {
         Self {
             object_id: pb_sstable_info.object_id,
             sst_id: pb_sstable_info.sst_id,
-            key_range: if pb_sstable_info.key_range.is_some() {
+            key_range: {
                 let pb_keyrange = pb_sstable_info.key_range.unwrap();
-                let key_range = KeyRange {
-                    left: Bytes::from(pb_keyrange.left),
-                    right: Bytes::from(pb_keyrange.right),
+                KeyRange {
+                    left: pb_keyrange.left.into(),
+                    right: pb_keyrange.right.into(),
                     right_exclusive: pb_keyrange.right_exclusive,
-                };
-                Some(key_range)
-            } else {
-                None
+                }
             },
-
             file_size: pb_sstable_info.file_size,
             table_ids: pb_sstable_info.table_ids.clone(),
             meta_offset: pb_sstable_info.meta_offset,
@@ -1145,18 +1127,14 @@ impl From<&PbSstableInfo> for SstableInfo {
         Self {
             object_id: pb_sstable_info.object_id,
             sst_id: pb_sstable_info.sst_id,
-            key_range: if pb_sstable_info.key_range.is_some() {
+            key_range: {
                 let pb_keyrange = pb_sstable_info.key_range.as_ref().unwrap();
-                let key_range = KeyRange {
-                    left: Bytes::from(pb_keyrange.left.clone()),
-                    right: Bytes::from(pb_keyrange.right.clone()),
+                KeyRange {
+                    left: pb_keyrange.left.clone().into(),
+                    right: pb_keyrange.right.clone().into(),
                     right_exclusive: pb_keyrange.right_exclusive,
-                };
-                Some(key_range)
-            } else {
-                None
+                }
             },
-
             file_size: pb_sstable_info.file_size,
             table_ids: pb_sstable_info.table_ids.clone(),
             meta_offset: pb_sstable_info.meta_offset,
@@ -1177,16 +1155,14 @@ impl From<SstableInfo> for PbSstableInfo {
         PbSstableInfo {
             object_id: sstable_info.object_id,
             sst_id: sstable_info.sst_id,
-            key_range: if sstable_info.key_range.is_some() {
-                let keyrange = sstable_info.key_range.unwrap();
+            key_range: {
+                let keyrange = sstable_info.key_range;
                 let pb_key_range = PbKeyRange {
                     left: keyrange.left.into(),
                     right: keyrange.right.into(),
                     right_exclusive: keyrange.right_exclusive,
                 };
                 Some(pb_key_range)
-            } else {
-                None
             },
 
             file_size: sstable_info.file_size,
@@ -1208,16 +1184,14 @@ impl From<&SstableInfo> for PbSstableInfo {
         PbSstableInfo {
             object_id: sstable_info.object_id,
             sst_id: sstable_info.sst_id,
-            key_range: if sstable_info.key_range.is_some() {
-                let keyrange = sstable_info.key_range.as_ref().unwrap();
+            key_range: {
+                let keyrange = &sstable_info.key_range;
                 let pb_key_range = PbKeyRange {
                     left: keyrange.left.to_vec(),
                     right: keyrange.right.to_vec(),
                     right_exclusive: keyrange.right_exclusive,
                 };
                 Some(pb_key_range)
-            } else {
-                None
             },
 
             file_size: sstable_info.file_size,
@@ -1235,24 +1209,8 @@ impl From<&SstableInfo> for PbSstableInfo {
 }
 
 impl SstableInfo {
-    pub fn get_sst_id(&self) -> u64 {
-        self.sst_id
-    }
-
-    pub fn get_object_id(&self) -> u64 {
-        self.sst_id
-    }
-
-    pub fn get_file_size(&self) -> u64 {
-        self.file_size
-    }
-
-    pub fn get_table_ids(&self) -> &Vec<u32> {
-        &self.table_ids
-    }
-
-    pub fn get_bloom_filter_kind(&self) -> BloomFilterType {
-        self.bloom_filter_kind
+    pub fn remove_key_range(&mut self) {
+        self.key_range = KeyRange::default();
     }
 }
 
@@ -1331,20 +1289,6 @@ impl From<&InputLevel> for PbInputLevel {
     }
 }
 
-impl InputLevel {
-    pub fn get_table_infos(&self) -> &Vec<SstableInfo> {
-        &self.table_infos
-    }
-
-    pub fn level_type(&self) -> PbLevelType {
-        self.level_type
-    }
-
-    pub fn get_level_idx(&self) -> u32 {
-        self.level_idx
-    }
-}
-
 #[derive(Clone, PartialEq, Default, Debug)]
 pub struct CompactTask {
     /// SSTs to be compacted, which will be removed from LSM after compaction
@@ -1363,7 +1307,7 @@ pub struct CompactTask {
     pub gc_delete_keys: bool,
     /// Lbase in LSM
     pub base_level: u32,
-    pub task_status: TaskStatus,
+    pub task_status: PbTaskStatus,
     /// compaction group the task belongs to
     pub compaction_group_id: u64,
     /// `existing_table_ids` for compaction drop key
@@ -1375,7 +1319,7 @@ pub struct CompactTask {
     pub current_epoch_time: u64,
     pub target_sub_level_id: u64,
     /// Identifies whether the task is `space_reclaim`, if the `compact_task_type` increases, it will be refactored to enum
-    pub task_type: TaskType,
+    pub task_type: PbTaskType,
     /// Deprecated. use `table_vnode_partition` instead;
     pub split_by_state_table: bool,
     /// Compaction needs to cut the state table every time 1/weight of vnodes in the table have been processed.
@@ -1446,8 +1390,8 @@ impl From<PbCompactTask> for CompactTask {
                 .splits
                 .into_iter()
                 .map(|pb_keyrange| KeyRange {
-                    left: Bytes::from(pb_keyrange.left),
-                    right: Bytes::from(pb_keyrange.right),
+                    left: pb_keyrange.left.into(),
+                    right: pb_keyrange.right.into(),
                     right_exclusive: pb_keyrange.right_exclusive,
                 })
                 .collect_vec(),
@@ -1500,8 +1444,8 @@ impl From<&PbCompactTask> for CompactTask {
                 .splits
                 .iter()
                 .map(|pb_keyrange| KeyRange {
-                    left: Bytes::from(pb_keyrange.left.clone()),
-                    right: Bytes::from(pb_keyrange.right.clone()),
+                    left: pb_keyrange.left.clone().into(),
+                    right: pb_keyrange.right.clone().into(),
                     right_exclusive: pb_keyrange.right_exclusive,
                 })
                 .collect_vec(),
@@ -1646,28 +1590,8 @@ impl From<&CompactTask> for PbCompactTask {
 }
 
 impl CompactTask {
-    pub fn task_type(&self) -> PbTaskType {
-        PbTaskType::try_from(self.task_type).unwrap()
-    }
-
-    pub fn task_status(&self) -> PbTaskStatus {
-        PbTaskStatus::try_from(self.task_status).unwrap()
-    }
-
     pub fn set_task_status(&mut self, s: PbTaskStatus) {
         self.task_status = s;
-    }
-
-    pub fn get_input_ssts(&self) -> &Vec<InputLevel> {
-        &self.input_ssts
-    }
-
-    pub fn get_task_id(&self) -> u64 {
-        self.task_id
-    }
-
-    pub fn get_max_sub_compaction(&self) -> u32 {
-        self.max_sub_compaction
     }
 }
 
@@ -1845,28 +1769,6 @@ impl From<&PbIntraLevelDelta> for IntraLevelDelta {
 }
 
 impl IntraLevelDelta {
-    pub fn get_level_idx(&self) -> u32 {
-        self.level_idx
-    }
-
-    pub fn get_l0_sub_level_id(&self) -> u64 {
-        self.l0_sub_level_id
-    }
-
-    pub fn get_removed_table_ids(&self) -> &Vec<u64> {
-        &self.removed_table_ids
-    }
-
-    pub fn get_inserted_table_infos(&self) -> &Vec<SstableInfo> {
-        &self.inserted_table_infos
-    }
-
-    pub fn get_vnode_partition_count(&self) -> u32 {
-        self.vnode_partition_count
-    }
-}
-
-impl IntraLevelDelta {
     pub fn new(
         level_idx: u32,
         l0_sub_level_id: u64,
@@ -2039,10 +1941,6 @@ impl From<&PbGroupDeltas> for GroupDeltas {
 }
 
 impl GroupDeltas {
-    pub fn get_group_deltas(&self) -> &Vec<GroupDelta> {
-        &self.group_deltas
-    }
-
     pub fn to_protobuf(&self) -> PbGroupDeltas {
         self.into()
     }

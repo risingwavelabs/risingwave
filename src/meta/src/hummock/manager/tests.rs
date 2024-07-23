@@ -226,14 +226,7 @@ async fn test_hummock_compaction_task() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(
-        compact_task
-            .get_input_ssts()
-            .first()
-            .unwrap()
-            .get_level_idx(),
-        0
-    );
+    assert_eq!(compact_task.input_ssts.first().unwrap().level_idx, 0);
     assert_eq!(compact_task.get_task_id(), 2);
 
     // Cancel the task and succeed.
@@ -293,9 +286,9 @@ async fn test_hummock_table() {
             .iter()
             .chain(levels.levels.iter())
             .flat_map(|level| level.table_infos.iter())
-            .map(|info| info.get_object_id())
+            .map(|info| info.object_id)
             .sorted()
-            .cmp(original_tables.iter().map(|ot| ot.get_object_id()).sorted())
+            .cmp(original_tables.iter().map(|ot| ot.object_id).sorted())
     );
 
     // Confirm tables got are equal to original tables
@@ -762,14 +755,7 @@ async fn test_print_compact_task() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(
-        compact_task
-            .get_input_ssts()
-            .first()
-            .unwrap()
-            .get_level_idx(),
-        0
-    );
+    assert_eq!(compact_task.input_ssts.first().unwrap().level_idx, 0);
 
     let s = compact_task_to_string(&compact_task);
     assert!(s.contains("Compaction task id: 1, group-id: 2, type: Dynamic, target level: 0"));
@@ -791,7 +777,7 @@ async fn test_invalid_sst_id() {
     // reject due to invalid context id
     let sst_to_worker = ssts
         .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), WorkerId::MAX))
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, WorkerId::MAX))
         .collect();
     let error = hummock_manager
         .commit_epoch_for_test(epoch, ssts.clone(), sst_to_worker)
@@ -801,7 +787,7 @@ async fn test_invalid_sst_id() {
 
     let sst_to_worker = ssts
         .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, context_id))
         .collect();
     hummock_manager
         .commit_epoch_for_test(epoch, ssts, sst_to_worker)
@@ -941,14 +927,7 @@ async fn test_hummock_compaction_task_heartbeat() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(
-        compact_task
-            .get_input_ssts()
-            .first()
-            .unwrap()
-            .get_level_idx(),
-        0
-    );
+    assert_eq!(compact_task.input_ssts.first().unwrap().level_idx, 0);
     assert_eq!(compact_task.get_task_id(), 2);
 
     for i in 0..10 {
@@ -1061,14 +1040,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(
-        compact_task
-            .get_input_ssts()
-            .first()
-            .unwrap()
-            .get_level_idx(),
-        0
-    );
+    assert_eq!(compact_task.input_ssts.first().unwrap().level_idx, 0);
     assert_eq!(compact_task.get_task_id(), 2);
 
     // send heartbeats to the task immediately
@@ -1104,8 +1076,8 @@ async fn test_extend_objects_to_delete() {
         .iter()
         .map(|ssts| {
             ssts.iter()
-                .max_by_key(|s| s.get_object_id())
-                .map(|s| s.get_object_id())
+                .max_by_key(|s| s.object_id)
+                .map(|s| s.object_id)
                 .unwrap()
         })
         .max()
@@ -1114,7 +1086,7 @@ async fn test_extend_objects_to_delete() {
     let all_object_ids = sst_infos
         .iter()
         .flatten()
-        .map(|s| s.get_object_id())
+        .map(|s| s.object_id)
         .chain(max_committed_object_id + 1..=max_committed_object_id + orphan_sst_num)
         .collect_vec();
     assert!(hummock_manager.get_objects_to_delete().is_empty());
@@ -1248,7 +1220,7 @@ async fn test_version_stats() {
         .collect_vec();
     let sst_to_worker = ssts
         .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), worker_node.id))
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, worker_node.id))
         .collect();
     hummock_manager
         .commit_epoch_for_test(epoch, ssts, sst_to_worker)
@@ -1862,7 +1834,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
     assert_eq!(
         current_version.get_compaction_group_levels(2).levels[base_level - 1].table_infos[0]
             .object_id,
-        sst_1.sst_info.get_object_id() + 1,
+        sst_1.sst_info.object_id + 1,
     );
     assert_eq!(
         current_version.get_compaction_group_levels(2).levels[base_level - 1].table_infos[0]

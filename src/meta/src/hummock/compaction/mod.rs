@@ -31,7 +31,7 @@ use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
-use risingwave_pb::hummock::{CompactionConfig, LevelType, PbCompactTask};
+use risingwave_pb::hummock::{CompactionConfig, LevelType};
 pub use selector::{CompactionSelector, CompactionSelectorContext};
 
 use self::selector::{EmergencySelector, LocalSelectorStatistic};
@@ -145,12 +145,11 @@ impl CompactStatus {
     }
 
     pub fn is_trivial_move_task(task: &CompactTask) -> bool {
-        if task.task_type() != TaskType::Dynamic && task.task_type() != TaskType::Emergency {
+        if task.task_type != TaskType::Dynamic && task.task_type != TaskType::Emergency {
             return false;
         }
 
-        if task.input_ssts.len() != 2
-            || task.input_ssts[0].level_type() != LevelType::Nonoverlapping
+        if task.input_ssts.len() != 2 || task.input_ssts[0].level_type != LevelType::Nonoverlapping
         {
             return false;
         }
@@ -173,7 +172,7 @@ impl CompactStatus {
 
     pub fn is_trivial_reclaim(task: &CompactTask) -> bool {
         // Currently all VnodeWatermark tasks are trivial reclaim.
-        if task.task_type() == TaskType::VnodeWatermark {
+        if task.task_type == TaskType::VnodeWatermark {
             return true;
         }
         let exist_table_ids = HashSet::<u32>::from_iter(task.existing_table_ids.clone());
@@ -184,13 +183,6 @@ impl CompactStatus {
                     .all(|table_id| !exist_table_ids.contains(table_id))
             })
         })
-    }
-
-    /// Declares a task as either succeeded, failed or canceled.
-    pub fn report_compact_task_pb(&mut self, compact_task: &PbCompactTask) {
-        for level in &compact_task.input_ssts {
-            self.level_handlers[level.level_idx as usize].remove_task(compact_task.task_id);
-        }
     }
 
     pub fn report_compact_task(&mut self, compact_task: &CompactTask) {

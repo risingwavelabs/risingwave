@@ -113,11 +113,11 @@ pub fn gen_dummy_sst_info(
     SstableInfo {
         object_id: id,
         sst_id: id,
-        key_range: Some(KeyRange {
+        key_range: KeyRange {
             left: Bytes::from(FullKey::for_test(table_id, min_table_key, epoch).encode()),
             right: Bytes::from(FullKey::for_test(table_id, max_table_key, epoch).encode()),
             right_exclusive: false,
-        }),
+        },
         file_size,
         table_ids: vec![table_id.table_id],
         uncompressed_file_size: file_size,
@@ -190,11 +190,11 @@ pub async fn put_sst(
     let sst = SstableInfo {
         object_id: sst_object_id,
         sst_id: sst_object_id,
-        key_range: Some(KeyRange {
+        key_range: KeyRange {
             left: Bytes::from(meta.smallest_key.clone()),
             right: Bytes::from(meta.largest_key.clone()),
             right_exclusive: false,
-        }),
+        },
         file_size: meta.estimated_size as u64,
         meta_offset: meta.meta_offset,
         uncompressed_file_size: meta.estimated_size as u64,

@@ -189,7 +189,7 @@ fn generate_splits_fast(
     );
     let mut indexes = vec![];
     for sst in sstable_infos {
-        let key_range = sst.key_range.as_ref().unwrap();
+        let key_range = &sst.key_range;
         indexes.push(
             FullKey {
                 user_key: FullKey::decode(&key_range.left).user_key,
@@ -512,7 +512,7 @@ pub fn optimize_by_copy_block(compact_task: &CompactTask, context: &CompactorCon
 
     let all_ssts_are_blocked_filter = sstable_infos
         .iter()
-        .all(|table_info| table_info.get_bloom_filter_kind() == BloomFilterType::Blocked);
+        .all(|table_info| table_info.bloom_filter_kind == BloomFilterType::Blocked);
 
     let delete_key_count = sstable_infos
         .iter()
@@ -552,7 +552,7 @@ pub fn optimize_by_copy_block(compact_task: &CompactTask, context: &CompactorCon
         && compaction_size < context.storage_opts.compactor_fast_max_compact_task_size
         && delete_key_count * 100
             < context.storage_opts.compactor_fast_max_compact_delete_ratio as u64 * total_key_count
-        && compact_task.task_type() == PbTaskType::Dynamic
+        && compact_task.task_type == PbTaskType::Dynamic
 }
 
 pub async fn generate_splits_for_task(
@@ -582,7 +582,7 @@ pub async fn generate_splits_for_task(
             &sstable_infos,
             compaction_size,
             context,
-            compact_task.get_max_sub_compaction(),
+            compact_task.max_sub_compaction,
         )
         .await?;
         if !splits.is_empty() {
@@ -666,7 +666,7 @@ pub fn calculate_task_parallelism(compact_task: &CompactTask, context: &Compacto
         context.compaction_executor.worker_num(),
         parallel_compact_size,
         compaction_size,
-        compact_task.get_max_sub_compaction(),
+        compact_task.max_sub_compaction,
     )
 }
 

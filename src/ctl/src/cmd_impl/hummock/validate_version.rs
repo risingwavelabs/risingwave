@@ -109,7 +109,7 @@ async fn print_user_key_in_version(
             .chain(cg.levels.iter())
         {
             for sstable_info in &level.table_infos {
-                let key_range = sstable_info.key_range.as_ref().unwrap();
+                let key_range = &sstable_info.key_range;
                 let left_user_key = FullKey::decode(&key_range.left);
                 let right_user_key = FullKey::decode(&key_range.right);
                 if left_user_key.user_key > *target_key || *target_key > right_user_key.user_key {

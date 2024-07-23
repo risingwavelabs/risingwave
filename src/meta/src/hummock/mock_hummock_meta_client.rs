@@ -163,7 +163,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         let sst_to_worker = sync_result
             .uncommitted_ssts
             .iter()
-            .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), self.context_id))
+            .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, self.context_id))
             .collect();
         let new_table_watermark = sync_result.table_watermarks;
         let table_change_log = build_table_change_log_delta(

@@ -210,9 +210,7 @@ pub fn can_concat(ssts: &[SstableInfo]) -> bool {
     for i in 1..len {
         if ssts[i - 1]
             .key_range
-            .as_ref()
-            .unwrap()
-            .compare_right_with(&ssts[i].key_range.as_ref().unwrap().left)
+            .compare_right_with(&ssts[i].key_range.left)
             != Ordering::Less
         {
             return false;

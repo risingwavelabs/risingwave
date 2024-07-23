@@ -11877,7 +11877,6 @@ version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
- "bytes",
  "either",
  "futures",
  "itertools 0.12.1",

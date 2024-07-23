@@ -179,9 +179,7 @@ impl CompactorRunner {
                         .iter()
                         .any(|table_id| self.compact_task.existing_table_ids.contains(table_id));
 
-                    self.key_range
-                        .full_key_overlap(table_info.key_range.as_ref().unwrap())
-                        && exist_table
+                    self.key_range.full_key_overlap(&table_info.key_range) && exist_table
                 })
                 .cloned()
                 .collect_vec();
@@ -267,8 +265,8 @@ pub fn partition_overlapping_sstable_infos(
     }
     let mut groups: BinaryHeap<SstableGroup> = BinaryHeap::default();
     origin_infos.sort_by(|a, b| {
-        let x = a.key_range.as_ref().unwrap();
-        let y = b.key_range.as_ref().unwrap();
+        let x = &a.key_range;
+        let y = &b.key_range;
         KeyComparator::compare_encoded_full_key(&x.left, &y.left)
     });
     for sst in origin_infos {
@@ -276,17 +274,15 @@ pub fn partition_overlapping_sstable_infos(
         if let Some(mut prev_group) = groups.peek_mut() {
             if KeyComparator::encoded_full_key_less_than(
                 &prev_group.max_right_bound,
-                &sst.key_range.as_ref().unwrap().left,
+                &sst.key_range.left,
             ) {
-                prev_group
-                    .max_right_bound
-                    .clone_from(&sst.key_range.as_ref().unwrap().right);
+                prev_group.max_right_bound.clone_from(&sst.key_range.right);
                 prev_group.ssts.push(sst);
                 continue;
             }
         }
         groups.push(SstableGroup {
-            max_right_bound: sst.key_range.as_ref().unwrap().right.clone(),
+            max_right_bound: sst.key_range.right.clone(),
             ssts: vec![sst],
         });
     }

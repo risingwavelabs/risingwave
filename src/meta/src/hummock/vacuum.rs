@@ -272,7 +272,7 @@ mod tests {
                     .first()
                     .unwrap()
                     .iter()
-                    .map(|s| s.get_object_id())
+                    .map(|s| s.object_id)
                     .collect_vec(),
             })
             .await

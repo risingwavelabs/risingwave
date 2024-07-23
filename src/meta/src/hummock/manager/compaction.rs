@@ -157,11 +157,8 @@ impl<'a> HummockVersionTransaction<'a> {
 
         for level in &compact_task.input_ssts {
             let level_idx = level.level_idx;
-            let mut removed_table_ids = level
-                .table_infos
-                .iter()
-                .map(|sst| sst.get_sst_id())
-                .collect_vec();
+            let mut removed_table_ids =
+                level.table_infos.iter().map(|sst| sst.sst_id).collect_vec();
 
             removed_table_ids_map
                 .entry(level_idx)
@@ -992,7 +989,7 @@ impl HummockManager {
                     "For compaction group {}: pick up {} {} sub_level in level {} to compact to target {}. cost time: {:?} compact_task_statistics {:?}",
                     compaction_group_id,
                     level_count,
-                    compact_task.input_ssts[0].level_type().as_str_name(),
+                    compact_task.input_ssts[0].level_type.as_str_name(),
                     compact_task.input_ssts[0].level_idx,
                     compact_task.target_level,
                     start_time.elapsed(),
@@ -1064,7 +1061,7 @@ impl HummockManager {
             .get_compact_tasks_impl(compaction_groups, max_select_count, selector)
             .await?;
         tasks.retain(|task| {
-            if task.task_status() == TaskStatus::Success {
+            if task.task_status == TaskStatus::Success {
                 debug_assert!(
                     CompactStatus::is_trivial_reclaim(task)
                         || CompactStatus::is_trivial_move_task(task)
@@ -1090,7 +1087,7 @@ impl HummockManager {
             .get_compact_tasks_impl(vec![compaction_group_id], 1, selector)
             .await?;
         for task in normal_tasks {
-            if task.task_status() != TaskStatus::Success {
+            if task.task_status != TaskStatus::Success {
                 return Ok(Some(task));
             }
             debug_assert!(
@@ -1120,7 +1117,7 @@ impl HummockManager {
             .levels
             .get(&compact_task.compaction_group_id)
         {
-            for input_level in compact_task.get_input_ssts() {
+            for input_level in &compact_task.input_ssts {
                 let input_level: &InputLevel = input_level;
                 let mut sst_ids: HashSet<_> = input_level
                     .table_infos
@@ -1133,7 +1130,7 @@ impl HummockManager {
                     }
                 }
                 if input_level.level_idx == 0 {
-                    for level in &group.get_level0().sub_levels {
+                    for level in &group.level0().sub_levels {
                         filter_ssts(level, &mut sst_ids);
                     }
                 } else {
@@ -1249,7 +1246,7 @@ impl HummockManager {
                 .iter()
                 .map(|level| level.level_idx)
                 .collect();
-            let is_success = if let TaskStatus::Success = compact_task.task_status() {
+            let is_success = if let TaskStatus::Success = compact_task.task_status {
                 // if member_table_ids changes, the data of sstable may stale.
                 let is_expired =
                     Self::is_compact_task_expired(&compact_task, version.latest_version());
@@ -1317,9 +1314,9 @@ impl HummockManager {
         }
         let mut success_groups = vec![];
         for compact_task in tasks {
-            let task_status = compact_task.task_status();
+            let task_status = compact_task.task_status;
             let task_status_label = task_status.as_str_name();
-            let task_type_label = compact_task.task_type().as_str_name();
+            let task_type_label = compact_task.task_type.as_str_name();
 
             self.compactor_manager
                 .remove_task_heartbeat(compact_task.task_id);
@@ -1350,8 +1347,8 @@ impl HummockManager {
             );
 
             if !deterministic_mode
-                && (matches!(compact_task.task_type(), compact_task::TaskType::Dynamic)
-                    || matches!(compact_task.task_type(), compact_task::TaskType::Emergency))
+                && (matches!(compact_task.task_type, compact_task::TaskType::Dynamic)
+                    || matches!(compact_task.task_type, compact_task::TaskType::Emergency))
             {
                 // only try send Dynamic compaction
                 self.try_send_compaction_request(

@@ -140,7 +140,7 @@ pub mod tests {
             level_type: LevelType::Overlapping,
             total_file_size: sst.file_size,
             uncompressed_file_size: sst.uncompressed_file_size,
-            sub_level_id: sst.get_sst_id(),
+            sub_level_id: sst.sst_id,
             table_infos: vec![sst],
             ..Default::default()
         });
@@ -164,7 +164,7 @@ pub mod tests {
             .iter()
             .map(|table| table.uncompressed_file_size)
             .sum();
-        let sub_level_id = table_infos[0].get_sst_id();
+        let sub_level_id = table_infos[0].sst_id;
         levels.l0.as_mut().unwrap().total_file_size += total_file_size;
         levels.l0.as_mut().unwrap().sub_levels.push(Level {
             level_idx: 0,

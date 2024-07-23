@@ -87,32 +87,12 @@ pub fn validate_safe_epoch(
     Ok(())
 }
 
-pub fn validate_table_key_range(version: &HummockVersion) {
-    for l in version.levels.values().flat_map(|levels| {
-        levels
-            .l0
-            .as_ref()
-            .unwrap()
-            .sub_levels
-            .iter()
-            .chain(levels.levels.iter())
-    }) {
-        for t in &l.table_infos {
-            assert!(
-                t.key_range.is_some(),
-                "key_range in table [{}] is none",
-                t.object_id
-            );
-        }
-    }
-}
-
 pub fn filter_single_sst<R, B>(info: &SstableInfo, table_id: TableId, table_key_range: &R) -> bool
 where
     R: RangeBounds<TableKey<B>>,
     B: AsRef<[u8]> + EmptySliceRef,
 {
-    let table_range = info.key_range.as_ref().unwrap();
+    let table_range = &info.key_range;
     let table_start = FullKey::decode(table_range.left.as_ref()).user_key;
     let table_end = FullKey::decode(table_range.right.as_ref()).user_key;
     let (left, right) = bound_table_key_range(table_id, table_key_range);
@@ -132,9 +112,7 @@ where
 /// Search the SST containing the specified key within a level, using binary search.
 pub(crate) fn search_sst_idx(ssts: &[SstableInfo], key: UserKey<&[u8]>) -> usize {
     ssts.partition_point(|table| {
-        let ord = FullKey::decode(&table.key_range.as_ref().unwrap().left)
-            .user_key
-            .cmp(&key);
+        let ord = FullKey::decode(&table.key_range.left).user_key.cmp(&key);
         ord == Ordering::Less || ord == Ordering::Equal
     })
 }

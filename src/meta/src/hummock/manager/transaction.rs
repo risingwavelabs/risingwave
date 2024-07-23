@@ -119,11 +119,7 @@ impl<'a> HummockVersionTransaction<'a> {
         let mut new_version_delta = self.new_delta();
         new_version_delta.max_committed_epoch = epoch;
         new_version_delta.new_table_watermarks = new_table_watermarks;
-        new_version_delta.change_log_delta = change_log_delta
-            .into_iter()
-            .map(|(table_id, delta)| (table_id, delta))
-            .collect();
-
+        new_version_delta.change_log_delta = change_log_delta;
         // Append SSTs to a new version.
         for (compaction_group_id, inserted_table_infos) in commit_sstables {
             let group_deltas = &mut new_version_delta

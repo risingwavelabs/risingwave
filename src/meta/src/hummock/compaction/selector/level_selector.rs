@@ -18,7 +18,6 @@
 // (found in the LICENSE.Apache file in the root directory).
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::version::Levels;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::compact_task::PbTaskType;
@@ -228,7 +227,7 @@ impl DynamicLevelSelectorCore {
                 .unwrap()
                 .sub_levels
                 .iter()
-                .filter(|level| level.level_type() == LevelType::Overlapping)
+                .filter(|level| level.level_type == LevelType::Overlapping)
                 .map(|level| level.table_infos.len())
                 .sum::<usize>();
             if overlapping_file_count > 0 {
@@ -257,7 +256,7 @@ impl DynamicLevelSelectorCore {
                 .iter()
                 .filter(|level| {
                     level.vnode_partition_count == self.config.split_weight_by_vnode
-                        && level.level_type() == LevelType::Nonoverlapping
+                        && level.level_type == LevelType::Nonoverlapping
                 })
                 .map(|level| level.total_file_size)
                 .sum::<u64>()
@@ -275,7 +274,7 @@ impl DynamicLevelSelectorCore {
                 .unwrap()
                 .sub_levels
                 .iter()
-                .filter(|level| level.level_type() == LevelType::Nonoverlapping)
+                .filter(|level| level.level_type == LevelType::Nonoverlapping)
                 .count() as u64;
             let non_overlapping_level_score = non_overlapping_level_count * SCORE_BASE
                 / std::cmp::max(
@@ -376,7 +375,7 @@ impl DynamicLevelSelectorCore {
         let mut level_bytes;
         let mut next_level_bytes = 0;
         for level in &levels.levels[ctx.base_level - 1..levels.levels.len()] {
-            let level_index = level.get_level_idx() as usize;
+            let level_index = level.level_idx as usize;
 
             if next_level_bytes > 0 {
                 level_bytes = next_level_bytes;
@@ -688,7 +687,7 @@ pub mod tests {
             compaction.input.input_levels[0]
                 .table_infos
                 .iter()
-                .map(|sst| sst.get_sst_id())
+                .map(|sst| sst.sst_id)
                 .collect_vec(),
             vec![5]
         );
@@ -696,7 +695,7 @@ pub mod tests {
             compaction.input.input_levels[1]
                 .table_infos
                 .iter()
-                .map(|sst| sst.get_sst_id())
+                .map(|sst| sst.sst_id)
                 .collect_vec(),
             vec![10]
         );

@@ -614,7 +614,7 @@ impl HummockVersionReader {
                 continue;
             }
 
-            match level.level_type() {
+            match level.level_type {
                 LevelType::Overlapping | LevelType::Unspecified => {
                     let sstable_infos = prune_overlapping_ssts(
                         &level.table_infos,
@@ -650,8 +650,6 @@ impl HummockVersionReader {
                     table_info_idx = table_info_idx.saturating_sub(1);
                     let ord = level.table_infos[table_info_idx]
                         .key_range
-                        .as_ref()
-                        .unwrap()
                         .compare_right_with_user_key(full_key.user_key.as_ref());
                     // the case that the key falls into the gap between two ssts
                     if ord == Ordering::Less {
@@ -929,7 +927,7 @@ impl HummockVersionReader {
                         .sstable_store
                         .sstable(sstable_info, local_stats)
                         .await?;
-                    assert_eq!(sstable_info.get_object_id(), sstable.id);
+                    assert_eq!(sstable_info.object_id, sstable.id);
                     if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
                         if !hit_sstable_bloom_filter(
                             &sstable,

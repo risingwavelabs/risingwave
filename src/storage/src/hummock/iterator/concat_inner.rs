@@ -27,11 +27,11 @@ use crate::hummock::{HummockResult, SstableIteratorType, SstableStoreRef};
 use crate::monitor::StoreLocalStatistic;
 
 fn smallest_key(sstable_info: &SstableInfo) -> &[u8] {
-    &sstable_info.key_range.as_ref().unwrap().left
+    &sstable_info.key_range.left
 }
 
 fn largest_key(sstable_info: &SstableInfo) -> &[u8] {
-    &sstable_info.key_range.as_ref().unwrap().right
+    &sstable_info.key_range.right
 }
 
 /// Served as the concrete implementation of `ConcatIterator` and `BackwardConcatIterator`.
@@ -160,8 +160,7 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
                 }
                 DirectionEnum::Backward => {
                     let ord = FullKey::decode(largest_key(table)).cmp(&key);
-                    ord == Greater
-                        || (ord == Equal && !table.key_range.as_ref().unwrap().right_exclusive)
+                    ord == Greater || (ord == Equal && !table.key_range.right_exclusive)
                 }
             })
             .saturating_sub(1); // considering the boundary of 0

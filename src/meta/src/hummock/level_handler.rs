@@ -90,9 +90,9 @@ impl LevelHandler {
         let mut table_ids = vec![];
         let mut total_file_size = 0;
         for sst in ssts {
-            self.compacting_files.insert(sst.get_sst_id(), task_id);
+            self.compacting_files.insert(sst.sst_id, task_id);
             total_file_size += sst.file_size;
-            table_ids.push(sst.get_sst_id());
+            table_ids.push(sst.sst_id);
         }
 
         self.pending_tasks.push(RunningCompactTask {

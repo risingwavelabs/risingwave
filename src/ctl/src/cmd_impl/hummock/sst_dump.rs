@@ -83,11 +83,11 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
         for level in version.get_combined_levels() {
             for sstable_info in &level.table_infos {
                 if let Some(object_id) = &args.object_id {
-                    if *object_id == sstable_info.get_object_id() {
+                    if *object_id == sstable_info.object_id {
                         print_level(level, sstable_info);
                         sst_dump_via_sstable_store(
                             &sstable_store,
-                            sstable_info.get_object_id(),
+                            sstable_info.object_id,
                             sstable_info.meta_offset,
                             sstable_info.file_size,
                             &table_data,
@@ -100,7 +100,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
                     print_level(level, sstable_info);
                     sst_dump_via_sstable_store(
                         &sstable_store,
-                        sstable_info.get_object_id(),
+                        sstable_info.object_id,
                         sstable_info.meta_offset,
                         sstable_info.file_size,
                         &table_data,

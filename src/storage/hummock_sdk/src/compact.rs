@@ -27,13 +27,13 @@ pub fn compact_task_output_to_string(compact_task: &CompactTask) -> String {
         "Compaction task id: {:?}, group-id: {:?}, type: {:?}, target level: {:?}, target sub level: {:?} watermark: {:?}, target_file_size: {:?}, splits: {:?}, status: {:?}",
         compact_task.task_id,
         compact_task.compaction_group_id,
-        compact_task.task_type(),
+        compact_task.task_type,
         compact_task.target_level,
         compact_task.target_sub_level_id,
         compact_task.watermark,
         compact_task.target_file_size,
         compact_task.splits.len(),
-        compact_task.task_status()
+        compact_task.task_status
     )
     .unwrap();
     s.push_str("Output: \n");
@@ -83,7 +83,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
                 if table.total_key_count != 0 {
                     format!(
                         "[id: {}, obj_id: {} {}KB stale_ratio {}]",
-                        table.get_sst_id(),
+                        table.sst_id,
                         table.object_id,
                         table.file_size / 1024,
                         (table.stale_key_count * 100 / table.total_key_count),
@@ -120,7 +120,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
 pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo) {
     use std::fmt::Write;
 
-    let key_range = sstable_info.key_range.as_ref().unwrap();
+    let key_range = &sstable_info.key_range;
     let left_str = if key_range.left.is_empty() {
         "-inf".to_string()
     } else {
@@ -138,8 +138,8 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
     writeln!(
         s,
         "SstableInfo: object id={}, SST id={}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={}KB, stale_ratio={}%, bloom_filter_kind {:?}",
-        sstable_info.get_object_id(),
-        sstable_info.get_sst_id(),
+        sstable_info.object_id,
+        sstable_info.sst_id,
         left_str,
         right_str,
         sstable_info.table_ids,

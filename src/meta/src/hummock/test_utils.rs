@@ -168,7 +168,7 @@ pub fn generate_test_sstables_with_table_id(
         sst_info.push(SstableInfo {
             object_id: sst_id,
             sst_id,
-            key_range: Some(KeyRange {
+            key_range: KeyRange {
                 left: Bytes::from(key_with_epoch(
                     format!("{:03}\0\0_key_test_{:05}", table_id, i + 1)
                         .as_bytes()
@@ -182,7 +182,7 @@ pub fn generate_test_sstables_with_table_id(
                     epoch,
                 )),
                 right_exclusive: false,
-            }),
+            },
             file_size: 2,
             table_ids: vec![table_id],
             uncompressed_file_size: 2,
@@ -199,11 +199,11 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) ->
         sst_info.push(SstableInfo {
             object_id: sst_id,
             sst_id,
-            key_range: Some(KeyRange {
+            key_range: KeyRange {
                 left: Bytes::from(iterator_test_key_of_epoch(sst_id, i + 1, epoch)),
                 right: Bytes::from(iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch)),
                 right_exclusive: false,
-            }),
+            },
             file_size: 2,
             table_ids: vec![sst_id as u32, sst_id as u32 * 10000],
             uncompressed_file_size: 2,
