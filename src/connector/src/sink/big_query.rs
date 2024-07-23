@@ -16,7 +16,7 @@ use core::time::Duration;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use gcp_bigquery_client::error::BQError;
 use gcp_bigquery_client::model::query_request::QueryRequest;
@@ -743,7 +743,8 @@ fn build_protobuf_descriptor_pool(desc: &DescriptorProto) -> Result<prost_reflec
     prost_reflect::DescriptorPool::from_file_descriptor_set(FileDescriptorSet {
         file: vec![file_descriptor],
     })
-    .map_err(|err| SinkError::BigQuery(anyhow::anyhow!("Build descriptor pool error: {:?}", err)))
+    .context("failed to build descriptor pool")
+    .map_err(SinkError::BigQuery)
 }
 
 fn build_protobuf_schema<'a>(
