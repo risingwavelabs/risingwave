@@ -20,6 +20,7 @@ use arrow_schema::{Field, Fields, Schema, SchemaRef};
 use risingwave_common::array::arrow::{FromArrow, ToArrow, UdfArrowConvert};
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::Bitmap;
+use risingwave_pb::expr::PbUserDefinedFunctionMetadata;
 
 use super::*;
 use crate::sig::{UdfImpl, UdfKind, UdfOptions};
@@ -118,12 +119,10 @@ impl EstimateSize for State {
 impl AggStateDyn for State {}
 
 /// Create a new user-defined aggregate function.
-pub fn new_user_defined(agg: &AggCall) -> Result<BoxedAggregateFunction> {
-    let udf = agg
-        .user_defined
-        .as_ref()
-        .context("missing UDF definition")?;
-
+pub fn new_user_defined(
+    return_type: &DataType,
+    udf: &PbUserDefinedFunctionMetadata,
+) -> Result<BoxedAggregateFunction> {
     let identifier = udf.get_identifier()?;
     let language = udf.language.as_str();
     let runtime = udf.runtime.as_deref();
@@ -137,7 +136,7 @@ pub fn new_user_defined(agg: &AggCall) -> Result<BoxedAggregateFunction> {
         link: udf.link.as_deref(),
         identifier,
         arg_names: &udf.arg_names,
-        return_type: &agg.return_type,
+        return_type,
         always_retry_on_network_error: false,
         function_type: udf.function_type.as_deref(),
     })
@@ -154,9 +153,9 @@ pub fn new_user_defined(agg: &AggCall) -> Result<BoxedAggregateFunction> {
     ));
 
     Ok(Box::new(UserDefinedAggregateFunction {
-        return_field: arrow_convert.to_arrow_field("", &agg.return_type)?,
+        return_field: arrow_convert.to_arrow_field("", return_type)?,
         state_field: Field::new("state", arrow_schema::DataType::Binary, true),
-        return_type: agg.return_type.clone(),
+        return_type: return_type.clone(),
         arg_schema,
         runtime,
     }))

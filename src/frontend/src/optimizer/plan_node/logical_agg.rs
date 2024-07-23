@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common::{bail_not_implemented, not_implemented};
-use risingwave_expr::aggregate::{agg_kinds, AggKind};
+use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
 
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
@@ -384,11 +384,11 @@ impl LogicalAggBuilder {
     ) -> Result<ExprImpl> {
         match agg_call.agg_kind {
             // Rewrite avg to cast(sum as avg_return_type) / count.
-            AggKind::Avg => {
+            AggKind::Builtin(PbAggKind::Avg) => {
                 assert_eq!(agg_call.args.len(), 1);
 
                 let sum = ExprImpl::from(push_agg_call(AggCall::new(
-                    AggKind::Sum,
+                    PbAggKind::Sum.into(),
                     agg_call.args.clone(),
                     agg_call.distinct,
                     agg_call.order_by.clone(),
@@ -398,7 +398,7 @@ impl LogicalAggBuilder {
                 .cast_explicit(agg_call.return_type())?;
 
                 let count = ExprImpl::from(push_agg_call(AggCall::new(
-                    AggKind::Count,
+                    PbAggKind::Count.into(),
                     agg_call.args.clone(),
                     agg_call.distinct,
                     agg_call.order_by.clone(),
@@ -416,10 +416,12 @@ impl LogicalAggBuilder {
             // which is in a sense more general than the pow function, especially when calculating
             // covariances in the future. Also we don't have the sqrt function for rooting, so we
             // use pow(x, 0.5) to simulate
-            kind @ (AggKind::StddevPop
-            | AggKind::StddevSamp
-            | AggKind::VarPop
-            | AggKind::VarSamp) => {
+            AggKind::Builtin(
+                kind @ (PbAggKind::StddevPop
+                | PbAggKind::StddevSamp
+                | PbAggKind::VarPop
+                | PbAggKind::VarSamp),
+            ) => {
                 let arg = agg_call.args().iter().exactly_one().unwrap();
                 let squared_arg = ExprImpl::from(FunctionCall::new(
                     ExprType::Multiply,
@@ -427,7 +429,7 @@ impl LogicalAggBuilder {
                 )?);
 
                 let sum_of_sq = ExprImpl::from(push_agg_call(AggCall::new(
-                    AggKind::Sum,
+                    PbAggKind::Sum.into(),
                     vec![squared_arg],
                     agg_call.distinct,
                     agg_call.order_by.clone(),
@@ -437,7 +439,7 @@ impl LogicalAggBuilder {
                 .cast_explicit(agg_call.return_type())?;
 
                 let sum = ExprImpl::from(push_agg_call(AggCall::new(
-                    AggKind::Sum,
+                    PbAggKind::Sum.into(),
                     agg_call.args.clone(),
                     agg_call.distinct,
                     agg_call.order_by.clone(),
@@ -447,7 +449,7 @@ impl LogicalAggBuilder {
                 .cast_explicit(agg_call.return_type())?;
 
                 let count = ExprImpl::from(push_agg_call(AggCall::new(
-                    AggKind::Count,
+                    PbAggKind::Count.into(),
                     agg_call.args.clone(),
                     agg_call.distinct,
                     agg_call.order_by.clone(),
@@ -477,11 +479,10 @@ impl LogicalAggBuilder {
                 )?);
 
                 let denominator = match kind {
-                    AggKind::VarPop | AggKind::StddevPop => count.clone(),
-                    AggKind::VarSamp | AggKind::StddevSamp => ExprImpl::from(FunctionCall::new(
-                        ExprType::Subtract,
-                        vec![count.clone(), one.clone()],
-                    )?),
+                    PbAggKind::VarPop | PbAggKind::StddevPop => count.clone(),
+                    PbAggKind::VarSamp | PbAggKind::StddevSamp => ExprImpl::from(
+                        FunctionCall::new(ExprType::Subtract, vec![count.clone(), one.clone()])?,
+                    ),
                     _ => unreachable!(),
                 };
 
@@ -490,13 +491,13 @@ impl LogicalAggBuilder {
                     vec![numerator, denominator],
                 )?);
 
-                if matches!(kind, AggKind::StddevPop | AggKind::StddevSamp) {
+                if matches!(kind, PbAggKind::StddevPop | PbAggKind::StddevSamp) {
                     target = ExprImpl::from(FunctionCall::new(ExprType::Sqrt, vec![target])?);
                 }
 
                 match kind {
-                    AggKind::VarPop | AggKind::StddevPop => Ok(target),
-                    AggKind::StddevSamp | AggKind::VarSamp => {
+                    PbAggKind::VarPop | PbAggKind::StddevPop => Ok(target),
+                    PbAggKind::StddevSamp | PbAggKind::VarSamp => {
                         let case_cond = ExprImpl::from(FunctionCall::new(
                             ExprType::LessThanOrEqual,
                             vec![count, one],
@@ -527,7 +528,6 @@ impl LogicalAggBuilder {
             order_by,
             filter,
             direct_args,
-            user_defined,
         } = agg_call;
 
         self.is_in_filter_clause = true;
@@ -565,7 +565,6 @@ impl LogicalAggBuilder {
             order_by,
             filter,
             direct_args,
-            user_defined,
         };
 
         if let Some((pos, existing)) = self
@@ -615,7 +614,7 @@ impl LogicalAggBuilder {
             agg_call.distinct = false;
         }
 
-        if matches!(agg_call.agg_kind, AggKind::Grouping) {
+        if matches!(agg_call.agg_kind, AggKind::Builtin(PbAggKind::Grouping)) {
             if self.grouping_sets.is_empty() {
                 return Err(ErrorCode::NotSupported(
                     "GROUPING must be used in a query with grouping sets".into(),
@@ -1225,7 +1224,7 @@ mod tests {
         // Test case: select v1, min(v2) from test group by v1;
         {
             let min_v2 = AggCall::new(
-                AggKind::Min,
+                PbAggKind::Min.into(),
                 vec![input_ref_2.clone().into()],
                 false,
                 OrderBy::any(),
@@ -1243,7 +1242,7 @@ mod tests {
             assert_eq_input_ref!(&exprs[1], 1);
 
             assert_eq!(agg_calls.len(), 1);
-            assert_eq!(agg_calls[0].agg_kind, AggKind::Min);
+            assert_eq!(agg_calls[0].agg_kind, PbAggKind::Min.into());
             assert_eq!(input_ref_to_column_indices(&agg_calls[0].inputs), vec![1]);
             assert_eq!(group_key, vec![0].into());
         }
@@ -1251,7 +1250,7 @@ mod tests {
         // Test case: select v1, min(v2) + max(v3) from t group by v1;
         {
             let min_v2 = AggCall::new(
-                AggKind::Min,
+                PbAggKind::Min.into(),
                 vec![input_ref_2.clone().into()],
                 false,
                 OrderBy::any(),
@@ -1260,7 +1259,7 @@ mod tests {
             )
             .unwrap();
             let max_v3 = AggCall::new(
-                AggKind::Max,
+                PbAggKind::Max.into(),
                 vec![input_ref_3.clone().into()],
                 false,
                 OrderBy::any(),
@@ -1286,9 +1285,9 @@ mod tests {
             }
 
             assert_eq!(agg_calls.len(), 2);
-            assert_eq!(agg_calls[0].agg_kind, AggKind::Min);
+            assert_eq!(agg_calls[0].agg_kind, PbAggKind::Min.into());
             assert_eq!(input_ref_to_column_indices(&agg_calls[0].inputs), vec![1]);
-            assert_eq!(agg_calls[1].agg_kind, AggKind::Max);
+            assert_eq!(agg_calls[1].agg_kind, PbAggKind::Max.into());
             assert_eq!(input_ref_to_column_indices(&agg_calls[1].inputs), vec![2]);
             assert_eq!(group_key, vec![0].into());
         }
@@ -1301,7 +1300,7 @@ mod tests {
             )
             .unwrap();
             let agg_call = AggCall::new(
-                AggKind::Min,
+                PbAggKind::Min.into(),
                 vec![v1_mult_v3.into()],
                 false,
                 OrderBy::any(),
@@ -1318,7 +1317,7 @@ mod tests {
             assert_eq_input_ref!(&exprs[1], 1);
 
             assert_eq!(agg_calls.len(), 1);
-            assert_eq!(agg_calls[0].agg_kind, AggKind::Min);
+            assert_eq!(agg_calls[0].agg_kind, PbAggKind::Min.into());
             assert_eq!(input_ref_to_column_indices(&agg_calls[0].inputs), vec![1]);
             assert_eq!(group_key, vec![0].into());
         }
@@ -1335,14 +1334,13 @@ mod tests {
 
         let values = LogicalValues::new(vec![], Schema { fields }, ctx);
         let agg_call = PlanAggCall {
-            agg_kind: AggKind::Min,
+            agg_kind: PbAggKind::Min.into(),
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
             distinct: false,
             order_by: vec![],
             filter: Condition::true_cond(),
             direct_args: vec![],
-            user_defined: None,
         };
         Agg::new(vec![agg_call], vec![1].into(), values.into()).into()
     }
@@ -1376,7 +1374,7 @@ mod tests {
 
         assert_eq!(agg_new.agg_calls().len(), 1);
         let agg_call_new = agg_new.agg_calls()[0].clone();
-        assert_eq!(agg_call_new.agg_kind, AggKind::Min);
+        assert_eq!(agg_call_new.agg_kind, PbAggKind::Min.into());
         assert_eq!(input_ref_to_column_indices(&agg_call_new.inputs), vec![1]);
         assert_eq!(agg_call_new.return_type, ty);
 
@@ -1419,7 +1417,7 @@ mod tests {
 
         assert_eq!(agg_new.agg_calls().len(), 1);
         let agg_call_new = agg_new.agg_calls()[0].clone();
-        assert_eq!(agg_call_new.agg_kind, AggKind::Min);
+        assert_eq!(agg_call_new.agg_kind, PbAggKind::Min.into());
         assert_eq!(input_ref_to_column_indices(&agg_call_new.inputs), vec![1]);
         assert_eq!(agg_call_new.return_type, ty);
 
@@ -1456,14 +1454,13 @@ mod tests {
             ctx,
         );
         let agg_call = PlanAggCall {
-            agg_kind: AggKind::Min,
+            agg_kind: PbAggKind::Min.into(),
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
             distinct: false,
             order_by: vec![],
             filter: Condition::true_cond(),
             direct_args: vec![],
-            user_defined: None,
         };
         let agg: PlanRef = Agg::new(vec![agg_call], vec![1].into(), values.into()).into();
 
@@ -1482,7 +1479,7 @@ mod tests {
 
         assert_eq!(agg_new.agg_calls().len(), 1);
         let agg_call_new = agg_new.agg_calls()[0].clone();
-        assert_eq!(agg_call_new.agg_kind, AggKind::Min);
+        assert_eq!(agg_call_new.agg_kind, PbAggKind::Min.into());
         assert_eq!(input_ref_to_column_indices(&agg_call_new.inputs), vec![1]);
         assert_eq!(agg_call_new.return_type, ty);
 
@@ -1521,24 +1518,22 @@ mod tests {
 
         let agg_calls = vec![
             PlanAggCall {
-                agg_kind: AggKind::Min,
+                agg_kind: PbAggKind::Min.into(),
                 return_type: ty.clone(),
                 inputs: vec![InputRef::new(2, ty.clone())],
                 distinct: false,
                 order_by: vec![],
                 filter: Condition::true_cond(),
                 direct_args: vec![],
-                user_defined: None,
             },
             PlanAggCall {
-                agg_kind: AggKind::Max,
+                agg_kind: PbAggKind::Max.into(),
                 return_type: ty.clone(),
                 inputs: vec![InputRef::new(1, ty.clone())],
                 distinct: false,
                 order_by: vec![],
                 filter: Condition::true_cond(),
                 direct_args: vec![],
-                user_defined: None,
             },
         ];
         let agg: PlanRef = Agg::new(agg_calls, vec![1, 2].into(), values.into()).into();
@@ -1558,7 +1553,7 @@ mod tests {
 
         assert_eq!(agg_new.agg_calls().len(), 1);
         let agg_call_new = agg_new.agg_calls()[0].clone();
-        assert_eq!(agg_call_new.agg_kind, AggKind::Max);
+        assert_eq!(agg_call_new.agg_kind, PbAggKind::Max.into());
         assert_eq!(input_ref_to_column_indices(&agg_call_new.inputs), vec![0]);
         assert_eq!(agg_call_new.return_type, ty);
 
