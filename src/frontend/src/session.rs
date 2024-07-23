@@ -67,7 +67,7 @@ use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager};
 use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS};
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::frontend_service::schema_change_service_server::SchemaChangeServiceServer;
+use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::Object;
@@ -106,7 +106,7 @@ use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::{FrontendMetrics, GLOBAL_FRONTEND_METRICS};
 use crate::observer::FrontendObserverNode;
-use crate::rpc::SchemaChangeServiceImpl;
+use crate::rpc::FrontendServiceImpl;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::{
     DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
@@ -359,7 +359,7 @@ impl FrontendEnv {
         }
 
         let health_srv = HealthServiceImpl::new();
-        let schema_change_srv = SchemaChangeServiceImpl::new();
+        let frontend_srv = FrontendServiceImpl::new();
         let host = opts.health_check_listener_addr.clone();
 
         let telemetry_manager = TelemetryManager::new(
@@ -380,7 +380,7 @@ impl FrontendEnv {
         tokio::spawn(async move {
             tonic::transport::Server::builder()
                 .add_service(HealthServer::new(health_srv))
-                .add_service(SchemaChangeServiceServer::new(schema_change_srv))
+                .add_service(FrontendServiceServer::new(frontend_srv))
                 .serve(host.parse().unwrap())
                 .await
                 .unwrap();

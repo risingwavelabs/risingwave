@@ -8,33 +8,19 @@ option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 
-message SchemaChangeRequest {
-  message GetNewTablePlanRequest {
-    uint32 database_id = 1;
-    string owner = 2;
-    string table_name = 3;
-    ddl_service.SchemaChangeEnvelope schema_change = 4;
-  }
-
-  oneof request {
-    GetNewTablePlanRequest get_new_table_plan = 1;
-  }
-
+message GetTableReplacePlanRequest {
+  uint32 database_id = 1;
+  string owner = 2;
+  string table_name = 3;
+  ddl_service.SchemaChangeEnvelope schema_change = 4;
 }
 
-message SchemaChangeResponse {
-  message GetNewTablePlanResponse {
-    ddl_service.ReplaceTablePlan table_plan = 1;
-  }
 
-  oneof response {
-    GetNewTablePlanResponse replace_table_plan = 1;
-  }
-
+message GetTableReplacePlanResponse {
+  ddl_service.ReplaceTablePlan table_plan = 1;
 }
-
 
 // Frontend will start a background worker to
-service SchemaChangeService {
-  rpc GetNewTableStreamingGraph(SchemaChangeRequest) returns (SchemaChangeResponse);
+service FrontendService {
+  rpc GetTableReplacePlan(GetTableReplacePlanRequest) returns (GetTableReplacePlanResponse);
 }

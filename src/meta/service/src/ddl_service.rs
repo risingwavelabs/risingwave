@@ -49,6 +49,7 @@ pub struct DdlServiceImpl {
     sink_manager: SinkCoordinatorManager,
     ddl_controller: DdlController,
     aws_client: Arc<Option<AwsEc2Client>>,
+    // frontend_client:
 }
 
 impl DdlServiceImpl {
