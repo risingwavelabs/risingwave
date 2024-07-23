@@ -326,9 +326,9 @@ impl HummockManagerService for HummockServiceImpl {
         &self,
         request: Request<TriggerFullGcRequest>,
     ) -> Result<Response<TriggerFullGcResponse>, Status> {
-        self.hummock_manager.start_full_gc(Duration::from_secs(
-            request.into_inner().sst_retention_time_sec,
-        ))?;
+        let req = request.into_inner();
+        self.hummock_manager
+            .start_full_gc(Duration::from_secs(req.sst_retention_time_sec), req.prefix)?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))
     }
 
@@ -687,6 +687,17 @@ impl HummockManagerService for HummockServiceImpl {
             .list_change_log_epochs(table_id, min_epoch, max_count)
             .await;
         Ok(Response::new(ListChangeLogEpochsResponse { epochs }))
+    }
+
+    async fn get_version_by_epoch(
+        &self,
+        request: Request<GetVersionByEpochRequest>,
+    ) -> Result<Response<GetVersionByEpochResponse>, Status> {
+        let GetVersionByEpochRequest { epoch } = request.into_inner();
+        let version = self.hummock_manager.epoch_to_version(epoch).await?;
+        Ok(Response::new(GetVersionByEpochResponse {
+            version: Some(version.to_protobuf()),
+        }))
     }
 }
 

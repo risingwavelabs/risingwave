@@ -20,13 +20,12 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
-use risingwave_common::hash::ParallelUnitId;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::RW_VERSION;
 use risingwave_pb::common::worker_node::{Property, State};
-use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
+use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -39,7 +38,8 @@ use tokio::task::JoinHandle;
 
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::model::{
-    InMemValTransaction, MetadataModel, ValTransaction, VarTransaction, Worker, INVALID_EXPIRE_AT,
+    ClusterId, InMemValTransaction, MetadataModel, ValTransaction, VarTransaction, Worker,
+    INVALID_EXPIRE_AT,
 };
 use crate::storage::{MetaStore, Transaction};
 use crate::{MetaError, MetaResult};
@@ -144,13 +144,8 @@ impl ClusterManager {
                         old_worker_parallelism,
                         new_worker_parallelism
                     );
-                    let parallel_units = self
-                        .generate_cn_parallel_units(
-                            new_worker_parallelism - old_worker_parallelism,
-                            new_worker.worker_id(),
-                        )
-                        .await?;
-                    new_worker.worker_node.parallel_units.extend(parallel_units);
+
+                    new_worker.worker_node.parallelism = new_worker_parallelism as _;
                 }
                 Ordering::Greater => {
                     if !self.env.opts.disable_automatic_parallelism_control {
@@ -161,10 +156,8 @@ impl ClusterManager {
                             old_worker_parallelism,
                             new_worker_parallelism
                         );
-                        new_worker
-                            .worker_node
-                            .parallel_units
-                            .truncate(new_worker_parallelism)
+
+                        new_worker.worker_node.parallelism = new_worker_parallelism as _;
                     } else {
                         // Warn and keep the original parallelism if the worker registered with a
                         // smaller parallelism, entering compatibility mode.
@@ -210,20 +203,13 @@ impl ClusterManager {
             _ => None,
         };
 
-        // Generate parallel units.
-        let parallel_units = if r#type == WorkerType::ComputeNode {
-            self.generate_cn_parallel_units(new_worker_parallelism, worker_id)
-                .await?
-        } else {
-            vec![]
-        };
         // Construct worker.
         let worker_node = WorkerNode {
             id: worker_id,
             r#type: r#type as i32,
             host: Some(host_address.clone()),
             state: State::Starting as i32,
-            parallel_units,
+            parallelism: new_worker_parallelism as _,
             property,
             transactional_id,
             // resource doesn't need persist
@@ -515,29 +501,12 @@ impl ClusterManager {
         }
     }
 
-    /// Generate `parallel_degree` parallel units.
-    async fn generate_cn_parallel_units(
-        &self,
-        parallel_degree: usize,
-        worker_id: WorkerId,
-    ) -> MetaResult<Vec<ParallelUnit>> {
-        let start_id = self
-            .env
-            .id_gen_manager()
-            .as_kv()
-            .generate_interval::<{ IdCategory::ParallelUnit }>(parallel_degree as u64)
-            .await? as ParallelUnitId;
-        let parallel_units = (start_id..start_id + parallel_degree as ParallelUnitId)
-            .map(|id| ParallelUnit {
-                id,
-                worker_node_id: worker_id,
-            })
-            .collect();
-        Ok(parallel_units)
-    }
-
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> Option<Worker> {
         self.core.read().await.get_worker_by_id(worker_id)
+    }
+
+    pub fn cluster_id(&self) -> &ClusterId {
+        self.env.cluster_id()
     }
 }
 
@@ -547,17 +516,17 @@ pub struct StreamingClusterInfo {
     /// All **active** compute nodes in the cluster.
     pub worker_nodes: HashMap<u32, WorkerNode>,
 
-    /// All parallel units of the **active** compute nodes in the cluster.
-    pub parallel_units: HashMap<ParallelUnitId, ParallelUnit>,
-
-    /// All unschedulable parallel units of compute nodes in the cluster.
-    pub unschedulable_parallel_units: HashMap<ParallelUnitId, ParallelUnit>,
+    /// All unschedulable compute nodes in the cluster.
+    pub unschedulable_workers: HashSet<u32>,
 }
 
-// Encapsulating the use of parallel_units.
+// Encapsulating the use of parallelism
 impl StreamingClusterInfo {
     pub fn parallelism(&self) -> usize {
-        self.parallel_units.len()
+        self.worker_nodes
+            .values()
+            .map(|worker| worker.parallelism as usize)
+            .sum()
     }
 }
 
@@ -731,34 +700,24 @@ impl ClusterManagerCore {
     fn get_streaming_cluster_info(&self) -> StreamingClusterInfo {
         let mut streaming_worker_node = self.list_streaming_worker_node(Some(State::Running));
 
-        let unschedulable_worker_node = streaming_worker_node
+        let unschedulable_workers = streaming_worker_node
             .extract_if(|worker| {
                 worker
                     .property
                     .as_ref()
                     .map_or(false, |p| p.is_unschedulable)
             })
-            .collect_vec();
+            .map(|w| w.id)
+            .collect();
 
         let active_workers: HashMap<_, _> = streaming_worker_node
             .into_iter()
             .map(|w| (w.id, w))
             .collect();
 
-        let active_parallel_units = active_workers
-            .values()
-            .flat_map(|worker| worker.parallel_units.iter().map(|p| (p.id, p.clone())))
-            .collect();
-
-        let unschedulable_parallel_units = unschedulable_worker_node
-            .iter()
-            .flat_map(|worker| worker.parallel_units.iter().map(|p| (p.id, p.clone())))
-            .collect();
-
         StreamingClusterInfo {
             worker_nodes: active_workers,
-            parallel_units: active_parallel_units,
-            unschedulable_parallel_units,
+            unschedulable_workers,
         }
     }
 
@@ -803,7 +762,6 @@ fn meta_node_info(host: &str, started_at: Option<u64>) -> WorkerNode {
             .map(HostAddr::to_protobuf)
             .ok(),
         state: State::Running as _,
-        parallel_units: vec![],
         property: None,
         transactional_id: None,
         resource: Some(risingwave_pb::common::worker_node::Resource {
@@ -812,6 +770,7 @@ fn meta_node_info(host: &str, started_at: Option<u64>) -> WorkerNode {
             total_cpu_cores: total_cpu_available() as _,
         }),
         started_at,
+        parallelism: 0,
     }
 }
 
@@ -986,13 +945,13 @@ mod tests {
     }
 
     async fn assert_cluster_manager(cluster_manager: &ClusterManager, parallel_count: usize) {
-        let parallel_units = cluster_manager
+        let parallelism: usize = cluster_manager
             .list_active_serving_compute_nodes()
             .await
             .into_iter()
-            .flat_map(|w| w.parallel_units)
-            .collect_vec();
-        assert_eq!(parallel_units.len(), parallel_count);
+            .map(|w| w.parallelism as usize)
+            .sum();
+        assert_eq!(parallelism, parallel_count);
     }
 
     // This test takes seconds because the TTL is measured in seconds.

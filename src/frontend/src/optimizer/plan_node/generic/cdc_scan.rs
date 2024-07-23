@@ -33,7 +33,7 @@ use crate::catalog::ColumnId;
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{FunctionalDependencySet, MonotonicityMap};
 use crate::WithOptions;
 
 /// [`CdcScan`] reads rows of a table from an external upstream database
@@ -123,6 +123,10 @@ impl CdcScan {
 
     pub fn watermark_columns(&self) -> FixedBitSet {
         FixedBitSet::with_capacity(self.get_table_columns().len())
+    }
+
+    pub fn columns_monotonicity(&self) -> MonotonicityMap {
+        MonotonicityMap::new()
     }
 
     pub(crate) fn column_names_with_table_prefix(&self) -> Vec<String> {

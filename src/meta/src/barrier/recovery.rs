@@ -14,12 +14,13 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::DefaultParallelism;
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -28,14 +29,13 @@ use risingwave_pb::meta::{PausedReason, Recovery};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
 use thiserror_ext::AsReport;
-use tokio::sync::oneshot;
+use tokio::time::Instant;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, warn, Instrument};
 
 use super::TracedEpoch;
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::InflightActorInfo;
-use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::schedule::ScheduledBarriers;
@@ -45,9 +45,11 @@ use crate::controller::catalog::ReleaseContext;
 use crate::manager::{ActiveStreamingWorkerNodes, MetadataManager, WorkerId};
 use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
-use crate::{model, MetaResult};
+use crate::{model, MetaError, MetaResult};
 
 impl GlobalBarrierManager {
+    // Migration timeout.
+    const RECOVERY_FORCE_MIGRATION_TIMEOUT: Duration = Duration::from_secs(300);
     // Retry base interval in milliseconds.
     const RECOVERY_RETRY_BASE_INTERVAL: u64 = 20;
     // Retry max interval.
@@ -131,12 +133,7 @@ impl GlobalBarrierManagerContext {
         let mgr = self.metadata_manager.as_v1_ref();
         let mviews = mgr.catalog_manager.list_creating_background_mvs().await;
 
-        let mut mview_definitions = HashMap::new();
-        let mut table_map = HashMap::new();
-        let mut table_fragment_map = HashMap::new();
-        let mut upstream_mv_counts = HashMap::new();
-        let mut senders = HashMap::new();
-        let mut receivers = Vec::new();
+        let mut table_mview_map = HashMap::new();
         for mview in mviews {
             let table_id = TableId::new(mview.id);
             let fragments = mgr
@@ -152,65 +149,15 @@ impl GlobalBarrierManagerContext {
                     .await?;
                 tracing::debug!("notified frontend for stream job {}", table_id.table_id);
             } else {
-                table_map.insert(table_id, fragments.backfill_actor_ids());
-                mview_definitions.insert(table_id, mview.definition.clone());
-                upstream_mv_counts.insert(table_id, fragments.dependent_table_ids());
-                table_fragment_map.insert(table_id, fragments);
-                let (finished_tx, finished_rx) = oneshot::channel();
-                senders.insert(
-                    table_id,
-                    Notifier {
-                        finished: Some(finished_tx),
-                        ..Default::default()
-                    },
-                );
-                receivers.push((mview, internal_tables, finished_rx));
+                table_mview_map.insert(table_id, (fragments, mview, internal_tables));
             }
         }
 
         let version_stats = self.hummock_manager.get_version_stats().await;
         // If failed, enter recovery mode.
         {
-            let mut tracker = self.tracker.lock().await;
-            *tracker = CreateMviewProgressTracker::recover(
-                table_map.into(),
-                upstream_mv_counts.into(),
-                mview_definitions.into(),
-                version_stats,
-                senders.into(),
-                table_fragment_map.into(),
-                self.metadata_manager.clone(),
-            );
-        }
-        for (table, internal_tables, finished) in receivers {
-            let catalog_manager = mgr.catalog_manager.clone();
-            tokio::spawn(async move {
-                let res: MetaResult<()> = try {
-                    tracing::debug!("recovering stream job {}", table.id);
-                    finished.await.ok().context("failed to finish command")??;
-
-                    tracing::debug!("finished stream job {}", table.id);
-                    // Once notified that job is finished we need to notify frontend.
-                    // and mark catalog as created and commit to meta.
-                    // both of these are done by catalog manager.
-                    catalog_manager
-                        .finish_create_materialized_view_procedure(internal_tables, table.clone())
-                        .await?;
-                    tracing::debug!("notified frontend for stream job {}", table.id);
-                };
-                if let Err(e) = res.as_ref() {
-                    tracing::error!(
-                        id = table.id,
-                        error = %e.as_report(),
-                        "stream job interrupted, will retry after recovery",
-                    );
-                    // NOTE(kwannoel): We should not cleanup stream jobs,
-                    // we don't know if it's just due to CN killed,
-                    // or the job has actually failed.
-                    // Users have to manually cancel the stream jobs,
-                    // if they want to clean it.
-                }
-            });
+            *self.tracker.lock() =
+                CreateMviewProgressTracker::recover_v1(version_stats, table_mview_map, mgr.clone());
         }
         Ok(())
     }
@@ -222,73 +169,23 @@ impl GlobalBarrierManagerContext {
             .list_background_creating_mviews()
             .await?;
 
-        let mut senders = HashMap::new();
-        let mut receivers = Vec::new();
-        let mut table_fragment_map = HashMap::new();
-        let mut mview_definitions = HashMap::new();
-        let mut table_map = HashMap::new();
-        let mut upstream_mv_counts = HashMap::new();
+        let mut mview_map = HashMap::new();
         for mview in &mviews {
-            let (finished_tx, finished_rx) = oneshot::channel();
             let table_id = TableId::new(mview.table_id as _);
-            senders.insert(
-                table_id,
-                Notifier {
-                    finished: Some(finished_tx),
-                    ..Default::default()
-                },
-            );
-
             let table_fragments = mgr
                 .catalog_controller
                 .get_job_fragments_by_id(mview.table_id)
                 .await?;
             let table_fragments = TableFragments::from_protobuf(table_fragments);
-            upstream_mv_counts.insert(table_id, table_fragments.dependent_table_ids());
-            table_map.insert(table_id, table_fragments.backfill_actor_ids());
-            table_fragment_map.insert(table_id, table_fragments);
-            mview_definitions.insert(table_id, mview.definition.clone());
-            receivers.push((mview.table_id, finished_rx));
+            mview_map.insert(table_id, (mview.definition.clone(), table_fragments));
         }
 
         let version_stats = self.hummock_manager.get_version_stats().await;
         // If failed, enter recovery mode.
         {
-            let mut tracker = self.tracker.lock().await;
-            *tracker = CreateMviewProgressTracker::recover(
-                table_map.into(),
-                upstream_mv_counts.into(),
-                mview_definitions.into(),
-                version_stats,
-                senders.into(),
-                table_fragment_map.into(),
-                self.metadata_manager.clone(),
-            );
+            *self.tracker.lock() =
+                CreateMviewProgressTracker::recover_v2(mview_map, version_stats, mgr.clone());
         }
-        for (id, finished) in receivers {
-            let catalog_controller = mgr.catalog_controller.clone();
-            tokio::spawn(async move {
-                let res: MetaResult<()> = try {
-                    tracing::debug!("recovering stream job {}", id);
-                    finished.await.ok().context("failed to finish command")??;
-                    tracing::debug!(id, "finished stream job");
-                    catalog_controller.finish_streaming_job(id, None).await?;
-                };
-                if let Err(e) = &res {
-                    tracing::error!(
-                        id,
-                        error = %e.as_report(),
-                        "stream job interrupted, will retry after recovery",
-                    );
-                    // NOTE(kwannoel): We should not cleanup stream jobs,
-                    // we don't know if it's just due to CN killed,
-                    // or the job has actually failed.
-                    // Users have to manually cancel the stream jobs,
-                    // if they want to clean it.
-                }
-            });
-        }
-
         Ok(())
     }
 
@@ -329,7 +226,7 @@ impl GlobalBarrierManager {
     /// the cluster or `risectl` command. Used for debugging purpose.
     ///
     /// Returns the new state of the barrier manager after recovery.
-    pub async fn recovery(&mut self, paused_reason: Option<PausedReason>) {
+    pub async fn recovery(&mut self, paused_reason: Option<PausedReason>, err: Option<MetaError>) {
         let prev_epoch = TracedEpoch::new(
             self.context
                 .hummock_manager
@@ -351,6 +248,13 @@ impl GlobalBarrierManager {
         let new_state = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
                 let recovery_result: MetaResult<_> = try {
+                    if let Some(err) = &err {
+                        self.context
+                            .metadata_manager
+                            .notify_finish_failed(err)
+                            .await;
+                    }
+
                     self.context
                         .clean_dirty_streaming_jobs()
                         .await
@@ -477,8 +381,8 @@ impl GlobalBarrierManager {
                         tracing::Span::current(), // recovery span
                     ));
 
-                    let mut node_to_collect =
-                        control_stream_manager.inject_barrier(command_ctx.clone())?;
+                    let mut node_to_collect = control_stream_manager
+                        .inject_barrier(command_ctx.clone(), info.existing_table_ids())?;
                     while !node_to_collect.is_empty() {
                         let (worker_id, prev_epoch, _) = control_stream_manager
                             .next_complete_barrier_response()
@@ -542,88 +446,133 @@ impl GlobalBarrierManagerContext {
     ) -> MetaResult<InflightActorInfo> {
         let mgr = self.metadata_manager.as_v2_ref();
 
-        let all_inuse_parallel_units: HashSet<_> = mgr
+        // all worker slots used by actors
+        let all_inuse_worker_slots: HashSet<_> = mgr
             .catalog_controller
-            .all_inuse_parallel_units()
+            .all_inuse_worker_slots()
             .await?
             .into_iter()
             .collect();
 
-        let active_parallel_units: HashSet<_> = active_nodes
+        let active_worker_slots: HashSet<_> = active_nodes
             .current()
             .values()
-            .flat_map(|node| node.parallel_units.iter().map(|pu| pu.id as i32))
+            .flat_map(|node| {
+                (0..node.parallelism).map(|idx| WorkerSlotId::new(node.id, idx as usize))
+            })
             .collect();
 
-        let expired_parallel_units: BTreeSet<_> = all_inuse_parallel_units
-            .difference(&active_parallel_units)
+        let expired_worker_slots: BTreeSet<_> = all_inuse_worker_slots
+            .difference(&active_worker_slots)
             .cloned()
             .collect();
-        if expired_parallel_units.is_empty() {
-            debug!("no expired parallel units, skipping.");
+
+        if expired_worker_slots.is_empty() {
+            debug!("no expired worker slots, skipping.");
             return self.resolve_actor_info(active_nodes).await;
         }
 
         debug!("start migrate actors.");
-        let mut to_migrate_parallel_units = expired_parallel_units.into_iter().rev().collect_vec();
-        debug!(
-            "got to migrate parallel units {:#?}",
-            to_migrate_parallel_units
-        );
-        let mut inuse_parallel_units: HashSet<_> = all_inuse_parallel_units
-            .intersection(&active_parallel_units)
+        let mut to_migrate_worker_slots = expired_worker_slots.into_iter().rev().collect_vec();
+        debug!("got to migrate worker slots {:#?}", to_migrate_worker_slots);
+
+        let mut inuse_worker_slots: HashSet<_> = all_inuse_worker_slots
+            .intersection(&active_worker_slots)
             .cloned()
             .collect();
 
         let start = Instant::now();
         let mut plan = HashMap::new();
-        'discovery: while !to_migrate_parallel_units.is_empty() {
-            let new_parallel_units = active_nodes
+        'discovery: while !to_migrate_worker_slots.is_empty() {
+            let mut new_worker_slots = active_nodes
                 .current()
                 .values()
-                .flat_map(|node| {
-                    node.parallel_units
-                        .iter()
-                        .filter(|pu| !inuse_parallel_units.contains(&(pu.id as _)))
+                .flat_map(|worker| {
+                    (0..worker.parallelism).map(move |i| WorkerSlotId::new(worker.id, i as _))
                 })
-                .cloned()
                 .collect_vec();
-            if !new_parallel_units.is_empty() {
-                debug!("new parallel units found: {:#?}", new_parallel_units);
-                for target_parallel_unit in new_parallel_units {
-                    if let Some(from) = to_migrate_parallel_units.pop() {
+
+            new_worker_slots.retain(|worker_slot| !inuse_worker_slots.contains(worker_slot));
+            let to_migration_size = to_migrate_worker_slots.len();
+            let mut available_size = new_worker_slots.len();
+
+            if available_size < to_migration_size
+                && start.elapsed() > GlobalBarrierManager::RECOVERY_FORCE_MIGRATION_TIMEOUT
+            {
+                let mut factor = 2;
+
+                while available_size < to_migration_size {
+                    let mut extended_worker_slots = active_nodes
+                        .current()
+                        .values()
+                        .flat_map(|worker| {
+                            (0..worker.parallelism * factor)
+                                .map(move |i| WorkerSlotId::new(worker.id, i as _))
+                        })
+                        .collect_vec();
+
+                    extended_worker_slots
+                        .retain(|worker_slot| !inuse_worker_slots.contains(worker_slot));
+
+                    extended_worker_slots.sort_by(|a, b| {
+                        a.slot_idx()
+                            .cmp(&b.slot_idx())
+                            .then(a.worker_id().cmp(&b.worker_id()))
+                    });
+
+                    available_size = extended_worker_slots.len();
+                    new_worker_slots = extended_worker_slots;
+
+                    factor *= 2;
+                }
+
+                tracing::info!(
+                    "migration timed out, extending worker slots to {:?} by factor {}",
+                    new_worker_slots,
+                    factor,
+                );
+            }
+
+            if !new_worker_slots.is_empty() {
+                debug!("new worker slots found: {:#?}", new_worker_slots);
+                for target_worker_slot in new_worker_slots {
+                    if let Some(from) = to_migrate_worker_slots.pop() {
                         debug!(
-                            "plan to migrate from parallel unit {} to {}",
-                            from, target_parallel_unit.id
+                            "plan to migrate from worker slot {} to {}",
+                            from, target_worker_slot
                         );
-                        inuse_parallel_units.insert(target_parallel_unit.id as i32);
-                        plan.insert(from, target_parallel_unit);
+                        inuse_worker_slots.insert(target_worker_slot);
+                        plan.insert(from, target_worker_slot);
                     } else {
                         break 'discovery;
                     }
                 }
             }
 
-            if to_migrate_parallel_units.is_empty() {
+            if to_migrate_worker_slots.is_empty() {
                 break;
             }
 
             // wait to get newly joined CN
             let changed = active_nodes
-                .wait_changed(Duration::from_millis(5000), |active_nodes| {
-                    let current_nodes = active_nodes
-                        .current()
-                        .values()
-                        .map(|node| (node.id, &node.host, &node.parallel_units))
-                        .collect_vec();
-                    warn!(
-                        current_nodes = ?current_nodes,
-                        "waiting for new workers to join, elapsed: {}s",
-                        start.elapsed().as_secs()
-                    );
-                })
+                .wait_changed(
+                    Duration::from_millis(5000),
+                    GlobalBarrierManager::RECOVERY_FORCE_MIGRATION_TIMEOUT,
+                    |active_nodes| {
+                        let current_nodes = active_nodes
+                            .current()
+                            .values()
+                            .map(|node| (node.id, &node.host, node.parallelism))
+                            .collect_vec();
+                        warn!(
+                            current_nodes = ?current_nodes,
+                            "waiting for new workers to join, elapsed: {}s",
+                            start.elapsed().as_secs()
+                        );
+                    },
+                )
                 .await;
-            warn!(?changed, "get worker changed. Retry migrate");
+            warn!(?changed, "get worker changed or timed out. Retry migrate");
         }
 
         mgr.catalog_controller.migrate_actors(plan).await?;
@@ -686,8 +635,8 @@ impl GlobalBarrierManagerContext {
         let available_parallelism = active_nodes
             .current()
             .values()
-            .flat_map(|worker_node| worker_node.parallel_units.iter())
-            .count();
+            .map(|worker_node| worker_node.parallelism as usize)
+            .sum();
 
         let table_parallelisms: HashMap<_, _> = {
             let streaming_parallelisms = mgr
@@ -854,11 +803,11 @@ impl GlobalBarrierManagerContext {
         let available_parallelism = info
             .node_map
             .values()
-            .flat_map(|worker_node| worker_node.parallel_units.iter())
-            .count();
+            .map(|worker_node| worker_node.parallelism as usize)
+            .sum();
 
         if available_parallelism == 0 {
-            return Err(anyhow!("no available parallel units for auto scaling").into());
+            return Err(anyhow!("no available worker slots for auto scaling").into());
         }
 
         let all_table_parallelisms: HashMap<_, _> = {
@@ -966,108 +915,148 @@ impl GlobalBarrierManagerContext {
         active_nodes: &mut ActiveStreamingWorkerNodes,
     ) -> MetaResult<MigrationPlan> {
         let mgr = self.metadata_manager.as_v1_ref();
-
         let mut cached_plan = MigrationPlan::get(self.env.meta_store().as_kv()).await?;
 
-        let all_worker_parallel_units = mgr.fragment_manager.all_worker_parallel_units().await;
+        let all_worker_slots = mgr.fragment_manager.all_worker_slots().await;
 
-        let (expired_inuse_workers, inuse_workers): (Vec<_>, Vec<_>) = all_worker_parallel_units
+        let (expired_inuse_workers, inuse_workers): (Vec<_>, Vec<_>) = all_worker_slots
             .into_iter()
             .partition(|(worker, _)| expired_workers.contains(worker));
 
-        let mut to_migrate_parallel_units: BTreeSet<_> = expired_inuse_workers
+        let mut to_migrate_worker_slots: BTreeSet<_> = expired_inuse_workers
             .into_iter()
-            .flat_map(|(_, pu)| pu.into_iter())
+            .flat_map(|(_, worker_slots)| worker_slots.into_iter())
             .collect();
-        let mut inuse_parallel_units: HashSet<_> = inuse_workers
+        let mut inuse_worker_slots: HashSet<_> = inuse_workers
             .into_iter()
-            .flat_map(|(_, pu)| pu.into_iter())
+            .flat_map(|(_, worker_slots)| worker_slots.into_iter())
             .collect();
 
-        cached_plan.parallel_unit_plan.retain(|from, to| {
-            if to_migrate_parallel_units.contains(from) {
-                if !to_migrate_parallel_units.contains(&to.id) {
-                    // clean up target parallel units in migration plan that are expired and not
+        cached_plan.worker_slot_plan.retain(|from, to| {
+            if to_migrate_worker_slots.contains(from) {
+                if !to_migrate_worker_slots.contains(to) {
+                    // clean up target worker slots in migration plan that are expired and not
                     // used by any actors.
-                    return !expired_workers.contains(&to.worker_node_id);
+                    return !expired_workers.contains(&to.worker_id());
                 }
                 return true;
             }
             false
         });
-        to_migrate_parallel_units.retain(|id| !cached_plan.parallel_unit_plan.contains_key(id));
-        inuse_parallel_units.extend(cached_plan.parallel_unit_plan.values().map(|pu| pu.id));
+        to_migrate_worker_slots.retain(|id| !cached_plan.worker_slot_plan.contains_key(id));
+        inuse_worker_slots.extend(cached_plan.worker_slot_plan.values());
 
-        if to_migrate_parallel_units.is_empty() {
-            // all expired parallel units are already in migration plan.
-            debug!("all expired parallel units are already in migration plan.");
+        if to_migrate_worker_slots.is_empty() {
+            // all expired worker slots are already in migration plan.
+            debug!("all expired worker slots are already in migration plan.");
             return Ok(cached_plan);
         }
-        let mut to_migrate_parallel_units =
-            to_migrate_parallel_units.into_iter().rev().collect_vec();
-        debug!(
-            "got to migrate parallel units {:#?}",
-            to_migrate_parallel_units
-        );
+        let mut to_migrate_worker_slots = to_migrate_worker_slots.into_iter().rev().collect_vec();
+        debug!("got to migrate worker slots {:#?}", to_migrate_worker_slots);
 
         let start = Instant::now();
-        // if in-used expire parallel units are not empty, should wait for newly joined worker.
-        'discovery: while !to_migrate_parallel_units.is_empty() {
-            let mut new_parallel_units = active_nodes
+        // if in-used expire worker slots are not empty, should wait for newly joined worker.
+        'discovery: while !to_migrate_worker_slots.is_empty() {
+            let mut new_worker_slots = active_nodes
                 .current()
                 .values()
-                .flat_map(|worker| worker.parallel_units.iter().cloned())
+                .flat_map(|worker| {
+                    (0..worker.parallelism).map(move |i| WorkerSlotId::new(worker.id, i as _))
+                })
                 .collect_vec();
-            new_parallel_units.retain(|pu| !inuse_parallel_units.contains(&pu.id));
 
-            if !new_parallel_units.is_empty() {
-                debug!("new parallel units found: {:#?}", new_parallel_units);
-                for target_parallel_unit in new_parallel_units {
-                    if let Some(from) = to_migrate_parallel_units.pop() {
+            new_worker_slots.retain(|worker_slot| !inuse_worker_slots.contains(worker_slot));
+
+            let to_migration_size = to_migrate_worker_slots.len();
+            let mut available_size = new_worker_slots.len();
+
+            if available_size < to_migration_size
+                && start.elapsed() > GlobalBarrierManager::RECOVERY_FORCE_MIGRATION_TIMEOUT
+            {
+                let mut factor = 2;
+                while available_size < to_migration_size {
+                    let mut extended_worker_slots = active_nodes
+                        .current()
+                        .values()
+                        .flat_map(|worker| {
+                            (0..worker.parallelism * factor)
+                                .map(move |i| WorkerSlotId::new(worker.id, i as _))
+                        })
+                        .collect_vec();
+
+                    extended_worker_slots
+                        .retain(|worker_slot| !inuse_worker_slots.contains(worker_slot));
+
+                    extended_worker_slots.sort_by(|a, b| {
+                        a.slot_idx()
+                            .cmp(&b.slot_idx())
+                            .then(a.worker_id().cmp(&b.worker_id()))
+                    });
+
+                    available_size = extended_worker_slots.len();
+                    new_worker_slots = extended_worker_slots;
+                    factor *= 2;
+                }
+
+                tracing::info!(
+                    "migration timed out, extending worker slots to {:?} by factor {}",
+                    new_worker_slots,
+                    factor,
+                );
+            }
+
+            if !new_worker_slots.is_empty() {
+                debug!("new worker slots found: {:#?}", new_worker_slots);
+                for target_worker_slot in new_worker_slots {
+                    if let Some(from) = to_migrate_worker_slots.pop() {
                         debug!(
-                            "plan to migrate from parallel unit {} to {}",
-                            from, target_parallel_unit.id
+                            "plan to migrate from worker slot {} to {}",
+                            from, target_worker_slot
                         );
-                        inuse_parallel_units.insert(target_parallel_unit.id);
+                        inuse_worker_slots.insert(target_worker_slot);
                         cached_plan
-                            .parallel_unit_plan
-                            .insert(from, target_parallel_unit);
+                            .worker_slot_plan
+                            .insert(from, target_worker_slot);
                     } else {
                         break 'discovery;
                     }
                 }
             }
 
-            if to_migrate_parallel_units.is_empty() {
+            if to_migrate_worker_slots.is_empty() {
                 break;
             }
 
             // wait to get newly joined CN
             let changed = active_nodes
-                .wait_changed(Duration::from_millis(5000), |active_nodes| {
-                    let current_nodes = active_nodes
-                        .current()
-                        .values()
-                        .map(|node| (node.id, &node.host, &node.parallel_units))
-                        .collect_vec();
-                    warn!(
-                        current_nodes = ?current_nodes,
-                        "waiting for new workers to join, elapsed: {}s",
-                        start.elapsed().as_secs()
-                    );
-                })
+                .wait_changed(
+                    Duration::from_millis(5000),
+                    GlobalBarrierManager::RECOVERY_FORCE_MIGRATION_TIMEOUT,
+                    |active_nodes| {
+                        let current_nodes = active_nodes
+                            .current()
+                            .values()
+                            .map(|node| (node.id, &node.host, &node.parallelism))
+                            .collect_vec();
+                        warn!(
+                            current_nodes = ?current_nodes,
+                            "waiting for new workers to join, elapsed: {}s",
+                            start.elapsed().as_secs()
+                        );
+                    },
+                )
                 .await;
-            warn!(?changed, "get worker changed. Retry migrate");
+            warn!(?changed, "get worker changed or timed out. Retry migrate");
         }
 
         // update migration plan, if there is a chain in the plan, update it.
         let mut new_plan = MigrationPlan::default();
-        for (from, to) in &cached_plan.parallel_unit_plan {
-            let mut to = to.clone();
-            while let Some(target) = cached_plan.parallel_unit_plan.get(&to.id) {
-                to = target.clone();
+        for (from, to) in &cached_plan.worker_slot_plan {
+            let mut to = *to;
+            while let Some(target) = cached_plan.worker_slot_plan.get(&to) {
+                to = *target;
             }
-            new_plan.parallel_unit_plan.insert(*from, to);
+            new_plan.worker_slot_plan.insert(*from, to);
         }
 
         new_plan.insert(self.env.meta_store().as_kv()).await?;

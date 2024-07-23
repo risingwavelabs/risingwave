@@ -17,11 +17,13 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
+use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_pb::hummock::{
     CompactionConfig, CompatibilityVersion, GroupConstruct, GroupDestroy, GroupMetaChange,
-    GroupTableChange, LevelType, PbLevelType,
+    GroupTableChange, PbLevelType,
 };
 use tracing::warn;
 
@@ -29,10 +31,10 @@ use super::StateTableId;
 use crate::change_log::TableChangeLog;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
-use crate::table_watermark::TableWatermarks;
+use crate::table_watermark::{ReadTableWatermark, TableWatermarks};
 use crate::version::{
-    GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, Level, Levels, OverlappingLevel,
-    SstableInfo,
+    GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo,
+    Level, Levels, OverlappingLevel, SstableInfo,
 };
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
@@ -157,23 +159,62 @@ impl HummockVersion {
     }
 
     pub fn get_object_ids(&self) -> HashSet<HummockSstableObjectId> {
+        self.get_sst_infos().map(|s| s.object_id).collect()
+    }
+
+    pub fn get_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
+        self.get_sst_infos().map(|s| s.sst_id).collect()
+    }
+
+    pub fn get_sst_infos(&self) -> impl Iterator<Item = &SstableInfo> {
         self.get_combined_levels()
-            .flat_map(|level| {
-                level
-                    .table_infos
-                    .iter()
-                    .map(|table_info| table_info.object_id)
-            })
+            .flat_map(|level| level.table_infos.iter())
             .chain(self.table_change_log.values().flat_map(|change_log| {
                 change_log.0.iter().flat_map(|epoch_change_log| {
                     epoch_change_log
                         .old_value
                         .iter()
-                        .map(|sst| sst.object_id)
-                        .chain(epoch_change_log.new_value.iter().map(|sst| sst.object_id))
+                        .chain(epoch_change_log.new_value.iter())
                 })
             }))
-            .collect()
+    }
+
+    /// `get_sst_infos_from_groups` doesn't guarantee that all returned sst info belongs to `select_group`.
+    /// i.e. `select_group` is just a hint.
+    /// We separate `get_sst_infos_from_groups` and `get_sst_infos` because `get_sst_infos_from_groups` may be further customized in the future.
+    pub fn get_sst_infos_from_groups<'a>(
+        &'a self,
+        select_group: &'a HashSet<CompactionGroupId>,
+    ) -> impl Iterator<Item = &SstableInfo> + 'a {
+        self.levels
+            .iter()
+            .filter_map(|(cg_id, level)| {
+                if select_group.contains(cg_id) {
+                    Some(level)
+                } else {
+                    None
+                }
+            })
+            .flat_map(|level| {
+                level
+                    .l0
+                    .as_ref()
+                    .unwrap()
+                    .sub_levels
+                    .iter()
+                    .rev()
+                    .chain(level.levels.iter())
+            })
+            .flat_map(|level| level.table_infos.iter())
+            .chain(self.table_change_log.values().flat_map(|change_log| {
+                // TODO: optimization: strip table change log
+                change_log.0.iter().flat_map(|epoch_change_log| {
+                    epoch_change_log
+                        .old_value
+                        .iter()
+                        .chain(epoch_change_log.new_value.iter())
+                })
+            }))
     }
 
     pub fn level_iter<F: FnMut(&Level) -> bool>(
@@ -207,50 +248,93 @@ impl HummockVersion {
         &self,
         existing_table_ids: &[u32],
     ) -> BTreeMap<u32, TableWatermarks> {
-        fn extract_single_table_watermark(
-            table_watermarks: &TableWatermarks,
-            safe_epoch: u64,
-        ) -> Option<TableWatermarks> {
-            if let Some((first_epoch, first_epoch_watermark)) = table_watermarks.watermarks.first()
-            {
-                assert!(
-                    *first_epoch >= safe_epoch,
-                    "smallest epoch {} in table watermark should be at least safe epoch {}",
-                    first_epoch,
-                    safe_epoch
-                );
-                if *first_epoch == safe_epoch {
-                    Some(TableWatermarks {
-                        watermarks: vec![(*first_epoch, first_epoch_watermark.clone())],
-                        direction: table_watermarks.direction,
-                    })
-                } else {
-                    None
-                }
+        safe_epoch_table_watermarks_impl(
+            &self.table_watermarks,
+            &self.state_table_info,
+            existing_table_ids,
+        )
+    }
+}
+
+pub fn safe_epoch_table_watermarks_impl(
+    table_watermarks: &HashMap<TableId, Arc<TableWatermarks>>,
+    state_table_info: &HummockVersionStateTableInfo,
+    existing_table_ids: &[u32],
+) -> BTreeMap<u32, TableWatermarks> {
+    fn extract_single_table_watermark(
+        table_watermarks: &TableWatermarks,
+        safe_epoch: u64,
+    ) -> Option<TableWatermarks> {
+        if let Some((first_epoch, first_epoch_watermark)) = table_watermarks.watermarks.first() {
+            assert!(
+                *first_epoch >= safe_epoch,
+                "smallest epoch {} in table watermark should be at least safe epoch {}",
+                first_epoch,
+                safe_epoch
+            );
+            if *first_epoch == safe_epoch {
+                Some(TableWatermarks {
+                    watermarks: vec![(*first_epoch, first_epoch_watermark.clone())],
+                    direction: table_watermarks.direction,
+                })
             } else {
                 None
             }
+        } else {
+            None
         }
-        self.table_watermarks
-            .iter()
-            .filter_map(|(table_id, table_watermarks)| {
-                let u32_table_id = table_id.table_id();
-                if !existing_table_ids.contains(&u32_table_id) {
-                    None
-                } else {
-                    extract_single_table_watermark(
-                        table_watermarks,
-                        self.state_table_info
-                            .info()
-                            .get(table_id)
-                            .expect("table should exist")
-                            .safe_epoch,
-                    )
-                    .map(|table_watermarks| (table_id.table_id, table_watermarks))
-                }
-            })
-            .collect()
     }
+    table_watermarks
+        .iter()
+        .filter_map(|(table_id, table_watermarks)| {
+            let u32_table_id = table_id.table_id();
+            if !existing_table_ids.contains(&u32_table_id) {
+                None
+            } else {
+                extract_single_table_watermark(
+                    table_watermarks,
+                    state_table_info
+                        .info()
+                        .get(table_id)
+                        .expect("table should exist")
+                        .safe_epoch,
+                )
+                .map(|table_watermarks| (table_id.table_id, table_watermarks))
+            }
+        })
+        .collect()
+}
+
+pub fn safe_epoch_read_table_watermarks_impl(
+    safe_epoch_watermarks: &BTreeMap<u32, TableWatermarks>,
+) -> BTreeMap<TableId, ReadTableWatermark> {
+    safe_epoch_watermarks
+        .iter()
+        .map(|(table_id, watermarks)| {
+            assert_eq!(watermarks.watermarks.len(), 1);
+            let vnode_watermarks = &watermarks.watermarks.first().expect("should exist").1;
+            let mut vnode_watermark_map = BTreeMap::new();
+            for vnode_watermark in vnode_watermarks.iter() {
+                let watermark = Bytes::copy_from_slice(&vnode_watermark.watermark);
+                for vnode in vnode_watermark.vnode_bitmap.as_ref().iter_vnodes() {
+                    assert!(
+                        vnode_watermark_map
+                            .insert(vnode, watermark.clone())
+                            .is_none(),
+                        "duplicate table watermark on vnode {}",
+                        vnode.to_index()
+                    );
+                }
+            }
+            (
+                TableId::from(*table_id),
+                ReadTableWatermark {
+                    direction: watermarks.direction,
+                    vnode_watermarks: vnode_watermark_map,
+                },
+            )
+        })
+        .collect()
 }
 
 impl HummockVersion {
@@ -596,7 +680,7 @@ impl HummockVersion {
                     insert_new_sub_level(
                         levels.l0.as_mut().unwrap(),
                         insert_sub_level_id,
-                        LevelType::Overlapping,
+                        PbLevelType::Overlapping,
                         insert_table_infos,
                         None,
                     );
@@ -678,10 +762,10 @@ impl HummockVersion {
                                 < new_change_log.epochs.first().expect("non-empty")
                         );
                     }
-                    change_log.0.push(new_change_log.into());
+                    change_log.0.push(new_change_log.clone());
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(TableChangeLog(vec![new_change_log.into()]));
+                    entry.insert(TableChangeLog(vec![new_change_log.clone()]));
                 }
             };
         }
@@ -915,7 +999,7 @@ pub fn build_initial_compaction_group_levels(
     for l in 0..compaction_config.get_max_level() {
         levels.push(Level {
             level_idx: (l + 1) as u32,
-            level_type: LevelType::Nonoverlapping,
+            level_type: PbLevelType::Nonoverlapping,
             table_infos: vec![],
             total_file_size: 0,
             sub_level_id: 0,
@@ -1002,10 +1086,10 @@ pub fn get_compaction_group_ssts(
 
 pub fn new_sub_level(
     sub_level_id: u64,
-    level_type: LevelType,
+    level_type: PbLevelType,
     table_infos: Vec<SstableInfo>,
 ) -> Level {
-    if level_type == LevelType::Nonoverlapping {
+    if level_type == PbLevelType::Nonoverlapping {
         debug_assert!(
             can_concat(&table_infos),
             "sst of non-overlapping level is not concat-able: {:?}",
@@ -1042,7 +1126,7 @@ pub fn add_ssts_to_sub_level(
     l0.sub_levels[sub_level_idx]
         .table_infos
         .extend(insert_table_infos);
-    if l0.sub_levels[sub_level_idx].level_type == LevelType::Nonoverlapping {
+    if l0.sub_levels[sub_level_idx].level_type == PbLevelType::Nonoverlapping {
         l0.sub_levels[sub_level_idx]
             .table_infos
             .sort_by(|sst1, sst2| {
@@ -1066,7 +1150,7 @@ pub fn add_ssts_to_sub_level(
 pub fn insert_new_sub_level(
     l0: &mut OverlappingLevel,
     insert_sub_level_id: u64,
-    level_type: LevelType,
+    level_type: PbLevelType,
     insert_table_infos: Vec<SstableInfo>,
     sub_level_insert_hint: Option<usize>,
 ) {
@@ -1145,8 +1229,8 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) 
         let b = sst2.key_range.as_ref().unwrap();
         a.cmp(b)
     });
-    if operand.level_type == LevelType::Overlapping {
-        operand.level_type = LevelType::Nonoverlapping;
+    if operand.level_type == PbLevelType::Overlapping {
+        operand.level_type = PbLevelType::Nonoverlapping;
     }
     assert!(
         can_concat(&operand.table_infos),

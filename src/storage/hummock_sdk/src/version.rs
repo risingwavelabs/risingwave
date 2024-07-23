@@ -25,7 +25,7 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_pb::hummock::compact_task::{PbTaskStatus, PbTaskType, TaskStatus, TaskType};
 use risingwave_pb::hummock::group_delta::PbDeltaType;
 use risingwave_pb::hummock::hummock_version::PbLevels;
-use risingwave_pb::hummock::hummock_version_delta::{ChangeLogDelta, PbGroupDeltas};
+use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
 use risingwave_pb::hummock::subscribe_compaction_event_request::PbReportTask;
 use risingwave_pb::hummock::{
     BloomFilterType, CompactionConfig, LevelType, PbCompactTask, PbGroupConstruct, PbGroupDelta,
@@ -36,7 +36,7 @@ use risingwave_pb::hummock::{
 };
 use tracing::warn;
 
-use crate::change_log::TableChangeLog;
+use crate::change_log::{ChangeLogDelta, TableChangeLog};
 use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRange;
@@ -255,7 +255,7 @@ pub struct Levels {
     pub group_id: u64,
     pub parent_group_id: u64,
 
-    #[expect(deprecated)]
+    #[deprecated]
     pub member_table_ids: Vec<u32>,
 }
 
@@ -292,6 +292,7 @@ impl Levels {
 }
 
 impl From<&PbLevels> for Levels {
+    #[expect(deprecated)]
     fn from(pb_levels: &PbLevels) -> Self {
         Self {
             l0: if pb_levels.l0.is_some() {
@@ -302,13 +303,13 @@ impl From<&PbLevels> for Levels {
             levels: pb_levels.levels.iter().map(Level::from).collect_vec(),
             group_id: pb_levels.group_id,
             parent_group_id: pb_levels.parent_group_id,
-
-            member_table_ids: Default::default(),
+            member_table_ids: pb_levels.member_table_ids.clone(),
         }
     }
 }
 
 impl From<&Levels> for PbLevels {
+    #[expect(deprecated)]
     fn from(levels: &Levels) -> Self {
         Self {
             l0: if levels.l0.is_some() {
@@ -319,13 +320,13 @@ impl From<&Levels> for PbLevels {
             levels: levels.levels.iter().map(PbLevel::from).collect_vec(),
             group_id: levels.group_id,
             parent_group_id: levels.parent_group_id,
-            #[expect(deprecated)]
             member_table_ids: levels.member_table_ids.clone(),
         }
     }
 }
 
 impl From<PbLevels> for Levels {
+    #[expect(deprecated)]
     fn from(pb_levels: PbLevels) -> Self {
         Self {
             l0: if pb_levels.l0.is_some() {
@@ -336,7 +337,6 @@ impl From<PbLevels> for Levels {
             levels: pb_levels.levels.into_iter().map(Level::from).collect_vec(),
             group_id: pb_levels.group_id,
             parent_group_id: pb_levels.parent_group_id,
-            #[expect(deprecated)]
             member_table_ids: pb_levels.member_table_ids.clone(),
         }
     }
@@ -344,6 +344,7 @@ impl From<PbLevels> for Levels {
 
 impl From<Levels> for PbLevels {
     fn from(levels: Levels) -> Self {
+        #[expect(deprecated)]
         Self {
             l0: if levels.l0.is_some() {
                 Some(levels.l0.unwrap().into())
@@ -353,7 +354,7 @@ impl From<Levels> for PbLevels {
             levels: levels.levels.into_iter().map(PbLevel::from).collect_vec(),
             group_id: levels.group_id,
             parent_group_id: levels.parent_group_id,
-            ..Default::default()
+            member_table_ids: levels.member_table_ids.clone(),
         }
     }
 }
@@ -826,6 +827,65 @@ impl HummockVersionDelta {
             .collect()
     }
 
+    pub fn newly_added_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
+        let ssts_from_group_deltas = self.group_deltas.values().flat_map(|group_deltas| {
+            group_deltas.group_deltas.iter().flat_map(|group_delta| {
+                static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
+                let sst_slice = match group_delta {
+                    GroupDelta::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
+                    GroupDelta::GroupConstruct(_)
+                    | GroupDelta::GroupDestroy(_)
+                    | GroupDelta::GroupMetaChange(_)
+                    | GroupDelta::GroupTableChange(_) => &EMPTY_VEC,
+                };
+                sst_slice.iter()
+            })
+        });
+
+        let ssts_from_change_log = self.change_log_delta.values().flat_map(|delta| {
+            let new_log = delta.new_log.as_ref().unwrap();
+            new_log.new_value.iter().chain(new_log.old_value.iter())
+        });
+
+        ssts_from_group_deltas
+            .chain(ssts_from_change_log)
+            .map(|sst| sst.object_id)
+            .collect()
+    }
+
+    pub fn newly_added_sst_infos<'a>(
+        &'a self,
+        select_group: &'a HashSet<CompactionGroupId>,
+    ) -> impl Iterator<Item = &SstableInfo> + 'a {
+        self.group_deltas
+            .iter()
+            .filter_map(|(cg_id, group_deltas)| {
+                if select_group.contains(cg_id) {
+                    Some(group_deltas)
+                } else {
+                    None
+                }
+            })
+            .flat_map(|group_deltas| {
+                group_deltas.group_deltas.iter().flat_map(|group_delta| {
+                    static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
+                    let sst_slice = match group_delta {
+                        GroupDelta::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
+                        GroupDelta::GroupConstruct(_)
+                        | GroupDelta::GroupDestroy(_)
+                        | GroupDelta::GroupMetaChange(_)
+                        | GroupDelta::GroupTableChange(_) => &EMPTY_VEC,
+                    };
+                    sst_slice.iter()
+                })
+            })
+            .chain(self.change_log_delta.values().flat_map(|delta| {
+                // TODO: optimization: strip table change log
+                let new_log = delta.new_log.as_ref().unwrap();
+                new_log.new_value.iter().chain(new_log.old_value.iter())
+            }))
+    }
+
     pub fn visible_table_safe_epoch(&self) -> u64 {
         self.safe_epoch
     }
@@ -869,7 +929,7 @@ impl From<&PbHummockVersionDelta> for HummockVersionDelta {
                     (
                         TableId::new(*table_id),
                         ChangeLogDelta {
-                            new_log: log_delta.new_log.clone(),
+                            new_log: log_delta.new_log.clone().map(Into::into),
                             truncate_epoch: log_delta.truncate_epoch,
                         },
                     )
@@ -911,7 +971,7 @@ impl From<&HummockVersionDelta> for PbHummockVersionDelta {
             change_log_delta: version_delta
                 .change_log_delta
                 .iter()
-                .map(|(table_id, log_delta)| (table_id.table_id, log_delta.clone()))
+                .map(|(table_id, log_delta)| (table_id.table_id, log_delta.into()))
                 .collect(),
             state_table_info_delta: version_delta
                 .state_table_info_delta
@@ -948,7 +1008,7 @@ impl From<HummockVersionDelta> for PbHummockVersionDelta {
             change_log_delta: version_delta
                 .change_log_delta
                 .into_iter()
-                .map(|(table_id, log_delta)| (table_id.table_id, log_delta))
+                .map(|(table_id, log_delta)| (table_id.table_id, log_delta.into()))
                 .collect(),
             state_table_info_delta: version_delta
                 .state_table_info_delta
@@ -989,7 +1049,7 @@ impl From<PbHummockVersionDelta> for HummockVersionDelta {
                     (
                         TableId::new(*table_id),
                         ChangeLogDelta {
-                            new_log: log_delta.new_log.clone(),
+                            new_log: log_delta.new_log.clone().map(Into::into),
                             truncate_epoch: log_delta.truncate_epoch,
                         },
                     )
@@ -1041,6 +1101,10 @@ impl SstableInfo {
         }
 
         basic
+    }
+
+    pub fn to_protobuf(&self) -> PbSstableInfo {
+        self.into()
     }
 }
 
@@ -1370,6 +1434,7 @@ impl CompactTask {
 }
 
 impl From<PbCompactTask> for CompactTask {
+    #[expect(deprecated)]
     fn from(pb_compact_task: PbCompactTask) -> Self {
         Self {
             input_ssts: pb_compact_task
@@ -1406,7 +1471,6 @@ impl From<PbCompactTask> for CompactTask {
             current_epoch_time: pb_compact_task.current_epoch_time,
             target_sub_level_id: pb_compact_task.target_sub_level_id,
             task_type: TaskType::try_from(pb_compact_task.task_type).unwrap(),
-            #[allow(deprecated)]
             split_by_state_table: pb_compact_task.split_by_state_table,
             split_weight_by_vnode: pb_compact_task.split_weight_by_vnode,
             table_vnode_partition: pb_compact_task.table_vnode_partition.clone(),
@@ -1424,6 +1488,7 @@ impl From<PbCompactTask> for CompactTask {
 }
 
 impl From<&PbCompactTask> for CompactTask {
+    #[expect(deprecated)]
     fn from(pb_compact_task: &PbCompactTask) -> Self {
         Self {
             input_ssts: pb_compact_task
@@ -1460,7 +1525,6 @@ impl From<&PbCompactTask> for CompactTask {
             current_epoch_time: pb_compact_task.current_epoch_time,
             target_sub_level_id: pb_compact_task.target_sub_level_id,
             task_type: TaskType::try_from(pb_compact_task.task_type).unwrap(),
-            #[allow(deprecated)]
             split_by_state_table: pb_compact_task.split_by_state_table,
             split_weight_by_vnode: pb_compact_task.split_weight_by_vnode,
             table_vnode_partition: pb_compact_task.table_vnode_partition.clone(),
@@ -1478,6 +1542,7 @@ impl From<&PbCompactTask> for CompactTask {
 }
 
 impl From<CompactTask> for PbCompactTask {
+    #[expect(deprecated)]
     fn from(compact_task: CompactTask) -> Self {
         Self {
             input_ssts: compact_task
@@ -1514,7 +1579,6 @@ impl From<CompactTask> for PbCompactTask {
             current_epoch_time: compact_task.current_epoch_time,
             target_sub_level_id: compact_task.target_sub_level_id,
             task_type: compact_task.task_type.into(),
-            //#[allow(deprecated)] split_by_state_table: self.split_by_state_table,
             split_weight_by_vnode: compact_task.split_weight_by_vnode,
             table_vnode_partition: compact_task.table_vnode_partition.clone(),
             table_watermarks: compact_task
@@ -1522,12 +1586,15 @@ impl From<CompactTask> for PbCompactTask {
                 .into_iter()
                 .map(|(table_id, table_watermark)| (table_id, table_watermark.into()))
                 .collect(),
-            ..Default::default()
+            split_by_state_table: compact_task.split_by_state_table,
+            table_schemas: compact_task.table_schemas.clone(),
+            max_sub_compaction: compact_task.max_sub_compaction,
         }
     }
 }
 
 impl From<&CompactTask> for PbCompactTask {
+    #[expect(deprecated)]
     fn from(compact_task: &CompactTask) -> Self {
         Self {
             input_ssts: compact_task
@@ -1564,7 +1631,6 @@ impl From<&CompactTask> for PbCompactTask {
             current_epoch_time: compact_task.current_epoch_time,
             target_sub_level_id: compact_task.target_sub_level_id,
             task_type: compact_task.task_type.into(),
-            //#[allow(deprecated)] split_by_state_table: self.split_by_state_table,
             split_weight_by_vnode: compact_task.split_weight_by_vnode,
             table_vnode_partition: compact_task.table_vnode_partition.clone(),
             table_watermarks: compact_task
@@ -1572,7 +1638,9 @@ impl From<&CompactTask> for PbCompactTask {
                 .iter()
                 .map(|(table_id, table_watermark)| (*table_id, table_watermark.into()))
                 .collect(),
-            ..Default::default()
+            split_by_state_table: compact_task.split_by_state_table,
+            table_schemas: compact_task.table_schemas.clone(),
+            max_sub_compaction: compact_task.max_sub_compaction,
         }
     }
 }
@@ -1672,17 +1740,17 @@ impl From<PbReportTask> for ReportTask {
     }
 }
 
-impl From<ReportTask> for PbCompactTask {
+impl From<ReportTask> for PbReportTask {
     fn from(value: ReportTask) -> Self {
         Self {
+            table_stats_change: value.table_stats_change.clone(),
             task_id: value.task_id,
             task_status: value.task_status.into(),
             sorted_output_ssts: value
                 .sorted_output_ssts
                 .into_iter()
-                .map(SstableInfo::into)
+                .map(|sst| sst.into())
                 .collect_vec(),
-            ..Default::default()
         }
     }
 }
@@ -1691,11 +1759,11 @@ impl From<ReportTask> for PbCompactTask {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct IntraLevelDelta {
-    level_idx: u32,
-    l0_sub_level_id: u64,
-    removed_table_ids: Vec<u64>,
-    inserted_table_infos: Vec<SstableInfo>,
-    vnode_partition_count: u32,
+    pub level_idx: u32,
+    pub l0_sub_level_id: u64,
+    pub removed_table_ids: Vec<u64>,
+    pub inserted_table_infos: Vec<SstableInfo>,
+    pub vnode_partition_count: u32,
 }
 
 impl IntraLevelDelta {
@@ -1973,5 +2041,9 @@ impl From<&PbGroupDeltas> for GroupDeltas {
 impl GroupDeltas {
     pub fn get_group_deltas(&self) -> &Vec<GroupDelta> {
         &self.group_deltas
+    }
+
+    pub fn to_protobuf(&self) -> PbGroupDeltas {
+        self.into()
     }
 }

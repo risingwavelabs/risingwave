@@ -17,7 +17,8 @@ use std::collections::{BTreeMap, VecDeque};
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::hash::VirtualNode;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::safe_epoch_read_table_watermarks_impl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::table_watermark::{
@@ -187,33 +188,7 @@ impl SkipWatermarkState {
     pub fn from_safe_epoch_watermarks(
         safe_epoch_watermarks: &BTreeMap<u32, TableWatermarks>,
     ) -> Self {
-        let watermarks = safe_epoch_watermarks
-            .iter()
-            .map(|(table_id, watermarks)| {
-                assert_eq!(watermarks.watermarks.len(), 1);
-                let vnode_watermarks = &watermarks.watermarks.first().expect("should exist").1;
-                let mut vnode_watermark_map = BTreeMap::new();
-                for vnode_watermark in vnode_watermarks.as_ref() {
-                    let watermark = Bytes::copy_from_slice(&vnode_watermark.watermark);
-                    for vnode in vnode_watermark.vnode_bitmap.as_ref().iter_vnodes() {
-                        assert!(
-                            vnode_watermark_map
-                                .insert(vnode, watermark.clone())
-                                .is_none(),
-                            "duplicate table watermark on vnode {}",
-                            vnode.to_index()
-                        );
-                    }
-                }
-                (
-                    TableId::from(*table_id),
-                    ReadTableWatermark {
-                        direction: watermarks.direction,
-                        vnode_watermarks: vnode_watermark_map,
-                    },
-                )
-            })
-            .collect();
+        let watermarks = safe_epoch_read_table_watermarks_impl(safe_epoch_watermarks);
         Self::new(watermarks)
     }
 

@@ -64,7 +64,7 @@ pub struct TtlReclaimCompactionPicker {
 }
 
 impl TtlReclaimCompactionPicker {
-    pub fn new(table_id_to_options: HashMap<StateTableId, TableOption>) -> Self {
+    pub fn new(table_id_to_options: &HashMap<StateTableId, TableOption>) -> Self {
         let table_id_to_ttl: HashMap<u32, u32> = table_id_to_options
             .iter()
             .filter(|id_to_option| {
@@ -205,7 +205,7 @@ mod test {
     use std::sync::Arc;
 
     use itertools::Itertools;
-    use risingwave_hummock_sdk::version::Level;
+    use risingwave_hummock_sdk::version::{HummockVersionStateTableInfo, Level};
     use risingwave_pb::hummock::compact_task;
     pub use risingwave_pb::hummock::LevelType;
 
@@ -218,6 +218,7 @@ mod test {
     use crate::hummock::compaction::selector::{CompactionSelector, TtlCompactionSelector};
     use crate::hummock::compaction::{CompactionDeveloperConfig, LocalSelectorStatistic};
     use crate::hummock::model::CompactionGroup;
+    use crate::hummock::test_utils::compaction_selector_context;
 
     #[test]
     fn test_ttl_reclaim_compaction_selector() {
@@ -377,13 +378,17 @@ mod test {
             let task = selector
                 .pick_compaction(
                     1,
-                    &group_config,
-                    &levels,
-                    &BTreeSet::new(),
-                    &mut levels_handler,
-                    &mut local_stats,
-                    table_id_to_options,
-                    Arc::new(CompactionDeveloperConfig::default()),
+                    compaction_selector_context(
+                        &group_config,
+                        &levels,
+                        &BTreeSet::new(),
+                        &mut levels_handler,
+                        &mut local_stats,
+                        &table_id_to_options,
+                        Arc::new(CompactionDeveloperConfig::default()),
+                        &Default::default(),
+                        &HummockVersionStateTableInfo::empty(),
+                    ),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -428,13 +433,17 @@ mod test {
             let task = selector
                 .pick_compaction(
                     1,
-                    &group_config,
-                    &levels,
-                    &BTreeSet::new(),
-                    &mut levels_handler,
-                    &mut local_stats,
-                    table_id_to_options.clone(),
-                    Arc::new(CompactionDeveloperConfig::default()),
+                    compaction_selector_context(
+                        &group_config,
+                        &levels,
+                        &BTreeSet::new(),
+                        &mut levels_handler,
+                        &mut local_stats,
+                        &table_id_to_options,
+                        Arc::new(CompactionDeveloperConfig::default()),
+                        &Default::default(),
+                        &HummockVersionStateTableInfo::empty(),
+                    ),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -462,13 +471,17 @@ mod test {
             let task = selector
                 .pick_compaction(
                     1,
-                    &group_config,
-                    &levels,
-                    &BTreeSet::new(),
-                    &mut levels_handler,
-                    &mut local_stats,
-                    table_id_to_options.clone(),
-                    Arc::new(CompactionDeveloperConfig::default()),
+                    compaction_selector_context(
+                        &group_config,
+                        &levels,
+                        &BTreeSet::new(),
+                        &mut levels_handler,
+                        &mut local_stats,
+                        &table_id_to_options,
+                        Arc::new(CompactionDeveloperConfig::default()),
+                        &Default::default(),
+                        &HummockVersionStateTableInfo::empty(),
+                    ),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -519,13 +532,17 @@ mod test {
             let task = selector
                 .pick_compaction(
                     1,
-                    &group_config,
-                    &levels,
-                    &BTreeSet::new(),
-                    &mut levels_handler,
-                    &mut local_stats,
-                    table_id_to_options,
-                    Arc::new(CompactionDeveloperConfig::default()),
+                    compaction_selector_context(
+                        &group_config,
+                        &levels,
+                        &BTreeSet::new(),
+                        &mut levels_handler,
+                        &mut local_stats,
+                        &table_id_to_options,
+                        Arc::new(CompactionDeveloperConfig::default()),
+                        &Default::default(),
+                        &HummockVersionStateTableInfo::empty(),
+                    ),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -561,13 +578,17 @@ mod test {
             // // pick ttl reclaim
             let task = selector.pick_compaction(
                 1,
-                &group_config,
-                &levels,
-                &BTreeSet::new(),
-                &mut levels_handler,
-                &mut local_stats,
-                HashMap::default(),
-                Arc::new(CompactionDeveloperConfig::default()),
+                compaction_selector_context(
+                    &group_config,
+                    &levels,
+                    &BTreeSet::new(),
+                    &mut levels_handler,
+                    &mut local_stats,
+                    &HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
+                    &Default::default(),
+                    &HummockVersionStateTableInfo::empty(),
+                ),
             );
 
             // empty table_options does not select any files
@@ -624,13 +645,17 @@ mod test {
                 let task = selector
                     .pick_compaction(
                         1,
-                        &group_config,
-                        &levels,
-                        &BTreeSet::new(),
-                        &mut levels_handler,
-                        &mut local_stats,
-                        table_id_to_options.clone(),
-                        Arc::new(CompactionDeveloperConfig::default()),
+                        compaction_selector_context(
+                            &group_config,
+                            &levels,
+                            &BTreeSet::new(),
+                            &mut levels_handler,
+                            &mut local_stats,
+                            &table_id_to_options,
+                            Arc::new(CompactionDeveloperConfig::default()),
+                            &Default::default(),
+                            &HummockVersionStateTableInfo::empty(),
+                        ),
                     )
                     .unwrap();
 
@@ -717,13 +742,17 @@ mod test {
                 let task = selector
                     .pick_compaction(
                         1,
-                        &group_config,
-                        &levels,
-                        &BTreeSet::new(),
-                        &mut levels_handler,
-                        &mut local_stats,
-                        table_id_to_options.clone(),
-                        Arc::new(CompactionDeveloperConfig::default()),
+                        compaction_selector_context(
+                            &group_config,
+                            &levels,
+                            &BTreeSet::new(),
+                            &mut levels_handler,
+                            &mut local_stats,
+                            &table_id_to_options,
+                            Arc::new(CompactionDeveloperConfig::default()),
+                            &Default::default(),
+                            &HummockVersionStateTableInfo::empty(),
+                        ),
                     )
                     .unwrap();
 

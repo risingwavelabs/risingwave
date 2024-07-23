@@ -27,6 +27,7 @@ use futures::{FutureExt, StreamExt, TryFutureExt};
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
 use risingwave_common::must_match;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::SyncResult;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
@@ -49,7 +50,8 @@ struct IssuedState {
 
     pub barrier_inflight_latency: HistogramTimer,
 
-    pub table_ids: HashSet<TableId>,
+    /// Only be `Some(_)` when `kind` is `Checkpoint`
+    pub table_ids: Option<HashSet<TableId>>,
 
     pub kind: BarrierKind,
 }
@@ -202,6 +204,8 @@ pub(super) struct ManagedBarrierState {
 
     mutation_subscribers: HashMap<ActorId, ActorMutationSubscribers>,
 
+    prev_barrier_table_ids: Option<(EpochPair, HashSet<TableId>)>,
+
     /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
     pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
 
@@ -235,6 +239,7 @@ impl ManagedBarrierState {
         Self {
             epoch_barrier_state_map: BTreeMap::default(),
             mutation_subscribers: Default::default(),
+            prev_barrier_table_ids: None,
             create_mview_progress: Default::default(),
             state_store,
             streaming_metrics,
@@ -403,7 +408,7 @@ impl ManagedBarrierState {
                             state_store,
                             &self.streaming_metrics,
                             prev_epoch,
-                            table_ids,
+                            table_ids.expect("should be Some on BarrierKind::Checkpoint"),
                         ))
                     })
                 }
@@ -471,21 +476,21 @@ impl ManagedBarrierState {
     }
 
     /// Collect a `barrier` from the actor with `actor_id`.
-    pub(super) fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) {
+    pub(super) fn collect(&mut self, actor_id: ActorId, epoch: EpochPair) {
         tracing::debug!(
             target: "events::stream::barrier::manager::collect",
-            epoch = ?barrier.epoch, actor_id, state = ?self.epoch_barrier_state_map,
+            ?epoch, actor_id, state = ?self.epoch_barrier_state_map,
             "collect_barrier",
         );
 
-        match self.epoch_barrier_state_map.get_mut(&barrier.epoch.prev) {
+        match self.epoch_barrier_state_map.get_mut(&epoch.prev) {
             None => {
                 // If the barrier's state is stashed, this occurs exclusively in scenarios where the barrier has not been
                 // injected by the barrier manager, or the barrier message is blocked at the `RemoteInput` side waiting for injection.
                 // Given these conditions, it's inconceivable for an actor to attempt collect at this point.
                 panic!(
                     "cannot collect new actor barrier {:?} at current state: None",
-                    barrier.epoch,
+                    epoch,
                 )
             }
             Some(&mut BarrierState {
@@ -501,15 +506,15 @@ impl ManagedBarrierState {
                 assert!(
                     exist,
                     "the actor doesn't exist. actor_id: {:?}, curr_epoch: {:?}",
-                    actor_id, barrier.epoch.curr
+                    actor_id, epoch.curr
                 );
-                assert_eq!(curr_epoch, barrier.epoch.curr);
-                self.may_have_collected_all(barrier.epoch.prev);
+                assert_eq!(curr_epoch, epoch.curr);
+                self.may_have_collected_all(epoch.prev);
             }
             Some(BarrierState { inner, .. }) => {
                 panic!(
                     "cannot collect new actor barrier {:?} at current state: {:?}",
-                    barrier.epoch, inner
+                    epoch, inner
                 )
             }
         }
@@ -527,6 +532,50 @@ impl ManagedBarrierState {
             .streaming_metrics
             .barrier_inflight_latency
             .start_timer();
+
+        if let Some(hummock) = self.state_store.as_hummock() {
+            hummock.start_epoch(barrier.epoch.curr, table_ids.clone());
+        }
+
+        let table_ids = match barrier.kind {
+            BarrierKind::Unspecified => {
+                unreachable!()
+            }
+            BarrierKind::Initial => {
+                assert!(
+                    self.prev_barrier_table_ids.is_none(),
+                    "non empty table_ids at initial barrier: {:?}",
+                    self.prev_barrier_table_ids
+                );
+                info!(epoch = ?barrier.epoch, "initialize at Initial barrier");
+                self.prev_barrier_table_ids = Some((barrier.epoch, table_ids));
+                None
+            }
+            BarrierKind::Barrier => {
+                if let Some((prev_epoch, prev_table_ids)) = self.prev_barrier_table_ids.as_mut() {
+                    assert_eq!(prev_epoch.curr, barrier.epoch.prev);
+                    assert_eq!(prev_table_ids, &table_ids);
+                    *prev_epoch = barrier.epoch;
+                } else {
+                    info!(epoch = ?barrier.epoch, "initialize at non-checkpoint barrier");
+                    self.prev_barrier_table_ids = Some((barrier.epoch, table_ids));
+                }
+                None
+            }
+            BarrierKind::Checkpoint => Some(
+                if let Some((prev_epoch, prev_table_ids)) = self
+                    .prev_barrier_table_ids
+                    .replace((barrier.epoch, table_ids))
+                {
+                    assert_eq!(prev_epoch.curr, barrier.epoch.prev);
+                    prev_table_ids
+                } else {
+                    info!(epoch = ?barrier.epoch, "initialize at Checkpoint barrier");
+                    HashSet::new()
+                },
+            ),
+        };
+
         if let Some(BarrierState { ref inner, .. }) =
             self.epoch_barrier_state_map.get_mut(&barrier.epoch.prev)
         {
@@ -674,8 +723,8 @@ mod tests {
         managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1, HashSet::new());
         managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2, HashSet::new());
         managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3, HashSet::new());
-        managed_barrier_state.collect(1, &barrier1);
-        managed_barrier_state.collect(2, &barrier1);
+        managed_barrier_state.collect(1, barrier1.epoch);
+        managed_barrier_state.collect(2, barrier1.epoch);
         assert_eq!(
             managed_barrier_state.pop_next_completed_epoch().await,
             test_epoch(0)
@@ -688,9 +737,9 @@ mod tests {
                 .0,
             &test_epoch(1)
         );
-        managed_barrier_state.collect(1, &barrier2);
-        managed_barrier_state.collect(1, &barrier3);
-        managed_barrier_state.collect(2, &barrier2);
+        managed_barrier_state.collect(1, barrier2.epoch);
+        managed_barrier_state.collect(1, barrier3.epoch);
+        managed_barrier_state.collect(2, barrier2.epoch);
         assert_eq!(
             managed_barrier_state.pop_next_completed_epoch().await,
             test_epoch(1)
@@ -703,8 +752,8 @@ mod tests {
                 .0,
             { &test_epoch(2) }
         );
-        managed_barrier_state.collect(2, &barrier3);
-        managed_barrier_state.collect(3, &barrier3);
+        managed_barrier_state.collect(2, barrier3.epoch);
+        managed_barrier_state.collect(3, barrier3.epoch);
         assert_eq!(
             managed_barrier_state.pop_next_completed_epoch().await,
             test_epoch(2)
@@ -725,12 +774,12 @@ mod tests {
         managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2, HashSet::new());
         managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3, HashSet::new());
 
-        managed_barrier_state.collect(1, &barrier1);
-        managed_barrier_state.collect(1, &barrier2);
-        managed_barrier_state.collect(1, &barrier3);
-        managed_barrier_state.collect(2, &barrier1);
-        managed_barrier_state.collect(2, &barrier2);
-        managed_barrier_state.collect(2, &barrier3);
+        managed_barrier_state.collect(1, barrier1.epoch);
+        managed_barrier_state.collect(1, barrier2.epoch);
+        managed_barrier_state.collect(1, barrier3.epoch);
+        managed_barrier_state.collect(2, barrier1.epoch);
+        managed_barrier_state.collect(2, barrier2.epoch);
+        managed_barrier_state.collect(2, barrier3.epoch);
         assert_eq!(
             managed_barrier_state
                 .epoch_barrier_state_map
@@ -739,8 +788,8 @@ mod tests {
                 .0,
             &0
         );
-        managed_barrier_state.collect(3, &barrier1);
-        managed_barrier_state.collect(3, &barrier2);
+        managed_barrier_state.collect(3, barrier1.epoch);
+        managed_barrier_state.collect(3, barrier2.epoch);
         assert_eq!(
             managed_barrier_state
                 .epoch_barrier_state_map
@@ -749,7 +798,7 @@ mod tests {
                 .0,
             &0
         );
-        managed_barrier_state.collect(4, &barrier1);
+        managed_barrier_state.collect(4, barrier1.epoch);
         assert_eq!(
             managed_barrier_state.pop_next_completed_epoch().await,
             test_epoch(0)

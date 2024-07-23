@@ -44,6 +44,7 @@ pub mod key_range;
 pub mod prost_key_range;
 pub mod table_stats;
 pub mod table_watermark;
+pub mod time_travel;
 pub mod version;
 
 pub use compact::*;
@@ -146,6 +147,7 @@ pub enum HummockReadEpoch {
     NoWait(HummockEpoch),
     /// We don't need to wait epoch.
     Backup(HummockEpoch),
+    TimeTravel(HummockEpoch),
 }
 
 impl From<BatchQueryEpoch> for HummockReadEpoch {
@@ -154,6 +156,7 @@ impl From<BatchQueryEpoch> for HummockReadEpoch {
             batch_query_epoch::Epoch::Committed(epoch) => HummockReadEpoch::Committed(epoch),
             batch_query_epoch::Epoch::Current(epoch) => HummockReadEpoch::Current(epoch),
             batch_query_epoch::Epoch::Backup(epoch) => HummockReadEpoch::Backup(epoch),
+            batch_query_epoch::Epoch::TimeTravel(epoch) => HummockReadEpoch::TimeTravel(epoch),
         }
     }
 }
@@ -171,6 +174,7 @@ impl HummockReadEpoch {
             HummockReadEpoch::Current(epoch) => epoch,
             HummockReadEpoch::NoWait(epoch) => epoch,
             HummockReadEpoch::Backup(epoch) => epoch,
+            HummockReadEpoch::TimeTravel(epoch) => epoch,
         }
     }
 }

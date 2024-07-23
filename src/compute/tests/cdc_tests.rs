@@ -381,6 +381,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         "RowSeqExecutor2".to_string(),
         None,
         None,
+        None,
     ));
 
     // check result

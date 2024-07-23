@@ -22,7 +22,6 @@ use risingwave_hummock_sdk::version::{
     GroupDelta, HummockVersion, HummockVersionDelta, IntraLevelDelta, SstableInfo,
 };
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId};
-use risingwave_pb::hummock::hummock_version_delta::PbChangeLogDelta;
 use risingwave_pb::hummock::{HummockVersionStats, StateTableInfoDelta};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
@@ -108,6 +107,7 @@ impl<'a> HummockVersionTransaction<'a> {
         deltas.push(delta);
     }
 
+    /// Returns a duplicate delta, used by time travel.
     pub(super) fn pre_commit_epoch(
         &mut self,
         epoch: HummockEpoch,
@@ -115,13 +115,13 @@ impl<'a> HummockVersionTransaction<'a> {
         new_table_ids: HashMap<TableId, CompactionGroupId>,
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         change_log_delta: HashMap<TableId, ChangeLogDelta>,
-    ) {
+    ) -> HummockVersionDelta {
         let mut new_version_delta = self.new_delta();
         new_version_delta.max_committed_epoch = epoch;
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta
             .into_iter()
-            .map(|(table_id, delta)| (table_id, PbChangeLogDelta::from(delta)))
+            .map(|(table_id, delta)| (table_id, delta))
             .collect();
 
         // Append SSTs to a new version.
@@ -175,7 +175,9 @@ impl<'a> HummockVersionTransaction<'a> {
             }
         });
 
+        let time_travel_delta = (*new_version_delta).clone();
         new_version_delta.pre_apply();
+        time_travel_delta
     }
 }
 

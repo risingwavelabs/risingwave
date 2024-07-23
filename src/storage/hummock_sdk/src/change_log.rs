@@ -165,6 +165,7 @@ pub fn build_table_change_log_delta<'a>(
     table_change_log
 }
 
+#[derive(Debug, PartialEq, Clone)]
 pub struct ChangeLogDelta {
     pub truncate_epoch: u64,
     pub new_log: Option<EpochNewChangeLog>,

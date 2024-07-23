@@ -29,6 +29,7 @@ use crate::error::Result;
 mod bind_context;
 mod bind_param;
 mod create;
+mod create_view;
 mod delete;
 mod expr;
 mod for_system;
@@ -43,6 +44,7 @@ mod update;
 mod values;
 
 pub use bind_context::{BindContext, Clause, LateralBindContext};
+pub use create_view::BoundCreateView;
 pub use delete::BoundDelete;
 pub use expr::{bind_data_type, bind_struct_field};
 pub use insert::BoundInsert;

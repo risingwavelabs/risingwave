@@ -50,6 +50,7 @@ impl StreamCdcTableScan {
             core.append_only(),
             false,
             core.watermark_columns(),
+            core.columns_monotonicity(),
         );
         Self { base, core }
     }
