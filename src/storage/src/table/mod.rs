@@ -22,9 +22,9 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 pub use risingwave_common::hash::table_distribution::*;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_hummock_sdk::key::TableKey;
 
 use crate::error::StorageResult;
@@ -52,7 +52,7 @@ where
     for _ in 0..chunk_size.unwrap_or(usize::MAX) {
         match stream.next().await.transpose()? {
             Some(row) => {
-                for (datum, builder) in row.exact_size_iter().zip_eq_fast(builders.iter_mut()) {
+                for (datum, builder) in row.iter().zip_eq_debug(builders.iter_mut()) {
                     builder.append(datum);
                 }
             }
@@ -147,12 +147,6 @@ impl<T: AsRef<[u8]>> Deref for KeyedRow<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.row
-    }
-}
-
-impl<T: AsRef<[u8]>> From<KeyedRow<T>> for OwnedRow {
-    fn from(value: KeyedRow<T>) -> Self {
-        value.row
     }
 }
 

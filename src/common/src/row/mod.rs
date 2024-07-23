@@ -201,32 +201,6 @@ pub trait RowExt: Row {
     fn is_null_at(&self, index: usize) -> bool {
         self.datum_at(index).is_none()
     }
-
-    fn exact_size_iter(&self) -> impl ExactSizeIterator<Item = DatumRef<'_>> {
-        ExactSizeRowIter {
-            inner: self.iter(),
-            size: self.len(),
-        }
-    }
-}
-
-pub struct ExactSizeRowIter<'a, I: Iterator<Item = DatumRef<'a>> + 'a> {
-    inner: I,
-    size: usize,
-}
-
-impl<'a, I: Iterator<Item = DatumRef<'a>> + 'a> Iterator for ExactSizeRowIter<'a, I> {
-    type Item = DatumRef<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next()
-    }
-}
-
-impl<'a, I: Iterator<Item = DatumRef<'a>> + 'a> ExactSizeIterator for ExactSizeRowIter<'a, I> {
-    fn len(&self) -> usize {
-        self.size
-    }
 }
 
 impl<R: Row> RowExt for R {}
