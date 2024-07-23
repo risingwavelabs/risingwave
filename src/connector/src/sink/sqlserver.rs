@@ -509,7 +509,7 @@ impl SqlClient {
         })?;
         tcp.set_nodelay(true).map_err(|e| {
             SinkError::SqlServer(anyhow!(format!(
-                "Setting node delay error when connecting to SQL Server, error: {}",
+                "Setting nodelay error when connecting to SQL Server, error: {}",
                 e
             )))
         })?;

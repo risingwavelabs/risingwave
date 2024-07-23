@@ -505,7 +505,7 @@ impl DorisField {
                 .parse::<u8>()
                 .map_err(|err| {
                     SinkError::Doris(format!(
-                        "Unable to convert decimal'scale to u8. error: {:?}",
+                        "Unable to convert decimal's scale to u8. error: {:?}",
                         err.kind()
                     ))
                 })?;
