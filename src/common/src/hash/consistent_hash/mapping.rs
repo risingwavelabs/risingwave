@@ -329,6 +329,31 @@ impl ActorMapping {
         self.transform(to_map)
     }
 
+    /// Transform the actor mapping to the worker slot mapping. Note that the parameter is a mapping from actor to worker.
+    pub fn to_worker_slot(&self, actor_to_worker: &HashMap<ActorId, u32>) -> WorkerSlotMapping {
+        let mut worker_actors = HashMap::new();
+        for actor_id in self.iter_unique() {
+            let worker_id = actor_to_worker
+                .get(&actor_id)
+                .cloned()
+                .unwrap_or_else(|| panic!("location for actor {} not found", actor_id));
+
+            worker_actors
+                .entry(worker_id)
+                .or_insert(BTreeSet::new())
+                .insert(actor_id);
+        }
+
+        let mut actor_location = HashMap::new();
+        for (worker, actors) in worker_actors {
+            for (idx, &actor) in actors.iter().enumerate() {
+                actor_location.insert(actor, WorkerSlotId::new(worker, idx));
+            }
+        }
+
+        self.transform(&actor_location)
+    }
+
     /// Create an actor mapping from the protobuf representation.
     pub fn from_protobuf(proto: &ActorMappingProto) -> Self {
         assert_eq!(proto.original_indices.len(), proto.data.len());
@@ -444,6 +469,13 @@ impl ParallelUnitMapping {
             original_indices: self.original_indices.clone(),
             data: self.data.clone(),
         }
+    }
+}
+
+impl WorkerSlotMapping {
+    /// Transform this worker slot mapping to an actor mapping, essentially `transform`.
+    pub fn to_actor(&self, to_map: &HashMap<WorkerSlotId, ActorId>) -> ActorMapping {
+        self.transform(to_map)
     }
 }
 

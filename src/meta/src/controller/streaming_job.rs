@@ -16,8 +16,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
 use itertools::Itertools;
-use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_common::{bail, current_cluster_version};
@@ -43,8 +41,8 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::{
-    FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup,
-    PbTableFragments, Relation, RelationGroup,
+    PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup, PbTableFragments, Relation,
+    RelationGroup,
 };
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
@@ -67,7 +65,7 @@ use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
     build_relation_group, check_relation_name_duplicate, check_sink_into_table_cycle,
     ensure_object_id, ensure_user_id, get_fragment_actor_ids, get_fragment_mappings,
-    get_parallel_unit_to_worker_map, PartialObject,
+    rebuild_fragment_mapping_from_actors, PartialObject,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, SinkId, StreamingJob};
@@ -1388,8 +1386,6 @@ impl CatalogController {
 
         let txn = inner.db.begin().await?;
 
-        let parallel_unit_to_worker = get_parallel_unit_to_worker_map(&txn).await?;
-
         let mut fragment_mapping_to_notify = vec![];
 
         // for assert only
@@ -1482,7 +1478,6 @@ impl CatalogController {
                     fragment_id: Set(fragment_id as _),
                     status: Set(ActorStatus::Running),
                     splits: Set(splits.map(|splits| (&PbConnectorSplits { splits }).into())),
-                    parallel_unit_id: Set(parallel_unit.id as _),
                     worker_id: Set(parallel_unit.worker_node_id as _),
                     upstream_actor_ids: Set(actor_upstreams),
                     vnode_bitmap: Set(vnode_bitmap.as_ref().map(|bitmap| bitmap.into())),
@@ -1538,41 +1533,24 @@ impl CatalogController {
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
 
-            let fragment_actors = fragment.find_related(Actor).all(&txn).await?;
+            let job_actors = fragment
+                .find_related(Actor)
+                .all(&txn)
+                .await?
+                .into_iter()
+                .map(|actor| {
+                    (
+                        fragment_id,
+                        fragment.distribution_type,
+                        actor.actor_id,
+                        actor.vnode_bitmap,
+                        actor.worker_id,
+                        actor.status,
+                    )
+                })
+                .collect_vec();
 
-            let mut actor_to_parallel_unit = HashMap::with_capacity(fragment_actors.len());
-            let mut actor_to_vnode_bitmap = HashMap::with_capacity(fragment_actors.len());
-            for actor in &fragment_actors {
-                actor_to_parallel_unit.insert(actor.actor_id as u32, actor.parallel_unit_id as _);
-                if let Some(vnode_bitmap) = &actor.vnode_bitmap {
-                    let bitmap = Bitmap::from(&vnode_bitmap.to_protobuf());
-                    actor_to_vnode_bitmap.insert(actor.actor_id as u32, bitmap);
-                }
-            }
-
-            let vnode_mapping = if actor_to_vnode_bitmap.is_empty() {
-                let parallel_unit = *actor_to_parallel_unit.values().exactly_one().unwrap();
-                ParallelUnitMapping::new_single(parallel_unit as ParallelUnitId)
-            } else {
-                // Generate the parallel unit mapping from the fragment's actor bitmaps.
-                assert_eq!(actor_to_vnode_bitmap.len(), actor_to_parallel_unit.len());
-                ActorMapping::from_bitmaps(&actor_to_vnode_bitmap)
-                    .to_parallel_unit(&actor_to_parallel_unit)
-            }
-            .to_protobuf();
-
-            let mut fragment = fragment.into_active_model();
-            fragment.vnode_mapping = Set((&vnode_mapping).into());
-            fragment.update(&txn).await?;
-
-            let worker_slot_mapping = ParallelUnitMapping::from_protobuf(&vnode_mapping)
-                .to_worker_slot(&parallel_unit_to_worker)?
-                .to_protobuf();
-
-            fragment_mapping_to_notify.push(FragmentWorkerSlotMapping {
-                fragment_id: fragment_id as u32,
-                mapping: Some(worker_slot_mapping),
-            });
+            fragment_mapping_to_notify.extend(rebuild_fragment_mapping_from_actors(job_actors));
 
             // for downstream and upstream
             let removed_actor_ids: HashSet<_> = removed_actors

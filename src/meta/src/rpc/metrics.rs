@@ -29,6 +29,7 @@ use risingwave_common::metrics::LabelGuardedIntGaugeVec;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::register_guarded_int_gauge_vec_with_registry;
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
+use risingwave_meta_model_v2::WorkerId;
 use risingwave_object_store::object::object_metrics::{
     ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
 };
@@ -818,17 +819,14 @@ pub async fn refresh_fragment_info_metrics_v2(
         }
     };
 
-    let pu_addr_mapping: HashMap<u32, String> = worker_nodes
+    let worker_addr_mapping: HashMap<WorkerId, String> = worker_nodes
         .into_iter()
-        .flat_map(|worker_node| {
+        .map(|worker_node| {
             let addr = match worker_node.host {
                 Some(host) => format!("{}:{}", host.host, host.port),
                 None => "".to_owned(),
             };
-            worker_node
-                .parallel_units
-                .into_iter()
-                .map(move |pu| (pu.id, addr.clone()))
+            (worker_node.id as WorkerId, addr)
         })
         .collect();
     let table_compaction_group_id_mapping = hummock_manager
@@ -845,7 +843,7 @@ pub async fn refresh_fragment_info_metrics_v2(
         let fragment_id_str = actor_location.fragment_id.to_string();
         // Report a dummy gauge metrics with (fragment id, actor id, node
         // address) as its label
-        if let Some(address) = pu_addr_mapping.get(&(actor_location.parallel_unit_id as u32)) {
+        if let Some(address) = worker_addr_mapping.get(&actor_location.worker_id) {
             meta_metrics
                 .actor_info
                 .with_label_values(&[&actor_id_str, &fragment_id_str, address])

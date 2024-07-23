@@ -81,9 +81,13 @@ message TableFragments {
     uint32 fragment_type_mask = 2;
     FragmentDistributionType distribution_type = 3;
     repeated stream_plan.StreamActor actors = 4;
+
+    // NOTE: vnode_mapping is deprecated, we will generate the vnode_mapping by actors' bitmaps
     // Vnode mapping (which should be set in upstream dispatcher) of the fragment.
     // This field is always set to `Some`. For singleton, the parallel unit for all vnodes will be the same.
-    common.ParallelUnitMapping vnode_mapping = 5;
+    reserved 5;
+    reserved "vnode_mapping";
+
     repeated uint32 state_table_ids = 6;
     // Note that this can be derived backwards from the upstream actors of the Actor held by the Fragment,
     // but in some scenarios (e.g. Scaling) it will lead to a lot of duplicate code,
@@ -128,8 +132,13 @@ message ActorLocation {
 }
 
 message MigrationPlan {
+  // NOTE: parallel_unit_migration_plan is deprecated, using worker_slot_migration_plan instead
   // map<parallel_unit_id, parallel_unit>, the plan indicates that the actors will be migrated from old parallel unit to the new one.
-  map<uint32, common.ParallelUnit> parallel_unit_migration_plan = 1;
+  reserved 1;
+  reserved "parallel_unit_migration_plan";
+
+  // map<src_worker_slot_id, dst_worker_slot_id>, the plan indicates that the actors will be migrated from old worker_slot to the new one.
+  map<uint64, uint64> worker_slot_migration_plan = 2;
 }
 
 message FlushRequest {
@@ -244,8 +253,10 @@ message ListActorStatesResponse {
   message ActorState {
     uint32 actor_id = 1;
     uint32 fragment_id = 2;
-    uint32 parallel_unit_id = 3;
+    reserved 3;
+    reserved "parallel_unit_id";
     TableFragments.ActorStatus.ActorState state = 4;
+    uint32 worker_id = 5;
   }
   repeated ActorState states = 1;
 }
@@ -507,16 +518,19 @@ message GetClusterInfoResponse {
   uint64 revision = 5;
 }
 
-message Reschedule {
-  repeated uint32 added_parallel_units = 1;
-  repeated uint32 removed_parallel_units = 2;
+// For each fragment that needs to be rescheduled, there will be a WorkerReschedule,
+// indicating on which workers the actors of this fragment need to be changed and by how many.
+message WorkerReschedule {
+  // worker_id -> actor_diff
+  map<uint32, int32> worker_actor_diff = 1;
 }
 
 message RescheduleRequest {
-  // reschedule plan for each fragment
-  map<uint32, Reschedule> reschedules = 1;
+  reserved "reschedules";
+  reserved 1;
   uint64 revision = 2;
   bool resolve_no_shuffle_upstream = 3;
+  map<uint32, WorkerReschedule> worker_reschedules = 4;
 }
 
 message RescheduleResponse {
