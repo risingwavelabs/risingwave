@@ -244,7 +244,7 @@ create table enum_to_varchar (
 );
 
 statement ok
-create table orders (
+create table upper_orders (
   id int,
   name varchar,
   PRIMARY KEY (id)
@@ -255,6 +255,6 @@ create table orders (
  username = '${PGUSER:$USER}',
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
- table.name = 'Order',
+ table.name = 'Orders',
  slot.name = 'orders'
 );

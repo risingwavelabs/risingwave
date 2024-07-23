@@ -109,6 +109,6 @@ INSERT INTO list_with_null VALUES (5, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 
 CREATE TABLE "Orders" (
     id int PRIMARY KEY,
-    name varchar,
+    name varchar
 );
 INSERT INTO "Orders" VALUES (1, 'happy');
