@@ -20,6 +20,7 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
+use risingwave_meta::error::MetaErrorInner;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::rpc::ddl_controller::fill_table_stream_graph_info;
 use risingwave_pb::catalog::connection::private_link_service::{
@@ -930,9 +931,6 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<AutoSchemaChangeResponse>, Status> {
         let req = request.into_inner();
 
-        let schema_change = req.schema_change.unwrap();
-        let cdc_table_name = schema_change.cdc_table_name.clone();
-
         let mut workers = self
             .metadata_manager
             .list_worker_node(Some(WorkerType::Frontend), Some(State::Running))
@@ -940,33 +938,49 @@ impl DdlService for DdlServiceImpl {
         workers.shuffle(&mut thread_rng());
         let worker = workers
             .first()
-            .ok_or_else(|| anyhow!("no frontend worker available"))?;
-        let client = self.env.frontend_client_pool().get(worker).await?;
+            .ok_or_else(|| MetaError::from(anyhow!("no frontend worker available")))?;
+        let client = self
+            .env
+            .frontend_client_pool()
+            .get(worker)
+            .await
+            .map_err(|err| MetaError::from(err))?;
 
-        // get the table catalog corresponding to the
-        let tables: Vec<Table> = self
-            .metadata_manager
-            .get_table_catalog_by_cdc_table_name(cdc_table_name)
-            .await?;
+        let Some(schema_change) = req.schema_change else {
+            return Err(Status::invalid_argument(
+                "schema change message is required",
+            ));
+        };
 
-        for table in tables {
-            // send a request to the frontend to get the ReplaceTablePlan
-            let resp = client
-                .get_table_replace_plan(GetTableReplacePlanRequest {
-                    database_id: table.database_id,
-                    owner: table.owner,
-                    table_name: table.name,
-                    schema_change: Some(schema_change),
-                })
+        for table_change in schema_change.table_changes {
+            let cdc_table_name = table_change.cdc_table_name.clone();
+
+            // get the table catalog corresponding to the cdc table
+            let tables: Vec<Table> = self
+                .metadata_manager
+                .get_table_catalog_by_cdc_table_name(cdc_table_name)
                 .await?;
 
-            if let Some(plan) = resp.table_plan {
-                // start the schema change procedure
-                self.ddl_controller
-                    .run_command(DdlCommand::ReplaceTable(Self::extract_replace_table_info(
-                        plan,
-                    )))
-                    .await?;
+            for table in tables {
+                // send a request to the frontend to get the ReplaceTablePlan
+                let resp = client
+                    .get_table_replace_plan(GetTableReplacePlanRequest {
+                        database_id: table.database_id,
+                        owner: table.owner,
+                        table_name: table.name,
+                        table_change: Some(table_change.clone()),
+                    })
+                    .await
+                    .map_err(|err| MetaError::from(err))?;
+
+                if let Some(plan) = resp.replace_plan {
+                    // start the schema change procedure
+                    self.ddl_controller
+                        .run_command(DdlCommand::ReplaceTable(Self::extract_replace_table_info(
+                            plan,
+                        )))
+                        .await?;
+                }
             }
         }
 
