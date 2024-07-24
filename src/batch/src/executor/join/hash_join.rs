@@ -3319,14 +3319,15 @@ mod tests {
              3   5.0 3   4.0
              3   5.0 3   3.0
              4   1.0 4   0
-             4   1.0 4   0.5",
+             4   1.0 4   9.0",
         );
         let expect = DataChunk::from_pretty(
             "i   f   i   F
              1   3.5 1   5.5
              2   4.0 .   .
              3   5.0 .   .
-             3   5.0 .   .",
+             3   5.0 .   .
+             4   1.0 4   9.0",
         );
         let cond = TestFixture::create_cond();
         let mut state = LeftNonEquiJoinState {
@@ -3347,7 +3348,7 @@ mod tests {
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
-        assert!(!state.found_matched);
+        assert!(state.found_matched);
 
         let chunk = DataChunk::from_pretty(
             "i   f   i   F
