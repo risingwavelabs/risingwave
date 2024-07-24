@@ -215,6 +215,7 @@ impl ClusterManager {
             // resource doesn't need persist
             resource: None,
             started_at: None,
+            node_label: "".to_string(),
         };
 
         let mut worker = Worker::from_protobuf(worker_node.clone());
@@ -771,6 +772,7 @@ fn meta_node_info(host: &str, started_at: Option<u64>) -> WorkerNode {
         }),
         started_at,
         parallelism: 0,
+        node_label: "".to_string(),
     }
 }
 

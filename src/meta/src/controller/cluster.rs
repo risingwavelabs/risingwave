@@ -88,6 +88,7 @@ impl From<WorkerInfo> for PbWorkerNode {
             transactional_id: info.0.transaction_id.map(|id| id as _),
             resource: info.2.resource,
             started_at: info.2.started_at,
+            node_label: "".to_string(),
         }
     }
 }
@@ -465,6 +466,7 @@ fn meta_node_info(host: &str, started_at: Option<u64>) -> PbWorkerNode {
             total_cpu_cores: total_cpu_available() as _,
         }),
         started_at,
+        node_label: "".to_string(),
     }
 }
 
