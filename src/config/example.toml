@@ -57,7 +57,6 @@ compact_task_table_size_partition_threshold_high = 536870912
 event_log_enabled = true
 event_log_channel_max_size = 10
 enable_dropped_column_reclaim = false
-secret_store_private_key = [100, 101, 109, 111, 45, 115, 101, 99, 114, 101, 116, 45, 112, 114, 105, 118, 97, 116, 101, 45, 107, 101, 121]
 
 [meta.compaction_config]
 max_bytes_for_level_base = 536870912
@@ -126,6 +125,7 @@ stream_memory_controller_sequence_tls_lag = 32
 stream_enable_arrangement_backfill = true
 stream_high_join_amplification_threshold = 2048
 stream_enable_actor_tokio_metrics = false
+stream_exchange_connection_pool_size = 1
 
 [storage]
 share_buffers_sync_parallelism = 1
@@ -198,6 +198,7 @@ recent_filter_rotate_interval_ms = 10000
 set_atomic_write_dir = false
 opendal_upload_concurrency = 8
 opendal_writer_abort_on_err = false
+upload_part_size = 16777216
 
 [storage.object_store.retry]
 req_backoff_interval_ms = 1000

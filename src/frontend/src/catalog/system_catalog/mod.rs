@@ -22,7 +22,6 @@ use std::sync::{Arc, LazyLock};
 use futures::stream::BoxStream;
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::acl::AclMode;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{
@@ -102,8 +101,6 @@ pub struct SysCatalogReaderImpl {
     catalog_reader: CatalogReader,
     // Read user info.
     user_info_reader: UserInfoReader,
-    // Read cluster info.
-    worker_node_manager: WorkerNodeManagerRef,
     // Read from meta.
     meta_client: Arc<dyn FrontendMetaClient>,
     // Read auth context.
@@ -118,7 +115,6 @@ impl SysCatalogReaderImpl {
     pub fn new(
         catalog_reader: CatalogReader,
         user_info_reader: UserInfoReader,
-        worker_node_manager: WorkerNodeManagerRef,
         meta_client: Arc<dyn FrontendMetaClient>,
         auth_context: Arc<AuthContext>,
         config: Arc<RwLock<SessionConfig>>,
@@ -127,7 +123,6 @@ impl SysCatalogReaderImpl {
         Self {
             catalog_reader,
             user_info_reader,
-            worker_node_manager,
             meta_client,
             auth_context,
             config,

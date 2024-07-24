@@ -66,10 +66,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".plan_common.ExternalTableDesc",
         ".hummock.CompactTask",
         ".catalog.StreamSourceInfo",
-        ".catalog.SecretRef",
+        ".secret.SecretRef",
         ".catalog.Source",
         ".catalog.Sink",
         ".catalog.View",
+        ".catalog.SinkFormatDesc",
         ".connector_service.ValidateSourceRequest",
         ".connector_service.GetEventStreamRequest",
         ".connector_service.SinkParam",
@@ -119,6 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("expr.ExprNode.rex_node", "#[derive(Eq, Hash)]")
         .type_attribute("expr.ExprNode.NowRexNode", "#[derive(Eq, Hash)]")
         .type_attribute("expr.InputRef", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.UserDefinedFunctionMetadata", "#[derive(Eq, Hash)]")
         .type_attribute("data.Datum", "#[derive(Eq, Hash)]")
         .type_attribute("expr.FunctionCall", "#[derive(Eq, Hash)]")
         .type_attribute("expr.UserDefinedFunction", "#[derive(Eq, Hash)]")

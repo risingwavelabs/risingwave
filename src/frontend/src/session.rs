@@ -51,6 +51,7 @@ use risingwave_common::config::{
     load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
 };
 use risingwave_common::memory::MemoryContext;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::session_config::{ConfigReporter, SessionConfig, VisibilityMode};
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
@@ -85,6 +86,7 @@ use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
+use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::{
     check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId,
@@ -186,7 +188,7 @@ impl FrontendEnv {
         let meta_client = Arc::new(MockFrontendMetaClient {});
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
         let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
-        let compute_client_pool = Arc::new(ComputeClientPool::default());
+        let compute_client_pool = Arc::new(ComputeClientPool::for_test());
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             compute_client_pool,
@@ -196,7 +198,7 @@ impl FrontendEnv {
             None,
         );
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
-        let client_pool = Arc::new(ComputeClientPool::default());
+        let client_pool = Arc::new(ComputeClientPool::for_test());
         let creating_streaming_tracker = StreamingJobTracker::new(meta_client.clone());
         let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(
             Builder::new_multi_thread()
@@ -246,10 +248,6 @@ impl FrontendEnv {
         );
         info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
-        let batch_config = config.batch;
-        let meta_config = config.meta;
-        let streaming_config = config.streaming;
-
         let frontend_address: HostAddr = opts
             .advertise_addr
             .as_ref()
@@ -267,7 +265,7 @@ impl FrontendEnv {
             WorkerType::Frontend,
             &frontend_address,
             Default::default(),
-            &meta_config,
+            &config.meta,
         )
         .await?;
 
@@ -295,15 +293,16 @@ impl FrontendEnv {
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
-        let compute_client_pool =
-            Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
+        let compute_client_pool = Arc::new(ComputeClientPool::new(
+            config.batch_exchange_connection_pool_size(),
+        ));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             compute_client_pool.clone(),
             catalog_reader.clone(),
             Arc::new(GLOBAL_DISTRIBUTED_QUERY_METRICS.clone()),
-            batch_config.distributed_query_limit,
-            batch_config.max_batch_queries_per_frontend_node,
+            config.batch.distributed_query_limit,
+            config.batch.max_batch_queries_per_frontend_node,
         );
 
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
@@ -317,6 +316,12 @@ impl FrontendEnv {
         let system_params_manager =
             Arc::new(LocalSystemParamsManager::new(system_params_reader.clone()));
 
+        LocalSecretManager::init(
+            opts.temp_secret_file_dir,
+            meta_client.cluster_id().to_string(),
+            worker_id,
+        );
+
         // This `session_params` should be initialized during the initial notification in `observer_manager`
         let session_params = Arc::new(RwLock::new(SessionConfig::default()));
         let frontend_observer_node = FrontendObserverNode::new(
@@ -328,7 +333,7 @@ impl FrontendEnv {
             hummock_snapshot_manager.clone(),
             system_params_manager.clone(),
             session_params.clone(),
-            compute_client_pool,
+            compute_client_pool.clone(),
         );
         let observer_manager =
             ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)
@@ -337,8 +342,6 @@ impl FrontendEnv {
         join_handles.push(observer_join_handle);
 
         meta_client.activate(&frontend_address).await?;
-
-        let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
 
         let frontend_metrics = Arc::new(GLOBAL_FRONTEND_METRICS.clone());
         let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
@@ -383,7 +386,7 @@ impl FrontendEnv {
 
         let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(
             Builder::new_multi_thread()
-                .worker_threads(batch_config.frontend_compute_runtime_worker_threads)
+                .worker_threads(config.batch.frontend_compute_runtime_worker_threads)
                 .thread_name("rw-batch-local")
                 .enable_all()
                 .build()
@@ -438,13 +441,13 @@ impl FrontendEnv {
                 system_params_manager,
                 session_params,
                 server_addr: frontend_address,
-                client_pool,
+                client_pool: compute_client_pool,
                 frontend_metrics,
                 spill_metrics,
                 sessions_map,
-                batch_config,
-                meta_config,
-                streaming_config,
+                batch_config: config.batch,
+                meta_config: config.meta,
+                streaming_config: config.streaming,
                 source_metrics,
                 creating_streaming_job_tracker,
                 compute_runtime,
@@ -990,6 +993,30 @@ impl SessionImpl {
                 )
             })?;
         Ok(table.clone())
+    }
+
+    pub fn get_secret_by_name(
+        &self,
+        schema_name: Option<String>,
+        secret_name: &str,
+    ) -> Result<Arc<SecretCatalog>> {
+        let db_name = self.database();
+        let search_path = self.config().search_path();
+        let user_name = &self.auth_context().user_name;
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let schema = match schema_name {
+            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
+            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
+        };
+        let schema = catalog_reader.get_schema_by_name(db_name, schema.name().as_str())?;
+        let secret = schema.get_secret_by_name(secret_name).ok_or_else(|| {
+            RwError::from(ErrorCode::ItemNotFound(format!(
+                "secret {} not found",
+                secret_name
+            )))
+        })?;
+        Ok(secret.clone())
     }
 
     pub async fn list_change_log_epochs(

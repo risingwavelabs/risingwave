@@ -38,8 +38,8 @@ fn read_pg_cast(_: &SysCatalogReaderImpl) -> Vec<PgCast> {
         .enumerate()
         .map(|(idx, (src, target, ctx))| PgCast {
             oid: idx as i32,
-            castsource: DataType::from(*src).to_oid(),
-            casttarget: DataType::from(*target).to_oid(),
+            castsource: DataType::try_from(*src).unwrap().to_oid(),
+            casttarget: DataType::try_from(*target).unwrap().to_oid(),
             castcontext: ctx.to_string(),
         })
         .collect()

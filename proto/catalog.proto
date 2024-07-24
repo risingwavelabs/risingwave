@@ -52,6 +52,11 @@ message StreamSourceInfo {
   // deprecated
   plan_common.RowFormatType row_format = 1;
   string row_schema_location = 2;
+  // This means *use **confluent** schema registry* and is `false` for **aws glue** schema registry.
+  // Eventually we will deprecate it and rely on `enum SchemaLocation` derived from `format_encode_options` below.
+  // * schema.location     false
+  // * schema.registry     true
+  // * aws.glue.schema_arn false
   bool use_schema_registry = 3;
   string proto_message_name = 4;
   int32 csv_delimiter = 5;
@@ -457,4 +462,9 @@ message Secret {
   bytes value = 4;
   uint32 owner = 5;
   uint32 schema_id = 6;
+}
+
+message OptionsWithSecret {
+  map<string, string> options = 1;
+  map<string, secret.SecretRef> secret_refs = 2;
 }

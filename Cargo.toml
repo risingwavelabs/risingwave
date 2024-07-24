@@ -94,6 +94,7 @@ aws-config = { version = "1", default-features = false, features = [
 aws-credential-types = { version = "1", default-features = false, features = [
     "hardcoded-credentials",
 ] }
+aws-sdk-glue = "1"
 aws-sdk-kinesis = { version = "1", default-features = false, features = [
     "rt-tokio",
     "rustls",
@@ -281,17 +282,22 @@ private_intra_doc_links = "allow"
 # Explicit lints don't hurt, and sometimes rust-analyzer works better with explicit links.
 redundant_explicit_links = "allow"
 
+# Tweak built-in profiles and define custom profiles.
+# See `docs/dev/src/build-and-run/profiles.md` for detailed information.
 [profile.dev]
-lto = 'off'
+lto = "off"
 
 [profile.release]
 debug = "full"
+incremental = true
 split-debuginfo = "packed"
+lto = "off"
+
+[profile.production]
+inherits = "release"
+incremental = false
 lto = "thin"
 
-# The profile used for CI in main branch.
-# This profile inherits from the release profile, but turns on some checks and assertions for us to
-# better catch bugs in CI.
 [profile.ci-release]
 inherits = "release"
 incremental = false
@@ -301,9 +307,6 @@ split-debuginfo = "off"
 debug-assertions = true
 overflow-checks = true
 
-# The profile used for CI in pull requests.
-# External dependencies are built with optimization enabled, while crates in this workspace are built
-# with `dev` profile and full debug info. This is a trade-off between build time and e2e test time.
 [profile.ci-dev]
 inherits = "dev"
 incremental = false
@@ -317,14 +320,11 @@ opt-level = 3
 [profile.ci-dev.package."indextree"]
 opt-level = 3
 
-# The profile used for deterministic simulation tests in CI.
-# The simulator can only run single-threaded, so optimization is required to make the running time
-# reasonable. The optimization level is customized to speed up the build.
 [profile.ci-sim]
 inherits = "dev"
-opt-level = 2
 incremental = false
-debug = 1
+debug = "line-tables-only"
+opt-level = 2
 
 [patch.crates-io]
 # Patch third-party crates for deterministic simulation.

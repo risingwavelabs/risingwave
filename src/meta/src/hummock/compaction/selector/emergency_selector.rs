@@ -12,21 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::compact_task;
-use risingwave_pb::hummock::hummock_version::Levels;
 
-use super::{CompactionSelector, DynamicLevelSelectorCore, LocalSelectorStatistic};
+use super::{CompactionSelector, DynamicLevelSelectorCore};
 use crate::hummock::compaction::picker::{EmergencyCompactionPicker, LocalPickerStatistic};
-use crate::hummock::compaction::{
-    create_compaction_task, CompactionDeveloperConfig, CompactionTask,
-};
-use crate::hummock::level_handler::LevelHandler;
-use crate::hummock::model::CompactionGroup;
+use crate::hummock::compaction::selector::CompactionSelectorContext;
+use crate::hummock::compaction::{create_compaction_task, CompactionTask};
 
 #[derive(Default)]
 pub struct EmergencySelector {}
@@ -35,14 +27,16 @@ impl CompactionSelector for EmergencySelector {
     fn pick_compaction(
         &mut self,
         task_id: HummockCompactionTaskId,
-        group: &CompactionGroup,
-        levels: &Levels,
-        _member_table_ids: &std::collections::BTreeSet<risingwave_common::catalog::TableId>,
-        level_handlers: &mut [LevelHandler],
-        selector_stats: &mut LocalSelectorStatistic,
-        _table_id_to_options: HashMap<u32, TableOption>,
-        developer_config: Arc<CompactionDeveloperConfig>,
+        context: CompactionSelectorContext<'_>,
     ) -> Option<CompactionTask> {
+        let CompactionSelectorContext {
+            group,
+            levels,
+            level_handlers,
+            selector_stats,
+            developer_config,
+            ..
+        } = context;
         let dynamic_level_core = DynamicLevelSelectorCore::new(
             group.compaction_config.clone(),
             developer_config.clone(),
