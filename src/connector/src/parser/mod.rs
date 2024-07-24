@@ -841,6 +841,11 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                     // 1. block source executor
                     // 2. send schema change to Meta
                     // 3. wait for Meta to finish schema change
+                    let (oneshot_tx, oneshot_rx) = tokio::sync::oneshot::channel();
+                    if let Some(ref tx) = parser.source_ctx().schema_change_tx {
+                        tx.send((schema_change, oneshot_tx)).await.unwrap();
+                        oneshot_rx.await.unwrap();
+                    }
                 }
             }
         }
