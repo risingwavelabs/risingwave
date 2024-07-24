@@ -124,23 +124,34 @@ impl ControlStreamHandle {
         }
     }
 
-    async fn shutdown_stream(&mut self) {
-        let err =
-            ScoredStreamError::new(StreamError::shutdown()).to_status_unnamed(Code::Cancelled);
-
+    /// Send `Shutdown` message to the control stream and wait for the stream to be closed
+    /// by the meta service. Notify the caller through `shutdown_sender` once it's done.
+    fn shutdown_stream(&mut self, shutdown_sender: oneshot::Sender<()>) {
         if let Some((sender, _)) = self.pair.take() {
             // TODO: Shall we send a specific message of shutdown?
-            if sender.send(Err(err)).is_err() {
+            if sender
+                .send(Ok(StreamingControlStreamResponse {
+                    response: Some(streaming_control_stream_response::Response::Shutdown(
+                        Default::default(),
+                    )),
+                }))
+                .is_err()
+            {
                 warn!("failed to notify shutdown of control stream");
             } else {
-                // We should always unregister the current node from the meta service before
-                // calling this method. So upon next recovery, the meta service will not involve
-                // us anymore and drop the connection to us.
-                //
-                // We detect this by waiting the stream to be closed. This is to ensure that the
-                // `Shutdown` error has been acknowledged by the meta service, for more precise
-                // error report.
-                sender.closed().await;
+                tokio::spawn(async move {
+                    // We should always unregister the current node from the meta service before
+                    // calling this method. So upon next recovery, the meta service will not involve
+                    // us anymore and drop the connection to us.
+                    //
+                    // We detect this by waiting the stream to be closed. This is to ensure that the
+                    // `Shutdown` error has been acknowledged by the meta service, for more precise
+                    // error report.
+                    sender.closed().await;
+
+                    // Notify the caller that the shutdown is done.
+                    let _ = shutdown_sender.send(());
+                });
             }
         }
     }
@@ -476,7 +487,7 @@ impl LocalBarrierWorker {
                                 });
                             }
                             actor_op => {
-                                self.handle_actor_op(actor_op).await;
+                                self.handle_actor_op(actor_op);
                             }
                         }
                     }
@@ -558,7 +569,7 @@ impl LocalBarrierWorker {
         }
     }
 
-    async fn handle_actor_op(&mut self, actor_op: LocalActorOperation) {
+    fn handle_actor_op(&mut self, actor_op: LocalActorOperation) {
         match actor_op {
             LocalActorOperation::NewControlStream { .. } => {
                 unreachable!("NewControlStream event should be handled separately in async context")
@@ -611,8 +622,7 @@ impl LocalBarrierWorker {
                 if !self.actor_manager_state.handles.is_empty() {
                     tracing::warn!("shutdown with running actors");
                 }
-                self.control_stream_handle.shutdown_stream().await;
-                let _ = result_sender.send(());
+                self.control_stream_handle.shutdown_stream(result_sender);
             }
         }
     }
@@ -1040,9 +1050,6 @@ impl ScoredStreamError {
 
                 // `BarrierSend` is likely to be caused by actor exit and not the root cause.
                 ErrorKind::BarrierSend { .. } => 1,
-
-                // Asked to shutdown by user, likely to be the root cause.
-                ErrorKind::Shutdown => 3000,
 
                 // Executor errors first.
                 ErrorKind::Executor(ee) => 2000 + stream_executor_error_score(ee),

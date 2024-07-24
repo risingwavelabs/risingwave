@@ -100,9 +100,6 @@ pub enum ErrorKind {
         #[backtrace]
         anyhow::Error,
     ),
-
-    #[error("the compute node is asked to shutdown")]
-    Shutdown,
 }
 
 impl From<PbFieldNotFound> for StreamError {
