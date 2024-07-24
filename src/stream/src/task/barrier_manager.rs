@@ -348,8 +348,7 @@ impl LocalBarrierWorker {
         let (event_tx, event_rx) = unbounded_channel();
         let (failure_tx, failure_rx) = unbounded_channel();
         let shared_context = Arc::new(SharedContext::new(
-            actor_manager.env.server_address().clone(),
-            actor_manager.env.config(),
+            &actor_manager.env,
             LocalBarrierManager {
                 barrier_event_sender: event_tx,
                 actor_failure_sender: failure_tx,
