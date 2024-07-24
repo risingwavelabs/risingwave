@@ -53,9 +53,9 @@ message DropActorsResponse {
 }
 
 message PartialGraphInfo {
-  repeated uint32 actor_ids_to_send = 3;
-  repeated uint32 actor_ids_to_collect = 4;
-  repeated uint32 table_ids_to_sync = 5;
+  repeated uint32 actor_ids_to_send = 1;
+  repeated uint32 actor_ids_to_collect = 2;
+  repeated uint32 table_ids_to_sync = 3;
 }
 
 message InjectBarrierRequest {

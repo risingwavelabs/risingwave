@@ -353,10 +353,9 @@ mod actor_status {
                 InflightActorStatus::Running {
                     inflight_barriers, ..
                 } => {
-                    let (prev_epoch, (prev_partial_graph_id, _)) =
-                        inflight_barriers.last_key_value().expect("non-empty");
+                    let (prev_epoch, _) = inflight_barriers.last_key_value().expect("non-empty");
                     assert!(*prev_epoch < barrier.epoch.prev);
-                    (None, *prev_partial_graph_id != partial_graph_id)
+                    (None, false)
                 }
             };
 
@@ -410,7 +409,7 @@ mod actor_status {
                 assert_eq!(prev_epoch, epoch.prev);
                 let move_to_graph_id = if let Some((epoch, (graph_id, _))) = inflight_barriers.first_key_value() {
                     if *graph_id != prev_partial_graph_id {
-                        Some(Some((prev_partial_graph_id, *epoch)))
+                        Some(Some((*graph_id, *epoch)))
                     } else {
                         None
                     }
@@ -548,7 +547,7 @@ impl ManagedBarrierState {
                 .entry(partial_graph_id)
                 .or_insert_with(|| {
                     PartialGraphManagedBarrierState::new(
-                        partial_graph_id.0 == u32::MAX,
+                        partial_graph_id.is_global_graph(),
                         self.state_store.clone(),
                         self.streaming_metrics.clone(),
                         self.barrier_await_tree_reg.clone(),
