@@ -17,6 +17,7 @@ postmaster license_key
 postmaster max_concurrent_creating_streaming_jobs
 postmaster pause_on_next_bootstrap
 user application_name
+user backfill_rate_limit
 user background_ddl
 user batch_enable_distributed_dml
 user batch_parallelism

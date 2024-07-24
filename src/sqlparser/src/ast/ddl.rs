@@ -138,8 +138,8 @@ pub enum AlterViewOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
-    /// `SET STREAMING_RATE_LIMIT TO <rate_limit>`
-    SetStreamingRateLimit {
+    /// `SET BACKFILL_RATE_LIMIT TO <rate_limit>`
+    SetBackfillRateLimit {
         rate_limit: i32,
     },
 }
@@ -341,8 +341,8 @@ impl fmt::Display for AlterViewOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
-            AlterViewOperation::SetStreamingRateLimit { rate_limit } => {
-                write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
+            AlterViewOperation::SetBackfillRateLimit { rate_limit } => {
+                write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
             }
         }
     }

@@ -3133,6 +3133,28 @@ impl Parser<'_> {
         })
     }
 
+    /// BACKFILL_RATE_LIMIT = default | NUMBER
+    /// BACKFILL_RATE_LIMIT TO default | NUMBER
+    pub fn parse_alter_backfill_rate_limit(&mut self) -> PResult<Option<i32>> {
+        if !self.parse_keyword(Keyword::BACKFILL_RATE_LIMIT) {
+            return Ok(None);
+        }
+        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+            return self.expected("TO or = after ALTER TABLE SET BACKFILL_RATE_LIMIT");
+        }
+        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
+            -1
+        } else {
+            let s = self.parse_number_value()?;
+            if let Ok(n) = s.parse::<i32>() {
+                n
+            } else {
+                return self.expected("number or DEFAULT");
+            }
+        };
+        Ok(Some(rate_limit))
+    }
+
     /// STREAMING_RATE_LIMIT = default | NUMBER
     /// STREAMING_RATE_LIMIT TO default | NUMBER
     pub fn parse_alter_streaming_rate_limit(&mut self) -> PResult<Option<i32>> {
@@ -3229,11 +3251,11 @@ impl Parser<'_> {
                     deferred,
                 }
             } else if materialized
-                && let Some(rate_limit) = self.parse_alter_streaming_rate_limit()?
+                && let Some(rate_limit) = self.parse_alter_backfill_rate_limit()?
             {
-                AlterViewOperation::SetStreamingRateLimit { rate_limit }
+                AlterViewOperation::SetBackfillRateLimit { rate_limit }
             } else {
-                return self.expected("SCHEMA/PARALLELISM/STREAMING_RATE_LIMIT after SET");
+                return self.expected("SCHEMA/PARALLELISM/BACKFILL_RATE_LIMIT after SET");
             }
         } else {
             return self.expected(&format!(

@@ -814,7 +814,7 @@ pub async fn handle(
         Statement::AlterView {
             materialized,
             name,
-            operation: AlterViewOperation::SetStreamingRateLimit { rate_limit },
+            operation: AlterViewOperation::SetBackfillRateLimit { rate_limit },
         } if materialized => {
             alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                 handler_args,

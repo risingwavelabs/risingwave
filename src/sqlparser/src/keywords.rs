@@ -95,6 +95,7 @@ define_keywords!(
     AUTHORIZATION,
     AUTO,
     AVG,
+    BACKFILL_RATE_LIMIT,
     BASE64,
     BEGIN,
     BEGIN_FRAME,
