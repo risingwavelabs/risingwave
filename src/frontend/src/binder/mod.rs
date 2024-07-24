@@ -41,6 +41,7 @@ mod statement;
 mod struct_field;
 mod update;
 mod values;
+pub mod fetch_cursor;
 
 pub use bind_context::{BindContext, Clause, LateralBindContext};
 pub use delete::BoundDelete;

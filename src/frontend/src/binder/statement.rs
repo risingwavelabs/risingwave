@@ -17,6 +17,7 @@ use risingwave_common::catalog::Field;
 use risingwave_sqlparser::ast::Statement;
 
 use super::delete::BoundDelete;
+use super::fetch_cursor::BoundFetchCursor;
 use super::update::BoundUpdate;
 use crate::binder::{Binder, BoundInsert, BoundQuery};
 use crate::error::Result;
@@ -28,6 +29,7 @@ pub enum BoundStatement {
     Delete(Box<BoundDelete>),
     Update(Box<BoundUpdate>),
     Query(Box<BoundQuery>),
+    FetchCursor(Box<BoundFetchCursor>)
 }
 
 impl BoundStatement {
@@ -46,6 +48,9 @@ impl BoundStatement {
                 .as_ref()
                 .map_or(vec![], |s| s.fields().into()),
             BoundStatement::Query(q) => q.schema().fields().into(),
+            BoundStatement::FetchCursor(f) => f.returning_schema
+            .as_ref()
+            .map_or(vec![], |s| s.fields().into()),
         }
     }
 }
@@ -99,6 +104,7 @@ impl RewriteExprsRecursive for BoundStatement {
             BoundStatement::Delete(inner) => inner.rewrite_exprs_recursive(rewriter),
             BoundStatement::Update(inner) => inner.rewrite_exprs_recursive(rewriter),
             BoundStatement::Query(inner) => inner.rewrite_exprs_recursive(rewriter),
+            BoundStatement::FetchCursor(_) => {},
         }
     }
 }

@@ -15,18 +15,25 @@
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_sqlparser::ast::FetchCursorStatement;
+use risingwave_common::bail_not_implemented;
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::types::DataType;
+use risingwave_sqlparser::ast::{FetchCursorStatement, Statement};
 
+use super::extended_handle::{PrepareStatement, PreparedResult};
+use super::query::BoundResult;
 use super::RwPgResponse;
+use crate::binder::fetch_cursor::BoundFetchCursor;
+use crate::binder::BoundStatement;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
 use crate::{Binder, PgResponseStream};
 
 pub async fn handle_fetch_cursor(
-    handle_args: HandlerArgs,
+    handler_args: HandlerArgs,
     stmt: FetchCursorStatement,
 ) -> Result<RwPgResponse> {
-    let session = handle_args.session.clone();
+    let session = handler_args.session.clone();
     let db_name = session.database();
     let (_, cursor_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.cursor_name.clone())?;
@@ -34,7 +41,7 @@ pub async fn handle_fetch_cursor(
     let cursor_manager = session.get_cursor_manager();
 
     let (rows, pg_descs) = cursor_manager
-        .get_rows_with_cursor(cursor_name, stmt.count, handle_args)
+        .get_rows_with_cursor(cursor_name, stmt.count, handler_args)
         .await?;
     Ok(build_fetch_cursor_response(rows, pg_descs))
 }
@@ -44,4 +51,43 @@ fn build_fetch_cursor_response(rows: Vec<Row>, pg_descs: Vec<PgFieldDescriptor>)
         .row_cnt_opt(Some(rows.len() as i32))
         .values(PgResponseStream::from(rows), pg_descs)
         .into()
+}
+
+pub async fn handle_parse(
+    handler_args: HandlerArgs,
+    statement: Statement,
+    specific_param_types: Vec<Option<DataType>>,
+) -> Result<PrepareStatement> {
+    if let Statement::FetchCursor { stmt } = &statement{
+        let session = handler_args.session.clone();
+            let db_name = session.database();
+            let (_, cursor_name) =
+                Binder::resolve_schema_qualified_name(db_name, stmt.cursor_name.clone())?;
+        let mut binder = Binder::new_with_param_types(&session, specific_param_types);
+        let desc = session.get_cursor_manager().get_desc_with_cursor(cursor_name.clone(), handler_args).await?;
+        let schema = if desc.is_empty(){
+            None
+        }else{
+            let fields = desc.into_iter().map(|p|from_pg_field(p)).collect::<Result<Vec<_>>>()?;
+            Some(Schema::new(fields))
+        };
+
+        let bound = binder.bind_fetch_cursor(cursor_name,stmt.count,schema)?;
+        
+        let bound_result = BoundResult{
+            stmt_type: StatementType::FETCH_CURSOR,
+            must_dist: false,
+            bound: BoundStatement::FetchCursor(Box::new(bound)),
+            param_types: binder.export_param_types()?,
+            parsed_params: None,
+            dependent_relations: binder.included_relations(),
+        };
+        let result = PreparedResult{
+            statement,
+            bound_result,
+        };
+        Ok(PrepareStatement::Prepared(result))
+    }else{
+        bail_not_implemented!("unsupported statement {:?}", statement)
+    }
 }

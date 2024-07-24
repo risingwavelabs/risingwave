@@ -36,7 +36,7 @@ use risingwave_sqlparser::ast::{
     TableFactor, TableWithJoins,
 };
 
-use crate::error::{ErrorCode, Result as RwResult};
+use crate::error::{ErrorCode, Result as RwResult, RwError};
 use crate::session::{current, SessionImpl};
 
 pin_project! {
