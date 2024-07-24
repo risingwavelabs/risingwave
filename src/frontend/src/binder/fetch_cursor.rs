@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::catalog::Schema;
-use risingwave_pb::ddl_service::alter_name_request::Object;
-use risingwave_sqlparser::ast::ObjectName;
 use crate::error::Result;
 
 use crate::Binder;

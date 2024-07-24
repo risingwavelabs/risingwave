@@ -35,8 +35,9 @@ use risingwave_sqlparser::ast::{
     CompatibleSourceSchema, ConnectorSchema, ObjectName, Query, Select, SelectItem, SetExpr,
     TableFactor, TableWithJoins,
 };
+use thiserror_ext::AsReport;
 
-use crate::error::{ErrorCode, Result as RwResult, RwError};
+use crate::error::{ErrorCode, Result as RwResult};
 use crate::session::{current, SessionImpl};
 
 pin_project! {
@@ -187,6 +188,10 @@ pub fn to_pg_field(f: &Field) -> PgFieldDescriptor {
         f.data_type().to_oid(),
         f.data_type().type_len(),
     )
+}
+
+pub fn from_pg_field(f: PgFieldDescriptor) -> RwResult<Field> {
+    Ok(Field::with_name(DataType::from_oid(f.get_type_oid()).map_err(|e| ErrorCode::BindError(e.to_report_string()))?, f.get_name()))
 }
 
 #[easy_ext::ext(SourceSchemaCompatExt)]
