@@ -311,6 +311,7 @@ pub(crate) fn field_to_json(field: &Field) -> Value {
         // we do the same here
         risingwave_common::types::DataType::Struct(_) => ("string", ""),
         risingwave_common::types::DataType::List { .. } => ("string", ""),
+        risingwave_common::types::DataType::Map(_) => todo!("map"),
     };
 
     if name.is_empty() {

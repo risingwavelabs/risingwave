@@ -497,15 +497,23 @@ impl ToText for StructRef<'_> {
     }
 }
 
-/// Double quote a string if it contains any special characters.
-fn quote_if_need(input: &str, writer: &mut impl Write) -> std::fmt::Result {
+pub const PG_NEED_QUOTE_CHARS: [char; 11] = [
+    '"', '\\', '(', ')', ',',
+    // PostgreSQL `array_isspace` includes '\x0B' but rust
+    // [`char::is_ascii_whitespace`] does not.
+    ' ', '\t', '\n', '\r', '\x0B', '\x0C',
+];
+
+/// Double quote a string if it contains any special characters.///
+pub fn quote_if_need(input: &str, writer: &mut impl Write) -> std::fmt::Result {
+    // Note: for struct here, 'null' as a string is not quoted, but for list it's quoted:
+    // ```sql
+    // select row('a','a b','null'), array['a','a b','null'];
+    // ----
+    // (a,"a b",null) {a,"a b","null"}
+    // ```
     if !input.is_empty() // non-empty
-        && !input.contains([
-            '"', '\\', '(', ')', ',',
-            // PostgreSQL `array_isspace` includes '\x0B' but rust
-            // [`char::is_ascii_whitespace`] does not.
-            ' ', '\t', '\n', '\r', '\x0B', '\x0C',
-        ])
+    && !input.contains(PG_NEED_QUOTE_CHARS)
     {
         return writer.write_str(input);
     }

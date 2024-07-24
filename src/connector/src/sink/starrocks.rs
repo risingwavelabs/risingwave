@@ -246,6 +246,9 @@ impl StarrocksSink {
             risingwave_common::types::DataType::Int256 => Err(SinkError::Starrocks(
                 "INT256 is not supported for Starrocks sink.".to_string(),
             )),
+            risingwave_common::types::DataType::Map(_) => Err(SinkError::Starrocks(
+                "MAP is not supported for Starrocks sink.".to_string(),
+            )),
         }
     }
 }

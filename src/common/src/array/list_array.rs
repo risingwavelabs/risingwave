@@ -29,6 +29,7 @@ use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, BoolArray, PrimitiveArray,
     PrimitiveArrayItemType, RowRef, Utf8Array,
 };
+use crate::array::struct_array::PG_NEED_QUOTE_CHARS;
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::row::Row;
 use crate::types::{
@@ -56,6 +57,7 @@ impl ArrayBuilder for ListArrayBuilder {
 
     #[cfg(test)]
     fn new(capacity: usize) -> Self {
+        // TODO: deprecate this
         Self::with_type(
             capacity,
             // Default datatype
@@ -248,6 +250,12 @@ impl ListArray {
         ensure!(
             array.values.is_empty(),
             "Must have no buffer in a list array"
+        );
+        debug_assert!(
+            (array.array_type == PbArrayType::List as i32)
+                || (array.array_type == PbArrayType::Map as i32),
+            "invalid array type for list: {}",
+            array.array_type
         );
         let bitmap: Bitmap = array.get_null_bitmap()?.into();
         let array_data = array.get_list_array_data()?.to_owned();
@@ -500,6 +508,7 @@ impl From<ListValue> for ArrayImpl {
     }
 }
 
+/// A slice of an array
 #[derive(Copy, Clone)]
 pub struct ListRef<'a> {
     array: &'a ArrayImpl,
@@ -649,12 +658,7 @@ impl ToText for ListRef<'_> {
                 let need_quote = !matches!(datum_ref, None | Some(ScalarRefImpl::List(_)))
                     && (s.is_empty()
                         || s.to_ascii_lowercase() == "null"
-                        || s.contains([
-                            '"', '\\', '{', '}', ',',
-                            // PostgreSQL `array_isspace` includes '\x0B' but rust
-                            // [`char::is_ascii_whitespace`] does not.
-                            ' ', '\t', '\n', '\r', '\x0B', '\x0C',
-                        ]));
+                        || s.contains(PG_NEED_QUOTE_CHARS));
                 if need_quote {
                     f(&"\"")?;
                     s.chars().try_for_each(|c| {

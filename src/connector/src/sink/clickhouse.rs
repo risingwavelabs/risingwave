@@ -399,6 +399,9 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Int256 => Err(SinkError::ClickHouse(
                 "clickhouse can not support Int256".to_string(),
             )),
+            risingwave_common::types::DataType::Map(_) => Err(SinkError::ClickHouse(
+                "clickhouse can not support Map".to_string(),
+            )),
         };
         if !is_match? {
             return Err(SinkError::ClickHouse(format!(
@@ -939,6 +942,11 @@ impl ClickHouseFieldWithNull {
             ScalarRefImpl::Bytea(_) => {
                 return Err(SinkError::ClickHouse(
                     "clickhouse can not support Bytea".to_string(),
+                ))
+            }
+            ScalarRefImpl::Map(_) => {
+                return Err(SinkError::ClickHouse(
+                    "clickhouse can not support Map".to_string(),
                 ))
             }
         };

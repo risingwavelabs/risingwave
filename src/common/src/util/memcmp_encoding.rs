@@ -170,6 +170,7 @@ fn calculate_encoded_size_inner(
             DataType::Varchar => deserializer.skip_bytes()?,
             DataType::Bytea => deserializer.skip_bytes()?,
             DataType::Int256 => Int256::MEMCMP_ENCODED_SIZE,
+            DataType::Map(_) => todo!(),
         };
 
         // consume offset of fixed_type
