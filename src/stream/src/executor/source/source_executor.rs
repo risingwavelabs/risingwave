@@ -24,6 +24,7 @@ use risingwave_common::metrics::{LabelGuardedIntCounter, GLOBAL_ERROR_METRICS};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
+use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
@@ -32,8 +33,8 @@ use risingwave_connector::source::{
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
@@ -122,6 +123,32 @@ impl<S: StateStore> SourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
+
+        let (schema_change_tx, rx) =
+            tokio::sync::mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(32);
+        let meta_client = self.actor_ctx.meta_client.clone();
+        let _ = tokio::task::spawn(async move {
+            let mut schema_change_rx = rx;
+            while let Some((schema_change, parser_tx)) = schema_change_rx.recv().await {
+                // handle schema change
+                if let Some(ref meta_client) = meta_client {
+                    match meta_client
+                        .auto_schema_change(schema_change.to_protobuf())
+                        .await
+                    {
+                        Ok(_) => {
+                            tracing::info!("schema change success");
+                            parser_tx.send(()).unwrap();
+                        }
+                        Err(e) => {
+                            tracing::error!(error = ?e.as_report(), "schema change error");
+                            parser_tx.send(()).unwrap();
+                        }
+                    }
+                }
+            }
+        });
+
         let source_ctx = SourceContext::new(
             self.actor_ctx.id,
             self.stream_source_core.as_ref().unwrap().source_id,
@@ -137,6 +164,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 rate_limit: self.rate_limit_rps,
             },
             source_desc.source.config.clone(),
+            Some(schema_change_tx),
         );
         let stream = source_desc
             .source
