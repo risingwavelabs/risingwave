@@ -1091,11 +1091,8 @@ impl DdlController {
 
         if let Some(creating_sink_table_fragments) = creating_sink_table_fragments {
             let sink_fragment = creating_sink_table_fragments.sink_fragment().unwrap();
-
-            let sink = sink.unwrap();
-
+            let sink = sink.expect("sink not found");
             let uniq_name = &format!("{}.{}.{}", sink.database_id, sink.schema_id, sink.name);
-
             Self::inject_replace_table_plan_for_sink(
                 Some(sink.id),
                 &sink_fragment,
