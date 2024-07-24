@@ -14,6 +14,8 @@
 
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime};
@@ -115,6 +117,7 @@ pub struct MetaClient {
     inner: GrpcMetaClient,
     meta_config: MetaConfig,
     cluster_id: String,
+    shutting_down: Arc<AtomicBool>,
 }
 
 impl MetaClient {
@@ -276,6 +279,7 @@ impl MetaClient {
             inner: grpc_meta_client,
             meta_config: meta_config.to_owned(),
             cluster_id: add_worker_resp.cluster_id,
+            shutting_down: Arc::new(false.into()),
         };
 
         static REPORT_PANIC: std::sync::Once = std::sync::Once::new();
@@ -322,8 +326,12 @@ impl MetaClient {
         let resp = self.inner.heartbeat(request).await?;
         if let Some(status) = resp.status {
             if status.code() == risingwave_pb::common::status::Code::UnknownWorker {
-                tracing::error!("worker expired: {}", status.message);
-                std::process::exit(1);
+                // Ignore the error if we're shutting down.
+                // Otherwise, exit the process.
+                if !self.shutting_down.load(Relaxed) {
+                    tracing::error!(message = status.message, "worker expired");
+                    std::process::exit(1);
+                }
             }
         }
         Ok(())
@@ -745,6 +753,7 @@ impl MetaClient {
             host: Some(self.host_addr.to_protobuf()),
         };
         self.inner.delete_worker_node(request).await?;
+        self.shutting_down.store(true, Relaxed);
         Ok(())
     }
 
