@@ -62,7 +62,6 @@ impl StreamKeyedMerge {
             if let Some(lhs_idx) = o2i_lhs.try_map(output_idx) {
                 schema_fields.push(lhs_input.schema().fields()[lhs_idx].clone());
             } else if let Some(rhs_idx) = o2i_rhs.try_map(output_idx) {
-                println!("rhs schema: {:?}", rhs_input.schema().fields());
                 schema_fields.push(rhs_input.schema().fields()[rhs_idx].clone());
             } else {
                 bail!(
