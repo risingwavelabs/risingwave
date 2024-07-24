@@ -18,7 +18,9 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use risingwave_common::catalog::TableId;
 use risingwave_common::must_match;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
-use risingwave_hummock_sdk::key::{FullKey, SetSlice, TableKeyRange, UserKey, UserKeyRange};
+use risingwave_hummock_sdk::key::{
+    bound_table_key_range, FullKey, SetSlice, TableKeyRange, UserKey, UserKeyRange,
+};
 use risingwave_hummock_sdk::EpochWithGap;
 
 use crate::error::StorageResult;
@@ -347,17 +349,16 @@ pub struct ChangeLogIterator {
 impl ChangeLogIterator {
     pub async fn new(
         epoch_range: (u64, u64),
-        (start_bound, end_bound): TableKeyRange,
+        table_key_range: TableKeyRange,
         new_value_iter: MergeIterator<SstableIterator>,
         old_value_iter: MergeIterator<SstableIterator>,
         table_id: TableId,
     ) -> HummockResult<Self> {
-        let make_user_key = |table_key| UserKey {
-            table_id,
-            table_key,
-        };
-        let start_bound = start_bound.map(make_user_key);
-        let end_bound = end_bound.map(make_user_key);
+        let user_key_range_ref = bound_table_key_range(table_id, &table_key_range);
+        let (start_bound, end_bound) = (
+            user_key_range_ref.0.map(|key| key.cloned()),
+            user_key_range_ref.1.map(|key| key.cloned()),
+        );
         let mut inner = ChangeLogIteratorInner::new(
             epoch_range,
             (start_bound, end_bound),

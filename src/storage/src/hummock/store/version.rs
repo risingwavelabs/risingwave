@@ -973,6 +973,17 @@ impl HummockVersionReader {
                 static EMPTY_VEC: Vec<EpochNewChangeLog> = Vec::new();
                 &EMPTY_VEC[..]
             };
+        if let Some(max_epoch_change_log) = change_log.last() {
+            let (_, max_epoch) = epoch_range;
+            if !max_epoch_change_log.epochs.contains(&max_epoch) {
+                warn!(
+                    max_epoch,
+                    change_log_epochs = ?change_log.iter().flat_map(|epoch_log| epoch_log.epochs.iter()).collect_vec(),
+                    table_id = options.table_id.table_id,
+                    "max_epoch does not exist"
+                );
+            }
+        }
         let read_options = Arc::new(SstableIteratorReadOptions {
             cache_policy: Default::default(),
             must_iterated_end_user_key: None,
