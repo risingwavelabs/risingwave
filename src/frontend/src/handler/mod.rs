@@ -48,6 +48,7 @@ mod alter_source_with_sr;
 mod alter_streaming_rate_limit;
 mod alter_system;
 mod alter_table_column;
+mod alter_table_replace_connector;
 mod alter_table_with_sr;
 pub mod alter_user;
 pub mod cancel_job;
@@ -695,6 +696,12 @@ pub async fn handle(
             name,
             operation: AlterTableOperation::RefreshSchema,
         } => alter_table_with_sr::handle_refresh_schema(handler_args, name).await,
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::ReplaceConnector {
+                connector_schema,
+            }
+        },
         Statement::AlterTable {
             name,
             operation: AlterTableOperation::SetStreamingRateLimit { rate_limit },

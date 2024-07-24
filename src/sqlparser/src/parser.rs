@@ -3124,7 +3124,10 @@ impl Parser<'_> {
             AlterTableOperation::AlterColumn { column_name, op }
         } else if self.parse_keywords(&[Keyword::REFRESH, Keyword::SCHEMA]) {
             AlterTableOperation::RefreshSchema
-        } else {
+        } else if self.parse_keywords(&[Keyword::REPLACE, Keyword::CONNECTOR]) {
+
+            AlterTableOperation::ReplaceConnector {}
+        }else {
             return self.expected("ADD or RENAME or OWNER TO or SET or DROP after ALTER TABLE");
         };
         Ok(Statement::AlterTable {

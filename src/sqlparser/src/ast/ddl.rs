@@ -106,6 +106,9 @@ pub enum AlterTableOperation {
     SetStreamingRateLimit {
         rate_limit: i32,
     },
+    ReplaceConnector {
+        connector_schema: ConnectorSchema,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
