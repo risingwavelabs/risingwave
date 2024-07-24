@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use risingwave_common::catalog::ColumnCatalog;
-
-use risingwave_pb::ddl_service::SchemaChangeEnvelope as PbSchemaChangeEnvelope;
+use risingwave_pb::ddl_service::{
+    SchemaChangeEnvelope as PbSchemaChangeEnvelope, TableSchemaChange as PbTableSchemaChange,
+};
 
 #[derive(Debug)]
 pub struct SchemaChangeEnvelope {
@@ -28,13 +29,23 @@ pub struct TableSchemaChange {
 }
 
 impl SchemaChangeEnvelope {
-    pub fn to_protobuf(&self) -> Vec<PbSchemaChangeEnvelope> {
+    pub fn to_protobuf(&self) -> PbSchemaChangeEnvelope {
+        let table_changes = self
+            .table_changes
+            .iter()
+            .map(|table_change| {
+                let columns = table_change
+                    .columns
+                    .iter()
+                    .map(|column| column.to_protobuf())
+                    .collect();
+                PbTableSchemaChange {
+                    cdc_table_name: table_change.cdc_table_name.clone(),
+                    columns,
+                }
+            })
+            .collect();
 
-        PbSchemaChangeEnvelope {
-            cdc_table_name: self.c
-            column_descs: vec![],
-        }
-
-
+        PbSchemaChangeEnvelope { table_changes }
     }
 }

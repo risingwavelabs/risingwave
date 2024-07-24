@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_server::{BoxedError, SessionManager};
-use risingwave_pb::ddl_service::{ReplaceTablePlan, SchemaChangeEnvelope};
+use risingwave_pb::ddl_service::{ReplaceTablePlan, SchemaChangeEnvelope, TableSchemaChange};
 use risingwave_pb::frontend_service::frontend_service_server::FrontendService;
 use risingwave_pb::frontend_service::{GetTableReplacePlanRequest, GetTableReplacePlanResponse};
 use risingwave_rpc_client::error::ToTonicStatus;
@@ -62,20 +62,18 @@ impl FrontendService for FrontendServiceImpl {
         request: RpcRequest<GetTableReplacePlanRequest>,
     ) -> Result<RpcResponse<GetTableReplacePlanResponse>, Status> {
         let req = request.into_inner();
-
-        let change = req
-            .schema_change
-            .expect("schema change message is required");
+        let table_change = req.table_change.expect("schema change message is required");
         let replace_plan =
-            get_new_table_plan(change, req.table_name, req.database_id, req.owner).await?;
+            get_new_table_plan(table_change, req.table_name, req.database_id, req.owner).await?;
+
         Ok(RpcResponse::new(GetTableReplacePlanResponse {
-            table_plan: Some(replace_plan),
+            replace_plan: Some(replace_plan),
         }))
     }
 }
 
 async fn get_new_table_plan(
-    change: SchemaChangeEnvelope,
+    table_change: TableSchemaChange,
     table_name: String,
     database_id: u32,
     owner: u32,
@@ -88,7 +86,7 @@ async fn get_new_table_plan(
     let session = session_mgr.get_session(database_id, owner)?;
 
     // call the handle alter method
-    let new_columns = change.column_descs.into_iter().map(|c| c.into()).collect();
+    let new_columns = table_change.columns.into_iter().map(|c| c.into()).collect();
     let table_name = ObjectName::from(vec![table_name.as_str().into()]);
     let (new_table_definition, original_catalog) =
         get_new_table_definition_for_cdc_table(&session, table_name.clone(), new_columns).await?;

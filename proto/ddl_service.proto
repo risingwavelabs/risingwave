@@ -447,7 +447,7 @@ message CommentOnResponse {
 
 message TableSchemaChange {
   string cdc_table_name = 1;
-  repeated plan_common.ColumnCatalog column_descs = 2;
+  repeated plan_common.ColumnCatalog columns = 2;
 }
 
 message SchemaChangeEnvelope {
