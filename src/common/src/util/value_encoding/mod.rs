@@ -253,7 +253,7 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Jsonb(v) => v.capacity(),
         ScalarRefImpl::Struct(s) => estimate_serialize_struct_size(s),
         ScalarRefImpl::List(v) => estimate_serialize_list_size(v),
-        ScalarRefImpl::Map(_) => todo!(),
+        ScalarRefImpl::Map(v) => estimate_serialize_list_size(v.0),
     }
 }
 

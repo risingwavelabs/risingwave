@@ -118,7 +118,7 @@ impl Array for MapArray {
 
 impl MapArray {
     pub fn from_protobuf(array: &PbArray) -> ArrayResult<ArrayImpl> {
-        let inner = ListArray::from_protobuf(&array)?.into_list();
+        let inner = ListArray::from_protobuf(array)?.into_list();
         Ok(Self { inner }.into())
     }
 

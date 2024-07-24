@@ -29,7 +29,6 @@ use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, BoolArray, PrimitiveArray,
     PrimitiveArrayItemType, RowRef, Utf8Array,
 };
-use crate::array::struct_array::PG_NEED_QUOTE_CHARS;
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::row::Row;
 use crate::types::{
@@ -658,7 +657,14 @@ impl ToText for ListRef<'_> {
                 let need_quote = !matches!(datum_ref, None | Some(ScalarRefImpl::List(_)))
                     && (s.is_empty()
                         || s.to_ascii_lowercase() == "null"
-                        || s.contains(PG_NEED_QUOTE_CHARS));
+                        || s.contains([
+                            '"', '\\', ',',
+                            // whilespace:
+                            // PostgreSQL `array_isspace` includes '\x0B' but rust
+                            // [`char::is_ascii_whitespace`] does not.
+                            ' ', '\t', '\n', '\r', '\x0B', '\x0C', // list-specific:
+                            '{', '}',
+                        ]));
                 if need_quote {
                     f(&"\"")?;
                     s.chars().try_for_each(|c| {

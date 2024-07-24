@@ -170,7 +170,11 @@ fn calculate_encoded_size_inner(
             DataType::Varchar => deserializer.skip_bytes()?,
             DataType::Bytea => deserializer.skip_bytes()?,
             DataType::Int256 => Int256::MEMCMP_ENCODED_SIZE,
-            DataType::Map(_) => todo!(),
+            DataType::Map(_) => {
+                // Map should not be used as key.
+                // This should be banned in frontend and this branch should actually be unreachable.
+                return Err(memcomparable::Error::NotSupported("map"));
+            }
         };
 
         // consume offset of fixed_type

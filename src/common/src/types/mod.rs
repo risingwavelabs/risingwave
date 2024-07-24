@@ -981,7 +981,6 @@ impl ScalarRefImpl<'_> {
     }
 
     /// Serialize the scalar into the `memcomparable` format.
-    /// TODO: use serde?
     pub fn serialize(
         &self,
         ser: &mut memcomparable::Serializer<impl BufMut>,
@@ -1069,7 +1068,11 @@ impl ScalarImpl {
             Ty::Jsonb => Self::Jsonb(JsonbVal::memcmp_deserialize(de)?),
             Ty::Struct(t) => StructValue::memcmp_deserialize(t.types(), de)?.to_scalar_value(),
             Ty::List(t) => ListValue::memcmp_deserialize(t, de)?.to_scalar_value(),
-            Ty::Map(_) => todo!(),
+            Ty::Map(_) => {
+                // Map should not be used as key.
+                // This should be banned in frontend and this branch should actually be unreachable.
+                Err(memcomparable::Error::NotSupported("map"))?
+            }
         })
     }
 
@@ -1249,7 +1252,10 @@ mod tests {
                     ScalarImpl::List(ListValue::from_iter([233i64, 2333])),
                     DataType::List(Box::new(DataType::Int64)),
                 ),
-                DataTypeName::Map => todo!(),
+                DataTypeName::Map => {
+                    // map is not hashable
+                    continue;
+                }
             };
 
             test(Some(scalar), data_type.clone());
