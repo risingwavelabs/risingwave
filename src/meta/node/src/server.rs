@@ -719,11 +719,10 @@ pub async fn start_service_as_election_leader(
         }
     }
 
-    let idle_shutdown = CancellationToken::new();
     let _idle_checker_handle = IdleManager::start_idle_checker(
         env.idle_manager_ref(),
         Duration::from_secs(30),
-        idle_shutdown.clone(),
+        shutdown.clone(),
     );
 
     let (abort_sender, abort_recv) = tokio::sync::oneshot::channel();
@@ -772,7 +771,6 @@ pub async fn start_service_as_election_leader(
         risingwave_pb::meta::event_log::Event::MetaNodeStart(event),
     ]);
 
-    let server_shutdown = CancellationToken::new();
     let server = tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
         .layer(TracingExtractLayer::new())
@@ -804,31 +802,14 @@ pub async fn start_service_as_election_leader(
                 tcp_nodelay: true,
                 keepalive_duration: None,
             },
-            server_shutdown.clone().cancelled_owned(),
+            shutdown.clone().cancelled_owned(),
         );
     started::set();
     let _server_handle = tokio::spawn(server);
 
     // Wait for the shutdown signal.
-    tokio::select! {
-        // Idle manager informs to shutdown. Do nothing else but directly return.
-        _ = idle_shutdown.cancelled() => {}
-
-        // External shutdown signal.
-        _ = shutdown.cancelled() => {
-            // Wait for all other workers to shutdown for gracefulness.
-            if election_client.is_leader() {
-                let res = metadata_manager.wait_till_all_worker_nodes_exit().await;
-                if let Err(e) = res {
-                    tracing::error!(
-                        error = %e.as_report(),
-                        "error occurs while waiting for all worker nodes to exit, directly shutdown",
-                    );
-                }
-            }
-            server_shutdown.cancel();
-        }
-    }
+    shutdown.cancelled().await;
+    // TODO(shutdown): may warn user if there's any other node still running in the cluster.
     // TODO(shutdown): do we have any other shutdown tasks?
     Ok(())
 }
