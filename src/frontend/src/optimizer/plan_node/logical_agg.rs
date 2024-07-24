@@ -326,8 +326,10 @@ impl LogicalAgg {
     ) -> PlanRef {
         let local_approx_percentile =
             StreamLocalApproxPercentile::new(input, approx_percentile_agg_call);
-        let global_approx_percentile =
-            StreamGlobalApproxPercentile::new(local_approx_percentile.into());
+        let global_approx_percentile = StreamGlobalApproxPercentile::new(
+            local_approx_percentile.into(),
+            approx_percentile_agg_call,
+        );
         global_approx_percentile.into()
     }
 

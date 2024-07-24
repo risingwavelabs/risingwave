@@ -13,18 +13,18 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
-use pretty_xmlish::XmlNode;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use crate::expr::{ExprRewriter, ExprVisitor};
+use crate::expr::{ExprRewriter, ExprVisitor, Literal};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::{childless_record, Distill};
 use crate::optimizer::plan_node::{
-    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
+    ExprRewritable, PlanAggCall, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
 };
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -34,10 +34,14 @@ use crate::PlanRef;
 pub struct StreamGlobalApproxPercentile {
     pub base: PlanBase<Stream>,
     input: PlanRef,
+    /// Quantile
+    quantile: Literal,
+    /// Used to compute the exponent bucket base.
+    relative_error: Literal,
 }
 
 impl StreamGlobalApproxPercentile {
-    pub fn new(input: PlanRef) -> Self {
+    pub fn new(input: PlanRef, approx_percentile_agg_call: &PlanAggCall) -> Self {
         let schema = Schema::new(vec![Field::new("approx_percentile", DataType::Float64)]);
         let watermark_columns = FixedBitSet::with_capacity(1);
         let base = PlanBase::new_stream(
@@ -51,13 +55,22 @@ impl StreamGlobalApproxPercentile {
             watermark_columns,
             input.columns_monotonicity().clone(),
         );
-        Self { base, input }
+        Self {
+            base,
+            input,
+            quantile: approx_percentile_agg_call.direct_args[0].clone(),
+            relative_error: approx_percentile_agg_call.direct_args[1].clone(),
+        }
     }
 }
 
 impl Distill for StreamGlobalApproxPercentile {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        childless_record("StreamGlobalApproxPercentile", vec![])
+        let out = vec![
+            ("quantile", Pretty::debug(&self.quantile)),
+            ("relative_error", Pretty::debug(&self.relative_error)),
+        ];
+        childless_record("StreamGlobalApproxPercentile", out)
     }
 }
 
@@ -70,6 +83,8 @@ impl PlanTreeNodeUnary for StreamGlobalApproxPercentile {
         Self {
             base: self.base.clone(),
             input,
+            quantile: self.quantile.clone(),
+            relative_error: self.relative_error.clone(),
         }
     }
 }
