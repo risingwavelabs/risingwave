@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common_estimate_size::EstimateSize;
@@ -45,16 +45,27 @@ pub struct TableWatermarksIndex {
     pub staging_watermarks: VecDeque<(HummockEpoch, Arc<[VnodeWatermark]>)>,
     pub committed_watermarks: Option<Arc<TableWatermarks>>,
     latest_epoch: HummockEpoch,
-    committed_epoch: HummockEpoch,
+    committed_epoch: Option<HummockEpoch>,
 }
 
 impl TableWatermarksIndex {
-    pub fn new(watermark_direction: WatermarkDirection, committed_epoch: HummockEpoch) -> Self {
+    pub fn new(
+        watermark_direction: WatermarkDirection,
+        first_epoch: HummockEpoch,
+        first_vnode_watermark: Vec<VnodeWatermark>,
+        committed_epoch: Option<HummockEpoch>,
+    ) -> Self {
+        if let Some(committed_epoch) = committed_epoch {
+            assert!(first_epoch > committed_epoch);
+        }
         Self {
             watermark_direction,
-            staging_watermarks: VecDeque::new(),
+            staging_watermarks: VecDeque::from_iter([(
+                first_epoch,
+                Arc::from(first_vnode_watermark),
+            )]),
             committed_watermarks: None,
-            latest_epoch: committed_epoch,
+            latest_epoch: first_epoch,
             committed_epoch,
         }
     }
@@ -66,7 +77,7 @@ impl TableWatermarksIndex {
         Self {
             watermark_direction: committed_watermarks.direction,
             staging_watermarks: VecDeque::new(),
-            committed_epoch,
+            committed_epoch: Some(committed_epoch),
             latest_epoch: committed_epoch,
             committed_watermarks: Some(committed_watermarks),
         }
@@ -238,11 +249,20 @@ impl TableWatermarksIndex {
         committed_epoch: HummockEpoch,
     ) {
         assert_eq!(self.watermark_direction, committed_watermark.direction);
-        assert!(self.committed_epoch <= committed_epoch);
-        if self.committed_epoch == committed_epoch {
-            return;
+        if let Some(prev_committed_epoch) = self.committed_epoch {
+            assert!(prev_committed_epoch <= committed_epoch);
+            if prev_committed_epoch == committed_epoch {
+                return;
+            }
         }
-        self.committed_epoch = committed_epoch;
+        if self.latest_epoch < committed_epoch {
+            warn!(
+                latest_epoch = self.latest_epoch,
+                committed_epoch, "committed_epoch exceed table watermark latest_epoch"
+            );
+            self.latest_epoch = committed_epoch;
+        }
+        self.committed_epoch = Some(committed_epoch);
         self.committed_watermarks = Some(committed_watermark);
         // keep only watermark higher than committed epoch
         while let Some((old_epoch, _)) = self.staging_watermarks.front()
@@ -570,7 +590,7 @@ mod tests {
 
     use bytes::Bytes;
     use itertools::Itertools;
-    use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+    use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{test_epoch, EpochExt};
@@ -902,11 +922,11 @@ mod tests {
         watermark2: Bytes,
         watermark3: Bytes,
     ) -> TableWatermarksIndex {
-        let mut index = TableWatermarksIndex::new(direction, COMMITTED_EPOCH);
-        index.add_epoch_watermark(
-            EPOCH1,
-            vec![VnodeWatermark::new(build_bitmap(0..4), watermark1.clone())].into(),
+        let mut index = TableWatermarksIndex::new(
             direction,
+            EPOCH1,
+            vec![VnodeWatermark::new(build_bitmap(0..4), watermark1.clone())],
+            Some(COMMITTED_EPOCH),
         );
         index.add_epoch_watermark(
             EPOCH2,
@@ -1057,7 +1077,7 @@ mod tests {
                 .clone(),
             EPOCH1,
         );
-        assert_eq!(EPOCH1, index.committed_epoch);
+        assert_eq!(EPOCH1, index.committed_epoch.unwrap());
         assert_eq!(EPOCH2, index.latest_epoch);
         for vnode in 0..VirtualNode::COUNT {
             let vnode = VirtualNode::from_index(vnode);

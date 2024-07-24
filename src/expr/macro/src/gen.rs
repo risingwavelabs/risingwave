@@ -561,7 +561,7 @@ impl FunctionAttr {
                 use std::sync::Arc;
                 use risingwave_common::array::*;
                 use risingwave_common::types::*;
-                use risingwave_common::buffer::Bitmap;
+                use risingwave_common::bitmap::Bitmap;
                 use risingwave_common::row::OwnedRow;
                 use risingwave_common::util::iter_util::ZipEqFast;
 
@@ -695,7 +695,7 @@ impl FunctionAttr {
                 use risingwave_expr::sig::{FuncSign, SigDataType, FuncBuilder};
 
                 FuncSign {
-                    name: risingwave_expr::aggregate::AggKind::#pb_type.into(),
+                    name: risingwave_pb::expr::agg_call::Type::#pb_type.into(),
                     inputs_type: vec![#(#args),*],
                     variadic: false,
                     ret_type: #ret,
@@ -914,7 +914,7 @@ impl FunctionAttr {
                 use risingwave_common::array::*;
                 use risingwave_common::types::*;
                 use risingwave_common::bail;
-                use risingwave_common::buffer::Bitmap;
+                use risingwave_common::bitmap::Bitmap;
                 use risingwave_common_estimate_size::EstimateSize;
 
                 use risingwave_expr::expr::Context;
@@ -1195,7 +1195,7 @@ impl FunctionAttr {
             |return_type, chunk_size, children| {
                 use risingwave_common::array::*;
                 use risingwave_common::types::*;
-                use risingwave_common::buffer::Bitmap;
+                use risingwave_common::bitmap::Bitmap;
                 use risingwave_common::util::iter_util::ZipEqFast;
                 use risingwave_expr::expr::{BoxedExpression, Context};
                 use risingwave_expr::{Result, ExprError};

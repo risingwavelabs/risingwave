@@ -22,7 +22,7 @@ use futures::future::{join, try_join};
 use futures::{pin_mut, stream, StreamExt};
 use futures_async_stream::for_await;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::{OwnedRow, Row, RowExt};

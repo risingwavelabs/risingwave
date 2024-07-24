@@ -65,7 +65,7 @@ impl ReadSnapshot {
         match self.batch_query_epoch().epoch.unwrap() {
             batch_query_epoch::Epoch::Committed(epoch)
             | batch_query_epoch::Epoch::Current(epoch) => Some(epoch.into()),
-            batch_query_epoch::Epoch::Backup(_) => None,
+            batch_query_epoch::Epoch::Backup(_) | batch_query_epoch::Epoch::TimeTravel(_) => None,
         }
     }
 
@@ -74,7 +74,8 @@ impl ReadSnapshot {
         match self.batch_query_epoch().epoch.unwrap() {
             batch_query_epoch::Epoch::Committed(epoch)
             | batch_query_epoch::Epoch::Current(epoch)
-            | batch_query_epoch::Epoch::Backup(epoch) => epoch.into(),
+            | batch_query_epoch::Epoch::Backup(epoch)
+            | batch_query_epoch::Epoch::TimeTravel(epoch) => epoch.into(),
         }
     }
 

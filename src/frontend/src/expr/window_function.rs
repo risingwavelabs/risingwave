@@ -15,6 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::types::DataType;
+use risingwave_expr::aggregate::AggKind;
 use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_expr::window_function::{Frame, WindowFuncKind};
 
@@ -47,7 +48,7 @@ impl WindowFunction {
         args: Vec<ExprImpl>,
         frame: Option<Frame>,
     ) -> RwResult<Self> {
-        let return_type = Self::infer_return_type(kind, &args)?;
+        let return_type = Self::infer_return_type(&kind, &args)?;
         Ok(Self {
             kind,
             args,
@@ -58,7 +59,7 @@ impl WindowFunction {
         })
     }
 
-    fn infer_return_type(kind: WindowFuncKind, args: &[ExprImpl]) -> RwResult<DataType> {
+    fn infer_return_type(kind: &WindowFuncKind, args: &[ExprImpl]) -> RwResult<DataType> {
         use WindowFuncKind::*;
         match (kind, args) {
             (RowNumber, []) => Ok(DataType::Int64),
@@ -86,9 +87,9 @@ impl WindowFunction {
                 );
             }
 
-            (Aggregate(agg_kind), args) => {
+            (Aggregate(AggKind::Builtin(agg_kind)), args) => {
                 let arg_types = args.iter().map(ExprImpl::return_type).collect::<Vec<_>>();
-                let return_type = FUNCTION_REGISTRY.get_return_type(agg_kind, &arg_types)?;
+                let return_type = FUNCTION_REGISTRY.get_return_type(*agg_kind, &arg_types)?;
                 Ok(return_type)
             }
 

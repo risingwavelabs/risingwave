@@ -26,7 +26,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
     alter_name_request, alter_set_schema_request, create_connection_request, PbReplaceTablePlan,
-    PbTableJobType, ReplaceTablePlan,
+    PbTableJobType, ReplaceTablePlan, TableJobType,
 };
 use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -92,6 +92,7 @@ pub trait CatalogWriter: Send + Sync {
         table: PbTable,
         graph: StreamFragmentGraph,
         mapping: ColIndexMapping,
+        job_type: TableJobType,
     ) -> Result<()>;
 
     async fn alter_source_column(&self, source: PbSource) -> Result<()>;
@@ -309,10 +310,11 @@ impl CatalogWriter for CatalogWriterImpl {
         table: PbTable,
         graph: StreamFragmentGraph,
         mapping: ColIndexMapping,
+        job_type: TableJobType,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .replace_table(source, table, graph, mapping)
+            .replace_table(source, table, graph, mapping, job_type)
             .await?;
         self.wait_version(version).await
     }

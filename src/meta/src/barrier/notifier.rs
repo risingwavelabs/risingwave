@@ -36,9 +36,6 @@ pub(crate) struct Notifier {
 
     /// Get notified when scheduled barrier is collected or failed.
     pub collected: Option<oneshot::Sender<MetaResult<()>>>,
-
-    /// Get notified when scheduled barrier is finished.
-    pub finished: Option<oneshot::Sender<MetaResult<()>>>,
 }
 
 impl Notifier {
@@ -50,8 +47,8 @@ impl Notifier {
     }
 
     /// Notify when we have collected a barrier from all actors.
-    pub fn notify_collected(&mut self) {
-        if let Some(tx) = self.collected.take() {
+    pub fn notify_collected(self) {
+        if let Some(tx) = self.collected {
             tx.send(Ok(())).ok();
         }
     }
@@ -63,31 +60,10 @@ impl Notifier {
         }
     }
 
-    /// Notify when we have finished a barrier from all actors. This function consumes `self`.
-    ///
-    /// Generally when a barrier is collected, it's also finished since it does not require further
-    /// report of finishing from actors.
-    /// However for creating MV, this is only called when all `BackfillExecutor` report it finished.
-    pub fn notify_finished(self) {
-        if let Some(tx) = self.finished {
-            tx.send(Ok(())).ok();
-        }
-    }
-
-    /// Notify when we failed to finish a barrier. This function consumes `self`.
-    pub fn notify_finish_failed(self, err: MetaError) {
-        if let Some(tx) = self.finished {
-            tx.send(Err(err)).ok();
-        }
-    }
-
     /// Notify when we failed to collect or finish a barrier. This function consumes `self`.
     pub fn notify_failed(self, err: MetaError) {
         if let Some(tx) = self.collected {
             tx.send(Err(err.clone())).ok();
-        }
-        if let Some(tx) = self.finished {
-            tx.send(Err(err)).ok();
         }
     }
 }

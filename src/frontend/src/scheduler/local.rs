@@ -150,6 +150,7 @@ impl LocalQueryExecution {
         let search_path = self.session.config().search_path();
         let time_zone = self.session.config().timezone();
         let timeout = self.timeout;
+        let meta_client = self.front_env.meta_client_ref();
 
         let sender1 = sender.clone();
         let exec = async move {
@@ -171,7 +172,7 @@ impl LocalQueryExecution {
         use risingwave_expr::expr_context::TIME_ZONE;
 
         use crate::expr::function_impl::context::{
-            AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH, USER_INFO_READER,
+            AUTH_CONTEXT, CATALOG_READER, DB_NAME, META_CLIENT, SEARCH_PATH, USER_INFO_READER,
         };
 
         // box is necessary, otherwise the size of `exec` will double each time it is nested.
@@ -181,6 +182,7 @@ impl LocalQueryExecution {
         let exec = async move { SEARCH_PATH::scope(search_path, exec).await }.boxed();
         let exec = async move { AUTH_CONTEXT::scope(auth_context, exec).await }.boxed();
         let exec = async move { TIME_ZONE::scope(time_zone, exec).await }.boxed();
+        let exec = async move { META_CLIENT::scope(meta_client, exec).await }.boxed();
 
         if let Some(timeout) = timeout {
             let exec = async move {
@@ -400,6 +402,40 @@ impl LocalQueryExecution {
                         };
                         sources.push(exchange_source);
                     }
+                } else if let Some(_file_scan_info) = &second_stage.file_scan_info {
+                    let second_stage_plan_node = self.convert_plan_node(
+                        &second_stage.root,
+                        &mut None,
+                        Some(PartitionInfo::File),
+                        next_executor_id.clone(),
+                    )?;
+                    let second_stage_plan_fragment = PlanFragment {
+                        root: Some(second_stage_plan_node),
+                        exchange_info: Some(ExchangeInfo {
+                            mode: DistributionMode::Single as i32,
+                            ..Default::default()
+                        }),
+                    };
+                    let local_execute_plan = LocalExecutePlan {
+                        plan: Some(second_stage_plan_fragment),
+                        epoch: Some(self.snapshot.batch_query_epoch()),
+                        tracing_context: tracing_context.clone(),
+                    };
+                    // NOTE: select a random work node here.
+                    let worker_node = self.worker_node_manager.next_random_worker()?;
+                    let exchange_source = ExchangeSource {
+                        task_output_id: Some(TaskOutputId {
+                            task_id: Some(PbTaskId {
+                                task_id: 0_u64,
+                                stage_id: exchange_source_stage_id,
+                                query_id: self.query.query_id.id.clone(),
+                            }),
+                            output_id: 0,
+                        }),
+                        host: Some(worker_node.host.as_ref().unwrap().clone()),
+                        local_execute_plan: Some(Plan(local_execute_plan)),
+                    };
+                    sources.push(exchange_source);
                 } else {
                     let second_stage_plan_node = self.convert_plan_node(
                         &second_stage.root,
@@ -530,7 +566,7 @@ impl LocalQueryExecution {
                             self.get_fragment_id(&side_table_desc.table_id.into())?,
                         )?;
 
-                        // TODO: should we use `pb::ParallelUnitMapping` here?
+                        // TODO: should we use `pb::WorkerSlotMapping` here?
                         node.inner_side_vnode_mapping =
                             mapping.to_expanded().into_iter().map(u64::from).collect();
                         node.worker_nodes = self.worker_node_manager.manager.list_worker_nodes();

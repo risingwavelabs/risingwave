@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use risingwave_common::config::default::compaction_config;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
 
@@ -54,10 +55,33 @@ impl CompactionPicker for IntraCompactionPicker {
         if let Some(ret) =
             self.pick_whole_level(l0, &level_handlers[0], vnode_partition_count, stats)
         {
+            if ret.input_levels.len() < 2 {
+                tracing::error!(
+                    ?ret,
+                    vnode_partition_count,
+                    "pick_whole_level failed to pick enough levels"
+                );
+                return None;
+            }
+
             return Some(ret);
         }
 
-        self.pick_l0_intra(l0, &level_handlers[0], vnode_partition_count, stats)
+        if let Some(ret) = self.pick_l0_intra(l0, &level_handlers[0], vnode_partition_count, stats)
+        {
+            if ret.input_levels.len() < 2 {
+                tracing::error!(
+                    ?ret,
+                    vnode_partition_count,
+                    "pick_l0_intra failed to pick enough levels"
+                );
+                return None;
+            }
+
+            return Some(ret);
+        }
+
+        None
     }
 }
 
@@ -144,7 +168,10 @@ impl IntraCompactionPicker {
                 self.config.level0_max_compact_file_number,
                 overlap_strategy.clone(),
                 self.developer_config.enable_check_task_level_overlap,
-                self.config.max_l0_compact_level_count as usize,
+                self.config
+                    .max_l0_compact_level_count
+                    .unwrap_or(compaction_config::max_l0_compact_level_count())
+                    as usize,
             );
 
             let l0_select_tables_vec = non_overlap_sub_level_picker
@@ -357,7 +384,7 @@ impl WholeLevelCompactionPicker {
                     table_infos: next_level.table_infos.clone(),
                 });
             }
-            if !select_level_inputs.is_empty() {
+            if select_level_inputs.len() > 1 {
                 let vnode_partition_count =
                     if select_input_size > self.config.sub_level_max_compaction_bytes / 2 {
                         partition_count

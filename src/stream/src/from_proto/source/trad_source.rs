@@ -17,7 +17,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_connector::source::should_copy_to_format_encode_options;
-use risingwave_connector::WithPropertiesExt;
+use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{
@@ -45,7 +45,7 @@ pub fn create_source_desc_builder(
     params: &ExecutorParams,
     source_info: PbStreamSourceInfo,
     row_id_index: Option<u32>,
-    with_properties: BTreeMap<String, String>,
+    with_properties: WithOptionsSecResolved,
 ) -> SourceDescBuilder {
     {
         // compatible code: introduced in https://github.com/risingwavelabs/risingwave/pull/13707
@@ -165,6 +165,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     );
                 }
 
+                let with_properties = WithOptionsSecResolved::new(
+                    source.with_properties.clone(),
+                    source.secret_refs.clone(),
+                );
+
                 let source_desc_builder = create_source_desc_builder(
                     "source",
                     &source_id,
@@ -172,7 +177,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     &params,
                     source_info,
                     source.row_id_index,
-                    source.with_properties.clone(),
+                    with_properties,
                 );
 
                 let source_column_ids: Vec<_> = source_desc_builder

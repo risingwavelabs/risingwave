@@ -410,6 +410,7 @@ mod test {
             format: SinkFormat::AppendOnly,
             encode: SinkEncode::Json,
             options: BTreeMap::default(),
+            secret_refs: BTreeMap::default(),
             key_encode: None,
         };
 
@@ -487,6 +488,7 @@ mod test {
             format: SinkFormat::AppendOnly,
             encode: SinkEncode::Template,
             options: btree_map,
+            secret_refs: Default::default(),
             key_encode: None,
         };
 

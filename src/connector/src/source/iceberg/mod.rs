@@ -12,12 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod parquet_file_reader;
+
 use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use icelake::types::DataContentType;
+use futures::StreamExt;
+use iceberg::spec::{DataContentType, ManifestList};
 use itertools::Itertools;
+pub use parquet_file_reader::*;
 use risingwave_common::bail;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
@@ -171,58 +175,64 @@ impl IcebergSplitEnumerator {
         if batch_parallelism == 0 {
             bail!("Batch parallelism is 0. Cannot split the iceberg files.");
         }
-        let table = self.config.load_table().await?;
+        let table = self.config.load_table_v2().await?;
         let snapshot_id = match time_traval_info {
             Some(IcebergTimeTravelInfo::Version(version)) => {
-                let Some(snapshot) = table.current_table_metadata().snapshot(version) else {
+                let Some(snapshot) = table.metadata().snapshot_by_id(version) else {
                     bail!("Cannot find the snapshot id in the iceberg table.");
                 };
-                snapshot.snapshot_id
+                snapshot.snapshot_id()
             }
             Some(IcebergTimeTravelInfo::TimestampMs(timestamp)) => {
-                match &table.current_table_metadata().snapshots {
-                    Some(snapshots) => {
-                        let snapshot = snapshots
-                            .iter()
-                            .filter(|snapshot| snapshot.timestamp_ms <= timestamp)
-                            .max_by_key(|snapshot| snapshot.timestamp_ms);
-                        match snapshot {
-                            Some(snapshot) => snapshot.snapshot_id,
-                            None => {
-                                // convert unix time to human readable time
-                                let time = chrono::DateTime::from_timestamp_millis(timestamp);
-                                if time.is_some() {
-                                    bail!("Cannot find a snapshot older than {}", time.unwrap());
-                                } else {
-                                    bail!("Cannot find a snapshot");
-                                }
-                            }
-                        }
-                    }
+                let snapshot = table
+                    .metadata()
+                    .snapshots()
+                    .filter(|snapshot| snapshot.timestamp().timestamp_millis() <= timestamp)
+                    .max_by_key(|snapshot| snapshot.timestamp().timestamp_millis());
+                match snapshot {
+                    Some(snapshot) => snapshot.snapshot_id(),
                     None => {
-                        bail!("Cannot find the snapshots in the iceberg table.");
+                        // convert unix time to human readable time
+                        let time = chrono::DateTime::from_timestamp_millis(timestamp);
+                        if time.is_some() {
+                            bail!("Cannot find a snapshot older than {}", time.unwrap());
+                        } else {
+                            bail!("Cannot find a snapshot");
+                        }
                     }
                 }
             }
-            None => match table.current_table_metadata().current_snapshot_id {
-                Some(snapshot_id) => snapshot_id,
+            None => match table.metadata().current_snapshot() {
+                Some(snapshot) => snapshot.snapshot_id(),
                 None => bail!("Cannot find the current snapshot id in the iceberg table."),
             },
         };
         let mut files = vec![];
-        for file in table
-            .data_files_of_snapshot(
-                table
-                    .current_table_metadata()
-                    .snapshot(snapshot_id)
-                    .expect("snapshot must exists"),
-            )
-            .await?
-        {
-            if file.content != DataContentType::Data {
-                bail!("Reading iceberg table with delete files is unsupported. Please try to compact the table first.");
+
+        let snapshot = table
+            .metadata()
+            .snapshot_by_id(snapshot_id)
+            .expect("snapshot must exist");
+
+        let manifest_list: ManifestList = snapshot
+            .load_manifest_list(table.file_io(), table.metadata())
+            .await
+            .map_err(|e| anyhow!(e))?;
+        for entry in manifest_list.entries() {
+            let manifest = entry
+                .load_manifest(table.file_io())
+                .await
+                .map_err(|e| anyhow!(e))?;
+            let mut manifest_entries_stream =
+                futures::stream::iter(manifest.entries().iter().filter(|e| e.is_alive()));
+
+            while let Some(manifest_entry) = manifest_entries_stream.next().await {
+                let file = manifest_entry.data_file();
+                if file.content_type() != DataContentType::Data {
+                    bail!("Reading iceberg table with delete files is unsupported. Please try to compact the table first.");
+                }
+                files.push(file.file_path().to_string());
             }
-            files.push(file.file_path);
         }
         let split_num = batch_parallelism;
         // evenly split the files into splits based on the parallelism.

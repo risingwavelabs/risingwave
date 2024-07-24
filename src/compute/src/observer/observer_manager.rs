@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
-use risingwave_common_service::observer_manager::{ObserverState, SubscribeCompute};
-use risingwave_pb::meta::subscribe_response::Info;
+use risingwave_common_service::ObserverState;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 
 pub struct ComputeObserverNode {
@@ -22,22 +23,38 @@ pub struct ComputeObserverNode {
 }
 
 impl ObserverState for ComputeObserverNode {
-    type SubscribeType = SubscribeCompute;
-
-    fn handle_notification(&mut self, resp: SubscribeResponse) {
-        let Some(info) = resp.info.as_ref() else {
-            return;
-        };
-
-        match info.to_owned() {
-            Info::SystemParams(p) => self.system_params_manager.try_set_params(p),
-            _ => {
-                panic!("error type notification");
-            }
-        }
+    fn subscribe_type() -> risingwave_pb::meta::SubscribeType {
+        risingwave_pb::meta::SubscribeType::Compute
     }
 
-    fn handle_initialization_notification(&mut self, _resp: SubscribeResponse) {}
+    fn handle_notification(&mut self, resp: SubscribeResponse) {
+        if let Some(info) = resp.info.as_ref() {
+            match info.to_owned() {
+                Info::SystemParams(p) => self.system_params_manager.try_set_params(p),
+                Info::Secret(s) => match resp.operation() {
+                    Operation::Add => {
+                        LocalSecretManager::global().add_secret(s.id, s.value);
+                    }
+                    Operation::Delete => {
+                        LocalSecretManager::global().remove_secret(s.id);
+                    }
+                    _ => {
+                        panic!("error type notification");
+                    }
+                },
+                _ => {
+                    panic!("error type notification");
+                }
+            }
+        };
+    }
+
+    fn handle_initialization_notification(&mut self, resp: SubscribeResponse) {
+        let Some(Info::Snapshot(snapshot)) = resp.info else {
+            unreachable!();
+        };
+        LocalSecretManager::global().init_secrets(snapshot.secrets);
+    }
 }
 
 impl ComputeObserverNode {

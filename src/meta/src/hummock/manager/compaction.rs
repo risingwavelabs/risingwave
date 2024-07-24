@@ -78,7 +78,7 @@ use crate::hummock::compaction::selector::level_selector::PickerInfo;
 use crate::hummock::compaction::selector::{
     DynamicLevelSelector, DynamicLevelSelectorCore, LocalSelectorStatistic, ManualCompactionOption,
     ManualCompactionSelector, SpaceReclaimCompactionSelector, TombstoneCompactionSelector,
-    TtlCompactionSelector,
+    TtlCompactionSelector, VnodeWatermarkCompactionSelector,
 };
 use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig, CompactionSelector};
 use crate::hummock::error::{Error, Result};
@@ -133,6 +133,10 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
         compact_task::TaskType::Tombstone,
         Box::<TombstoneCompactionSelector>::default(),
     );
+    compaction_selectors.insert(
+        compact_task::TaskType::VnodeWatermark,
+        Box::<VnodeWatermarkCompactionSelector>::default(),
+    );
     compaction_selectors
 }
 
@@ -184,20 +188,22 @@ impl<'a> HummockVersionTransaction<'a> {
             })),
         };
         group_deltas.push(group_delta);
-        version_delta.safe_epoch = std::cmp::max(
+        let new_visible_table_safe_epoch = std::cmp::max(
             version_delta.latest_version().visible_table_safe_epoch(),
             compact_task.watermark,
         );
-        if version_delta.latest_version().visible_table_safe_epoch() < version_delta.safe_epoch {
+        version_delta.set_safe_epoch(new_visible_table_safe_epoch);
+        if version_delta.latest_version().visible_table_safe_epoch() < new_visible_table_safe_epoch
+        {
             version_delta.with_latest_version(|version, version_delta| {
                 for (table_id, info) in version.state_table_info.info() {
-                    let new_safe_epoch = min(version_delta.safe_epoch, info.committed_epoch);
+                    let new_safe_epoch = min(new_visible_table_safe_epoch, info.committed_epoch);
                     if new_safe_epoch > info.safe_epoch {
-                        if new_safe_epoch != version_delta.safe_epoch {
+                        if new_safe_epoch != version_delta.visible_table_safe_epoch() {
                             warn!(
                                 new_safe_epoch,
                                 committed_epoch = info.committed_epoch,
-                                global_safe_epoch = version_delta.safe_epoch,
+                                global_safe_epoch = new_visible_table_safe_epoch,
                                 table_id = table_id.table_id,
                                 "table has different safe epoch to global"
                             );
@@ -764,8 +770,10 @@ impl HummockManager {
                 &group_config,
                 &mut stats,
                 selector,
-                table_id_to_option.clone(),
+                &table_id_to_option,
                 developer_config.clone(),
+                &version.latest_version().table_watermarks,
+                &version.latest_version().state_table_info,
             ) {
                 let target_level_id = compact_task.input.target_level as u32;
 
@@ -1766,6 +1774,8 @@ impl CompactionState {
             Some(compact_task::TaskType::Ttl)
         } else if guard.contains(&(group, compact_task::TaskType::Tombstone)) {
             Some(compact_task::TaskType::Tombstone)
+        } else if guard.contains(&(group, compact_task::TaskType::VnodeWatermark)) {
+            Some(compact_task::TaskType::VnodeWatermark)
         } else {
             None
         }
