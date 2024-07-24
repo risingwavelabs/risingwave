@@ -97,12 +97,12 @@ where
         spawn_prof_thread(profile_path);
     }
 
-    let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt()).unwrap();
-    let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate()).unwrap();
-
     let future_with_shutdown = async move {
         let shutdown = CancellationToken::new();
         let mut fut = pin!(f(shutdown.clone()));
+
+        let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt()).unwrap();
+        let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate()).unwrap();
 
         tokio::select! {
             biased;
