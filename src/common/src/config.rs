@@ -1096,6 +1096,9 @@ pub struct ObjectStoreConfig {
     // TODO: the following field will be deprecated after opendal is stablized
     #[serde(default)]
     pub opendal_writer_abort_on_err: bool,
+
+    #[serde(default = "default::object_store_config::upload_part_size")]
+    pub upload_part_size: usize,
 }
 
 impl ObjectStoreConfig {
@@ -2121,6 +2124,11 @@ pub mod default {
 
         pub fn opendal_upload_concurrency() -> usize {
             8
+        }
+
+        pub fn upload_part_size() -> usize {
+            // 16m
+            16 * 1024 * 1024
         }
 
         pub mod s3 {
