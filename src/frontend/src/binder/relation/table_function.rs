@@ -83,6 +83,7 @@ impl Binder {
         let mut clause = Some(Clause::From);
         std::mem::swap(&mut self.context.clause, &mut clause);
         let func = self.bind_function(Function {
+            aggregate: false,
             name,
             args,
             variadic: false,

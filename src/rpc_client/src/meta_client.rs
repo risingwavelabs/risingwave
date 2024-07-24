@@ -1781,9 +1781,9 @@ impl GrpcMetaClient {
     // See `Endpoint::keep_alive_timeout`
     const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
     // Retry base interval in ms for connecting to meta server.
-    const INIT_RETRY_BASE_INTERVAL_MS: u64 = 50;
+    const INIT_RETRY_BASE_INTERVAL_MS: u64 = 10;
     // Max retry times for connecting to meta server.
-    const INIT_RETRY_MAX_INTERVAL_MS: u64 = 5000;
+    const INIT_RETRY_MAX_INTERVAL_MS: u64 = 2000;
 
     fn start_meta_member_monitor(
         &self,
