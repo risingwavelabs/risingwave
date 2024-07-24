@@ -780,6 +780,7 @@ mod tests {
                                 UnnamedExpr(
                                     Function(
                                         Function {
+                                            aggregate: false,
                                             name: ObjectName(
                                                 [
                                                     Ident {
@@ -892,7 +893,9 @@ mod tests {
                             select_items: [
                                 AggCall(
                                     AggCall {
-                                        agg_kind: ApproxPercentile,
+                                        agg_kind: Builtin(
+                                            ApproxPercentile,
+                                        ),
                                         return_type: Float64,
                                         args: [
                                             FunctionCall(
@@ -933,30 +936,29 @@ mod tests {
                                         direct_args: [
                                             Literal {
                                                 data: Some(
-                                                    Decimal(
-                                                        Normalized(
+                                                    Float64(
+                                                        OrderedFloat(
                                                             0.5,
                                                         ),
                                                     ),
                                                 ),
                                                 data_type: Some(
-                                                    Decimal,
+                                                    Float64,
                                                 ),
                                             },
                                             Literal {
                                                 data: Some(
-                                                    Decimal(
-                                                        Normalized(
+                                                    Float64(
+                                                        OrderedFloat(
                                                             0.01,
                                                         ),
                                                     ),
                                                 ),
                                                 data_type: Some(
-                                                    Decimal,
+                                                    Float64,
                                                 ),
                                             },
                                         ],
-                                        user_defined: false,
                                     },
                                 ),
                             ],
