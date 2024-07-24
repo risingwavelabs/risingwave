@@ -314,16 +314,16 @@ impl LogicalAgg {
             }
         }
         let normal = AggInfo {
-            calls: approx_percentile_agg_calls,
+            calls: non_approx_percentile_agg_calls,
             col_mapping: ColIndexMapping::new(
-                approx_percentile_col_mapping,
+                non_approx_percentile_col_mapping,
                 self.agg_calls().len(),
             ),
         };
         let approx = AggInfo {
-            calls: non_approx_percentile_agg_calls,
+            calls: approx_percentile_agg_calls,
             col_mapping: ColIndexMapping::new(
-                non_approx_percentile_col_mapping,
+                approx_percentile_col_mapping,
                 self.agg_calls().len(),
             ),
         };
