@@ -140,6 +140,8 @@ impl ControlStreamHandle {
                 warn!("failed to notify shutdown of control stream");
             } else {
                 tokio::spawn(async move {
+                    tracing::info!("waiting for meta service to close control stream...");
+
                     // We should always unregister the current node from the meta service before
                     // calling this method. So upon next recovery, the meta service will not involve
                     // us anymore and drop the connection to us.

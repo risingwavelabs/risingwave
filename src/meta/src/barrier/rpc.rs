@@ -167,6 +167,11 @@ impl ControlStreamManager {
         Ok(())
     }
 
+    /// Clear all nodes and response streams in the manager.
+    pub(super) fn clear(&mut self) {
+        *self = Self::new(self.context.clone());
+    }
+
     async fn next_response(
         &mut self,
     ) -> Option<(WorkerId, MetaResult<StreamingControlStreamResponse>)> {

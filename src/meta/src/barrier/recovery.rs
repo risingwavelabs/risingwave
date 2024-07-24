@@ -234,9 +234,12 @@ impl GlobalBarrierManager {
                 .committed_epoch
                 .into(),
         );
+
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked("cluster is under recovering");
+        // Clear all control streams to release resources (connections to compute nodes) first.
+        self.control_stream_manager.clear();
 
         tracing::info!("recovery start!");
         let retry_strategy = Self::get_retry_strategy();
@@ -288,6 +291,7 @@ impl GlobalBarrierManager {
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
                     // FIXME: Transactions should be used.
+                    // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
                     let mut info = if !self.env.opts.disable_automatic_parallelism_control
                         && background_streaming_jobs.is_empty()
                     {
