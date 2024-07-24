@@ -390,12 +390,11 @@ impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
         let operation_type_str = operation_type.as_str();
         let data_len = data.len();
 
-        let res =
-            // TODO: we should avoid this special case after fully migrating to opeandal for s3.
-            self.inner
-                .write_bytes(data)
-                .verbose_instrument_await(operation_type_str)
-                .await;
+        let res = self
+            .inner
+            .write_bytes(data)
+            .verbose_instrument_await(operation_type_str)
+            .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
 
