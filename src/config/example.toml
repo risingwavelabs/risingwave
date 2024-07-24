@@ -83,7 +83,14 @@ enable_barrier_read = false
 statement_timeout_in_sec = 3600
 frontend_compute_runtime_worker_threads = 4
 mask_worker_temporary_secs = 30
-redact_sql_option_keywords = ["credential", "key", "password", "private", "secret", "token"]
+redact_sql_option_keywords = [
+    "credential",
+    "key",
+    "password",
+    "private",
+    "secret",
+    "token",
+]
 
 [batch.developer]
 batch_connector_message_buffer_size = 16
@@ -189,6 +196,7 @@ recent_filter_rotate_interval_ms = 10000
 
 [storage.object_store]
 object_store_set_atomic_write_dir = false
+upload_part_size = 16777216
 
 [storage.object_store.retry]
 req_backoff_interval_ms = 1000
