@@ -995,6 +995,9 @@ pub struct ObjectStoreConfig {
 
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
+
+    #[serde(default = "default::object_store_config::upload_part_size")]
+    pub upload_part_size: usize,
 }
 
 impl ObjectStoreConfig {
@@ -1852,6 +1855,11 @@ pub mod default {
 
         pub fn object_store_list_retry_attempts() -> usize {
             DEFAULT_REQ_MAX_RETRY_ATTEMPTS
+        }
+
+        pub fn upload_part_size() -> usize {
+            // 16m
+            16 * 1024 * 1024
         }
 
         pub mod s3 {
