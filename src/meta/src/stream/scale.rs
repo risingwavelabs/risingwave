@@ -2621,11 +2621,7 @@ impl GlobalStreamManager {
                     // Only maintain the cache for streaming compute nodes.
                     let worker_is_streaming_compute = |worker: &WorkerNode| {
                         worker.get_type() == Ok(WorkerType::ComputeNode)
-                            && worker
-                                .property
-                                .as_ref()
-                                .map(|p| p.is_streaming)
-                                .unwrap_or(false)
+                            && worker.property.as_ref().unwrap().is_streaming
                     };
 
                     match notification {
@@ -2634,7 +2630,7 @@ impl GlobalStreamManager {
                                 continue;
                             }
 
-                            tracing::info!("worker {} activated notification received", worker.id);
+                            tracing::info!(worker = worker.id, "worker activated notification received");
 
                             let prev_worker = worker_cache.insert(worker.id, worker.clone());
 

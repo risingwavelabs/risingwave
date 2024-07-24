@@ -204,10 +204,11 @@ impl ControlStreamManager {
                         break Ok((worker_id, command.prev_epoch.value().0, resp));
                     }
                     Response::Shutdown(_) => {
+                        // Directly return an error to trigger recovery.
                         break Err(anyhow!("worker node {worker_id} is shutting down").into());
                     }
                     Response::Init(_) => {
-                        // unreachable
+                        // This arm should be unreachable.
                         break Err(anyhow!("get unexpected init response").into());
                     }
                 },
@@ -228,7 +229,7 @@ impl ControlStreamManager {
                         break Err(err);
                     } else {
                         // for node with no inflight barrier, simply ignore the error
-                        info!(node = ?node.worker, "no inflight barrier in the node, ignore error");
+                        info!(node = ?node.worker, error = %err.as_report(), "no inflight barrier in the node, ignore error");
                         continue;
                     }
                 }

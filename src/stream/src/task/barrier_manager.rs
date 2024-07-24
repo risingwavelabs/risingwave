@@ -128,7 +128,6 @@ impl ControlStreamHandle {
     /// by the meta service. Notify the caller through `shutdown_sender` once it's done.
     fn shutdown_stream(&mut self, shutdown_sender: oneshot::Sender<()>) {
         if let Some((sender, _)) = self.pair.take() {
-            // TODO: Shall we send a specific message of shutdown?
             if sender
                 .send(Ok(StreamingControlStreamResponse {
                     response: Some(streaming_control_stream_response::Response::Shutdown(
@@ -142,13 +141,12 @@ impl ControlStreamHandle {
                 tokio::spawn(async move {
                     tracing::info!("waiting for meta service to close control stream...");
 
-                    // We should always unregister the current node from the meta service before
-                    // calling this method. So upon next recovery, the meta service will not involve
-                    // us anymore and drop the connection to us.
+                    // Wait for the stream to be closed, to ensure that the `Shutdown` message has
+                    // been acknowledged by the meta service for more precise error report.
                     //
-                    // We detect this by waiting the stream to be closed. This is to ensure that the
-                    // `Shutdown` error has been acknowledged by the meta service, for more precise
-                    // error report.
+                    // This is because the meta service will reset the control stream manager and
+                    // drop the connection to us upon recovery. As a result, the receiver part of
+                    // this sender will also be dropped, causing the stream to close.
                     sender.closed().await;
 
                     // Notify the caller that the shutdown is done.
@@ -622,7 +620,9 @@ impl LocalBarrierWorker {
             }
             LocalActorOperation::Shutdown { result_sender } => {
                 if !self.actor_manager_state.handles.is_empty() {
-                    tracing::warn!("shutdown with running actors");
+                    tracing::warn!(
+                        "shutdown with running actors, scaling or migration will be triggered"
+                    );
                 }
                 self.control_stream_handle.shutdown_stream(result_sender);
             }

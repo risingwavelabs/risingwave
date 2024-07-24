@@ -469,9 +469,11 @@ pub async fn compute_node_serve(
     // Wait for the shutdown signal.
     shutdown.cancelled().await;
 
-    // TODO(shutdown): how does this interact with auto-scaling?
+    // Unregister from the meta service, then...
+    // - batch queries will not be scheduled to this compute node,
+    // - streaming actors will not be scheduled to this compute node after next recovery.
     meta_client.try_unregister().await;
-
+    // Shutdown the streaming manager.
     let _ = stream_mgr.shutdown().await;
 
     // NOTE(shutdown): We can't simply join the tonic server here because it only returns when all
