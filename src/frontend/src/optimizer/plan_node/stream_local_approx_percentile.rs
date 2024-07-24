@@ -43,8 +43,8 @@ pub struct StreamLocalApproxPercentile {
 impl StreamLocalApproxPercentile {
     pub fn new(input: PlanRef, approx_percentile_agg_call: &PlanAggCall) -> Self {
         let schema = Schema::new(vec![
-            Field::new("bucket_id", DataType::Int64),
-            Field::new("count", DataType::Int64),
+            Field::with_name(DataType::Int64, "bucket_id"),
+            Field::with_name(DataType::Int64, "count"),
         ]);
         // FIXME(kwannoel): How does watermark work with FixedBitSet
         let watermark_columns = FixedBitSet::with_capacity(2);

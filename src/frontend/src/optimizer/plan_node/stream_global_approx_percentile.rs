@@ -42,7 +42,10 @@ pub struct StreamGlobalApproxPercentile {
 
 impl StreamGlobalApproxPercentile {
     pub fn new(input: PlanRef, approx_percentile_agg_call: &PlanAggCall) -> Self {
-        let schema = Schema::new(vec![Field::new("approx_percentile", DataType::Float64)]);
+        let schema = Schema::new(vec![Field::with_name(
+            DataType::Float64,
+            "approx_percentile",
+        )]);
         let watermark_columns = FixedBitSet::with_capacity(1);
         let base = PlanBase::new_stream(
             input.ctx(),

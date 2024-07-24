@@ -45,11 +45,15 @@ use crate::utils::{
     ColIndexMapping, ColIndexMappingRewriteExt, Condition, GroupBy, IndexSet, Substitute,
 };
 
+pub struct AggInfo {
+    pub calls: Vec<PlanAggCall>,
+    pub col_mapping: ColIndexMapping,
+}
+
+/// `SeparatedAggInfo` is used to separate normal and approx percentile aggs.
 pub struct SeparatedAggInfo {
-    pub approx_percentile_agg_calls: Vec<PlanAggCall>,
-    pub non_approx_percentile_agg_calls: Vec<PlanAggCall>,
-    pub approx_percentile_col_mapping: ColIndexMapping,
-    pub non_approx_percentile_col_mapping: ColIndexMapping,
+    normal: AggInfo,
+    approx: AggInfo,
 }
 
 /// `LogicalAgg` groups input data by their group key and computes aggregation functions.
@@ -72,12 +76,16 @@ impl LogicalAgg {
         let mut core = self.core.clone();
 
         // ====== Handle approx percentile aggs
-        let SeparatedAggInfo {
-            approx_percentile_agg_calls,
-            non_approx_percentile_agg_calls,
-            approx_percentile_col_mapping,
-            non_approx_percentile_col_mapping,
-        } = self.separate_normal_and_special_agg();
+        let SeparatedAggInfo { normal, approx } = self.separate_normal_and_special_agg();
+
+        let AggInfo {
+            calls: non_approx_percentile_agg_calls,
+            col_mapping: non_approx_percentile_col_mapping,
+        } = normal;
+        let AggInfo {
+            calls: approx_percentile_agg_calls,
+            col_mapping: approx_percentile_col_mapping,
+        } = approx;
 
         let needs_keyed_merge = (!non_approx_percentile_agg_calls.is_empty()
             && !approx_percentile_agg_calls.is_empty())
@@ -305,18 +313,21 @@ impl LogicalAgg {
                 non_approx_percentile_col_mapping.push(Some(output_idx));
             }
         }
-        SeparatedAggInfo {
-            approx_percentile_agg_calls,
-            non_approx_percentile_agg_calls,
-            approx_percentile_col_mapping: ColIndexMapping::new(
+        let normal = AggInfo {
+            calls: approx_percentile_agg_calls,
+            col_mapping: ColIndexMapping::new(
                 approx_percentile_col_mapping,
                 self.agg_calls().len(),
             ),
-            non_approx_percentile_col_mapping: ColIndexMapping::new(
+        };
+        let approx = AggInfo {
+            calls: non_approx_percentile_agg_calls,
+            col_mapping: ColIndexMapping::new(
                 non_approx_percentile_col_mapping,
                 self.agg_calls().len(),
             ),
-        }
+        };
+        SeparatedAggInfo { normal, approx }
     }
 
     fn build_approx_percentile_agg(
