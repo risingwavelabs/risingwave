@@ -80,7 +80,7 @@ message WorkerNode {
   // It's populated by meta node, when the worker node is added by meta node.
   // It's not persistent in meta store.
   optional uint64 started_at = 9;
-  
+
   uint32 parallelism = 10;
 
   // Meta may assign labels to worker nodes to partition workload by label.

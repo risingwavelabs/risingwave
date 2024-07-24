@@ -473,10 +473,10 @@ message SubscribeResponse {
   }
   common.Status status = 1;
   Operation operation = 2;
-  
+
   // Catalog version
   uint64 version = 3;
-  
+
   oneof info {
     catalog.Database database = 4;
     catalog.Schema schema = 5;
@@ -587,8 +587,8 @@ message GetServerlessStreamingJobsStatusResponse {
 service ScaleService {
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
-  rpc UpdateStreamingJobNodeLabels(UpdateStreamingJobNodeLabelsRequest) returns (UpdateStreamingJobNodeLabelsResponse); 
-  rpc GetServerlessStreamingJobsStatus(GetServerlessStreamingJobsStatusRequest) returns (GetServerlessStreamingJobsStatusResponse); 
+  rpc UpdateStreamingJobNodeLabels(UpdateStreamingJobNodeLabelsRequest) returns (UpdateStreamingJobNodeLabelsResponse);
+  rpc GetServerlessStreamingJobsStatus(GetServerlessStreamingJobsStatusRequest) returns (GetServerlessStreamingJobsStatusResponse);
 }
 
 message MembersRequest {}
