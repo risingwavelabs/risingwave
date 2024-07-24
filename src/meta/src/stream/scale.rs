@@ -501,7 +501,7 @@ impl ScaleController {
         let mut actor_map = HashMap::new();
         // Index for Fragment
         let mut fragment_map = HashMap::new();
-        // Index for actor status, including actor's parallel unit
+        // Index for actor status, including actor's worker id
         let mut actor_status = BTreeMap::new();
         let mut fragment_state = HashMap::new();
         let mut fragment_to_table = HashMap::new();
@@ -813,6 +813,8 @@ impl ScaleController {
             .build_reschedule_context(&mut reschedules, options, table_parallelisms)
             .await?;
 
+        // Here, the plan for both upstream and downstream of the NO_SHUFFLE Fragment should already have been populated.
+
         // Index of actors to create/remove
         // Fragment Id => ( Actor Id => Worker Id )
         let (fragment_actors_to_remove, fragment_actors_to_create) =
@@ -840,7 +842,7 @@ impl ScaleController {
 
             match fragment.distribution_type() {
                 FragmentDistributionType::Single => {
-                    // Skip rebalance action for single distribution (always None)
+                    // Skip re-balancing action for single distribution (always None)
                     fragment_actor_bitmap
                         .insert(fragment.fragment_id as FragmentId, Default::default());
                 }
@@ -893,12 +895,10 @@ impl ScaleController {
         let fragment_actors_after_reschedule = fragment_actors_after_reschedule;
 
         // In order to maintain consistency with the original structure, the upstream and downstream
-        // actors of NoShuffle need to be in the same parallel unit and hold the same virtual nodes,
-        // so for the actors after the upstream rebalancing, we need to find the parallel
-        // unit corresponding to each actor, and find the downstream actor corresponding to
-        // the parallel unit, and then copy the Bitmap to the corresponding actor. At the
-        // same time, we need to sort out the relationship between upstream and downstream
-        // actors
+        // actors of NoShuffle need to be in the same worker slot and hold the same virtual nodes,
+        // so for the actors after the upstream re-balancing, since we have sorted the actors of the same fragment by id on all workers,
+        // we can identify the corresponding upstream actor with NO_SHUFFLE.
+        // NOTE: There should be more asserts here to ensure correctness.
         fn arrange_no_shuffle_relation(
             ctx: &RescheduleContext,
             fragment_id: &FragmentId,
@@ -971,9 +971,10 @@ impl ScaleController {
                 if let Some((root_fragment, root_actor_id)) = actor_group_map.get(actor_id) {
                     let root_bitmap = fragment_updated_bitmap
                         .get(root_fragment)
-                        .and_then(|map| map.get(root_actor_id))
-                        .unwrap()
-                        .clone();
+                        .expect("root fragment bitmap not found")
+                        .get(root_actor_id)
+                        .cloned()
+                        .expect("root actor bitmap not found");
 
                     // Copy the bitmap
                     fragment_bitmap.insert(*actor_id, root_bitmap);
@@ -1489,18 +1490,19 @@ impl ScaleController {
         for (fragment_id, WorkerReschedule { worker_actor_diff }) in reschedule {
             let fragment = ctx.fragment_map.get(fragment_id).unwrap();
 
-            // Actor Id => Parallel Unit Id
+            // Actor Id => Worker Id
             let mut actors_to_remove = BTreeMap::new();
             let mut actors_to_create = BTreeMap::new();
 
+            // NOTE(important): The value needs to be a BTreeSet to ensure that the actors on the worker are sorted in ascending order.
             let mut worker_to_actors = HashMap::new();
 
             for actor in &fragment.actors {
                 let worker_id = ctx.actor_id_to_worker_id(&actor.actor_id).unwrap();
                 worker_to_actors
                     .entry(worker_id)
-                    .or_insert(vec![])
-                    .push(actor.actor_id);
+                    .or_insert(BTreeSet::new())
+                    .insert(actor.actor_id as ActorId);
             }
 
             let decreased_actor_count = worker_actor_diff
@@ -1508,8 +1510,8 @@ impl ScaleController {
                 .filter(|(_, change)| change.is_negative())
                 .map(|(worker_id, change)| (worker_id, change.unsigned_abs()));
 
-            for (removed, n) in decreased_actor_count {
-                if let Some(actor_ids) = worker_to_actors.get(removed) {
+            for (worker_id, n) in decreased_actor_count {
+                if let Some(actor_ids) = worker_to_actors.get(worker_id) {
                     assert!(actor_ids.len() >= n);
 
                     let removed_actors: Vec<_> = actor_ids
@@ -1519,7 +1521,7 @@ impl ScaleController {
                         .collect();
 
                     for actor in removed_actors {
-                        actors_to_remove.insert(actor, *removed);
+                        actors_to_remove.insert(actor, *worker_id);
                     }
                 }
             }
@@ -1528,7 +1530,7 @@ impl ScaleController {
                 .iter()
                 .filter(|(_, change)| change.is_positive());
 
-            for (created_worker, n) in increased_actor_count {
+            for (worker, n) in increased_actor_count {
                 for _ in 0..*n {
                     let id = match self.env.id_gen_manager() {
                         IdGenManagerImpl::Kv(mgr) => {
@@ -1540,7 +1542,7 @@ impl ScaleController {
                         }
                     };
 
-                    actors_to_create.insert(id, *created_worker);
+                    actors_to_create.insert(id, *worker);
                 }
             }
 
@@ -1550,6 +1552,24 @@ impl ScaleController {
 
             if !actors_to_create.is_empty() {
                 fragment_actors_to_create.insert(*fragment_id as FragmentId, actors_to_create);
+            }
+        }
+
+        // sanity checking
+        for actors_to_remove in fragment_actors_to_remove.values() {
+            for actor_id in actors_to_remove.keys() {
+                let actor = ctx.actor_map.get(actor_id).unwrap();
+                for dispatcher in &actor.dispatcher {
+                    if DispatcherType::NoShuffle == dispatcher.get_type().unwrap() {
+                        let downstream_actor_id = dispatcher.downstream_actor_id.iter().exactly_one().expect("there should be only one downstream actor id in NO_SHUFFLE dispatcher");
+
+                        let _should_exists = fragment_actors_to_remove
+                            .get(&(dispatcher.dispatcher_id as FragmentId))
+                            .expect("downstream fragment of NO_SHUFFLE relation should be in the removing map")
+                            .get(downstream_actor_id)
+                            .expect("downstream actor of NO_SHUFFLE relation should be in the removing map");
+                    }
+                }
             }
         }
 

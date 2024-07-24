@@ -311,7 +311,7 @@ pub struct StreamFragmentGraph {
     dependent_table_ids: HashSet<TableId>,
 
     /// The default parallelism of the job, specified by the `STREAMING_PARALLELISM` session
-    /// variable. If not specified, all active parallel units will be used.
+    /// variable. If not specified, all active worker slots will be used.
     specified_parallelism: Option<NonZeroUsize>,
 }
 
