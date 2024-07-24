@@ -164,6 +164,8 @@ impl MetadataModel for TableFragments {
             actor_splits: build_actor_connector_splits(&self.actor_splits),
             ctx: Some(self.ctx.to_protobuf()),
             parallelism: Some(self.assigned_parallelism.into()),
+            node_label: "".to_string(),
+            backfill_done: true,
         }
     }
 

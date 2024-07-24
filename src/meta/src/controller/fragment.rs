@@ -340,6 +340,8 @@ impl CatalogController {
                 }
                 .into(),
             ),
+            node_label: "".to_string(),
+            backfill_done: true,
         };
 
         Ok(table_fragments)
