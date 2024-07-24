@@ -551,6 +551,14 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn auto_schema_change(&self, schema_change: SchemaChangeEnvelope) -> Result<()> {
+        let request = AutoSchemaChangeRequest {
+            schema_change: Some(schema_change),
+        };
+        let _ = self.inner.auto_schema_change(request).await?;
+        Ok(())
+    }
+
     pub async fn create_view(&self, view: PbView) -> Result<CatalogVersion> {
         let request = CreateViewRequest { view: Some(view) };
         let resp = self.inner.create_view(request).await?;
@@ -2021,6 +2029,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, comment_on, CommentOnRequest, CommentOnResponse }
             ,{ ddl_client, get_tables, GetTablesRequest, GetTablesResponse }
             ,{ ddl_client, wait, WaitRequest, WaitResponse }
+            ,{ ddl_client, auto_schema_change, AutoSchemaChangeRequest, AutoSchemaChangeResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

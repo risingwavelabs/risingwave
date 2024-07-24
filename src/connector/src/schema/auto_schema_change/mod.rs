@@ -12,14 +12,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::parser::schema_change::SchemaChangeEnvelope;
-
-/// client for auto schema change
-/// Can be a global client
-pub struct AutoSchemaChangeClient {}
-
-impl AutoSchemaChangeClient {
-    pub fn submit_schema_change(&self, schema_change: SchemaChangeEnvelope) -> anyhow::Result<()> {
-        Ok(())
-    }
-}
+mod client;
