@@ -15,7 +15,6 @@
 use std::ops::Range;
 
 use risingwave_common::array::*;
-use risingwave_common::row::Row;
 use risingwave_common::types::*;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{AggCall, AggStateDyn, AggregateFunction, AggregateState};
@@ -29,6 +28,7 @@ fn build(agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
     Ok(Box::new(ApproxPercentile { fraction }))
 }
 
+#[allow(dead_code)]
 pub struct ApproxPercentile {
     fraction: Option<f64>,
 }
@@ -38,14 +38,6 @@ struct State(Vec<f64>);
 
 impl AggStateDyn for State {}
 
-impl ApproxPercentile {
-    fn add_datum(&self, state: &mut State, datum_ref: DatumRef<'_>) {
-        if let Some(datum) = datum_ref.to_owned_datum() {
-            state.0.push((*datum.as_float64()).into());
-        }
-    }
-}
-
 #[async_trait::async_trait]
 impl AggregateFunction for ApproxPercentile {
     fn return_type(&self) -> DataType {
@@ -53,48 +45,23 @@ impl AggregateFunction for ApproxPercentile {
     }
 
     fn create_state(&self) -> Result<AggregateState> {
-        Ok(AggregateState::Any(Box::<State>::default()))
+        todo!()
     }
 
-    async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {
-        let state = state.downcast_mut();
-        for (_, row) in input.rows() {
-            self.add_datum(state, row.datum_at(0));
-        }
-        Ok(())
+    async fn update(&self, _state: &mut AggregateState, _input: &StreamChunk) -> Result<()> {
+        todo!()
     }
 
     async fn update_range(
         &self,
-        state: &mut AggregateState,
-        input: &StreamChunk,
-        range: Range<usize>,
+        _state: &mut AggregateState,
+        _input: &StreamChunk,
+        _range: Range<usize>,
     ) -> Result<()> {
-        let state = state.downcast_mut();
-        for (_, row) in input.rows_in(range) {
-            self.add_datum(state, row.datum_at(0));
-        }
-        Ok(())
+        todo!()
     }
 
-    async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
-        let state = &state.downcast_ref::<State>().0;
-        Ok(
-            if let Some(fraction) = self.fraction
-                && !state.is_empty()
-            {
-                let rn = fraction * (state.len() - 1) as f64;
-                let crn = f64::ceil(rn);
-                let frn = f64::floor(rn);
-                let result = if crn == frn {
-                    state[crn as usize]
-                } else {
-                    (crn - rn) * state[frn as usize] + (rn - frn) * state[crn as usize]
-                };
-                Some(result.into())
-            } else {
-                None
-            },
-        )
+    async fn get_result(&self, _state: &AggregateState) -> Result<Datum> {
+        todo!()
     }
 }
