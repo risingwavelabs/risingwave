@@ -297,7 +297,7 @@ impl LogicalAgg {
         let mut approx_percentile_col_mapping = Vec::with_capacity(estimated_len);
         let mut non_approx_percentile_col_mapping = Vec::with_capacity(estimated_len);
         for (output_idx, agg_call) in self.agg_calls().iter().enumerate() {
-            if agg_call.agg_kind == AggKind::ApproxPercentile {
+            if agg_call.agg_kind == AggKind::Builtin(PbAggKind::ApproxPercentile) {
                 approx_percentile_agg_calls.push(agg_call.clone());
                 approx_percentile_col_mapping.push(Some(output_idx));
             } else {
@@ -643,7 +643,7 @@ impl LogicalAggBuilder {
                     _ => unreachable!(),
                 }
             }
-            AggKind::ApproxPercentile => {
+            AggKind::Builtin(PbAggKind::ApproxPercentile) => {
                 if agg_call.order_by.sort_exprs[0].order_type == OrderType::descending() {
                     // Rewrite DESC into 1.0-percentile for approx_percentile.
                     let prev_percentile = agg_call.direct_args[0].clone();

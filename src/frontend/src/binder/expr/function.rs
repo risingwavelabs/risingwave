@@ -515,7 +515,11 @@ impl Binder {
                 }
             }
             (AggKind::Builtin(PbAggKind::Mode), [], [_arg]) => {}
-            (AggKind::Builtin(PbAggKind::ApproxPercentile), [percentile, relative_error], [_percentile_col]) => {
+            (
+                AggKind::Builtin(PbAggKind::ApproxPercentile),
+                [percentile, relative_error],
+                [_percentile_col],
+            ) => {
                 Self::decimal_to_float64(percentile, &kind)?;
                 Self::decimal_to_float64(relative_error, &kind)?;
             }
@@ -579,7 +583,7 @@ impl Binder {
             if matches!(
                 kind,
                 AggKind::Builtin(PbAggKind::ApproxCountDistinct)
-                | AggKind::Builtin(PbAggKind::ApproxPercentile)
+                    | AggKind::Builtin(PbAggKind::ApproxPercentile)
             ) {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "DISTINCT is not allowed for approximate aggregation `{}`",
