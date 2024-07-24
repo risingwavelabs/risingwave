@@ -34,12 +34,13 @@ use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result};
 use crate::handler::declare_cursor::create_stream_for_cursor_stmt;
 use crate::handler::query::{create_stream, gen_batch_plan_fragmenter, BatchQueryPlanResult};
-use crate::handler::util::{convert_logstore_u64_to_unix_millis, gen_query_from_table_name};
+use crate::handler::util::{convert_logstore_u64_to_unix_millis, gen_query_from_table_name, to_pg_field};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{generic, BatchLogSeqScan};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
 use crate::{OptimizerContext, OptimizerContextRef, PgResponseStream, PlanRef, TableCatalog};
+use risingwave_common::catalog::Field;
 
 pub enum Cursor {
     Subscription(SubscriptionCursor),
@@ -56,16 +57,24 @@ impl Cursor {
             Cursor::Query(cursor) => cursor.next(count).await,
         }
     }
+    pub async fn get_fields(
+        &mut self,
+    ) -> Vec<Field> {
+        match self {
+            Cursor::Subscription(cursor) => cursor.fields.clone(),
+            Cursor::Query(cursor) => cursor.pg_descs.clone(),
+        }
+    }
 }
 
 pub struct QueryCursor {
     row_stream: PgResponseStream,
-    pg_descs: Vec<PgFieldDescriptor>,
+    pg_descs: Vec<Field>,
     remaining_rows: VecDeque<Row>,
 }
 
 impl QueryCursor {
-    pub fn new(row_stream: PgResponseStream, pg_descs: Vec<PgFieldDescriptor>) -> Result<Self> {
+    pub fn new(row_stream: PgResponseStream, pg_descs: Vec<Field>) -> Result<Self> {
         Ok(Self {
             row_stream,
             pg_descs,
@@ -91,13 +100,14 @@ impl QueryCursor {
         // min with 100 to avoid allocating too many memory at once.
         let mut ans = Vec::with_capacity(std::cmp::min(100, count) as usize);
         let mut cur = 0;
+        let desc = self.pg_descs.iter().map(|f| to_pg_field(f)).collect();
         while cur < count
             && let Some(row) = self.next_once().await?
         {
             cur += 1;
             ans.push(row);
         }
-        Ok((ans, self.pg_descs.clone()))
+        Ok((ans, desc))
     }
 }
 
@@ -122,9 +132,9 @@ enum State {
         // It is returned from the batch execution.
         row_stream: PgResponseStream,
 
-        // The pg descs to from the batch query read.
-        // It is returned from the batch execution.
-        pg_descs: Vec<PgFieldDescriptor>,
+        // // The pg descs to from the batch query read.
+        // // It is returned from the batch execution.
+        // pg_descs: Vec<PgFieldDescriptor>,
 
         // A cache to store the remaining rows from the row stream.
         remaining_rows: VecDeque<Row>,
@@ -140,6 +150,7 @@ pub struct SubscriptionCursor {
     dependent_table_id: TableId,
     cursor_need_drop_time: Instant,
     state: State,
+    fields: Vec<Field>,
 }
 
 impl SubscriptionCursor {
@@ -150,17 +161,21 @@ impl SubscriptionCursor {
         dependent_table_id: TableId,
         handle_args: &HandlerArgs,
     ) -> Result<Self> {
-        let state = if let Some(start_timestamp) = start_timestamp {
-            State::InitLogStoreQuery {
+        let (state,fields) = if let Some(start_timestamp) = start_timestamp {
+            let table_catalog = handle_args
+            .session.get_table_by_id(&dependent_table_id)?;
+            let fields = table_catalog.columns.iter().map(|c| Field::with_name(c.data_type().clone(), c.name())).collect();
+            let fields = Self::build_desc(fields, true);
+            (State::InitLogStoreQuery {
                 seek_timestamp: start_timestamp,
                 expected_timestamp: None,
-            }
+            },fields)
         } else {
             // The query stream needs to initiated on cursor creation to make sure
             // future fetch on the cursor starts from the snapshot when the cursor is declared.
             //
             // TODO: is this the right behavior? Should we delay the query stream initiation till the first fetch?
-            let (row_stream, pg_descs) =
+            let (row_stream, fields) =
                 Self::initiate_query(None, &dependent_table_id, handle_args.clone()).await?;
             let pinned_epoch = handle_args
                 .session
@@ -177,14 +192,13 @@ impl SubscriptionCursor {
                 .0;
             let start_timestamp = pinned_epoch;
 
-            State::Fetch {
+            (State::Fetch {
                 from_snapshot: true,
                 rw_timestamp: start_timestamp,
                 row_stream,
-                pg_descs,
                 remaining_rows: VecDeque::new(),
                 expected_timestamp: None,
-            }
+            },fields)
         };
 
         let cursor_need_drop_time =
@@ -195,14 +209,14 @@ impl SubscriptionCursor {
             dependent_table_id,
             cursor_need_drop_time,
             state,
+            fields,
         })
     }
 
     async fn next_row(
         &mut self,
         handle_args: &HandlerArgs,
-        expected_pg_descs: &Vec<PgFieldDescriptor>,
-    ) -> Result<(Option<Row>, Vec<PgFieldDescriptor>)> {
+    ) -> Result<Option<Row>> {
         loop {
             match &mut self.state {
                 State::InitLogStoreQuery {
@@ -238,17 +252,15 @@ impl SubscriptionCursor {
                                 from_snapshot,
                                 rw_timestamp,
                                 row_stream,
-                                pg_descs: pg_descs.clone(),
                                 remaining_rows,
                                 expected_timestamp,
                             };
-                            if (!expected_pg_descs.is_empty()) && expected_pg_descs.ne(&pg_descs) {
-                                // If the user alters the table upstream of the sub, there will be different descs here.
-                                // So we should output data for different descs in two separate batches
-                                return Ok((None, vec![]));
+                            if self.fields.ne(&pg_descs){
+                                self.fields = pg_descs;
+                                return Ok(None);
                             }
                         }
-                        Ok((None, _)) => return Ok((None, vec![])),
+                        Ok((None, _)) => return Ok(None),
                         Err(e) => {
                             self.state = State::Invalid;
                             return Err(e);
@@ -259,7 +271,6 @@ impl SubscriptionCursor {
                     from_snapshot,
                     rw_timestamp,
                     row_stream,
-                    pg_descs,
                     remaining_rows,
                     expected_timestamp,
                 } => {
@@ -273,15 +284,9 @@ impl SubscriptionCursor {
                         // 1. Fetch the next row
                         let new_row = row.take();
                         if from_snapshot {
-                            return Ok((
-                                Some(Row::new(Self::build_row(new_row, None)?)),
-                                pg_descs.clone(),
-                            ));
+                            return Ok(Some(Row::new(Self::build_row(new_row, None)?)));
                         } else {
-                            return Ok((
-                                Some(Row::new(Self::build_row(new_row, Some(rw_timestamp))?)),
-                                pg_descs.clone(),
-                            ));
+                            return Ok(Some(Row::new(Self::build_row(new_row, Some(rw_timestamp))?)));
                         }
                     } else {
                         // 2. Reach EOF for the current query.
@@ -324,12 +329,11 @@ impl SubscriptionCursor {
 
         let mut ans = Vec::with_capacity(std::cmp::min(100, count) as usize);
         let mut cur = 0;
-        let mut pg_descs_ans = vec![];
+        let desc = self.fields.iter().map(|f| to_pg_field(f)).collect();
         while cur < count {
-            let (row, descs_ans) = self.next_row(&handle_args, &pg_descs_ans).await?;
+            let row = self.next_row(&handle_args).await?;
             match row {
                 Some(row) => {
-                    pg_descs_ans = descs_ans;
                     cur += 1;
                     ans.push(row);
                 }
@@ -339,7 +343,7 @@ impl SubscriptionCursor {
             }
         }
 
-        Ok((ans, pg_descs_ans))
+        Ok((ans, desc))
     }
 
     async fn get_next_rw_timestamp(
@@ -379,7 +383,7 @@ impl SubscriptionCursor {
         rw_timestamp: Option<u64>,
         dependent_table_id: &TableId,
         handle_args: HandlerArgs,
-    ) -> Result<(PgResponseStream, Vec<PgFieldDescriptor>)> {
+    ) -> Result<(PgResponseStream, Vec<Field>)> {
         let session = handle_args.clone().session;
         let table_catalog = session.get_table_by_id(dependent_table_id)?;
         let (row_stream, pg_descs) = if let Some(rw_timestamp) = rw_timestamp {
@@ -394,7 +398,9 @@ impl SubscriptionCursor {
                     rw_timestamp,
                 )?,
             )?;
-            create_stream(session, plan_fragmenter_result, vec![]).await?
+            let fields = plan_fragmenter_result.schema.fields.clone();
+            let (row_stream, _) = create_stream(session, plan_fragmenter_result, vec![]).await?;
+            (row_stream,fields)
         } else {
             let subscription_from_table_name =
                 ObjectName(vec![Ident::from(table_catalog.name.as_ref())]);
@@ -437,20 +443,18 @@ impl SubscriptionCursor {
     }
 
     pub fn build_desc(
-        mut descs: Vec<PgFieldDescriptor>,
+        mut descs: Vec<Field>,
         from_snapshot: bool,
-    ) -> Vec<PgFieldDescriptor> {
+    ) -> Vec<Field> {
         if from_snapshot {
-            descs.push(PgFieldDescriptor::new(
-                "op".to_owned(),
-                DataType::Int16.to_oid(),
-                DataType::Int16.type_len(),
+            descs.push(Field::with_name(
+                DataType::Int16,
+                "op"
             ));
         }
-        descs.push(PgFieldDescriptor::new(
-            "rw_timestamp".to_owned(),
-            DataType::Int64.to_oid(),
-            DataType::Int64.type_len(),
+        descs.push(Field::with_name(
+            DataType::Int64,
+            "rw_timestamp"
         ));
         descs
     }
@@ -554,7 +558,7 @@ impl CursorManager {
         &self,
         cursor_name: ObjectName,
         row_stream: PgResponseStream,
-        pg_descs: Vec<PgFieldDescriptor>,
+        pg_descs: Vec<Field>,
     ) -> Result<()> {
         let cursor = QueryCursor::new(row_stream, pg_descs)?;
         self.cursor_map
@@ -598,6 +602,17 @@ impl CursorManager {
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         if let Some(cursor) = self.cursor_map.lock().await.get_mut(&cursor_name) {
             cursor.next(count, handle_args).await
+        } else {
+            Err(ErrorCode::ItemNotFound(format!("Cannot find cursor `{}`", cursor_name)).into())
+        }
+    }
+
+    pub async fn get_fields_with_cursor(
+        &self,
+        cursor_name: String,
+    ) -> Result<Vec<Field>> {
+        if let Some(cursor) = self.cursor_map.lock().await.get_mut(&cursor_name) {
+            Ok(cursor.get_fields().await)
         } else {
             Err(ErrorCode::ItemNotFound(format!("Cannot find cursor `{}`", cursor_name)).into())
         }

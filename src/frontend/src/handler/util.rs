@@ -190,10 +190,6 @@ pub fn to_pg_field(f: &Field) -> PgFieldDescriptor {
     )
 }
 
-pub fn from_pg_field(f: PgFieldDescriptor) -> RwResult<Field> {
-    Ok(Field::with_name(DataType::from_oid(f.get_type_oid()).map_err(|e| ErrorCode::BindError(e.to_report_string()))?, f.get_name()))
-}
-
 #[easy_ext::ext(SourceSchemaCompatExt)]
 impl CompatibleSourceSchema {
     /// Convert `self` to [`ConnectorSchema`] and warn the user if the syntax is deprecated.

@@ -22,7 +22,6 @@ use risingwave_sqlparser::ast::{FetchCursorStatement, Statement};
 
 use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
 use super::query::BoundResult;
-use super::util::from_pg_field;
 use super::RwPgResponse;
 use crate::binder::BoundStatement;
 use crate::error::Result;
@@ -84,15 +83,10 @@ pub async fn handle_parse(
             let db_name = session.database();
             let (_, cursor_name) =
                 Binder::resolve_schema_qualified_name(db_name, stmt.cursor_name.clone())?;
-        let desc = session.get_cursor_manager().get_desc_with_cursor(cursor_name.clone(), handler_args).await?;
+        let fields = session.get_cursor_manager().get_fields_with_cursor(cursor_name.clone()).await?;
         
             let mut binder = Binder::new_with_param_types(&session, specific_param_types);
-        let schema = if desc.is_empty(){
-            None
-        }else{
-            let fields = desc.into_iter().map(|p|from_pg_field(p)).collect::<Result<Vec<_>>>()?;
-            Some(Schema::new(fields))
-        };
+        let schema = Some(Schema::new(fields));
 
         let bound = binder.bind_fetch_cursor(cursor_name,stmt.count,schema)?;
         let bound_result = BoundResult{

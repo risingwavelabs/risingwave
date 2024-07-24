@@ -14,6 +14,7 @@
 
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::Field;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_sqlparser::ast::{DeclareCursorStatement, ObjectName, Query, Since, Statement};
 
@@ -124,12 +125,14 @@ async fn handle_declare_query_cursor(
 pub async fn create_stream_for_cursor_stmt(
     handle_args: HandlerArgs,
     stmt: Statement,
-) -> Result<(PgResponseStream, Vec<PgFieldDescriptor>)> {
+) -> Result<(PgResponseStream, Vec<Field>)> {
     let session = handle_args.session.clone();
     let plan_fragmenter_result = {
         let context = OptimizerContext::from_handler_args(handle_args);
         let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
         gen_batch_plan_fragmenter(&session, plan_result)?
     };
-    create_stream(session, plan_fragmenter_result, vec![]).await
+    let fields = plan_fragmenter_result.schema.fields.clone();
+            let (row_stream, _) = create_stream(session, plan_fragmenter_result, vec![]).await?;
+            Ok((row_stream,fields))
 }
