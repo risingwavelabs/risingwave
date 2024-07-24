@@ -32,6 +32,10 @@ use crate::optimizer::plan_node::{
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
+/// `StreamKeyedMerge` is used for merging two streams with the same stream key and distribution.
+/// It will buffer the outputs from its input streams until we receive a barrier.
+/// On receiving a barrier, it will `Project` their outputs according
+/// to the provided `lhs_mapping` and `rhs_mapping`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamKeyedMerge {
     pub base: PlanBase<Stream>,
@@ -51,6 +55,8 @@ impl StreamKeyedMerge {
         rhs_mapping: ColIndexMapping,
     ) -> Result<Self> {
         assert_eq!(lhs_mapping.target_size(), rhs_mapping.target_size());
+        assert_eq!(lhs_input.distribution(), rhs_input.distribution());
+        assert_eq!(lhs_input.stream_key(), rhs_input.stream_key());
         let mut schema_fields = Vec::with_capacity(lhs_mapping.target_size());
         let o2i_lhs = lhs_mapping
             .inverse()
