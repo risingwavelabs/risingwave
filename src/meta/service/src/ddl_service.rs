@@ -922,6 +922,8 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(AlterParallelismResponse {}))
     }
 
+    /// Auto schema change for cdc sources,
+    /// called by the source parser when a schema change is detected.
     async fn auto_schema_change(
         &self,
         request: Request<AutoSchemaChangeRequest>,
@@ -931,13 +933,6 @@ impl DdlService for DdlServiceImpl {
         let schema_change = req.schema_change.unwrap();
         let cdc_table_name = schema_change.cdc_table_name.clone();
 
-        // get the table catalog corresponding to the
-        let tables: Vec<Table> = self
-            .metadata_manager
-            .get_table_catalog_by_cdc_table_name(cdc_table_name)
-            .await?;
-
-        // send a request to the frontend to get the ReplaceTablePlan
         let mut workers = self
             .metadata_manager
             .list_worker_node(Some(WorkerType::Frontend), Some(State::Running))
@@ -948,7 +943,14 @@ impl DdlService for DdlServiceImpl {
             .ok_or_else(|| anyhow!("no frontend worker available"))?;
         let client = self.env.frontend_client_pool().get(worker).await?;
 
+        // get the table catalog corresponding to the
+        let tables: Vec<Table> = self
+            .metadata_manager
+            .get_table_catalog_by_cdc_table_name(cdc_table_name)
+            .await?;
+
         for table in tables {
+            // send a request to the frontend to get the ReplaceTablePlan
             let resp = client
                 .get_table_replace_plan(GetTableReplacePlanRequest {
                     database_id: table.database_id,

@@ -198,7 +198,7 @@ pub fn parse_schema_change(
                 }
             }
             schema_changes.push(TableSchemaChange {
-                up_table_full_name: id,
+                cdc_table_name: id,
                 columns: column_descs
                     .into_iter()
                     .map(|column_desc| ColumnCatalog {

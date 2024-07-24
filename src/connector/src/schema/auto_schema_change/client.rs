@@ -12,29 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_rpc_client::MetaClient;
 
-use risingwave_pb::ddl_service::SchemaChangeEnvelope as PbSchemaChangeEnvelope;
+use crate::parser::schema_change::SchemaChangeEnvelope;
 
-#[derive(Debug)]
-pub struct SchemaChangeEnvelope {
-    pub table_changes: Vec<TableSchemaChange>,
+/// client for auto schema change
+/// we may collect some metrics here
+pub struct AutoSchemaChangeClient {
+    meta_client: MetaClient,
 }
 
-#[derive(Debug)]
-pub struct TableSchemaChange {
-    pub(crate) cdc_table_name: String,
-    pub(crate) columns: Vec<ColumnCatalog>,
-}
+impl AutoSchemaChangeClient {
+    pub fn submit_schema_change(&self, schema_change: SchemaChangeEnvelope) -> anyhow::Result<()> {
+        // TODO:
 
-impl SchemaChangeEnvelope {
-    pub fn to_protobuf(&self) -> Vec<PbSchemaChangeEnvelope> {
-
-        PbSchemaChangeEnvelope {
-            cdc_table_name: self.c
-            column_descs: vec![],
-        }
-
-
+        Ok(())
     }
 }
