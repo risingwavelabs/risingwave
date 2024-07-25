@@ -543,7 +543,7 @@ mod tests {
         let config =
             serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
                 .unwrap();
-        let reader = PostgresExternalTableReader::new(config, rw_schema, vec![0, 1], 1000)
+        let reader = PostgresExternalTableReader::new(config, rw_schema, vec![0, 1])
             .await
             .unwrap();
 
