@@ -14,7 +14,12 @@ query I
      approx_percentile(0.9, 0.01) within group (order by p_col) as p90
  from t group by grp_col;
 ----
-502.8074762179866 916.1932801755476
+497.7794014558068 907.0313473737922
+
+query I
+select percentile_disc(0.5) within group (order by p_col) as p50, percentile_disc(0.9) within group (order by p_col) as p90 from t group by grp_col;
+----
+500 900
 
 statement ok
 create materialized view m1 as
@@ -26,4 +31,35 @@ create materialized view m1 as
 query I
 select * from m1;
 ----
-502.8074762179866 916.1932801755476
+497.7794014558068 907.0313473737922
+
+# statement ok
+# recover;
+
+# wait recovery
+# sleep 10s
+
+query I
+select * from m1;
+----
+497.7794014558068 907.0313473737922
+
+# Test 0<x<1 values
+statement ok
+insert into t select 0.001, 1 from generate_series(1, 500);
+
+statement ok
+insert into t select 0.0001, 1 from generate_series(1, 501);
+
+statement ok
+flush;
+
+query I
+select * from m1;
+----
+0.000997478114637043 804.4614206837127
+
+query I
+select percentile_cont(0.5) within group (order by p_col) as p50, percentile_cont(0.9) within group (order by p_col) as p90 from t group by grp_col;
+----
+0.001 800

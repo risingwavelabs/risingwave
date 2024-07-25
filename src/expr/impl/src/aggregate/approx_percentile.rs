@@ -130,7 +130,8 @@ impl AggregateFunction for ApproxPercentile {
         for (bucket_id, count) in &state.buckets {
             acc_count += count;
             if acc_count >= quantile_count {
-                let approx_percentile = self.base.powi(*bucket_id);
+                // approx value = 2 * y^i / (y + 1)
+                let approx_percentile = 2.0 * self.base.powi(*bucket_id) / (self.base + 1.0);
                 let approx_percentile = ScalarImpl::Float64(approx_percentile.into());
                 return Ok(Datum::from(approx_percentile));
             }
@@ -155,6 +156,7 @@ impl AggregateFunction for ApproxPercentile {
         let Some(scalar_state) = datum else {
             return Ok(AggregateState::Any(Box::new(state)));
         };
+        println!("scalar state: {:?}", scalar_state);
         let encoded_state: Box<[u8]> = scalar_state.into_bytea();
         let mut cursor = 0;
         state.count = u64::from_be_bytes(encoded_state[cursor..cursor + 8].try_into().unwrap());
