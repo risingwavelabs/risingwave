@@ -138,11 +138,11 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
 
     /// Pop an element from the builder.
     ///
+    /// It's used in `rollback` in source parser.
+    ///
     /// # Returns
     ///
     /// Returns `None` if there is no elements in the builder.
-    ///
-    /// XXX: This seems useless. Perhaps we can delete it.
     fn pop(&mut self) -> Option<()>;
 
     /// Append an element in another array into builder.

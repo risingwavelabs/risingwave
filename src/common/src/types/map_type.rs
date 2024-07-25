@@ -18,6 +18,7 @@ use anyhow::*;
 
 use super::*;
 
+/// Refer to [`super::super::array::MapArray`] for the invariants of a map value.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MapType(Box<(DataType, DataType)>);
 
@@ -73,6 +74,13 @@ impl MapType {
         DataType::List(Box::new(DataType::Struct(self.into_struct())))
     }
 
+    /// String and integral types are allowed.
+    ///
+    /// This is similar to [Protobuf](https://protobuf.dev/programming-guides/proto3/#maps)'s
+    /// decision.
+    ///
+    /// Note that this isn't definitive.
+    /// Just be conservative at the beginning, but not too restrictive (like only allowing strings).
     pub fn assert_key_type_valid(data_type: &DataType) {
         let valid = match data_type {
             DataType::Int16 | DataType::Int32 | DataType::Int64 => true,

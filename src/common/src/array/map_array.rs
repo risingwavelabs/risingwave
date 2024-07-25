@@ -74,8 +74,22 @@ impl ArrayBuilder for MapArrayBuilder {
     }
 }
 
-/// `MapArray` is physically just a `List<Struct<key: K, value: V>>` array, but with some additional restrictions
-/// on the `key`.
+/// `MapArray` is physically just a `List<Struct<key: K, value: V>>` array, but with some additional restrictions.
+///
+/// Type:
+/// - `key`'s datatype can only be string & integral types. (See [`MapType::assert_key_type_valid`].)
+/// - `value` can be any type.
+///
+/// Value (for each map value in the array):
+/// - `key`s are non-null and unique.
+/// - `key`s and `value`s must be of the same length.
+///   For a `MapArray`, it's sliced by the `ListArray`'s offsets, so it essentially means the
+///   `key` and `value` children arrays have the same length.
+/// - The lists are not sorted by `key`.
+/// - Map values are not comparable.
+///   And the map type should not be used as (primary/group/join/order) keys.
+///   Such usages should be banned in the frontend, and the implementation of `PartialEq`, `Ord` etc. are `unreachable!()`. (See [`cmp`].)
+///   Note that this decision is not definitive. Just be conservative at the beginning.
 #[derive(Debug, Clone, Eq)]
 pub struct MapArray {
     pub(super) inner: ListArray,
@@ -141,6 +155,8 @@ impl MapArray {
         self.inner.offsets()
     }
 }
+
+/// Refer to [`MapArray`] for the invariants of a map value.
 #[derive(Clone, Eq, EstimateSize)]
 pub struct MapValue(pub(crate) ListValue);
 
@@ -239,6 +255,8 @@ impl MapValue {
 }
 
 /// A map is just a slice of the underlying struct array.
+///
+/// Refer to [`MapArray`] for the invariants of a map value.
 ///
 /// XXX: perhaps we can make it `MapRef<'a, 'b>(ListRef<'a>, ListRef<'b>);`.
 /// Then we can build a map ref from 2 list refs without copying the data.

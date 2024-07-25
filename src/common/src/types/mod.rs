@@ -208,7 +208,7 @@ impl TryFrom<DataTypeName> for DataType {
             DataTypeName::Interval => Ok(DataType::Interval),
             DataTypeName::Jsonb => Ok(DataType::Jsonb),
             DataTypeName::Struct | DataTypeName::List | DataTypeName::Map => {
-                Err("Functions returning struct or list can not be inferred. Please use `FunctionCall::new_unchecked`.")
+                Err("Functions returning composite types can not be inferred. Please use `FunctionCall::new_unchecked`.")
             }
         }
     }
