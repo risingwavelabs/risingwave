@@ -1495,7 +1495,7 @@ impl ScaleController {
             let mut actors_to_create = BTreeMap::new();
 
             // NOTE(important): The value needs to be a BTreeSet to ensure that the actors on the worker are sorted in ascending order.
-            let mut worker_to_actors = HashMap::new();
+            let mut worker_to_actors: HashMap<_, BTreeSet<_>> = HashMap::new();
 
             for actor in &fragment.actors {
                 let worker_id = ctx.actor_id_to_worker_id(&actor.actor_id).unwrap();
@@ -1568,6 +1568,10 @@ impl ScaleController {
                             .expect("downstream fragment of NO_SHUFFLE relation should be in the removing map")
                             .get(downstream_actor_id)
                             .expect("downstream actor of NO_SHUFFLE relation should be in the removing map");
+
+                        let downstream_actor = ctx.actor_map.get(downstream_actor_id).unwrap();
+
+                        assert_eq!(actor.vnode_bitmap, downstream_actor.vnode_bitmap);
                     }
                 }
             }
