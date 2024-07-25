@@ -19,7 +19,7 @@
 //! We have a `Serializer` and a `Deserializer` for each schema of `Row`, which can be reused
 //! until schema changes
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use bitflags::bitflags;
@@ -176,7 +176,7 @@ impl ValueRowSerializer for Serializer {
 /// Should non-null default values be specified, a new field could be added to Deserializer
 #[derive(Clone)]
 pub struct Deserializer {
-    needed_column_ids: BTreeMap<i32, usize>,
+    needed_column_ids: HashMap<i32, usize>,
     schema: Arc<[DataType]>,
     default_column_values: Vec<(usize, Datum)>,
 }
@@ -193,7 +193,7 @@ impl Deserializer {
                 .iter()
                 .enumerate()
                 .map(|(i, c)| (c.get_id(), i))
-                .collect::<BTreeMap<_, _>>(),
+                .collect::<HashMap<_, _>>(),
             schema,
             default_column_values: column_with_default.collect(),
         }
@@ -214,12 +214,16 @@ impl ValueRowDeserializer for Deserializer {
         let data_start_idx = offsets_start_idx + datum_num * offset_bytes;
         let offsets = &encoded_bytes[offsets_start_idx..data_start_idx];
         let data = &encoded_bytes[data_start_idx..];
-        let mut datums: Vec<Option<Datum>> = vec![None; self.schema.len()];
-        let mut contained_indices = BTreeSet::new();
+
+        // initialize datums with default values
+        let mut datums: Vec<Datum> = vec![None; self.schema.len()];
+        for (i, datum) in &self.default_column_values {
+            datums[*i] = datum.clone();
+        }
+
         for i in 0..datum_num {
             let this_id = encoded_bytes.get_i32_le();
             if let Some(&decoded_idx) = self.needed_column_ids.get(&this_id) {
-                contained_indices.insert(decoded_idx);
                 let this_offset_start_idx = i * offset_bytes;
                 let mut this_offset_slice =
                     &offsets[this_offset_start_idx..(this_offset_start_idx + offset_bytes)];
@@ -246,15 +250,10 @@ impl ValueRowDeserializer for Deserializer {
                         &mut data_slice,
                     )?)
                 };
-                datums[decoded_idx] = Some(data);
+                datums[decoded_idx] = data;
             }
         }
-        for (id, datum) in &self.default_column_values {
-            if !contained_indices.contains(id) {
-                datums[*id].get_or_insert(datum.clone());
-            }
-        }
-        Ok(datums.into_iter().map(|d| d.unwrap_or(None)).collect())
+        Ok(datums)
     }
 }
 
