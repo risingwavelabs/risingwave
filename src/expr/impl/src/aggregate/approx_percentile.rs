@@ -26,6 +26,7 @@ use risingwave_expr::{build_aggregate, Result};
 /// For two phase agg, we still use `DDSketch`.
 /// Then we also need to store the `relative_error` of the sketch, so we can report it
 /// in an internal table, if it changes.
+/// TODO(kwannoel): We also need to test 0 < x < 1 range.
 #[build_aggregate("approx_percentile(float8) -> float8")]
 fn build(agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
     let quantile = agg.direct_args[0]
@@ -47,9 +48,10 @@ pub struct ApproxPercentile {
 }
 
 type BucketCount = u64;
-type BucketId = u64;
+type BucketId = i32;
 type Count = u64;
 
+// TODO(kwannoel): handle `0` and negative values.
 #[derive(Debug, Default)]
 struct State {
     count: BucketCount,
@@ -119,7 +121,20 @@ impl AggregateFunction for ApproxPercentile {
         Ok(())
     }
 
-    async fn get_result(&self, _state: &AggregateState) -> Result<Datum> {
-        todo!()
+    // TODO(kwannoel): Instead of iterating over all buckets, we can maintain the
+    // approximate quantile bucket on the fly.
+    async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
+        let state = state.downcast_ref::<State>();
+        let quantile_count = (state.count as f64 * self.quantile) as u64;
+        let mut acc_count = 0;
+        for (bucket_id, count) in &state.buckets {
+            acc_count += count;
+            if acc_count >= quantile_count {
+                let approx_percentile = self.base.powi(*bucket_id);
+                let approx_percentile = ScalarImpl::Float64(approx_percentile.into());
+                return Ok(Datum::from(approx_percentile));
+            }
+        }
+        return Ok(None);
     }
 }
