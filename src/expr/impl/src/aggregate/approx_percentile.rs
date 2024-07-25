@@ -137,4 +137,36 @@ impl AggregateFunction for ApproxPercentile {
         }
         return Ok(None);
     }
+
+    fn encode_state(&self, state: &AggregateState) -> Result<Datum> {
+        let state = state.downcast_ref::<State>();
+        let mut encoded_state = Vec::with_capacity(state.estimated_heap_size());
+        encoded_state.extend_from_slice(&state.count.to_be_bytes());
+        for (bucket_id, count) in &state.buckets {
+            encoded_state.extend_from_slice(&bucket_id.to_be_bytes());
+            encoded_state.extend_from_slice(&count.to_be_bytes());
+        }
+        let encoded_scalar = ScalarImpl::Bytea(encoded_state.into());
+        Ok(Datum::from(encoded_scalar))
+    }
+
+    fn decode_state(&self, datum: Datum) -> Result<AggregateState> {
+        let mut state = State::default();
+        let Some(scalar_state) = datum else {
+            return Ok(AggregateState::Any(Box::new(state)));
+        };
+        let encoded_state: Box<[u8]> = scalar_state.into_bytea();
+        let mut cursor = 0;
+        state.count = u64::from_be_bytes(encoded_state[cursor..cursor + 8].try_into().unwrap());
+        cursor += 8;
+        while cursor < encoded_state.len() {
+            let bucket_id =
+                i32::from_be_bytes(encoded_state[cursor..cursor + 4].try_into().unwrap());
+            cursor += 8;
+            let count = u64::from_be_bytes(encoded_state[cursor..cursor + 8].try_into().unwrap());
+            cursor += 8;
+            state.buckets.insert(bucket_id, count);
+        }
+        Ok(AggregateState::Any(Box::new(state)))
+    }
 }
