@@ -850,17 +850,17 @@ impl GlobalBarrierManager {
         );
 
         crate::telemetry::report_event(
-                risingwave_pb::telemetry::TelemetryEventStage::Recovery,
-                "adhoc_recovery".to_string(),
-                0,
-                None,
-                None,
-                None,
-            );
+            risingwave_pb::telemetry::TelemetryEventStage::Recovery,
+            "adhoc_recovery".to_string(),
+            0,
+            None,
+            None,
+            None,
+        );
 
-            // No need to clean dirty tables for barrier recovery,
-            // The foreground stream job should cleanup their own tables.
-            self.recovery(None, Some(err)).instrument(span).await;
+        // No need to clean dirty tables for barrier recovery,
+        // The foreground stream job should cleanup their own tables.
+        self.recovery(None, Some(err)).instrument(span).await;
         self.context.set_status(BarrierManagerStatus::Running);
     }
 }
