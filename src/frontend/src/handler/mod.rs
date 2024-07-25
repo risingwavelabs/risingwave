@@ -33,6 +33,7 @@ use risingwave_sqlparser::ast::*;
 use self::util::{DataChunkToRowSetAdapter, SourceSchemaCompatExt};
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
+use crate::handler::alter_table_connector_attr::handle_alter_table_connector_attr;
 use crate::handler::cancel_job::handle_cancel;
 use crate::handler::kill_process::handle_kill;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
@@ -48,6 +49,7 @@ mod alter_source_with_sr;
 mod alter_streaming_rate_limit;
 mod alter_system;
 mod alter_table_column;
+mod alter_table_connector_attr;
 mod alter_table_with_sr;
 pub mod alter_user;
 pub mod cancel_job;
@@ -707,6 +709,10 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::AlterConnectorAttr { attr },
+        } => handle_alter_table_connector_attr(handler_args, name, attr),
         Statement::AlterIndex {
             name,
             operation: AlterIndexOperation::RenameIndex { index_name },
