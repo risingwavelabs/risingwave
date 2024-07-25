@@ -530,7 +530,6 @@ pub mod tests {
     use std::collections::BTreeSet;
 
     use risingwave_common::config::default::compaction_config;
-    use risingwave_hummock_sdk::level::{Level, Levels};
 
     use super::*;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
@@ -752,7 +751,7 @@ pub mod tests {
                 true,
                 compaction_config::max_l0_compact_level_count() as usize,
             );
-            let ret = picker.pick_l0_multi_non_overlap_level(&Levels, &levels_handlers[0]);
+            let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             assert_eq!(6, ret.len());
         }
 

@@ -30,17 +30,20 @@ pub(crate) mod tests {
     use risingwave_common::util::epoch::{test_epoch, Epoch, EpochExt};
     use risingwave_common_service::NotificationClient;
     use risingwave_hummock_sdk::can_concat;
+    use risingwave_hummock_sdk::compact_task::CompactTask;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{
         next_key, prefix_slice_with_vnode, prefixed_range_with_vnode, FullKey, TableKey,
         TABLE_PREFIX_LEN,
     };
     use risingwave_hummock_sdk::key_range::KeyRange;
+    use risingwave_hummock_sdk::level::InputLevel;
+    use risingwave_hummock_sdk::sstable_info::SstableInfo;
     use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
     use risingwave_hummock_sdk::table_watermark::{
         ReadTableWatermark, TableWatermarks, VnodeWatermark, WatermarkDirection,
     };
-    use risingwave_hummock_sdk::version::{CompactTask, HummockVersion, InputLevel, SstableInfo};
+    use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use risingwave_meta::hummock::compaction::selector::{
         default_compaction_selector, ManualCompactionOption,

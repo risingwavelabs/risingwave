@@ -128,7 +128,8 @@ pub mod tests {
 
     use itertools::Itertools;
     use risingwave_hummock_sdk::key_range::KeyRange;
-    use risingwave_hummock_sdk::version::{Level, OverlappingLevel, SstableInfo};
+    use risingwave_hummock_sdk::level::{Level, OverlappingLevel};
+    use risingwave_hummock_sdk::sstable_info::SstableInfo;
     use risingwave_pb::hummock::LevelType;
 
     use super::*;

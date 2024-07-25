@@ -202,7 +202,8 @@ mod test {
     use std::sync::Arc;
 
     use itertools::Itertools;
-    use risingwave_hummock_sdk::version::{HummockVersionStateTableInfo, Level};
+    use risingwave_hummock_sdk::level::Level;
+    use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
     use risingwave_pb::hummock::compact_task;
     pub use risingwave_pb::hummock::LevelType;
 

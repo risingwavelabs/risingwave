@@ -404,9 +404,9 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_hummock_sdk::key_range::KeyRange;
-    use risingwave_hummock_sdk::version::{
-        HummockVersion, Level, Levels, OverlappingLevel, SstableInfo,
-    };
+    use risingwave_hummock_sdk::level::{Level, Levels, OverlappingLevel};
+    use risingwave_hummock_sdk::sstable_info::SstableInfo;
+    use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
     use risingwave_pb::hummock::write_limits::WriteLimit;
     use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats};

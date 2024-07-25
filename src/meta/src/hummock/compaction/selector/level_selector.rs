@@ -484,7 +484,8 @@ pub mod tests {
 
     use itertools::Itertools;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
-    use risingwave_hummock_sdk::version::{HummockVersionStateTableInfo, Levels};
+    use risingwave_hummock_sdk::level::Levels;
+    use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
     use risingwave_pb::hummock::compaction_config::CompactionMode;
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;

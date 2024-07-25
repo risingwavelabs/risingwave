@@ -165,7 +165,7 @@ pub mod tests {
     use std::sync::Arc;
 
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::new_sub_level;
-    use risingwave_hummock_sdk::version::{Levels, OverlappingLevel};
+    use risingwave_hummock_sdk::level::{Levels, OverlappingLevel};
     use risingwave_pb::hummock::LevelType;
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
