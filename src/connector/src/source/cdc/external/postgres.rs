@@ -370,7 +370,7 @@ impl PostgresExternalTableReader {
 
         let stream = match start_pk_row {
             Some(ref pk_row) => {
-                // prepare the scan statement, since we may need to conver the RW data type to postgres data type
+                // prepare the scan statement, since we may need to convert the RW data type to postgres data type
                 // e.g. varchar to uuid
                 let prepared_scan_stmt = {
                     let primary_keys = self
@@ -456,7 +456,6 @@ impl PostgresExternalTableReader {
 
 #[cfg(test)]
 mod tests {
-
     use std::collections::HashMap;
 
     use futures::pin_mut;
