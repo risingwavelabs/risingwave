@@ -64,7 +64,7 @@ use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tracing::{trace, Instrument};
 
-use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
+use super::watermark::{LazyCleanByEpoch, StateCleanStrategy};
 use crate::cache::cache_may_stale;
 use crate::common::cache::{StateCache, StateCacheFiller};
 use crate::common::table::state_table_cache::StateTableWatermarkCache;
@@ -77,7 +77,7 @@ const STATE_CLEANING_PERIOD_EPOCH: usize = 300;
 /// But we may want to improve this choice in the future.
 const WATERMARK_CACHE_ENTRIES: usize = 16;
 
-type DefaultWatermarkBufferStrategy = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>;
+type DefaultStateCleanStrategy = LazyCleanByEpoch<STATE_CLEANING_PERIOD_EPOCH>;
 
 /// This macro is used to mark a point where we want to randomly discard the operation and early
 /// return, only in insane mode.
@@ -97,12 +97,12 @@ pub struct StateTableInner<
     S,
     SD = BasicSerde,
     const IS_REPLICATED: bool = false,
-    W = DefaultWatermarkBufferStrategy,
+    SC = DefaultStateCleanStrategy,
     const USE_WATERMARK_CACHE: bool = false,
 > where
     S: StateStore,
     SD: ValueRowSerde,
-    W: WatermarkBufferStrategy,
+    SC: StateCleanStrategy,
 {
     /// Id for this table.
     table_id: TableId,
@@ -139,14 +139,12 @@ pub struct StateTableInner<
     value_indices: Option<Vec<usize>>,
 
     /// Strategy to buffer watermark for lazy state cleaning.
-    watermark_buffer_strategy: W,
-    /// State cleaning watermark. Old states will be cleaned under this watermark when committing.
-    state_clean_watermark: Option<ScalarImpl>,
-
-    /// Watermark of the last committed state cleaning.
-    prev_cleaned_watermark: Option<ScalarImpl>,
-
-    /// Watermark cache
+    state_clean_strategy: SC,
+    /// Pending watermark for state cleaning. Old states below this watermark will be cleaned when committing.
+    pending_watermark: Option<ScalarImpl>,
+    /// Last committed watermark for state cleaning.
+    committed_watermark: Option<ScalarImpl>,
+    /// Cache for the top-N primary keys for reducing unnecessary range deletion.
     watermark_cache: StateTableWatermarkCache,
 
     /// Data Types
@@ -177,16 +175,17 @@ pub type ReplicatedStateTable<S, SD> = StateTableInner<S, SD, true>;
 /// `WatermarkCacheStateTable` caches the watermark column.
 /// It will reduce state cleaning overhead.
 pub type WatermarkCacheStateTable<S> =
-    StateTableInner<S, BasicSerde, false, DefaultWatermarkBufferStrategy, true>;
+    StateTableInner<S, BasicSerde, false, DefaultStateCleanStrategy, true>;
 pub type WatermarkCacheParameterizedStateTable<S, const USE_WATERMARK_CACHE: bool> =
-    StateTableInner<S, BasicSerde, false, DefaultWatermarkBufferStrategy, USE_WATERMARK_CACHE>;
+    StateTableInner<S, BasicSerde, false, DefaultStateCleanStrategy, USE_WATERMARK_CACHE>;
 
 // initialize
-impl<S, SD, W, const USE_WATERMARK_CACHE: bool> StateTableInner<S, SD, true, W, USE_WATERMARK_CACHE>
+impl<S, SD, SC, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, true, SC, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
-    W: WatermarkBufferStrategy,
+    SC: StateCleanStrategy,
 {
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
     /// async interface only used for replicated state table,
@@ -197,12 +196,12 @@ where
 }
 
 // initialize
-impl<S, SD, W, const USE_WATERMARK_CACHE: bool>
-    StateTableInner<S, SD, false, W, USE_WATERMARK_CACHE>
+impl<S, SD, SC, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, false, SC, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
-    W: WatermarkBufferStrategy,
+    SC: StateCleanStrategy,
 {
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
     /// No need to `wait_for_epoch`, so it should complete immediately.
@@ -270,12 +269,12 @@ pub enum StateTableOpConsistencyLevel {
 // FIXME(kwannoel): Enforce that none of the constructors here
 // should be used by replicated state table.
 // Apart from from_table_catalog_inner.
-impl<S, SD, const IS_REPLICATED: bool, W, const USE_WATERMARK_CACHE: bool>
-    StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool, SC, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, IS_REPLICATED, SC, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
-    W: WatermarkBufferStrategy,
+    SC: StateCleanStrategy,
 {
     /// Create state table from table catalog and store.
     ///
@@ -499,9 +498,9 @@ where
             prefix_hint_len,
             table_option,
             value_indices,
-            watermark_buffer_strategy: W::default(),
-            state_clean_watermark: None,
-            prev_cleaned_watermark: None,
+            state_clean_strategy: SC::default(),
+            pending_watermark: None,
+            committed_watermark: None,
             watermark_cache,
             data_types,
             output_indices,
@@ -682,9 +681,9 @@ where
             prefix_hint_len: 0,
             table_option: Default::default(),
             value_indices,
-            watermark_buffer_strategy: W::default(),
-            state_clean_watermark: None,
-            prev_cleaned_watermark: None,
+            state_clean_strategy: SC::default(),
+            pending_watermark: None,
+            committed_watermark: None,
             watermark_cache,
             data_types,
             output_indices: vec![],
@@ -752,7 +751,7 @@ where
     }
 
     fn is_dirty(&self) -> bool {
-        self.local_store.is_dirty() || self.state_clean_watermark.is_some()
+        self.local_store.is_dirty() || self.pending_watermark.is_some()
     }
 
     pub fn is_consistent_op(&self) -> bool {
@@ -764,11 +763,12 @@ where
     }
 }
 
-impl<S, SD, W, const USE_WATERMARK_CACHE: bool> StateTableInner<S, SD, true, W, USE_WATERMARK_CACHE>
+impl<S, SD, SC, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, true, SC, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
-    W: WatermarkBufferStrategy,
+    SC: StateCleanStrategy,
 {
     /// Create replicated state table from table catalog with output indices
     pub async fn from_table_catalog_with_output_column_ids(
@@ -789,13 +789,8 @@ where
 }
 
 // point get
-impl<
-        S,
-        SD,
-        const IS_REPLICATED: bool,
-        W: WatermarkBufferStrategy,
-        const USE_WATERMARK_CACHE: bool,
-    > StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool, SC: StateCleanStrategy, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, IS_REPLICATED, SC, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -895,7 +890,7 @@ where
         let cache_may_stale = cache_may_stale(self.vnodes(), &new_vnodes);
 
         if cache_may_stale {
-            self.state_clean_watermark = None;
+            self.pending_watermark = None;
             if USE_WATERMARK_CACHE {
                 self.watermark_cache.clear();
             }
@@ -909,13 +904,8 @@ where
 }
 
 // write
-impl<
-        S,
-        SD,
-        const IS_REPLICATED: bool,
-        W: WatermarkBufferStrategy,
-        const USE_WATERMARK_CACHE: bool,
-    > StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool, SC: StateCleanStrategy, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, IS_REPLICATED, SC, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -1134,8 +1124,8 @@ where
     /// * `eager_cleaning` - Whether to clean up the state table eagerly.
     pub fn update_watermark(&mut self, watermark: ScalarImpl, eager_cleaning: bool) {
         trace!(table_id = %self.table_id, watermark = ?watermark, "update watermark");
-        if self.watermark_buffer_strategy.apply() || eager_cleaning {
-            self.state_clean_watermark = Some(watermark);
+        if self.state_clean_strategy.apply() || eager_cleaning {
+            self.pending_watermark = Some(watermark);
         }
     }
 
@@ -1182,7 +1172,7 @@ where
         );
         // Tick the watermark buffer here because state table is expected to be committed once
         // per epoch.
-        self.watermark_buffer_strategy.tick();
+        self.state_clean_strategy.tick();
         if !self.is_dirty() {
             // If the state table is not modified, go fast path.
             self.local_store.seal_current_epoch(
@@ -1201,7 +1191,7 @@ where
 
         // Refresh watermark cache if it is out of sync.
         if USE_WATERMARK_CACHE && !self.watermark_cache.is_synced() {
-            if let Some(ref watermark) = self.prev_cleaned_watermark {
+            if let Some(ref watermark) = self.committed_watermark {
                 let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
                     (Included(once(Some(watermark.clone()))), Unbounded);
                 // NOTE(kwannoel): We buffer `pks` before inserting into watermark cache
@@ -1256,7 +1246,7 @@ where
         next_epoch: u64,
         switch_op_consistency_level: Option<OpConsistencyLevel>,
     ) -> StreamExecutorResult<()> {
-        let watermark = self.state_clean_watermark.take();
+        let watermark = self.pending_watermark.take();
         watermark.as_ref().inspect(|watermark| {
             trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
         });
@@ -1328,7 +1318,7 @@ where
                 ));
             }
         }
-        self.prev_cleaned_watermark = watermark;
+        self.committed_watermark = watermark;
 
         // Clear the watermark cache and force a resync.
         // TODO(kwannoel): This can be further optimized:
@@ -1368,13 +1358,8 @@ impl<'a, T> KeyedRowStream<'a> for T where
 }
 
 // Iterator functions
-impl<
-        S,
-        SD,
-        const IS_REPLICATED: bool,
-        W: WatermarkBufferStrategy,
-        const USE_WATERMARK_CACHE: bool,
-    > StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool, SC: StateCleanStrategy, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, IS_REPLICATED, SC, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -1575,13 +1560,8 @@ where
     }
 }
 
-impl<
-        S,
-        SD,
-        const IS_REPLICATED: bool,
-        W: WatermarkBufferStrategy,
-        const USE_WATERMARK_CACHE: bool,
-    > StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool, SC: StateCleanStrategy, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, IS_REPLICATED, SC, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,

@@ -12,23 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// Strategy to decide how to buffer the watermarks, used for state cleaning.
-pub trait WatermarkBufferStrategy: Default {
+/// Strategy to decide when to do state cleaning.
+pub trait StateCleanStrategy: Default {
     /// Trigger when a epoch is committed.
     fn tick(&mut self);
 
-    /// Whether to clear the buffer.
+    /// Whether to apply the state cleaning watermark.
     ///
-    /// Returns true to indicate that the buffer should be cleared and the strategy states reset.
+    /// Returns true to indicate that state cleaning should be applied.
     fn apply(&mut self) -> bool;
 }
 
-/// No buffer, apply watermark to memory immediately.
-/// Use the strategy when you want to apply the watermark immediately.
+/// No delay, apply watermark to clean state immediately.
 #[derive(Default, Debug)]
-pub struct WatermarkNoBuffer;
+pub struct EagerClean;
 
-impl WatermarkBufferStrategy for WatermarkNoBuffer {
+impl StateCleanStrategy for EagerClean {
     fn tick(&mut self) {}
 
     fn apply(&mut self) -> bool {
@@ -36,15 +35,15 @@ impl WatermarkBufferStrategy for WatermarkNoBuffer {
     }
 }
 
-/// Buffer the watermark by a epoch period.
+/// Delay the state cleaning by a specified epoch period.
 /// The strategy reduced the delete-range calls to storage.
 #[derive(Default, Debug)]
-pub struct WatermarkBufferByEpoch<const PERIOD: usize> {
+pub struct LazyCleanByEpoch<const PERIOD: usize> {
     /// number of epochs since the last time we did state cleaning by watermark.
     buffered_epochs_cnt: usize,
 }
 
-impl<const PERIOD: usize> WatermarkBufferStrategy for WatermarkBufferByEpoch<PERIOD> {
+impl<const PERIOD: usize> StateCleanStrategy for LazyCleanByEpoch<PERIOD> {
     fn tick(&mut self) {
         self.buffered_epochs_cnt += 1;
     }
