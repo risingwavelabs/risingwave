@@ -200,7 +200,7 @@ mod test {
     #[tokio::test]
     async fn test_telemetry_report_event() {
         let event_stage = PbTelemetryEventStage::CreateStreamJob;
-        let feature_name = "test_feature".to_string();
+        let event_name = "test_feature";
         let catalog_id = 1;
         let connector_name = Some("test_connector".to_string());
         let object = Some(PbTelemetryDatabaseObject::Source);
@@ -210,7 +210,7 @@ mod test {
         request_to_telemetry_event(
             "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_string(),
             event_stage,
-            feature_name,
+            event_name,
             catalog_id,
             connector_name,
             object,
