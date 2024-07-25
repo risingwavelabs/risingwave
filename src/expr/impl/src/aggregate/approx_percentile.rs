@@ -16,31 +16,34 @@ use std::collections::BTreeMap;
 use std::ops::Range;
 
 use risingwave_common::array::*;
+use risingwave_common::row::Row;
 use risingwave_common::types::*;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{AggCall, AggStateDyn, AggregateFunction, AggregateState};
 use risingwave_expr::{build_aggregate, Result};
 
+/// TODO(kwannoel): for single phase agg, we can actually support `UDDSketch`.
+/// For two phase agg, we still use `DDSketch`.
+/// Then we also need to store the `relative_error` of the sketch, so we can report it
+/// in an internal table, if it changes.
 #[build_aggregate("approx_percentile(float8) -> float8")]
 fn build(agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
     let quantile = agg.direct_args[0]
         .literal()
         .map(|x| (*x.as_float64()).into())
         .unwrap();
-    let relative_error = agg.direct_args[1]
+    let relative_error: f64 = agg.direct_args[1]
         .literal()
         .map(|x| (*x.as_float64()).into())
         .unwrap();
-    Ok(Box::new(ApproxPercentile {
-        quantile,
-        relative_error,
-    }))
+    let base = (1.0 + relative_error) / (1.0 - relative_error);
+    Ok(Box::new(ApproxPercentile { quantile, base }))
 }
 
 #[allow(dead_code)]
 pub struct ApproxPercentile {
     quantile: f64,
-    relative_error: f64,
+    base: f64,
 }
 
 type BucketCount = u64;
@@ -53,15 +56,6 @@ struct State {
     buckets: BTreeMap<BucketId, Count>,
 }
 
-impl State {
-    fn new() -> Self {
-        Self {
-            count: 0,
-            buckets: BTreeMap::new(),
-        }
-    }
-}
-
 impl EstimateSize for State {
     fn estimated_heap_size(&self) -> usize {
         let count_size = 1;
@@ -72,6 +66,27 @@ impl EstimateSize for State {
 
 impl AggStateDyn for State {}
 
+impl ApproxPercentile {
+    fn add_datum(&self, state: &mut State, op: Op, datum: DatumRef<'_>) {
+        if let Some(value) = datum {
+            let prim_value = value.into_float64().into_inner();
+            let bucket_id = prim_value.log(self.base).ceil() as BucketId;
+            match op {
+                Op::Delete | Op::UpdateDelete => {
+                    let count = state.buckets.entry(bucket_id).or_insert(0);
+                    *count -= 1;
+                    state.count -= 1;
+                }
+                Op::Insert | Op::UpdateInsert => {
+                    let count = state.buckets.entry(bucket_id).or_insert(0);
+                    *count += 1;
+                    state.count += 1;
+                }
+            }
+        };
+    }
+}
+
 #[async_trait::async_trait]
 impl AggregateFunction for ApproxPercentile {
     fn return_type(&self) -> DataType {
@@ -79,20 +94,29 @@ impl AggregateFunction for ApproxPercentile {
     }
 
     fn create_state(&self) -> Result<AggregateState> {
-        todo!()
+        Ok(AggregateState::Any(Box::<State>::default()))
     }
 
-    async fn update(&self, _state: &mut AggregateState, _input: &StreamChunk) -> Result<()> {
-        todo!()
+    async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {
+        let state: &mut State = state.downcast_mut();
+        for (op, row) in input.rows() {
+            let datum = row.datum_at(0);
+            self.add_datum(state, op, datum);
+        }
+        Ok(())
     }
 
     async fn update_range(
         &self,
-        _state: &mut AggregateState,
-        _input: &StreamChunk,
-        _range: Range<usize>,
+        state: &mut AggregateState,
+        input: &StreamChunk,
+        range: Range<usize>,
     ) -> Result<()> {
-        todo!()
+        let state = state.downcast_mut();
+        for (op, row) in input.rows_in(range) {
+            self.add_datum(state, op, row.datum_at(0));
+        }
+        Ok(())
     }
 
     async fn get_result(&self, _state: &AggregateState) -> Result<Datum> {
