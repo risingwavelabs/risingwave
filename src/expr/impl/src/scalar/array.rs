@@ -33,9 +33,14 @@ fn row_(row: impl Row) -> StructValue {
 ///
 /// ```slt
 /// query T
-/// select map_from_entries(null::int[], [1,2,3]);
+/// select map_from_entries(null::int[], array[1,2,3]);
 /// ----
-/// null
+/// NULL
+///
+/// query T
+/// select map_from_entries(array['a','b','c'], array[1,2,3]);
+/// ----
+/// {"a":1,"b":2,"c":3}
 /// ```
 #[function(
     "map_from_entries(anyarray, anyarray) -> anymap",

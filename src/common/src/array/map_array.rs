@@ -34,8 +34,17 @@ pub struct MapArrayBuilder {
 impl ArrayBuilder for MapArrayBuilder {
     type ArrayType = MapArray;
 
+    #[cfg(not(test))]
     fn new(_capacity: usize) -> Self {
         panic!("please use `MapArrayBuilder::with_type` instead");
+    }
+
+    #[cfg(test)]
+    fn new(capacity: usize) -> Self {
+        Self::with_type(
+            capacity,
+            DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Varchar)),
+        )
     }
 
     fn with_type(capacity: usize, ty: DataType) -> Self {
