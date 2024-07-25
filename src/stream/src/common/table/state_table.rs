@@ -142,7 +142,7 @@ pub struct StateTableInner<
     state_clean_strategy: SC,
     /// Pending watermark for state cleaning. Old states below this watermark will be cleaned when committing.
     pending_watermark: Option<ScalarImpl>,
-    /// Last committed watermark for state cleaning.
+    /// Last committed watermark for state cleaning. Will be restored on state table recovery.
     committed_watermark: Option<ScalarImpl>,
     /// Cache for the top-N primary keys for reducing unnecessary range deletion.
     watermark_cache: StateTableWatermarkCache,
@@ -452,6 +452,36 @@ where
             row_serde.kind().is_column_aware()
         );
 
+        // Restore persisted table watermark.
+        let prefix_deser = if pk_indices.is_empty() {
+            None
+        } else {
+            Some(pk_serde.prefix(1))
+        };
+        let max_watermark_of_vnodes = distribution
+            .vnodes()
+            .iter_vnodes()
+            .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
+            .max();
+        let committed_watermark = if let Some(deser) = prefix_deser
+            && let Some(max_watermark) = max_watermark_of_vnodes
+        {
+            let deserialized = deser
+                .deserialize(&max_watermark)
+                .ok()
+                .and_then(|row| row[0].clone());
+            if deserialized.is_none() {
+                tracing::error!(
+                    vnodes = ?distribution.vnodes(),
+                    watermark = ?max_watermark,
+                    "Failed to deserialize persisted watermark from state store.",
+                );
+            }
+            deserialized
+        } else {
+            None
+        };
+
         let watermark_cache = if USE_WATERMARK_CACHE {
             StateTableWatermarkCache::new(WATERMARK_CACHE_ENTRIES)
         } else {
@@ -500,7 +530,7 @@ where
             value_indices,
             state_clean_strategy: SC::default(),
             pending_watermark: None,
-            committed_watermark: None,
+            committed_watermark,
             watermark_cache,
             data_types,
             output_indices,
@@ -665,11 +695,15 @@ where
             .collect();
         let pk_serde = OrderedRowSerde::new(pk_data_types, order_types);
 
+        // TODO: let's not restore watermark in unit tests for now, to avoid complexity.
+        let committed_watermark = None;
+
         let watermark_cache = if USE_WATERMARK_CACHE {
             StateTableWatermarkCache::new(WATERMARK_CACHE_ENTRIES)
         } else {
             StateTableWatermarkCache::new(0)
         };
+
         Self {
             table_id,
             local_store: local_state_store,
@@ -683,7 +717,7 @@ where
             value_indices,
             state_clean_strategy: SC::default(),
             pending_watermark: None,
-            committed_watermark: None,
+            committed_watermark,
             watermark_cache,
             data_types,
             output_indices: vec![],
@@ -1127,6 +1161,12 @@ where
         if self.state_clean_strategy.apply() || eager_cleaning {
             self.pending_watermark = Some(watermark);
         }
+    }
+
+    /// Get the committed watermark of the state table. Watermarks should be fed into the state
+    /// table through `update_watermark` method.
+    pub fn get_committed_watermark(&self) -> Option<&ScalarImpl> {
+        self.committed_watermark.as_ref()
     }
 
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
