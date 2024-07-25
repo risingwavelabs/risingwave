@@ -19,7 +19,7 @@ use risingwave_common::catalog::{ColumnCatalog, Schema};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_connector::match_sink_name_str;
-use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkType};
+use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::{
     SinkError, SinkMetaClient, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
 };
@@ -111,7 +111,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
         let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
-        let sink_id = sink_desc.get_id().into();
+        let sink_id: SinkId = sink_desc.get_id().into();
         let sink_name = sink_desc.get_name().to_owned();
         let db_name = sink_desc.get_db_name().into();
         let sink_from_name = sink_desc.get_sink_from_name().into();
@@ -162,6 +162,16 @@ impl ExecutorBuilder for SinkExecutorBuilder {
 
         let format_desc_with_secret = SinkParam::fill_secret_for_format_desc(format_desc)?;
 
+        let actor_id_str = format!("{}", params.actor_context.id);
+        let sink_id_str = format!("{}", sink_id.sink_id);
+
+        let sink_metrics = params.executor_stats.new_sink_metrics(
+            &actor_id_str,
+            &sink_id_str,
+            &sink_name,
+            connector,
+        );
+
         let sink_param = SinkParam {
             sink_id,
             sink_name,
@@ -177,14 +187,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             db_name,
             sink_from_name,
         };
-
-        let sink_id_str = format!("{}", sink_id.sink_id);
-
-        let sink_metrics = params.executor_stats.new_sink_metrics(
-            &params.info.identity,
-            sink_id_str.as_str(),
-            connector,
-        );
 
         let sink_write_param = SinkWriterParam {
             executor_id: params.executor_id,
