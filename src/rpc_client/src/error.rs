@@ -28,7 +28,14 @@ pub enum RpcError {
     TransportError(Box<tonic::transport::Error>),
 
     #[error(transparent)]
-    GrpcStatus(Box<TonicStatusWrapper>),
+    GrpcStatus(
+        #[from]
+        // Typically it does not have a backtrace,
+        // but this is to let `thiserror` generate `provide` implementation to make `Extra` work.
+        // See `risingwave_error::tonic::extra`.
+        #[backtrace]
+        Box<TonicStatusWrapper>,
+    ),
 
     #[error(transparent)]
     MetaAddressParse(#[from] MetaAddressStrategyParseError),
@@ -61,7 +68,7 @@ macro_rules! impl_from_status {
                 $(
                     #[doc = "Convert a gRPC status from " $service " service into an [`RpcError`]."]
                     pub fn [<from_ $service _status>](s: tonic::Status) -> Self {
-                        Self::grpc_status(s.with_client_side_service_name(stringify!($service)))
+                        Box::new(s.with_client_side_service_name(stringify!($service))).into()
                     }
                 )*
             }

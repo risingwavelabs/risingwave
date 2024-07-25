@@ -405,6 +405,15 @@ impl StageRunner {
                     expr_context.clone(),
                 ));
             }
+        } else if let Some(_file_scan_info) = self.stage.file_scan_info.as_ref() {
+            let task_id = PbTaskId {
+                query_id: self.stage.query_id.id.clone(),
+                stage_id: self.stage.id,
+                task_id: 0_u64,
+            };
+            let plan_fragment = self.create_plan_fragment(0_u64, Some(PartitionInfo::File));
+            let worker = self.choose_worker(&plan_fragment, 0_u32, self.stage.dml_table_id)?;
+            futures.push(self.schedule_task(task_id, plan_fragment, worker, expr_context.clone()));
         } else {
             for id in 0..self.stage.parallelism.unwrap() {
                 let task_id = PbTaskId {

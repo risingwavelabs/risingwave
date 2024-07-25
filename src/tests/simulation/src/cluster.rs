@@ -450,6 +450,8 @@ impl Cluster {
                 "hummock+sim://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
                 "--data-directory",
                 "hummock_001",
+                "--temp-secret-file-dir",
+                &format!("./secrets/meta-{i}"),
             ]);
             handle
                 .create_node()
@@ -477,6 +479,8 @@ impl Cluster {
                 "0.0.0.0:4566",
                 "--advertise-addr",
                 &format!("192.168.2.{i}:4566"),
+                "--temp-secret-file-dir",
+                &format!("./secrets/frontend-{i}"),
             ]);
             handle
                 .create_node()
@@ -505,6 +509,8 @@ impl Cluster {
                 "6979321856",
                 "--parallelism",
                 &conf.compute_node_cores.to_string(),
+                "--temp-secret-file-dir",
+                &format!("./secrets/compute-{i}"),
             ]);
             handle
                 .create_node()

@@ -418,6 +418,7 @@ impl LogicalJoin {
             .collect_vec();
 
         let new_scan_output_column_ids = new_scan.output_column_ids();
+        let as_of = new_scan.as_of.clone();
 
         // Construct a new logical join, because we have change its RHS.
         let new_logical_join = generic::Join::new(
@@ -435,6 +436,7 @@ impl LogicalJoin {
             new_scan_output_column_ids,
             lookup_prefix_len,
             false,
+            as_of,
         ))
     }
 

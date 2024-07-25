@@ -15,7 +15,7 @@
 use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::DataType;
-use risingwave_expr::aggregate::AggKind;
+use risingwave_expr::aggregate::PbAggKind;
 use risingwave_expr::sig::SigDataType;
 use risingwave_sqlparser::ast::{
     Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, OrderByExpr,
@@ -31,7 +31,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             Some(funcs) => funcs,
         };
         let func = funcs.choose(&mut self.rng).unwrap();
-        if matches!(func.name.as_aggregate(), AggKind::Min | AggKind::Max)
+        if matches!(func.name.as_aggregate(), PbAggKind::Min | PbAggKind::Max)
             && matches!(
                 func.ret_type,
                 SigDataType::Exact(DataType::Boolean | DataType::Jsonb)
@@ -51,7 +51,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         // DISTINCT now only works with agg kinds except `ApproxCountDistinct`, and with at least
         // one argument and only the first being non-constant. See `Binder::bind_normal_agg`
         // for more details.
-        let distinct_allowed = func.name.as_aggregate() != AggKind::ApproxCountDistinct
+        let distinct_allowed = func.name.as_aggregate() != PbAggKind::ApproxCountDistinct
             && !exprs.is_empty()
             && exprs.iter().skip(1).all(|e| matches!(e, Expr::Value(_)));
         let distinct = distinct_allowed && self.flip_coin();
@@ -86,13 +86,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates aggregate expressions. For internal / unsupported aggregators, we return `None`.
     fn make_agg_expr(
         &mut self,
-        func: AggKind,
+        func: PbAggKind,
         exprs: &[Expr],
         distinct: bool,
         filter: Option<Box<Expr>>,
         order_by: Vec<OrderByExpr>,
     ) -> Option<Expr> {
-        use AggKind as A;
+        use PbAggKind as A;
         match func {
             kind @ (A::FirstValue | A::LastValue) => {
                 if order_by.is_empty() {
@@ -100,7 +100,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                     None
                 } else {
                     Some(Expr::Function(make_agg_func(
-                        &kind.to_string(),
+                        &kind.as_str_name().to_lowercase(),
                         exprs,
                         distinct,
                         filter,
@@ -109,7 +109,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 }
             }
             other => Some(Expr::Function(make_agg_func(
-                &other.to_string(),
+                &other.as_str_name().to_lowercase(),
                 exprs,
                 distinct,
                 filter,
@@ -140,6 +140,7 @@ fn make_agg_func(
     };
 
     Function {
+        aggregate: false,
         name: ObjectName(vec![Ident::new_unchecked(func_name)]),
         args,
         variadic: false,

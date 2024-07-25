@@ -50,6 +50,7 @@ pub struct CompactorMetrics {
     pub sstable_distinct_epoch_count: Histogram,
     pub compaction_event_consumed_latency: Histogram,
     pub compaction_event_loop_iteration_latency: Histogram,
+    pub sstable_block_size: Histogram,
 }
 
 pub static GLOBAL_COMPACTOR_METRICS: LazyLock<CompactorMetrics> =
@@ -194,7 +195,7 @@ impl CompactorMetrics {
         let opts = histogram_opts!(
             "compactor_sstable_avg_value_size",
             "Total bytes gotten from sstable_avg_value_size, for observing sstable_avg_value_size",
-            size_buckets
+            size_buckets.clone()
         );
 
         let sstable_avg_value_size = register_histogram_with_registry!(opts, registry).unwrap();
@@ -251,6 +252,14 @@ impl CompactorMetrics {
         let compaction_event_loop_iteration_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
 
+        let opts = histogram_opts!(
+            "compactor_sstable_block_size",
+            "Total bytes gotten from sstable_block_size, for observing sstable_block_size",
+            size_buckets,
+        );
+
+        let sstable_block_size = register_histogram_with_registry!(opts, registry).unwrap();
+
         Self {
             compaction_upload_sst_counts,
             compact_fast_runner_bytes,
@@ -277,6 +286,7 @@ impl CompactorMetrics {
             sstable_distinct_epoch_count,
             compaction_event_consumed_latency,
             compaction_event_loop_iteration_latency,
+            sstable_block_size,
         }
     }
 

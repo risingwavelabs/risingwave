@@ -23,6 +23,7 @@ mod manual_selector;
 mod space_reclaim_selector;
 mod tombstone_compaction_selector;
 mod ttl_selector;
+mod vnode_watermark_selector;
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -31,12 +32,15 @@ pub use emergency_selector::EmergencySelector;
 pub use level_selector::{DynamicLevelSelector, DynamicLevelSelectorCore};
 pub use manual_selector::{ManualCompactionOption, ManualCompactionSelector};
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_hummock_sdk::table_watermark::TableWatermarks;
+use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::compact_task;
 use risingwave_pb::hummock::hummock_version::Levels;
 pub use space_reclaim_selector::SpaceReclaimCompactionSelector;
 pub use tombstone_compaction_selector::TombstoneCompactionSelector;
 pub use ttl_selector::TtlCompactionSelector;
+pub use vnode_watermark_selector::VnodeWatermarkCompactionSelector;
 
 use super::picker::LocalPickerStatistic;
 use super::{
@@ -47,17 +51,23 @@ use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
 
+pub struct CompactionSelectorContext<'a> {
+    pub group: &'a CompactionGroup,
+    pub levels: &'a Levels,
+    pub member_table_ids: &'a BTreeSet<TableId>,
+    pub level_handlers: &'a mut [LevelHandler],
+    pub selector_stats: &'a mut LocalSelectorStatistic,
+    pub table_id_to_options: &'a HashMap<u32, TableOption>,
+    pub developer_config: Arc<CompactionDeveloperConfig>,
+    pub table_watermarks: &'a HashMap<TableId, Arc<TableWatermarks>>,
+    pub state_table_info: &'a HummockVersionStateTableInfo,
+}
+
 pub trait CompactionSelector: Sync + Send {
     fn pick_compaction(
         &mut self,
         task_id: HummockCompactionTaskId,
-        group: &CompactionGroup,
-        levels: &Levels,
-        member_table_ids: &BTreeSet<TableId>,
-        level_handlers: &mut [LevelHandler],
-        selector_stats: &mut LocalSelectorStatistic,
-        table_id_to_options: HashMap<u32, TableOption>,
-        developer_config: Arc<CompactionDeveloperConfig>,
+        context: CompactionSelectorContext<'_>,
     ) -> Option<CompactionTask>;
 
     fn report_statistic_metrics(&self, _metrics: &MetaMetrics) {}

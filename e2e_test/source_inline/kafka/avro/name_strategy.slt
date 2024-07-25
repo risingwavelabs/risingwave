@@ -84,17 +84,6 @@ python3 scripts/source/schema_registry_producer.py  "${RISEDEV_KAFKA_BOOTSTRAP_S
 
 
 
-statement error SCHEMA_REGISTRY_NAME_STRATEGY_TOPIC_RECORD_NAME_STRATEGY expect non-empty field key\.message
-create table t_topic_record () with (
-    connector = 'kafka',
-    topic = 'upsert_avro_json-topic-record',
-    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}'
-) format upsert encode avro (
-    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
-    schema.registry.name.strategy = 'topic_record_name_strategy',
-    message = 'CPLM.OBJ_ATTRIBUTE_VALUE'
-);
-
 statement ok
 create table t_topic_record (primary key(rw_key))
 INCLUDE KEY AS rw_key
@@ -105,8 +94,7 @@ with (
 ) format upsert encode avro (
     schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
     schema.registry.name.strategy = 'topic_record_name_strategy',
-    message = 'CPLM.OBJ_ATTRIBUTE_VALUE',
-    key.message = 'string'
+    message = 'CPLM.OBJ_ATTRIBUTE_VALUE'
 );
 
 

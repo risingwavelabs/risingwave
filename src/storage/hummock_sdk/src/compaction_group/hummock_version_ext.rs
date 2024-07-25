@@ -17,8 +17,11 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
+use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
@@ -35,8 +38,10 @@ use crate::change_log::TableChangeLog;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::prost_key_range::KeyRangeExt;
-use crate::table_watermark::{TableWatermarks, VnodeWatermark};
-use crate::version::{HummockVersion, HummockVersionDelta};
+use crate::table_watermark::{
+    ReadTableWatermark, TableWatermarks, VnodeWatermark, WatermarkDirection,
+};
+use crate::version::{HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo};
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
 pub struct GroupDeltasSummary {
@@ -159,23 +164,62 @@ impl HummockVersion {
     }
 
     pub fn get_object_ids(&self) -> HashSet<HummockSstableObjectId> {
+        self.get_sst_infos().map(|s| s.object_id).collect()
+    }
+
+    pub fn get_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
+        self.get_sst_infos().map(|s| s.sst_id).collect()
+    }
+
+    pub fn get_sst_infos(&self) -> impl Iterator<Item = &SstableInfo> {
         self.get_combined_levels()
-            .flat_map(|level| {
-                level
-                    .table_infos
-                    .iter()
-                    .map(|table_info| table_info.get_object_id())
-            })
+            .flat_map(|level| level.table_infos.iter())
             .chain(self.table_change_log.values().flat_map(|change_log| {
                 change_log.0.iter().flat_map(|epoch_change_log| {
                     epoch_change_log
                         .old_value
                         .iter()
-                        .map(|sst| sst.object_id)
-                        .chain(epoch_change_log.new_value.iter().map(|sst| sst.object_id))
+                        .chain(epoch_change_log.new_value.iter())
                 })
             }))
-            .collect()
+    }
+
+    /// `get_sst_infos_from_groups` doesn't guarantee that all returned sst info belongs to `select_group`.
+    /// i.e. `select_group` is just a hint.
+    /// We separate `get_sst_infos_from_groups` and `get_sst_infos` because `get_sst_infos_from_groups` may be further customized in the future.
+    pub fn get_sst_infos_from_groups<'a>(
+        &'a self,
+        select_group: &'a HashSet<CompactionGroupId>,
+    ) -> impl Iterator<Item = &SstableInfo> + 'a {
+        self.levels
+            .iter()
+            .filter_map(|(cg_id, level)| {
+                if select_group.contains(cg_id) {
+                    Some(level)
+                } else {
+                    None
+                }
+            })
+            .flat_map(|level| {
+                level
+                    .l0
+                    .as_ref()
+                    .unwrap()
+                    .sub_levels
+                    .iter()
+                    .rev()
+                    .chain(level.levels.iter())
+            })
+            .flat_map(|level| level.table_infos.iter())
+            .chain(self.table_change_log.values().flat_map(|change_log| {
+                // TODO: optimization: strip table change log
+                change_log.0.iter().flat_map(|epoch_change_log| {
+                    epoch_change_log
+                        .old_value
+                        .iter()
+                        .chain(epoch_change_log.new_value.iter())
+                })
+            }))
     }
 
     pub fn level_iter<F: FnMut(&Level) -> bool>(
@@ -209,56 +253,110 @@ impl HummockVersion {
         &self,
         existing_table_ids: &[u32],
     ) -> BTreeMap<u32, PbTableWatermarks> {
-        fn extract_single_table_watermark(
-            table_watermarks: &TableWatermarks,
-            safe_epoch: u64,
-        ) -> Option<PbTableWatermarks> {
-            if let Some((first_epoch, first_epoch_watermark)) = table_watermarks.watermarks.first()
-            {
-                assert!(
-                    *first_epoch >= safe_epoch,
-                    "smallest epoch {} in table watermark should be at least safe epoch {}",
-                    first_epoch,
-                    safe_epoch
-                );
-                if *first_epoch == safe_epoch {
-                    Some(PbTableWatermarks {
-                        epoch_watermarks: vec![PbEpochNewWatermarks {
-                            watermarks: first_epoch_watermark
-                                .iter()
-                                .map(VnodeWatermark::to_protobuf)
-                                .collect(),
-                            epoch: *first_epoch,
-                        }],
-                        is_ascending: table_watermarks.direction.is_ascending(),
-                    })
-                } else {
-                    None
-                }
+        safe_epoch_table_watermarks_impl(
+            &self.table_watermarks,
+            &self.state_table_info,
+            existing_table_ids,
+        )
+    }
+}
+
+pub fn safe_epoch_table_watermarks_impl(
+    table_watermarks: &HashMap<TableId, Arc<TableWatermarks>>,
+    state_table_info: &HummockVersionStateTableInfo,
+    existing_table_ids: &[u32],
+) -> BTreeMap<u32, PbTableWatermarks> {
+    fn extract_single_table_watermark(
+        table_watermarks: &TableWatermarks,
+        safe_epoch: u64,
+    ) -> Option<PbTableWatermarks> {
+        if let Some((first_epoch, first_epoch_watermark)) = table_watermarks.watermarks.first() {
+            assert!(
+                *first_epoch >= safe_epoch,
+                "smallest epoch {} in table watermark should be at least safe epoch {}",
+                first_epoch,
+                safe_epoch
+            );
+            if *first_epoch == safe_epoch {
+                Some(PbTableWatermarks {
+                    epoch_watermarks: vec![PbEpochNewWatermarks {
+                        watermarks: first_epoch_watermark
+                            .iter()
+                            .map(VnodeWatermark::to_protobuf)
+                            .collect(),
+                        epoch: *first_epoch,
+                    }],
+                    is_ascending: table_watermarks.direction.is_ascending(),
+                })
             } else {
                 None
             }
+        } else {
+            None
         }
-        self.table_watermarks
-            .iter()
-            .filter_map(|(table_id, table_watermarks)| {
-                let u32_table_id = table_id.table_id();
-                if !existing_table_ids.contains(&u32_table_id) {
-                    None
-                } else {
-                    extract_single_table_watermark(
-                        table_watermarks,
-                        self.state_table_info
-                            .info()
-                            .get(table_id)
-                            .expect("table should exist")
-                            .safe_epoch,
-                    )
-                    .map(|table_watermarks| (table_id.table_id, table_watermarks))
-                }
-            })
-            .collect()
     }
+    table_watermarks
+        .iter()
+        .filter_map(|(table_id, table_watermarks)| {
+            let u32_table_id = table_id.table_id();
+            if !existing_table_ids.contains(&u32_table_id) {
+                None
+            } else {
+                extract_single_table_watermark(
+                    table_watermarks,
+                    state_table_info
+                        .info()
+                        .get(table_id)
+                        .expect("table should exist")
+                        .safe_epoch,
+                )
+                .map(|table_watermarks| (table_id.table_id, table_watermarks))
+            }
+        })
+        .collect()
+}
+
+pub fn safe_epoch_read_table_watermarks_impl(
+    safe_epoch_watermarks: &BTreeMap<u32, PbTableWatermarks>,
+) -> BTreeMap<TableId, ReadTableWatermark> {
+    safe_epoch_watermarks
+        .iter()
+        .map(|(table_id, watermarks)| {
+            assert_eq!(watermarks.epoch_watermarks.len(), 1);
+            let vnode_watermarks = &watermarks
+                .epoch_watermarks
+                .first()
+                .expect("should exist")
+                .watermarks;
+            let mut vnode_watermark_map = BTreeMap::new();
+            for vnode_watermark in vnode_watermarks {
+                let watermark = Bytes::copy_from_slice(&vnode_watermark.watermark);
+                for vnode in
+                    Bitmap::from(vnode_watermark.vnode_bitmap.as_ref().expect("should exist"))
+                        .iter_vnodes()
+                {
+                    assert!(
+                        vnode_watermark_map
+                            .insert(vnode, watermark.clone())
+                            .is_none(),
+                        "duplicate table watermark on vnode {}",
+                        vnode.to_index()
+                    );
+                }
+            }
+            (
+                TableId::from(*table_id),
+                ReadTableWatermark {
+                    direction: if watermarks.is_ascending {
+                        WatermarkDirection::Ascending
+                    } else {
+                        WatermarkDirection::Descending
+                    },
+                    vnode_watermarks: vnode_watermark_map,
+                },
+            )
+        })
+        .collect()
 }
 
 impl HummockVersion {
