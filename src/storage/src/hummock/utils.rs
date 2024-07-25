@@ -28,7 +28,8 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
 };
-use risingwave_hummock_sdk::version::{HummockVersion, SstableInfo};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use tokio::sync::oneshot::{channel, Receiver, Sender};
 

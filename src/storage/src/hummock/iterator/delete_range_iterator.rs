@@ -17,7 +17,7 @@ use std::future::Future;
 
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_hummock_sdk::key::{PointRange, UserKey};
-use risingwave_hummock_sdk::version::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::iterator::concat_delete_range_iterator::ConcatDeleteRangeIterator;

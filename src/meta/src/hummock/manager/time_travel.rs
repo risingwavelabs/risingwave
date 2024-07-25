@@ -18,10 +18,11 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::time_travel::{
     refill_version, IncompleteHummockVersion, IncompleteHummockVersionDelta,
 };
-use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta, SstableInfo};
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableId, HummockSstableObjectId,
 };

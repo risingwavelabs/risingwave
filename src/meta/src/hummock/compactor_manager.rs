@@ -19,7 +19,7 @@ use std::time::{Duration, Instant, SystemTime};
 use fail::fail_point;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::compact::statistics_compact_task;
-use risingwave_hummock_sdk::version::CompactTask;
+use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{

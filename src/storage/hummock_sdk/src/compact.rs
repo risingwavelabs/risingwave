@@ -16,7 +16,8 @@ use std::collections::HashSet;
 
 use risingwave_pb::hummock::LevelType;
 
-use crate::version::{CompactTask, SstableInfo};
+use crate::compact_task::CompactTask;
+use crate::sstable_info::SstableInfo;
 
 pub fn compact_task_output_to_string(compact_task: &CompactTask) -> String {
     use std::fmt::Write;

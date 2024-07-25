@@ -28,7 +28,8 @@ use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAw
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::version::{Level, SstableInfo};
+use risingwave_hummock_sdk::level::Level;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectMetadata, ObjectStoreImpl};
 use risingwave_rpc_client::MetaClient;

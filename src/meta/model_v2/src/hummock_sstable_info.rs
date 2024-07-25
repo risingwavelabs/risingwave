@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// use risingwave_hummock_sdk::version::SstableInfo;
 use risingwave_pb::hummock::PbSstableInfo;
 use sea_orm::entity::prelude::*;
 use sea_orm::{DeriveEntityModel, DeriveRelation, EnumIter};

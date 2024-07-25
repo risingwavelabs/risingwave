@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::config::default::compaction_config;
-use risingwave_hummock_sdk::version::{InputLevel, Level, Levels, OverlappingLevel};
+use risingwave_hummock_sdk::level::{InputLevel, Level, Levels, OverlappingLevel};
 use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;

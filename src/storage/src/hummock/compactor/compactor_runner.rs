@@ -23,10 +23,11 @@ use risingwave_common::util::value_encoding::column_aware_row_encoding::try_drop
 use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
+use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::version::{CompactTask, SstableInfo};
 use risingwave_hummock_sdk::{
     can_concat, compact_task_output_to_string, HummockSstableObjectId, KeyComparator,
 };

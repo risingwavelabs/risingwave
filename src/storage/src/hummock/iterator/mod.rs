@@ -18,7 +18,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use more_asserts::{assert_gt, assert_lt};
-use risingwave_hummock_sdk::version::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
 use super::{
     HummockResult, HummockValue, SstableIteratorReadOptions, SstableIteratorType, SstableStoreRef,

@@ -17,8 +17,8 @@ use std::cmp;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use risingwave_hummock_sdk::compact_task::ValidationTask;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::version::ValidationTask;
 
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::sstable::SstableIteratorReadOptions;

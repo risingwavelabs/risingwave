@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::version::{InputLevel, Levels, OverlappingLevel};
+use risingwave_hummock_sdk::level::{InputLevel, Levels, OverlappingLevel};
 use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::{

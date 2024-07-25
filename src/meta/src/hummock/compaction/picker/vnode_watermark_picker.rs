@@ -16,8 +16,9 @@ use std::collections::BTreeMap;
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
+use risingwave_hummock_sdk::level::{InputLevel, Levels};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::ReadTableWatermark;
-use risingwave_hummock_sdk::version::{InputLevel, Levels, SstableInfo};
 
 use crate::hummock::compaction::picker::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
@@ -108,8 +109,8 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
     use risingwave_hummock_sdk::key_range::KeyRange;
+    use risingwave_hummock_sdk::sstable_info::SstableInfo;
     use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
-    use risingwave_hummock_sdk::version::SstableInfo;
 
     use crate::hummock::compaction::picker::vnode_watermark_picker::should_delete_sst_by_watermark;
 

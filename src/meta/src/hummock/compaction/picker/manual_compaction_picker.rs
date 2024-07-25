@@ -16,7 +16,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_hummock_sdk::version::{InputLevel, Level, Levels, OverlappingLevel, SstableInfo};
+use risingwave_hummock_sdk::level::{InputLevel, Level, Levels, OverlappingLevel};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_pb::hummock::LevelType;
 
 use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};

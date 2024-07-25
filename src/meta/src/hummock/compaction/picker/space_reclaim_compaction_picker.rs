@@ -14,7 +14,8 @@
 
 use std::collections::HashSet;
 
-use risingwave_hummock_sdk::version::{InputLevel, Levels, SstableInfo};
+use risingwave_hummock_sdk::level::{InputLevel, Levels};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
 use super::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;

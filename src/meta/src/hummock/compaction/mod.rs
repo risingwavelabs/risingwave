@@ -17,7 +17,8 @@
 pub mod compaction_config;
 mod overlap_strategy;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_hummock_sdk::version::{CompactTask, Levels};
+use risingwave_hummock_sdk::compact_task::CompactTask;
+use risingwave_hummock_sdk::level::Levels;
 use risingwave_pb::hummock::compact_task::{self, TaskType};
 
 mod picker;

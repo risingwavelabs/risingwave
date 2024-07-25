@@ -23,7 +23,7 @@ use fail::fail_point;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::version::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::KeyComparator;
 
 use crate::hummock::block_stream::BlockDataStream;

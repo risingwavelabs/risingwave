@@ -19,7 +19,8 @@ use risingwave_common::catalog::TableOption;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
-use risingwave_hummock_sdk::version::{InputLevel, Levels, SstableInfo};
+use risingwave_hummock_sdk::level::{InputLevel, Levels};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
 use super::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;

@@ -21,8 +21,9 @@ use itertools::{enumerate, Itertools};
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::IntGauge;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
+use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::table_stats::PbTableStatsMap;
-use risingwave_hummock_sdk::version::{HummockVersion, Levels};
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{

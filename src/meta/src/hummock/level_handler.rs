@@ -15,7 +15,8 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use risingwave_hummock_sdk::version::{Level, SstableInfo};
+use risingwave_hummock_sdk::level::Level;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockSstableId};
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
 

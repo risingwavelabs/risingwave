@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::version::Levels;
+use risingwave_hummock_sdk::level::Levels;
 use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::{

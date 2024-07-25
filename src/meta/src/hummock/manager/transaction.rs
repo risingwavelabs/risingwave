@@ -17,9 +17,10 @@ use std::ops::{Deref, DerefMut};
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::{
-    GroupDelta, HummockVersion, HummockVersionDelta, IntraLevelDelta, SstableInfo,
+    GroupDelta, HummockVersion, HummockVersionDelta, IntraLevelDelta,
 };
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::{HummockVersionStats, StateTableInfoDelta};

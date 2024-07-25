@@ -31,10 +31,11 @@ use super::StateTableId;
 use crate::change_log::TableChangeLog;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
+use crate::level::{Level, Levels, OverlappingLevel};
+use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{ReadTableWatermark, TableWatermarks};
 use crate::version::{
     GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo,
-    Level, Levels, OverlappingLevel, SstableInfo,
 };
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
@@ -489,27 +490,24 @@ impl HummockVersion {
             // current `hummock::manager::gen_version_delta` implementation. Better refactor the
             // struct to reduce conventions.
             for group_delta in &group_deltas.group_deltas {
-                match group_delta {
-                    GroupDelta::IntraLevel(intra_level) => {
-                        if !intra_level.inserted_table_infos.is_empty() {
-                            info.insert_sst_level = intra_level.level_idx;
-                            info.insert_sst_infos
-                                .extend(intra_level.inserted_table_infos.iter().cloned());
-                        }
-                        if !intra_level.removed_table_ids.is_empty() {
-                            for id in &intra_level.removed_table_ids {
-                                if intra_level.level_idx == 0 {
-                                    removed_l0_ssts.insert(*id);
-                                } else {
-                                    removed_ssts
-                                        .entry(intra_level.level_idx)
-                                        .or_default()
-                                        .insert(*id);
-                                }
+                if let GroupDelta::IntraLevel(intra_level) = group_delta {
+                    if !intra_level.inserted_table_infos.is_empty() {
+                        info.insert_sst_level = intra_level.level_idx;
+                        info.insert_sst_infos
+                            .extend(intra_level.inserted_table_infos.iter().cloned());
+                    }
+                    if !intra_level.removed_table_ids.is_empty() {
+                        for id in &intra_level.removed_table_ids {
+                            if intra_level.level_idx == 0 {
+                                removed_l0_ssts.insert(*id);
+                            } else {
+                                removed_ssts
+                                    .entry(intra_level.level_idx)
+                                    .or_default()
+                                    .insert(*id);
                             }
                         }
                     }
-                    _ => unreachable!(),
                 }
             }
 
@@ -1341,9 +1339,10 @@ mod tests {
     use risingwave_pb::hummock::{CompactionConfig, GroupConstruct, GroupDestroy, LevelType};
 
     use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
+    use crate::level::{Level, Levels, OverlappingLevel};
+    use crate::sstable_info::SstableInfo;
     use crate::version::{
-        GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, IntraLevelDelta, Level,
-        Levels, OverlappingLevel, SstableInfo,
+        GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, IntraLevelDelta,
     };
 
     #[test]

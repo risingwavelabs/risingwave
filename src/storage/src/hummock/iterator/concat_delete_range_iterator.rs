@@ -15,7 +15,7 @@
 use std::future::Future;
 
 use risingwave_hummock_sdk::key::{FullKey, PointRange, UserKey};
-use risingwave_hummock_sdk::version::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::iterator::DeleteRangeIterator;

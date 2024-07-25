@@ -41,16 +41,16 @@ use parking_lot::Mutex;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::level::{InputLevel, Level, Levels};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
-use risingwave_hummock_sdk::version::{
-    CompactTask, GroupDelta, HummockVersion, InputLevel, IntraLevelDelta, Level, Levels,
-    ReportTask, SstableInfo,
-};
+use risingwave_hummock_sdk::version::{GroupDelta, HummockVersion, IntraLevelDelta};
 use risingwave_hummock_sdk::{
     compact_task_to_string, statistics_compact_task, CompactionGroupId, HummockCompactionTaskId,
     HummockVersionId,
@@ -837,7 +837,7 @@ impl HummockManager {
                         compact_task.input_ssts,
                         start_time.elapsed()
                     );
-                    compact_task.set_task_status(TaskStatus::Success);
+                    compact_task.task_status = TaskStatus::Success;
                     compact_status.report_compact_task(&compact_task);
                     if !is_trivial_reclaim {
                         compact_task
@@ -951,7 +951,7 @@ impl HummockManager {
                 .initiate_task_heartbeat(compact_task.clone());
 
             // this task has been finished.
-            compact_task.set_task_status(TaskStatus::Pending);
+            compact_task.task_status = TaskStatus::Pending;
             let compact_task_statistics = statistics_compact_task(compact_task);
 
             let level_type_label = build_compact_task_level_type_metrics_label(
@@ -1223,7 +1223,7 @@ impl HummockManager {
 
             {
                 // apply result
-                compact_task.set_task_status(task.task_status);
+                compact_task.task_status = task.task_status;
                 compact_task.sorted_output_ssts = task.sorted_output_ssts;
             }
 
@@ -1232,7 +1232,7 @@ impl HummockManager {
                     compact_status.report_compact_task(&compact_task);
                 }
                 None => {
-                    compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
+                    compact_task.task_status = TaskStatus::InvalidGroupCanceled;
                 }
             }
 
@@ -1251,7 +1251,7 @@ impl HummockManager {
                 let is_expired =
                     Self::is_compact_task_expired(&compact_task, version.latest_version());
                 if is_expired {
-                    compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
+                    compact_task.task_status = TaskStatus::InputOutdatedCanceled;
                     false
                 } else {
                     let group = version
@@ -1262,7 +1262,7 @@ impl HummockManager {
                     let input_exist =
                         group.check_deleted_sst_exist(&input_level_ids, input_sst_ids);
                     if !input_exist {
-                        compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
+                        compact_task.task_status = TaskStatus::InvalidGroupCanceled;
                         warn!(
                             "The task may be expired because of group split, task:\n {:?}",
                             compact_task_to_string(&compact_task)

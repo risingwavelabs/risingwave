@@ -14,7 +14,8 @@
 
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::version::{InputLevel, SstableInfo};
+use risingwave_hummock_sdk::level::InputLevel;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_pb::hummock::LevelType;
 
 use super::{CompactionInput, LocalPickerStatistic};

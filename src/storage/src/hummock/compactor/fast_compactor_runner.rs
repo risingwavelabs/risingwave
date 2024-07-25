@@ -22,10 +22,11 @@ use std::time::Instant;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStats;
-use risingwave_hummock_sdk::version::{CompactTask, SstableInfo};
 use risingwave_hummock_sdk::{can_concat, compact_task_to_string, EpochWithGap, LocalSstableInfo};
 
 use crate::filter_key_extractor::FilterKeyExtractorImpl;

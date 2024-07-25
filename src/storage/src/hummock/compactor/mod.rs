@@ -15,7 +15,7 @@
 mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
-use risingwave_hummock_sdk::version::{CompactTask, ValidationTask};
+use risingwave_hummock_sdk::compact_task::{CompactTask, ValidationTask};
 use risingwave_pb::compactor::{dispatch_compaction_task_request, DispatchCompactionTaskRequest};
 use risingwave_pb::hummock::report_compaction_task_request::{
     Event as ReportCompactionTaskEvent, HeartBeat as SharedHeartBeat,
@@ -537,9 +537,7 @@ pub fn start_compactor(
                                             Err(err) => {
                                                 tracing::warn!(error = %err.as_report(), "Failed to track pending SST object id");
                                                 let mut compact_task = compact_task;
-                                                compact_task.set_task_status(
-                                                    TaskStatus::TrackSstObjectIdFailed,
-                                                );
+                                                compact_task.task_status = TaskStatus::TrackSstObjectIdFailed;
                                                 ((compact_task, HashMap::default()), None)
                                             }
                                         };

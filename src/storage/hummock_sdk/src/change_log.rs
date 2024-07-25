@@ -19,7 +19,7 @@ use risingwave_pb::hummock::hummock_version_delta::PbChangeLogDelta;
 use risingwave_pb::hummock::{PbEpochNewChangeLog, PbTableChangeLog};
 use tracing::warn;
 
-use crate::version::SstableInfo;
+use crate::sstable_info::SstableInfo;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableChangeLog(pub Vec<EpochNewChangeLog>);

@@ -18,7 +18,7 @@
 // (found in the LICENSE.Apache file in the root directory).
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::version::Levels;
+use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::compact_task::PbTaskType;
 use risingwave_pb::hummock::{CompactionConfig, LevelType};

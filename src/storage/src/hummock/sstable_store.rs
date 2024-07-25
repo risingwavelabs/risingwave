@@ -26,7 +26,7 @@ use foyer::{
 use futures::{future, StreamExt};
 use itertools::Itertools;
 use risingwave_common::config::StorageMemoryConfig;
-use risingwave_hummock_sdk::version::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
@@ -1131,7 +1131,7 @@ mod tests {
     use std::ops::Range;
     use std::sync::Arc;
 
-    use risingwave_hummock_sdk::version::SstableInfo;
+    use risingwave_hummock_sdk::sstable_info::SstableInfo;
     use risingwave_hummock_sdk::HummockSstableObjectId;
 
     use super::{SstableStoreRef, SstableWriterOptions};

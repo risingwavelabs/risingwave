@@ -31,17 +31,20 @@ use std::collections::HashMap;
 pub use key_cmp::*;
 use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
-use version::SstableInfo;
+use sstable_info::SstableInfo;
 
 use crate::key_range::KeyRangeCommon;
 use crate::table_stats::TableStatsMap;
 
 pub mod change_log;
 pub mod compact;
+pub mod compact_task;
 pub mod compaction_group;
 pub mod key;
 pub mod key_range;
+pub mod level;
 pub mod prost_key_range;
+pub mod sstable_info;
 pub mod table_stats;
 pub mod table_watermark;
 pub mod time_travel;

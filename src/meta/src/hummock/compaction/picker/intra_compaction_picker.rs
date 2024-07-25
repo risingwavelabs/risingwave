@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::config::default::compaction_config;
-use risingwave_hummock_sdk::version::{InputLevel, Levels, OverlappingLevel};
+use risingwave_hummock_sdk::level::{InputLevel, Levels, OverlappingLevel};
 use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
@@ -417,7 +417,7 @@ impl WholeLevelCompactionPicker {
 
 #[cfg(test)]
 pub mod tests {
-    use risingwave_hummock_sdk::version::Level;
+    use risingwave_hummock_sdk::level::Level;
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
