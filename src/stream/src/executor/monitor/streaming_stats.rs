@@ -165,16 +165,16 @@ pub struct StreamingMetrics {
     log_store_read_rows: LabelGuardedIntCounterVec<4>,
     log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec<4>,
 
-    pub kv_log_store_storage_write_count: LabelGuardedIntCounterVec<3>,
-    pub kv_log_store_storage_write_size: LabelGuardedIntCounterVec<3>,
-    pub kv_log_store_rewind_count: LabelGuardedIntCounterVec<3>,
-    pub kv_log_store_rewind_delay: LabelGuardedHistogramVec<3>,
-    pub kv_log_store_storage_read_count: LabelGuardedIntCounterVec<4>,
-    pub kv_log_store_storage_read_size: LabelGuardedIntCounterVec<4>,
-    pub kv_log_store_buffer_unconsumed_item_count: LabelGuardedIntGaugeVec<3>,
-    pub kv_log_store_buffer_unconsumed_row_count: LabelGuardedIntGaugeVec<3>,
-    pub kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec<3>,
-    pub kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec<3>,
+    pub kv_log_store_storage_write_count: LabelGuardedIntCounterVec<4>,
+    pub kv_log_store_storage_write_size: LabelGuardedIntCounterVec<4>,
+    pub kv_log_store_rewind_count: LabelGuardedIntCounterVec<4>,
+    pub kv_log_store_rewind_delay: LabelGuardedHistogramVec<4>,
+    pub kv_log_store_storage_read_count: LabelGuardedIntCounterVec<5>,
+    pub kv_log_store_storage_read_size: LabelGuardedIntCounterVec<5>,
+    pub kv_log_store_buffer_unconsumed_item_count: LabelGuardedIntGaugeVec<4>,
+    pub kv_log_store_buffer_unconsumed_row_count: LabelGuardedIntGaugeVec<4>,
+    pub kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec<4>,
+    pub kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec<4>,
 
     // Sink iceberg metrics
     iceberg_write_qps: LabelGuardedIntCounterVec<3>,
@@ -869,7 +869,7 @@ impl StreamingMetrics {
         let kv_log_store_storage_write_count = register_guarded_int_counter_vec_with_registry!(
             "kv_log_store_storage_write_count",
             "Write row count throughput of kv log store",
-            &["executor_id", "connector", "sink_id"],
+            &["actor_id", "connector", "sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -877,7 +877,7 @@ impl StreamingMetrics {
         let kv_log_store_storage_write_size = register_guarded_int_counter_vec_with_registry!(
             "kv_log_store_storage_write_size",
             "Write size throughput of kv log store",
-            &["executor_id", "connector", "sink_id"],
+            &["actor_id", "connector", "sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -885,7 +885,7 @@ impl StreamingMetrics {
         let kv_log_store_storage_read_count = register_guarded_int_counter_vec_with_registry!(
             "kv_log_store_storage_read_count",
             "Write row count throughput of kv log store",
-            &["executor_id", "connector", "sink_id", "read_type"],
+            &["actor_id", "connector", "sink_id", "sink_name", "read_type"],
             registry
         )
         .unwrap();
@@ -893,7 +893,7 @@ impl StreamingMetrics {
         let kv_log_store_storage_read_size = register_guarded_int_counter_vec_with_registry!(
             "kv_log_store_storage_read_size",
             "Write size throughput of kv log store",
-            &["executor_id", "connector", "sink_id", "read_type"],
+            &["actor_id", "connector", "sink_id", "sink_name", "read_type"],
             registry
         )
         .unwrap();
@@ -901,7 +901,7 @@ impl StreamingMetrics {
         let kv_log_store_rewind_count = register_guarded_int_counter_vec_with_registry!(
             "kv_log_store_rewind_count",
             "Kv log store rewind rate",
-            &["executor_id", "connector", "sink_id"],
+            &["actor_id", "connector", "sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -926,7 +926,7 @@ impl StreamingMetrics {
 
         let kv_log_store_rewind_delay = register_guarded_histogram_vec_with_registry!(
             kv_log_store_rewind_delay_opts,
-            &["executor_id", "connector", "sink_id"],
+            &["actor_id", "connector", "sink_id", "sink_name"],
             registry
         )
         .unwrap();
@@ -935,7 +935,7 @@ impl StreamingMetrics {
             register_guarded_int_gauge_vec_with_registry!(
                 "kv_log_store_buffer_unconsumed_item_count",
                 "Number of Unconsumed Item in buffer",
-                &["executor_id", "connector", "sink_id"],
+                &["actor_id", "connector", "sink_id", "sink_name"],
                 registry
             )
             .unwrap();
@@ -944,7 +944,7 @@ impl StreamingMetrics {
             register_guarded_int_gauge_vec_with_registry!(
                 "kv_log_store_buffer_unconsumed_row_count",
                 "Number of Unconsumed Row in buffer",
-                &["executor_id", "connector", "sink_id"],
+                &["actor_id", "connector", "sink_id", "sink_name"],
                 registry
             )
             .unwrap();
@@ -953,7 +953,7 @@ impl StreamingMetrics {
             register_guarded_int_gauge_vec_with_registry!(
                 "kv_log_store_buffer_unconsumed_epoch_count",
                 "Number of Unconsumed Epoch in buffer",
-                &["executor_id", "connector", "sink_id"],
+                &["actor_id", "connector", "sink_id", "sink_name"],
                 registry
             )
             .unwrap();
@@ -962,7 +962,7 @@ impl StreamingMetrics {
             register_guarded_int_gauge_vec_with_registry!(
                 "kv_log_store_buffer_unconsumed_min_epoch",
                 "Number of Unconsumed Epoch in buffer",
-                &["executor_id", "connector", "sink_id"],
+                &["actor_id", "connector", "sink_id", "sink_name"],
                 registry
             )
             .unwrap();
