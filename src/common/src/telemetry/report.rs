@@ -129,7 +129,7 @@ where
 
 pub fn report_event_common(
     event_stage: PbTelemetryEventStage,
-    feature_name: String,
+    event_name: &str,
     catalog_id: i64,
     connector_name: Option<String>,
     object: Option<PbTelemetryDatabaseObject>,
@@ -147,7 +147,7 @@ pub fn report_event_common(
     request_to_telemetry_event(
         event_tracking_id,
         event_stage,
-        feature_name,
+        event_name,
         catalog_id,
         connector_name,
         object,
@@ -160,7 +160,7 @@ pub fn report_event_common(
 fn request_to_telemetry_event(
     tracking_id: String,
     event_stage: PbTelemetryEventStage,
-    feature_name: String,
+    event_name: &str,
     catalog_id: i64,
     connector_name: Option<String>,
     object: Option<PbTelemetryDatabaseObject>,
@@ -172,7 +172,7 @@ fn request_to_telemetry_event(
         tracking_id,
         event_time_sec: current_timestamp(),
         event_stage: event_stage as i32,
-        feature_name,
+        event_name: event_name.to_string(),
         connector_name,
         object: object.map(|c| c as i32),
         catalog_id,

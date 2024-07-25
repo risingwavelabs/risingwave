@@ -56,7 +56,7 @@ fn telemetry_sink_build(
 
     report_event(
         PbTelemetryEventStage::CreateStreamJob,
-        "sink".to_string(),
+        "sink",
         sink_id.sink_id() as i64,
         Some(connector_name.to_string()),
         Some(PbTelemetryDatabaseObject::Sink),

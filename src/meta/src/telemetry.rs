@@ -37,7 +37,7 @@ const TELEMETRY_META_REPORT_TYPE: &str = "meta";
 
 pub(crate) fn report_event(
     event_stage: PbTelemetryEventStage,
-    feature_name: String,
+    event_name: &str,
     catalog_id: i64,
     connector_name: Option<String>,
     component: Option<PbTelemetryDatabaseObject>,
@@ -45,7 +45,7 @@ pub(crate) fn report_event(
 ) {
     report_event_common(
         event_stage,
-        feature_name,
+        event_name,
         catalog_id,
         connector_name,
         component,

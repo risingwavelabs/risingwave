@@ -53,7 +53,7 @@ fn telemetry_source_build(
 
     report_event(
         PbTelemetryEventStage::CreateStreamJob,
-        source_type.to_string(),
+        source_type,
         source_id.table_id as i64,
         Some(get_connector_name(with_props)),
         Some(PbTelemetryDatabaseObject::Source),

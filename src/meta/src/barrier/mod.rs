@@ -579,7 +579,7 @@ impl GlobalBarrierManager {
             let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
             crate::telemetry::report_event(
                 risingwave_pb::telemetry::TelemetryEventStage::Recovery,
-                "normal_recovery".to_string(),
+                "normal_recovery",
                 0,
                 None,
                 None,
@@ -818,7 +818,7 @@ impl GlobalBarrierManager {
 
             crate::telemetry::report_event(
                 risingwave_pb::telemetry::TelemetryEventStage::Recovery,
-                "failure_recovery".to_string(),
+                "failure_recovery",
                 0,
                 None,
                 None,
@@ -851,7 +851,7 @@ impl GlobalBarrierManager {
 
         crate::telemetry::report_event(
             risingwave_pb::telemetry::TelemetryEventStage::Recovery,
-            "adhoc_recovery".to_string(),
+            "adhoc_recovery",
             0,
             None,
             None,
