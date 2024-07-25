@@ -1223,7 +1223,7 @@ impl StreamingMetrics {
         sink_name: &str,
         connector: &str,
     ) -> SinkMetrics {
-        let label_list = [actor_id_str, sink_id_str, sink_name, connector];
+        let label_list = [actor_id_str, connector, sink_id_str, sink_name];
         let sink_commit_duration_metrics = self
             .sink_commit_duration
             .with_guarded_label_values(&label_list);
