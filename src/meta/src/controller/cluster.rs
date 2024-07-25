@@ -942,7 +942,7 @@ mod tests {
             );
         }
 
-        // Since no worker is active, the parallel unit count should be 0.
+        // Since no worker is active, the parallelism should be 0.
         assert_eq!(cluster_ctl.list_active_worker_slots().await?.len(), 0);
 
         for id in &worker_ids {
