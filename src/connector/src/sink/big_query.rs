@@ -211,14 +211,14 @@ impl BigQuerySink {
         for i in rw_fields_name {
             let value = big_query_columns_desc.get(&i.name).ok_or_else(|| {
                 SinkError::BigQuery(anyhow::anyhow!(
-                    "Column name don't find in bigquery, risingwave is {:?} ",
+                    "Column name is not found in bigquery, risingwave is {:?} ",
                     i.name
                 ))
             })?;
             let data_type_string = Self::get_string_and_check_support_from_datatype(&i.data_type)?;
             if data_type_string.ne(value) {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Column type don't match, column name is {:?}. bigquery type is {:?} risingwave type is {:?} ",i.name,value,data_type_string
+                    "Column type mismatch, column name is {:?}. bigquery type is {:?} risingwave type is {:?} ",i.name,value,data_type_string
                 )));
             };
         }

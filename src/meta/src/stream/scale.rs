@@ -212,7 +212,7 @@ impl RescheduleContext {
         self.actor_status
             .get(actor_id)
             .and_then(|actor_status| actor_status.parallel_unit.as_ref())
-            .ok_or_else(|| anyhow!("could not found parallel unit for actor {}", actor_id).into())
+            .ok_or_else(|| anyhow!("could not find parallel unit for actor {}", actor_id).into())
     }
 
     fn parallel_unit_id_to_worker(
@@ -224,7 +224,7 @@ impl RescheduleContext {
             .and_then(|worker_id| self.worker_nodes.get(worker_id))
             .ok_or_else(|| {
                 anyhow!(
-                    "could not found Worker for ParallelUint {}",
+                    "could not find Worker for ParallelUint {}",
                     parallel_unit_id
                 )
                 .into()

@@ -96,7 +96,7 @@ impl TruncateOffset {
             } => {
                 if epoch <= *offset_epoch {
                     bail!(
-                        "new item epoch {} not exceed barrier offset epoch {}",
+                        "new item epoch {} does not exceed barrier offset epoch {}",
                         epoch,
                         offset_epoch
                     );

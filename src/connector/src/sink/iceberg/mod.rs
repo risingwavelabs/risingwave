@@ -712,7 +712,7 @@ impl Sink for IcebergSink {
             self.param.clone(),
             writer_param.vnode_bitmap.ok_or_else(|| {
                 SinkError::Remote(anyhow!(
-                    "sink needs coordination should not have singleton input"
+                    "sink needs coordination and should not have singleton input"
                 ))
             })?,
             inner,
@@ -1028,7 +1028,7 @@ impl WriteResult {
             {
                 v
             } else {
-                bail!("iceberg sink metadata should be a object");
+                bail!("iceberg sink metadata should be an object");
             };
 
             let data_files: Vec<DataFile>;
@@ -1055,7 +1055,7 @@ impl WriteResult {
                     .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
                     .context("Failed to parse data file from json")?;
             } else {
-                bail!("icberg sink metadata should have data_files object");
+                bail!("iceberg sink metadata should have data_files object");
             }
             Ok(Self {
                 data_files,
@@ -1155,7 +1155,7 @@ pub fn try_matches_arrow_schema(
 ) -> anyhow::Result<()> {
     if rw_schema.fields.len() != arrow_schema.fields().len() {
         bail!(
-            "Schema length not match, risingwave is {}, and iceberg is {}",
+            "Schema length mismatch, risingwave is {}, and iceberg is {}",
             rw_schema.fields.len(),
             arrow_schema.fields.len()
         );

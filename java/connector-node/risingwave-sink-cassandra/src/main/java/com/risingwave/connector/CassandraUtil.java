@@ -100,7 +100,7 @@ public class CassandraUtil {
                 throw Status.FAILED_PRECONDITION
                         .withDescription(
                                 String.format(
-                                        "Don't match in the type, name is %s, cassandra is %s, rw is %s",
+                                        "Type mismatch, name is %s, cassandra is %s, rw is %s",
                                         columnDesc.getName(),
                                         cassandraColumnDescMap.get(cql),
                                         columnDesc.getDataType().getTypeName()))
@@ -113,7 +113,7 @@ public class CassandraUtil {
             List<ColumnMetadata> cassandraColumnMetadatas, List<String> columnMetadatas) {
         if (cassandraColumnMetadatas.size() != columnMetadatas.size()) {
             throw Status.FAILED_PRECONDITION
-                    .withDescription("Primary key len don't match")
+                    .withDescription("Primary key len mismatch")
                     .asRuntimeException();
         }
         Set<String> cassandraColumnsSet =
@@ -125,7 +125,7 @@ public class CassandraUtil {
                 throw Status.FAILED_PRECONDITION
                         .withDescription(
                                 String.format(
-                                        "Primary key don't match. RisingWave Primary key is %s, don't find it in cassandra",
+                                        "Primary key mismatch. RisingWave Primary key is %s, not found in cassandra",
                                         columnMetadata))
                         .asRuntimeException();
             }

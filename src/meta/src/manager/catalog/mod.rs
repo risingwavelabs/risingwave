@@ -977,7 +977,7 @@ impl CatalogManager {
         database_core.check_relation_name_duplicated(&key)?;
 
         if database_core.has_in_progress_creation(&key) {
-            bail!("table is in creating procedure");
+            bail!("Creating the table");
         } else {
             database_core.mark_creating(&key);
             database_core.mark_creating_streaming_job(table.id, key);

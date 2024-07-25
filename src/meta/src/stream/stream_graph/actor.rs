@@ -749,7 +749,7 @@ impl ActorGraphBuilder {
                 .get(parallel_unit_id)
             {
                 bail!(
-                    "The worker {} where the associated upstream is located is unscheduable",
+                    "The worker {} where the associated upstream is located is unschedulable",
                     parallel_unit.worker_node_id
                 );
             }
