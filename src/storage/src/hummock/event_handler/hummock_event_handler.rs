@@ -53,7 +53,6 @@ use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::store::version::{
     HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
 };
-use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockResult, MemoryLimiter, SstableObjectIdManager, SstableStoreRef, TrackerId,
 };
@@ -612,8 +611,6 @@ impl HummockEventHandler {
             HummockVersionUpdate::PinnedVersion(version) => *version,
         };
 
-        validate_table_key_range(&newly_pinned_version);
-
         pinned_version.new_pin_version(newly_pinned_version)
     }
 
@@ -736,6 +733,9 @@ impl HummockEventHandler {
             }
             HummockEvent::Shutdown => {
                 unreachable!("shutdown is handled specially")
+            }
+            HummockEvent::StartEpoch { epoch, table_ids } => {
+                self.uploader.start_epoch(epoch, table_ids);
             }
             HummockEvent::InitEpoch {
                 instance_id,
@@ -933,7 +933,7 @@ mod tests {
     use tokio::sync::oneshot;
 
     use crate::hummock::event_handler::refiller::CacheRefiller;
-    use crate::hummock::event_handler::uploader::tests::{gen_imm, TEST_TABLE_ID};
+    use crate::hummock::event_handler::uploader::test_utils::{gen_imm, TEST_TABLE_ID};
     use crate::hummock::event_handler::uploader::UploadTaskOutput;
     use crate::hummock::event_handler::{HummockEvent, HummockEventHandler, HummockVersionUpdate};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -1146,6 +1146,11 @@ mod tests {
             rx.await.unwrap()
         };
 
+        send_event(HummockEvent::StartEpoch {
+            epoch: epoch1,
+            table_ids: HashSet::from_iter([TEST_TABLE_ID]),
+        });
+
         send_event(HummockEvent::InitEpoch {
             instance_id: guard.instance_id,
             init_epoch: epoch1,
@@ -1159,6 +1164,11 @@ mod tests {
         send_event(HummockEvent::ImmToUploader {
             instance_id: guard.instance_id,
             imm: imm1,
+        });
+
+        send_event(HummockEvent::StartEpoch {
+            epoch: epoch2,
+            table_ids: HashSet::from_iter([TEST_TABLE_ID]),
         });
 
         send_event(HummockEvent::LocalSealEpoch {
@@ -1178,6 +1188,10 @@ mod tests {
         });
 
         let epoch3 = epoch2.next_epoch();
+        send_event(HummockEvent::StartEpoch {
+            epoch: epoch3,
+            table_ids: HashSet::from_iter([TEST_TABLE_ID]),
+        });
         send_event(HummockEvent::LocalSealEpoch {
             instance_id: guard.instance_id,
             next_epoch: epoch3,

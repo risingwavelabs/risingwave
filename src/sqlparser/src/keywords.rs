@@ -230,6 +230,7 @@ define_keywords!(
     EXTRACT,
     FALSE,
     FETCH,
+    FILE,
     FILTER,
     FIRST,
     FIRST_VALUE,

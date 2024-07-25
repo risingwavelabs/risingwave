@@ -31,6 +31,7 @@
 #![feature(lazy_cell)]
 #![feature(error_generic_member_access)]
 #![feature(map_try_insert)]
+#![feature(iter_from_coroutine)]
 
 pub mod error;
 pub mod exchange_source;

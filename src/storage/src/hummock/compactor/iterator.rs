@@ -23,8 +23,8 @@ use fail::fail_point;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::KeyComparator;
-use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
@@ -242,8 +242,8 @@ impl SstableStreamIterator {
     fn sst_debug_info(&self) -> String {
         format!(
             "object_id={}, sst_id={}, meta_offset={}, table_ids={:?}",
-            self.sstable_info.get_object_id(),
-            self.sstable_info.get_sst_id(),
+            self.sstable_info.object_id,
+            self.sstable_info.sst_id,
             self.sstable_info.meta_offset,
             self.sstable_info.table_ids
         )
@@ -478,7 +478,7 @@ impl HummockIterator for ConcatSstableIterator {
 
             // Note that we need to use `<` instead of `<=` to ensure that all keys in an SST
             // (including its max. key) produce the same search result.
-            let max_sst_key = &table.key_range.as_ref().unwrap().right;
+            let max_sst_key = &table.key_range.right;
             FullKey::decode(max_sst_key).cmp(&seek_key) == Ordering::Less
         });
 

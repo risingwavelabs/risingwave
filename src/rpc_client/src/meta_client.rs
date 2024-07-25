@@ -51,6 +51,7 @@ use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
+use risingwave_pb::ddl_service::create_materialized_view_request::PbBackfillType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
@@ -114,6 +115,7 @@ pub struct MetaClient {
     host_addr: HostAddr,
     inner: GrpcMetaClient,
     meta_config: MetaConfig,
+    cluster_id: String,
 }
 
 impl MetaClient {
@@ -127,6 +129,10 @@ impl MetaClient {
 
     pub fn worker_type(&self) -> WorkerType {
         self.worker_type
+    }
+
+    pub fn cluster_id(&self) -> &str {
+        &self.cluster_id
     }
 
     /// Subscribe to notification from meta.
@@ -270,6 +276,7 @@ impl MetaClient {
             host_addr: addr.clone(),
             inner: grpc_meta_client,
             meta_config: meta_config.to_owned(),
+            cluster_id: add_worker_resp.cluster_id,
         };
 
         static REPORT_PANIC: std::sync::Once = std::sync::Once::new();
@@ -347,6 +354,7 @@ impl MetaClient {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
+            backfill: PbBackfillType::Regular as _,
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -956,14 +964,14 @@ impl MetaClient {
 
     pub async fn reschedule(
         &self,
-        reschedules: HashMap<u32, PbReschedule>,
+        worker_reschedules: HashMap<u32, PbWorkerReschedule>,
         revision: u64,
         resolve_no_shuffle_upstream: bool,
     ) -> Result<(bool, u64)> {
         let request = RescheduleRequest {
-            reschedules,
             revision,
             resolve_no_shuffle_upstream,
+            worker_reschedules,
         };
         let resp = self.inner.reschedule(request).await?;
         Ok((resp.success, resp.revision))
@@ -1026,7 +1034,7 @@ impl MetaClient {
         version_delta: HummockVersionDelta,
     ) -> Result<(HummockVersion, Vec<CompactionGroupId>)> {
         let req = ReplayVersionDeltaRequest {
-            version_delta: Some(version_delta.to_protobuf()),
+            version_delta: Some(version_delta.into()),
         };
         let resp = self.inner.replay_version_delta(req).await?;
         Ok((
@@ -1379,6 +1387,12 @@ impl MetaClient {
         let resp = self.inner.cancel_compact_task(req).await?;
         Ok(resp.ret)
     }
+
+    pub async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion> {
+        let req = GetVersionByEpochRequest { epoch };
+        let resp = self.inner.get_version_by_epoch(req).await?;
+        Ok(resp.version.unwrap())
+    }
 }
 
 #[async_trait]
@@ -1500,10 +1514,15 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()> {
+    async fn trigger_full_gc(
+        &self,
+        sst_retention_time_sec: u64,
+        prefix: Option<String>,
+    ) -> Result<()> {
         self.inner
             .trigger_full_gc(TriggerFullGcRequest {
                 sst_retention_time_sec,
+                prefix,
             })
             .await?;
         Ok(())
@@ -1539,6 +1558,10 @@ impl HummockMetaClient for MetaClient {
             .await?;
 
         Ok((request_sender, Box::pin(stream)))
+    }
+
+    async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion> {
+        self.get_version_by_epoch(epoch).await
     }
 }
 
@@ -1760,9 +1783,9 @@ impl GrpcMetaClient {
     // See `Endpoint::keep_alive_timeout`
     const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
     // Retry base interval in ms for connecting to meta server.
-    const INIT_RETRY_BASE_INTERVAL_MS: u64 = 50;
+    const INIT_RETRY_BASE_INTERVAL_MS: u64 = 10;
     // Max retry times for connecting to meta server.
-    const INIT_RETRY_MAX_INTERVAL_MS: u64 = 5000;
+    const INIT_RETRY_MAX_INTERVAL_MS: u64 = 2000;
 
     fn start_meta_member_monitor(
         &self,
@@ -2035,6 +2058,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, list_compact_task_progress, ListCompactTaskProgressRequest, ListCompactTaskProgressResponse }
             ,{ hummock_client, cancel_compact_task, CancelCompactTaskRequest, CancelCompactTaskResponse}
             ,{ hummock_client, list_change_log_epochs, ListChangeLogEpochsRequest, ListChangeLogEpochsResponse }
+            ,{ hummock_client, get_version_by_epoch, GetVersionByEpochRequest, GetVersionByEpochResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

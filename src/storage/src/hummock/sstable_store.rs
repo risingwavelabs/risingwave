@@ -26,12 +26,12 @@ use foyer::{
 use futures::{future, StreamExt};
 use itertools::Itertools;
 use risingwave_common::config::StorageMemoryConfig;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
     ObjectError, ObjectMetadataIter, ObjectStoreRef, ObjectStreamingUploader,
 };
-use risingwave_pb::hummock::SstableInfo;
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
@@ -572,13 +572,13 @@ impl SstableStore {
         sst: &SstableInfo,
         stats: &mut StoreLocalStatistic,
     ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static {
-        let object_id = sst.get_object_id();
+        let object_id = sst.object_id;
 
         let entry = self.meta_cache.fetch(object_id, || {
             let store = self.store.clone();
             let meta_path = self.get_sst_data_path(object_id);
             let stats_ptr = stats.remote_io_time.clone();
-            let range = sst.meta_offset as usize..sst.get_estimated_sst_size() as usize;
+            let range = sst.meta_offset as usize..sst.estimated_sst_size as usize;
             async move {
                 let now = Instant::now();
                 let buf = store.read(&meta_path, range).await?;
@@ -602,8 +602,10 @@ impl SstableStore {
 
     pub async fn list_object_metadata_from_object_store(
         &self,
+        prefix: Option<String>,
     ) -> HummockResult<ObjectMetadataIter> {
-        let raw_iter = self.store.list(&format!("{}/", self.path)).await?;
+        let list_path = format!("{}/{}", self.path, prefix.unwrap_or("".into()));
+        let raw_iter = self.store.list(&list_path).await?;
         let iter = raw_iter.filter(|r| match r {
             Ok(i) => future::ready(i.key.ends_with(&format!(".{}", OBJECT_SUFFIX))),
             Err(_) => future::ready(true),
@@ -1129,8 +1131,8 @@ mod tests {
     use std::ops::Range;
     use std::sync::Arc;
 
+    use risingwave_hummock_sdk::sstable_info::SstableInfo;
     use risingwave_hummock_sdk::HummockSstableObjectId;
-    use risingwave_pb::hummock::SstableInfo;
 
     use super::{SstableStoreRef, SstableWriterOptions};
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};

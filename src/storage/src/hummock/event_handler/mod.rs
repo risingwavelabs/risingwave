@@ -74,6 +74,11 @@ pub enum HummockEvent {
         imm: ImmutableMemtable,
     },
 
+    StartEpoch {
+        epoch: HummockEpoch,
+        table_ids: HashSet<TableId>,
+    },
+
     InitEpoch {
         instance_id: LocalInstanceId,
         init_epoch: HummockEpoch,
@@ -116,6 +121,10 @@ impl HummockEvent {
             HummockEvent::Clear(_, prev_epoch) => format!("Clear {:?}", prev_epoch),
 
             HummockEvent::Shutdown => "Shutdown".to_string(),
+
+            HummockEvent::StartEpoch { epoch, table_ids } => {
+                format!("StartEpoch {} {:?}", epoch, table_ids)
+            }
 
             HummockEvent::InitEpoch {
                 instance_id,

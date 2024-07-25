@@ -14,7 +14,9 @@
 
 use std::sync::Arc;
 
-use risingwave_pb::hummock::{InputLevel, LevelType, SstableInfo};
+use risingwave_hummock_sdk::level::InputLevel;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_pb::hummock::LevelType;
 
 use super::{CompactionInput, LocalPickerStatistic};
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
@@ -79,17 +81,17 @@ impl TrivialMovePicker {
             self.pick_trivial_move_sst(select_tables, target_tables, level_handlers, stats)
         {
             return Some(CompactionInput {
-                select_input_size: trivial_move_sst.get_estimated_sst_size(),
+                select_input_size: trivial_move_sst.estimated_sst_size,
                 total_file_count: 1,
                 input_levels: vec![
                     InputLevel {
                         level_idx: self.level as u32,
-                        level_type: LevelType::Nonoverlapping as i32,
+                        level_type: LevelType::Nonoverlapping,
                         table_infos: vec![trivial_move_sst],
                     },
                     InputLevel {
                         level_idx: self.target_level as u32,
-                        level_type: LevelType::Nonoverlapping as i32,
+                        level_type: LevelType::Nonoverlapping,
                         table_infos: vec![],
                     },
                 ],

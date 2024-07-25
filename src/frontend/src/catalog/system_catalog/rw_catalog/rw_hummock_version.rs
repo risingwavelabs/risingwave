@@ -92,7 +92,7 @@ fn remove_key_range_from_version(mut version: HummockVersion) -> HummockVersion 
             .chain(cg.l0.as_mut().unwrap().sub_levels.iter_mut())
         {
             for sst in &mut level.table_infos {
-                sst.key_range.take();
+                sst.remove_key_range();
             }
         }
     }
@@ -107,7 +107,7 @@ fn version_to_compaction_group_rows(version: &HummockVersion) -> Vec<RwHummockVe
             version_id: version.id as _,
             max_committed_epoch: version.max_committed_epoch as _,
             safe_epoch: version.visible_table_safe_epoch() as _,
-            compaction_group: json!(cg).into(),
+            compaction_group: json!(cg.to_protobuf()).into(),
         })
         .collect()
 }
@@ -117,8 +117,8 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
     for cg in version.levels.into_values() {
         for level in cg.levels.into_iter().chain(cg.l0.unwrap().sub_levels) {
             for sst in level.table_infos {
-                let estimated_sst_file_size = sst.get_estimated_sst_size();
-                let key_range = sst.key_range.unwrap();
+                let estimated_sst_file_size = sst.estimated_sst_size;
+                let key_range = &sst.key_range;
                 sstables.push(RwHummockSstable {
                     sstable_id: sst.sst_id as _,
                     object_id: sst.object_id as _,
@@ -126,8 +126,8 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
                     level_id: level.level_idx as _,
                     sub_level_id: (level.level_idx == 0).then_some(level.sub_level_id as _),
                     level_type: level.level_type as _,
-                    key_range_left: key_range.left,
-                    key_range_right: key_range.right,
+                    key_range_left: key_range.left.to_vec(),
+                    key_range_right: key_range.right.to_vec(),
                     right_exclusive: key_range.right_exclusive,
                     file_size: estimated_sst_file_size as _,
                     meta_offset: sst.meta_offset as _,

@@ -16,9 +16,10 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{ColumnCatalog, Schema};
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_connector::match_sink_name_str;
-use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkType};
+use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::{
     SinkError, SinkMetaClient, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
 };
@@ -110,11 +111,12 @@ impl ExecutorBuilder for SinkExecutorBuilder {
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
         let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
-        let sink_id = sink_desc.get_id().into();
+        let sink_id: SinkId = sink_desc.get_id().into();
         let sink_name = sink_desc.get_name().to_owned();
         let db_name = sink_desc.get_db_name().into();
         let sink_from_name = sink_desc.get_sink_from_name().into();
         let properties = sink_desc.get_properties().clone();
+        let secret_refs = sink_desc.get_secret_refs().clone();
         let downstream_pk = sink_desc
             .downstream_pk
             .iter()
@@ -155,10 +157,25 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             },
         };
 
+        let properties_with_secret =
+            LocalSecretManager::global().fill_secrets(properties, secret_refs)?;
+
+        let format_desc_with_secret = SinkParam::fill_secret_for_format_desc(format_desc)?;
+
+        let actor_id_str = format!("{}", params.actor_context.id);
+        let sink_id_str = format!("{}", sink_id.sink_id);
+
+        let sink_metrics = params.executor_stats.new_sink_metrics(
+            &actor_id_str,
+            &sink_id_str,
+            &sink_name,
+            connector,
+        );
+
         let sink_param = SinkParam {
             sink_id,
             sink_name,
-            properties,
+            properties: properties_with_secret,
             columns: columns
                 .iter()
                 .filter(|col| !col.is_hidden)
@@ -166,18 +183,10 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 .collect(),
             downstream_pk,
             sink_type,
-            format_desc,
+            format_desc: format_desc_with_secret,
             db_name,
             sink_from_name,
         };
-
-        let sink_id_str = format!("{}", sink_id.sink_id);
-
-        let sink_metrics = params.executor_stats.new_sink_metrics(
-            &params.info.identity,
-            sink_id_str.as_str(),
-            connector,
-        );
 
         let sink_write_param = SinkWriterParam {
             executor_id: params.executor_id,
@@ -214,7 +223,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             SinkLogStoreType::KvLogStore => {
                 let metrics = KvLogStoreMetrics::new(
                     &params.executor_stats,
-                    &params.info.identity,
+                    params.actor_context.id,
                     &sink_param,
                     connector,
                 );

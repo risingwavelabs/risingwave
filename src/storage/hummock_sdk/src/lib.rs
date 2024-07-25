@@ -31,19 +31,23 @@ use std::collections::HashMap;
 pub use key_cmp::*;
 use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
-use risingwave_pb::hummock::SstableInfo;
+use sstable_info::SstableInfo;
 
 use crate::key_range::KeyRangeCommon;
 use crate::table_stats::TableStatsMap;
 
 pub mod change_log;
 pub mod compact;
+pub mod compact_task;
 pub mod compaction_group;
 pub mod key;
 pub mod key_range;
+pub mod level;
 pub mod prost_key_range;
+pub mod sstable_info;
 pub mod table_stats;
 pub mod table_watermark;
+pub mod time_travel;
 pub mod version;
 
 pub use compact::*;
@@ -125,10 +129,7 @@ impl LocalSstableInfo {
     }
 
     pub fn file_size(&self) -> u64 {
-        assert_eq!(
-            self.sst_info.get_file_size(),
-            self.sst_info.get_estimated_sst_size()
-        );
+        assert_eq!(self.sst_info.file_size, self.sst_info.estimated_sst_size);
         self.sst_info.file_size
     }
 }
@@ -150,6 +151,7 @@ pub enum HummockReadEpoch {
     NoWait(HummockEpoch),
     /// We don't need to wait epoch.
     Backup(HummockEpoch),
+    TimeTravel(HummockEpoch),
 }
 
 impl From<BatchQueryEpoch> for HummockReadEpoch {
@@ -158,6 +160,7 @@ impl From<BatchQueryEpoch> for HummockReadEpoch {
             batch_query_epoch::Epoch::Committed(epoch) => HummockReadEpoch::Committed(epoch),
             batch_query_epoch::Epoch::Current(epoch) => HummockReadEpoch::Current(epoch),
             batch_query_epoch::Epoch::Backup(epoch) => HummockReadEpoch::Backup(epoch),
+            batch_query_epoch::Epoch::TimeTravel(epoch) => HummockReadEpoch::TimeTravel(epoch),
         }
     }
 }
@@ -175,6 +178,7 @@ impl HummockReadEpoch {
             HummockReadEpoch::Current(epoch) => epoch,
             HummockReadEpoch::NoWait(epoch) => epoch,
             HummockReadEpoch::Backup(epoch) => epoch,
+            HummockReadEpoch::TimeTravel(epoch) => epoch,
         }
     }
 }
@@ -210,9 +214,7 @@ pub fn can_concat(ssts: &[SstableInfo]) -> bool {
     for i in 1..len {
         if ssts[i - 1]
             .key_range
-            .as_ref()
-            .unwrap()
-            .compare_right_with(&ssts[i].key_range.as_ref().unwrap().left)
+            .compare_right_with(&ssts[i].key_range.left)
             != Ordering::Less
         {
             return false;

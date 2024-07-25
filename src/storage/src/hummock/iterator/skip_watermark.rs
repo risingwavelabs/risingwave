@@ -16,13 +16,14 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, VecDeque};
 
 use bytes::Bytes;
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::hash::VirtualNode;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::safe_epoch_read_table_watermarks_impl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
-use risingwave_pb::hummock::PbTableWatermarks;
+use risingwave_hummock_sdk::table_watermark::{
+    ReadTableWatermark, TableWatermarks, WatermarkDirection,
+};
 
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::value::HummockValue;
@@ -53,7 +54,7 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
 
     pub fn from_safe_epoch_watermarks(
         inner: I,
-        safe_epoch_watermarks: &BTreeMap<u32, PbTableWatermarks>,
+        safe_epoch_watermarks: &BTreeMap<u32, TableWatermarks>,
     ) -> Self {
         Self {
             inner,
@@ -185,46 +186,9 @@ impl SkipWatermarkState {
     }
 
     pub fn from_safe_epoch_watermarks(
-        safe_epoch_watermarks: &BTreeMap<u32, PbTableWatermarks>,
+        safe_epoch_watermarks: &BTreeMap<u32, TableWatermarks>,
     ) -> Self {
-        let watermarks = safe_epoch_watermarks
-            .iter()
-            .map(|(table_id, watermarks)| {
-                assert_eq!(watermarks.epoch_watermarks.len(), 1);
-                let vnode_watermarks = &watermarks
-                    .epoch_watermarks
-                    .first()
-                    .expect("should exist")
-                    .watermarks;
-                let mut vnode_watermark_map = BTreeMap::new();
-                for vnode_watermark in vnode_watermarks {
-                    let watermark = Bytes::copy_from_slice(&vnode_watermark.watermark);
-                    for vnode in
-                        Bitmap::from(vnode_watermark.vnode_bitmap.as_ref().expect("should exist"))
-                            .iter_vnodes()
-                    {
-                        assert!(
-                            vnode_watermark_map
-                                .insert(vnode, watermark.clone())
-                                .is_none(),
-                            "duplicate table watermark on vnode {}",
-                            vnode.to_index()
-                        );
-                    }
-                }
-                (
-                    TableId::from(*table_id),
-                    ReadTableWatermark {
-                        direction: if watermarks.is_ascending {
-                            WatermarkDirection::Ascending
-                        } else {
-                            WatermarkDirection::Descending
-                        },
-                        vnode_watermarks: vnode_watermark_map,
-                    },
-                )
-            })
-            .collect();
+        let watermarks = safe_epoch_read_table_watermarks_impl(safe_epoch_watermarks);
         Self::new(watermarks)
     }
 
