@@ -495,6 +495,12 @@ impl LocalBarrierWorker {
                 self.send_barrier(barrier, req.graph_info)?;
                 Ok(())
             }
+            Request::RemovePartialGraph(req) => {
+                self.remove_partial_graphs(
+                    req.partial_graph_ids.into_iter().map(PartialGraphId::new),
+                );
+                Ok(())
+            }
             Request::Init(_) => {
                 unreachable!()
             }
@@ -767,6 +773,23 @@ impl LocalBarrierWorker {
         Ok(())
     }
 
+    fn remove_partial_graphs(&mut self, partial_graph_ids: impl Iterator<Item = PartialGraphId>) {
+        for partial_graph_id in partial_graph_ids {
+            if let Some(graph) = self.state.graph_states.remove(&partial_graph_id) {
+                assert!(
+                    graph.is_empty(),
+                    "non empty graph to be removed: {}",
+                    &graph
+                );
+            } else {
+                warn!(
+                    partial_graph_id = partial_graph_id.0,
+                    "no partial graph to remove"
+                );
+            }
+        }
+    }
+
     /// Reset all internal states.
     pub(super) fn reset_state(&mut self) {
         *self = Self::new(self.actor_manager.clone());
@@ -785,8 +808,7 @@ impl LocalBarrierWorker {
         let root_err = self.try_find_root_failure().await.unwrap(); // always `Some` because we just added one
 
         if let Some(actor_state) = self.state.actor_states.get(&actor_id)
-            && let Some(inflight_barriers) = actor_state.inflight_barriers()
-            && !inflight_barriers.is_empty()
+            && !actor_state.inflight_barriers.is_empty()
         {
             self.control_stream_handle.reset_stream_with_err(
                 anyhow!(root_err)

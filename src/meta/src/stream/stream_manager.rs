@@ -964,6 +964,7 @@ mod tests {
                                 ),
                             }));
                         }
+                        streaming_control_stream_request::Request::RemovePartialGraph(..) => {}
                     }
                 }
             });
