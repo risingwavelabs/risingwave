@@ -19,13 +19,14 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
 use risingwave_pb::hummock::{
     CompactionConfig, CompatibilityVersion, GroupConstruct, GroupDestroy, GroupMetaChange,
-    GroupTableChange, Level, LevelType, OverlappingLevel, PbLevelType, PbTableWatermarks,
+    GroupTableChange, KeyRange, Level, LevelType, OverlappingLevel, PbLevelType, PbTableWatermarks,
     SstableInfo,
 };
 use tracing::warn;
@@ -33,6 +34,7 @@ use tracing::warn;
 use super::StateTableId;
 use crate::change_log::TableChangeLog;
 use crate::compaction_group::StaticCompactionGroupId;
+use crate::key::FullKey;
 use crate::key_range::KeyRangeCommon;
 use crate::prost_key_range::KeyRangeExt;
 use crate::table_watermark::{TableWatermarks, VnodeWatermark};
@@ -744,6 +746,198 @@ impl HummockVersion {
         }
         ret
     }
+
+    pub fn count_new_ssts_in_group_split_v2(
+        &self,
+        parent_group_id: CompactionGroupId,
+        split_point: &Vec<u8>,
+    ) -> u64 {
+        self.levels
+            .get(&parent_group_id)
+            .map_or(0, |parent_levels| {
+                let l0 = parent_levels.l0.as_ref().unwrap();
+                let mut split_count = 0;
+                for sub_level in &l0.sub_levels {
+                    if sub_level.level_type() == LevelType::Overlapping {
+                        // TODO: use table_id / vnode / key_range filter
+                        split_count += sub_level.get_table_infos().len() * 2;
+                        continue;
+                    }
+
+                    let pos = Self::get_split_pos(&sub_level.table_infos, split_point);
+                    let sst = sub_level.get_table_infos().get(pos).unwrap();
+
+                    if let SstSplitType::SplitToBoth =
+                        HummockVersion::need_to_split(sst, split_point)
+                    {
+                        split_count += 2;
+                    }
+                }
+
+                for level in &parent_levels.levels {
+                    let pos = Self::get_split_pos(&level.table_infos, split_point);
+                    let sst = level.get_table_infos().get(pos).unwrap();
+                    if let SstSplitType::SplitToBoth =
+                        HummockVersion::need_to_split(sst, split_point)
+                    {
+                        split_count += 2;
+                    }
+                }
+
+                split_count as u64
+            })
+    }
+
+    pub fn split_sst_info_for_level_v2(
+        level: &mut Level,
+        new_sst_id: &mut u64,
+        key_point: &Vec<u8>,
+    ) -> Vec<SstableInfo> {
+        if level.level_type() == LevelType::Overlapping {
+            level.table_infos.clone()
+        } else {
+            let pos = Self::get_split_pos(&level.table_infos, key_point);
+            let mut insert_table_infos = vec![];
+            let sst = &mut level.table_infos[pos];
+            let sst_split_type = Self::need_to_split(sst, key_point);
+
+            match sst_split_type {
+                SstSplitType::SplitToLeft => {
+                    // no need to split
+                    // do nothing
+                }
+                SstSplitType::SplitToRight => {
+                    let branch_sst = sst.clone();
+                    drop_sst_info(sst);
+                    insert_table_infos.push(branch_sst);
+                }
+                SstSplitType::SplitToBoth => {
+                    // split the sst
+                    let branch_sst = Self::split_sst_v2(sst, new_sst_id, key_point);
+                    insert_table_infos.push(branch_sst.clone());
+                }
+            }
+
+            insert_table_infos.extend_from_slice(&level.table_infos[pos + 1..]);
+            insert_table_infos
+        }
+    }
+
+    pub fn get_split_pos(sstables: &Vec<SstableInfo>, split_point: &Vec<u8>) -> usize {
+        println!("sstables len {:?}", sstables.len());
+        let pos = sstables
+            .partition_point(|sst| {
+                let key_range = sst.key_range.as_ref().unwrap();
+                let left = &key_range.left;
+                println!(
+                    "sst {:?} left {:?} split_point {:?}",
+                    sst.get_sst_id(),
+                    left,
+                    split_point
+                );
+                left.cmp(split_point) == Ordering::Less
+            })
+            .saturating_sub(1);
+        pos
+    }
+
+    pub fn split_sst_v2(
+        origin_sst_info: &mut SstableInfo,
+        new_sst_id: &mut u64,
+        split_key: &Vec<u8>,
+    ) -> SstableInfo {
+        let mut branch_table_info = origin_sst_info.clone();
+        branch_table_info.sst_id = *new_sst_id;
+        origin_sst_info.sst_id = *new_sst_id + 1;
+        *new_sst_id += 1;
+
+        let (key_range_l, key_range_r) = {
+            let key_range = origin_sst_info.key_range.as_ref().unwrap();
+            let l = KeyRange {
+                left: key_range.left.clone(),
+                right: split_key.clone(),
+                right_exclusive: true,
+            };
+
+            let r = KeyRange {
+                left: split_key.clone(),
+                right: key_range.right.clone(),
+                right_exclusive: key_range.right_exclusive,
+            };
+
+            (l, r)
+        };
+
+        let (table_ids_l, table_ids_r) = {
+            let split_user_key = FullKey::decode(&split_key).user_key;
+            let vnode = split_user_key.get_vnode_id();
+            let table_id = split_user_key.table_id.table_id();
+            let table_ids = &origin_sst_info.table_ids;
+            assert!(table_ids.is_sorted());
+
+            let pos = table_ids.partition_point(|id| *id < table_id);
+            if vnode == 0 {
+                (table_ids[..pos].to_vec(), table_ids[pos..].to_vec())
+            } else {
+                (table_ids[..=pos].to_vec(), table_ids[pos..].to_vec())
+            }
+        };
+
+        // rebuild the key_range and size and sstable file size
+        {
+            // origin_sst_info
+            origin_sst_info.key_range = Some(key_range_l.clone());
+            origin_sst_info.estimated_sst_size = origin_sst_info.estimated_sst_size / 2;
+            origin_sst_info.table_ids = table_ids_l;
+        }
+
+        {
+            // new sst
+            branch_table_info.key_range = Some(key_range_r.clone());
+            branch_table_info.estimated_sst_size = branch_table_info.estimated_sst_size / 2;
+            branch_table_info.table_ids = table_ids_r;
+        }
+
+        branch_table_info
+    }
+
+    fn need_to_split(sst: &SstableInfo, split_key: &Vec<u8>) -> SstSplitType {
+        let key_range = sst.key_range.as_ref().unwrap();
+        // 1. compare left
+        if split_key.cmp(&key_range.left).is_le() {
+            return SstSplitType::SplitToRight;
+        }
+
+        // 2. compare right
+        if key_range.right_exclusive {
+            if split_key.cmp(&key_range.right).is_ge() {
+                return SstSplitType::SplitToLeft;
+            }
+        } else {
+            if split_key.cmp(&key_range.right).is_gt() {
+                return SstSplitType::SplitToLeft;
+            }
+        }
+
+        return SstSplitType::SplitToBoth;
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum SstSplitType {
+    SplitToLeft,
+    SplitToRight,
+    SplitToBoth,
+}
+
+// Remember to retain the sst in the level after calling this function
+pub fn drop_sst_info(sst: &mut SstableInfo) {
+    sst.table_ids.clear();
+    sst.key_range = None;
+}
+
+pub fn is_drop_sst_info(sst: &SstableInfo) -> bool {
+    sst.table_ids.is_empty() || sst.key_range.is_none()
 }
 
 #[easy_ext::ext(HummockLevelsExt)]
@@ -1307,16 +1501,23 @@ pub fn split_sst(sst_info: &mut SstableInfo, new_sst_id: &mut u64) -> SstableInf
 mod tests {
     use std::collections::HashMap;
 
+    use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_pb::hummock::group_delta::DeltaType;
     use risingwave_pb::hummock::hummock_version::Levels;
     use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
     use risingwave_pb::hummock::{
-        CompactionConfig, GroupConstruct, GroupDelta, GroupDestroy, IntraLevelDelta, Level,
-        LevelType, OverlappingLevel, SstableInfo,
+        CompactionConfig, GroupConstruct, GroupDelta, GroupDestroy, IntraLevelDelta, KeyRange,
+        Level, LevelType, OverlappingLevel, SstableInfo,
     };
 
-    use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
+    use crate::compaction_group::hummock_version_ext::{
+        build_initial_compaction_group_levels, SstSplitType,
+    };
+    use crate::key::{gen_key_from_str, key_with_epoch, FullKey};
     use crate::version::{HummockVersion, HummockVersionDelta};
+    use crate::HummockSstableObjectId;
 
     #[test]
     fn test_get_sst_object_ids() {
@@ -1473,5 +1674,158 @@ mod tests {
             ]);
             version
         });
+    }
+
+    #[test]
+    fn test_split_sstables_with_key() {
+        pub fn generate_test_sstables_with_table_id(
+            epoch: u64,
+            table_id: u32,
+            sst_ids: Vec<HummockSstableObjectId>,
+        ) -> Vec<SstableInfo> {
+            let mut sst_info = vec![];
+            for (i, sst_id) in sst_ids.into_iter().enumerate() {
+                sst_info.push(SstableInfo {
+                    object_id: sst_id,
+                    sst_id,
+                    key_range: Some(KeyRange {
+                        left: key_with_epoch(
+                            format!("{:03}\0\0_key_test_{:05}", table_id, i + 1)
+                                .as_bytes()
+                                .to_vec(),
+                            epoch,
+                        ),
+                        right: key_with_epoch(
+                            format!("{:03}\0\0_key_test_{:05}", table_id, (i + 1) * 10)
+                                .as_bytes()
+                                .to_vec(),
+                            epoch,
+                        ),
+                        right_exclusive: false,
+                    }),
+                    file_size: 2,
+                    table_ids: vec![table_id],
+                    uncompressed_file_size: 2,
+                    max_epoch: epoch,
+                    ..Default::default()
+                });
+            }
+            sst_info
+        }
+
+        let ssts = generate_test_sstables_with_table_id(10, 10, vec![1, 2, 3, 4, 5]);
+        let split_point = key_with_epoch(
+            format!("{:03}\0\0_key_test_{:05}", 10, 3)
+                .as_bytes()
+                .to_vec(),
+            10,
+        );
+
+        println!("split_point {:?}", split_point);
+        let pos = HummockVersion::get_split_pos(&ssts, &split_point);
+        println!("pos {:?} ", pos);
+    }
+
+    #[test]
+    fn test_need_split_sst() {
+        {
+            let epoch = test_epoch(1);
+            let table_key_l = gen_key_from_str(VirtualNode::from_index(0), "1");
+            let table_key_r = gen_key_from_str(VirtualNode::from_index(255), "1");
+            let full_key_l = FullKey::for_test(TableId::new(3), table_key_l, epoch);
+            let full_key_r = FullKey::for_test(TableId::new(5), table_key_r, epoch);
+
+            let sst = SstableInfo {
+                object_id: 1,
+                sst_id: 1,
+                key_range: Some(KeyRange {
+                    left: full_key_l.encode(),
+                    right: full_key_r.encode(),
+                    right_exclusive: false,
+                }),
+                table_ids: vec![1, 2, 3, 4, 5],
+                uncompressed_file_size: 2,
+                ..Default::default()
+            };
+
+            let split_key = {
+                FullKey::for_test(
+                    TableId::from(3),
+                    gen_key_from_str(VirtualNode::from_index(0), ""),
+                    0,
+                )
+                .encode()
+            };
+
+            let origin_sst = sst.clone();
+            let split_type = HummockVersion::need_to_split(&origin_sst, &split_key);
+            println!("split_type {:?}", split_type);
+            assert_eq!(SstSplitType::SplitToRight, split_type);
+
+            let split_key = {
+                FullKey::for_test(
+                    TableId::from(6),
+                    gen_key_from_str(VirtualNode::from_index(0), ""),
+                    0,
+                )
+                .encode()
+            };
+            let origin_sst = sst.clone();
+            let split_type = HummockVersion::need_to_split(&origin_sst, &split_key);
+            println!("split_type {:?}", split_type);
+            assert_eq!(SstSplitType::SplitToLeft, split_type);
+
+            let split_key = {
+                FullKey::for_test(
+                    TableId::from(4),
+                    gen_key_from_str(VirtualNode::from_index(0), ""),
+                    0,
+                )
+                .encode()
+            };
+            let origin_sst = sst.clone();
+            let split_type = HummockVersion::need_to_split(&origin_sst, &split_key);
+            println!("split_type {:?}", split_type);
+            assert_eq!(SstSplitType::SplitToBoth, split_type);
+
+            let split_key = {
+                FullKey::for_test(
+                    TableId::from(3),
+                    gen_key_from_str(VirtualNode::from_index(0), ""),
+                    0,
+                )
+                .encode()
+            };
+            let origin_sst = sst.clone();
+            let split_type = HummockVersion::need_to_split(&origin_sst, &split_key);
+            println!("split_type {:?}", split_type);
+            assert_eq!(SstSplitType::SplitToRight, split_type);
+
+            let split_key = {
+                FullKey::for_test(
+                    TableId::from(5),
+                    gen_key_from_str(VirtualNode::from_index(255), ""),
+                    0,
+                )
+                .encode()
+            };
+            let origin_sst = sst.clone();
+            let split_type = HummockVersion::need_to_split(&origin_sst, &split_key);
+            println!("split_type {:?}", split_type);
+            assert_eq!(SstSplitType::SplitToBoth, split_type);
+
+            let split_key = {
+                FullKey::for_test(
+                    TableId::from(5),
+                    gen_key_from_str(VirtualNode::from_index(255), ""),
+                    u64::MAX,
+                )
+                .encode()
+            };
+            let origin_sst = sst.clone();
+            let split_type = HummockVersion::need_to_split(&origin_sst, &split_key);
+            println!("split_type {:?}", split_type);
+            assert_eq!(SstSplitType::SplitToLeft, split_type);
+        }
     }
 }
