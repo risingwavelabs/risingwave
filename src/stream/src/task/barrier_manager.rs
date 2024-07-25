@@ -56,7 +56,9 @@ use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::streaming_control_stream_request::{InitRequest, Request};
-use risingwave_pb::stream_service::streaming_control_stream_response::InitResponse;
+use risingwave_pb::stream_service::streaming_control_stream_response::{
+    InitResponse, ShutdownResponse,
+};
 use risingwave_pb::stream_service::{
     streaming_control_stream_response, BarrierCompleteResponse, BuildActorInfo,
     StreamingControlStreamRequest, StreamingControlStreamResponse,
@@ -126,12 +128,16 @@ impl ControlStreamHandle {
 
     /// Send `Shutdown` message to the control stream and wait for the stream to be closed
     /// by the meta service. Notify the caller through `shutdown_sender` once it's done.
-    fn shutdown_stream(&mut self, shutdown_sender: oneshot::Sender<()>) {
+    fn shutdown_stream(&mut self, has_running_actor: bool, shutdown_sender: oneshot::Sender<()>) {
+        if has_running_actor {
+            tracing::warn!("shutdown with running actors, scaling or migration will be triggered");
+        }
+
         if let Some((sender, _)) = self.pair.take() {
             if sender
                 .send(Ok(StreamingControlStreamResponse {
                     response: Some(streaming_control_stream_response::Response::Shutdown(
-                        Default::default(),
+                        ShutdownResponse { has_running_actor },
                     )),
                 }))
                 .is_err()
@@ -619,12 +625,8 @@ impl LocalBarrierWorker {
                 let _ = result_sender.send(debug_info.to_string());
             }
             LocalActorOperation::Shutdown { result_sender } => {
-                if !self.actor_manager_state.handles.is_empty() {
-                    tracing::warn!(
-                        "shutdown with running actors, scaling or migration will be triggered"
-                    );
-                }
-                self.control_stream_handle.shutdown_stream(result_sender);
+                self.control_stream_handle
+                    .shutdown_stream(!self.actor_manager_state.handles.is_empty(), result_sender);
             }
         }
     }

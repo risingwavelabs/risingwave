@@ -108,7 +108,9 @@ message StreamingControlStreamRequest {
 
 message StreamingControlStreamResponse {
   message InitResponse {}
-  message ShutdownResponse {}
+  message ShutdownResponse {
+    bool has_running_actor = 1;
+  }
 
   oneof response {
     InitResponse init = 1;
