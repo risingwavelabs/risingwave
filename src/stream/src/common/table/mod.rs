@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod state_cleaning;
 pub mod state_table;
 mod state_table_cache;
-mod watermark;
 
 #[cfg(test)]
 pub mod test_state_table;

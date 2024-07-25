@@ -64,7 +64,7 @@ use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tracing::{trace, Instrument};
 
-use super::watermark::{LazyCleanByEpoch, StateCleanStrategy};
+use super::state_cleaning::{LazyCleanByEpoch, StateCleanStrategy};
 use crate::cache::cache_may_stale;
 use crate::common::cache::{StateCache, StateCacheFiller};
 use crate::common::table::state_table_cache::StateTableWatermarkCache;
