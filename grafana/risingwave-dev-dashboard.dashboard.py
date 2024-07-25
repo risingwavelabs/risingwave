@@ -841,9 +841,11 @@ def section_streaming(outer_panels):
                         ),
                     ],
                 ),
+                # TODO: These 2 metrics should be deprecated because they are unaware of Log Store
+                # Let's remove them when all sinks are migrated to Log Store
                 panels.timeseries_rowsps(
-                    "Sink Throughput(rows/s)",
-                    "The number of rows streamed into each sink per second.",
+                    "Sink Throughput(rows/s) *",
+                    "The number of rows streamed into each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section"
                     [
                         panels.target(
                             f"sum(rate({metric('stream_sink_input_row_count')}[$__rate_interval])) by (sink_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)",
@@ -852,8 +854,8 @@ def section_streaming(outer_panels):
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Sink Throughput(rows/s) per Partition",
-                    "The number of rows streamed into each sink per second.",
+                    "Sink Throughput(rows/s) per Partition *",
+                    "The number of rows streamed into each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
                     [
                         panels.target(
                             f"sum(rate({metric('stream_sink_input_row_count')}[$__rate_interval])) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}",
@@ -4040,15 +4042,15 @@ def section_sink_metrics(outer_panels):
                     [
                         panels.target(
                             f"{metric('log_store_latest_write_epoch')}",
-                            "latest write epoch @ {{connector}} {{sink_id}} {{executor_id}}",
+                            "latest write epoch @ {{connector}} {{sink_id}} {{sink_name}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"{metric('log_store_latest_read_epoch')}",
-                            "latest read epoch @ {{connector}} {{sink_id}} {{executor_id}}",
+                            "latest read epoch @ {{connector}} {{sink_id}} {{sink_name}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"{metric('kv_log_store_buffer_unconsumed_min_epoch')}",
-                            "Kv log store uncomsuned min epoch @ {{connector}} {{sink_id}} {{executor_id}}",
+                            "Kv log store uncomsuned min epoch @ {{connector}} {{sink_id}} {{sink_name}} actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -4057,9 +4059,9 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"(max({metric('log_store_latest_write_epoch')}) by (connector, sink_id, executor_id)"
-                            + f"- max({metric('log_store_latest_read_epoch')}) by (connector, sink_id, executor_id)) / (2^16) / 1000",
-                            "Consume lag @ {{connector}} {{sink_id}} {{executor_id}}",
+                            f"(max({metric('log_store_latest_write_epoch')}) by (connector, sink_id, actor_id)"
+                            + f"- max({metric('log_store_latest_read_epoch')}) by (connector, sink_id, actor_id)) / (2^16) / 1000",
+                            "Consume lag @ {{connector}} {{sink_id}} {{sink_name}} actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -4068,8 +4070,8 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"avg(rate({metric('log_store_reader_wait_new_future_duration_ns')}[$__rate_interval])) by (connector, sink_id, executor_id) / 1000000000",
-                            "Backpressure @ {{connector}} {{sink_id}} {{executor_id}}",
+                            f"avg(rate({metric('log_store_reader_wait_new_future_duration_ns')}[$__rate_interval])) by (connector, sink_id, actor_id) / 1000000000",
+                            "Backpressure @ {{connector}} {{sink_id}} {{sink_name}} actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -4078,9 +4080,9 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"clamp_min((max({metric('log_store_first_write_epoch')}) by (connector, sink_id, executor_id)"
-                            + f"- max({metric('log_store_latest_read_epoch')}) by (connector, sink_id, executor_id)) / (2^16) / 1000, 0)",
-                            "Consume persistent log lag @ {{connector}} {{sink_id}} {{executor_id}}",
+                            f"clamp_min((max({metric('log_store_first_write_epoch')}) by (connector, sink_id, actor_id)"
+                            + f"- max({metric('log_store_latest_read_epoch')}) by (connector, sink_id, actor_id)) / (2^16) / 1000, 0)",
+                            "Consume persistent log lag @ {{connector}} {{sink_id}} {{sink_name}} actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -4099,8 +4101,8 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('log_store_read_rows')}[$__rate_interval])) by ({NODE_LABEL}, connector, sink_id, executor_id)",
-                            "sink={{connector}} {{sink_id}} @ {{executor_id}} {{%s}}"
+                            f"sum(rate({metric('log_store_read_rows')}[$__rate_interval])) by ({NODE_LABEL}, connector, sink_id, actor_id)",
+                            "sink={{connector}} {{sink_id}} @ {{sink_name}} actor {{actor_id}} @ {{%s}}"
                             % NODE_LABEL,
                         ),
                     ],
@@ -4120,8 +4122,8 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('log_store_write_rows')}[$__rate_interval])) by ({NODE_LABEL}, connector, sink_id, executor_id)",
-                            "sink={{connector}} {{sink_id}} @ {{executor_id}} {{%s}}"
+                            f"sum(rate({metric('log_store_write_rows')}[$__rate_interval])) by ({NODE_LABEL}, connector, sink_id, actor_id)",
+                            "sink={{connector}} {{sink_id}} @ {{sink_name}} actor {{actor_id}} {{%s}}"
                             % NODE_LABEL,
                         ),
                     ],
@@ -4131,8 +4133,8 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('kv_log_store_storage_read_count')}[$__rate_interval])) by (executor_id, connector, sink_id)",
-                            "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                            f"sum(rate({metric('kv_log_store_storage_read_count')}[$__rate_interval])) by (actor_id, connector, sink_id)",
+                            "{{sink_id}} {{sink_name}} actor {{actor_id}} ({{connector}})",
                         ),
                     ],
                 ),
@@ -4141,8 +4143,8 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('kv_log_store_storage_read_size')}[$__rate_interval])) by (executor_id, connector, sink_id)",
-                            "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                            f"sum(rate({metric('kv_log_store_storage_read_size')}[$__rate_interval])) by (actor_id, connector, sink_id)",
+                            "{{sink_id}} {{sink_name}} actor {{actor_id}} ({{connector}})",
                         ),
                     ],
                 ),
@@ -4151,8 +4153,8 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('kv_log_store_storage_write_count')}[$__rate_interval])) by (executor_id, connector, sink_id)",
-                            "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                            f"sum(rate({metric('kv_log_store_storage_write_count')}[$__rate_interval])) by (actor_id, connector, sink_id)",
+                            "{{sink_id}} {{sink_name}} actor {{actor_id}} ({{connector}})",
                         ),
                     ],
                 ),
@@ -4161,8 +4163,8 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('kv_log_store_storage_write_size')}[$__rate_interval])) by (executor_id, connector, sink_id)",
-                            "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                            f"sum(rate({metric('kv_log_store_storage_write_size')}[$__rate_interval])) by (actor_id, connector, sink_id)",
+                            "{{sink_id}} {{sink_name}} actor {{actor_id}} ({{connector}})",
                         ),
                     ],
                 ),
@@ -4172,15 +4174,15 @@ def section_sink_metrics(outer_panels):
                     [
                         panels.target(
                             f"{metric('kv_log_store_buffer_unconsumed_item_count')}",
-                            "Unconsumed item count @ {{connector}} {{sink_id}} {{executor_id}}",
+                            "Unconsumed item count @ {{connector}} {{sink_id}} {{sink_name}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"{metric('kv_log_store_buffer_unconsumed_row_count')}",
-                            "Unconsumed row count @ {{connector}} {{sink_id}} {{executor_id}}",
+                            "Unconsumed row count @ {{connector}} {{sink_id}} {{sink_name}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"{metric('kv_log_store_buffer_unconsumed_epoch_count')}",
-                            "Unconsumed epoch count @ {{connector}} {{sink_id}} {{executor_id}}",
+                            "Unconsumed epoch count @ {{connector}} {{sink_id}} {{sink_name}} actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -4189,8 +4191,8 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('kv_log_store_rewind_count')}[$__rate_interval])) by (executor_id, connector, sink_id)",
-                            "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                            f"sum(rate({metric('kv_log_store_rewind_count')}[$__rate_interval])) by (actor_id, connector, sink_id)",
+                            "{{sink_id}} {{sink_name}} actor {{actor_id}} ({{connector}})",
                         ),
                     ],
                 ),
@@ -4199,8 +4201,8 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"histogram_quantile(1.0, sum(rate({metric('kv_log_store_rewind_delay_bucket')}[$__rate_interval])) by (le, executor_id, connector, sink_id))",
-                            "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                            f"histogram_quantile(1.0, sum(rate({metric('kv_log_store_rewind_delay_bucket')}[$__rate_interval])) by (le, actor_id, connector, sink_id))",
+                            "{{sink_id}} {{sink_name}} actor {{actor_id}} ({{connector}})",
                         ),
                     ],
                 ),
