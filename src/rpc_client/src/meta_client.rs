@@ -51,6 +51,7 @@ use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
+use risingwave_pb::ddl_service::create_materialized_view_request::PbBackfillType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
@@ -353,6 +354,7 @@ impl MetaClient {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
+            backfill: PbBackfillType::Regular as _,
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -1781,9 +1783,9 @@ impl GrpcMetaClient {
     // See `Endpoint::keep_alive_timeout`
     const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
     // Retry base interval in ms for connecting to meta server.
-    const INIT_RETRY_BASE_INTERVAL_MS: u64 = 50;
+    const INIT_RETRY_BASE_INTERVAL_MS: u64 = 10;
     // Max retry times for connecting to meta server.
-    const INIT_RETRY_MAX_INTERVAL_MS: u64 = 5000;
+    const INIT_RETRY_MAX_INTERVAL_MS: u64 = 2000;
 
     fn start_meta_member_monitor(
         &self,

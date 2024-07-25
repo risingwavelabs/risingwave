@@ -216,7 +216,7 @@ async fn nexmark_q4_materialize_agg_cache_invalidation() -> Result<()> {
     let id = fragment.id();
     let workers = fragment.all_worker_count().into_keys().collect_vec();
 
-    // Let parallel unit 0 handle all groups.
+    // Let worker slot 0 handle all groups.
     cluster
         .reschedule(format!(
             "{}:[{}]",
@@ -242,8 +242,8 @@ async fn nexmark_q4_materialize_agg_cache_invalidation() -> Result<()> {
         .assert_result_ne(result_1)
         .assert_result_ne(RESULT);
 
-    // Let parallel unit 0 handle all groups again.
-    // Note that there're only 5 groups, so if the parallel unit 0 doesn't invalidate the cache
+    // Let worker slot 0 handle all groups again.
+    // Note that there're only 5 groups, so if the worker slot 0 doesn't invalidate the cache
     // correctly, it will yield the wrong result.
     cluster
         .reschedule(format!(

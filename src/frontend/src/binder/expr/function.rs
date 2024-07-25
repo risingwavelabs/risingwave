@@ -424,6 +424,36 @@ impl Binder {
         )?)))
     }
 
+    fn decimal_to_float64(decimal_expr: &mut ExprImpl, kind: &AggKind) -> Result<()> {
+        if decimal_expr.cast_implicit_mut(DataType::Float64).is_err() {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "direct arg in `{}` must be castable to float64",
+                kind
+            ))
+            .into());
+        }
+
+        let Some(Ok(fraction_datum)) = decimal_expr.try_fold_const() else {
+            bail_not_implemented!(
+                issue = 14079,
+                "variable as direct argument of ordered-set aggregate",
+            );
+        };
+
+        if let Some(ref fraction_value) = fraction_datum
+            && !(0.0..=1.0).contains(&fraction_value.as_float64().0)
+        {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "direct arg in `{}` must between 0.0 and 1.0",
+                kind
+            ))
+            .into());
+        }
+        // note that the fraction can be NULL
+        *decimal_expr = Literal::new(fraction_datum, DataType::Float64).into();
+        Ok(())
+    }
+
     fn bind_ordered_set_agg(
         &mut self,
         f: Function,
@@ -474,33 +504,7 @@ impl Binder {
                 [fraction],
                 [arg],
             ) => {
-                if fraction.cast_implicit_mut(DataType::Float64).is_err() {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "direct arg in `{}` must be castable to float64",
-                        kind
-                    ))
-                    .into());
-                }
-
-                let Some(Ok(fraction_datum)) = fraction.try_fold_const() else {
-                    bail_not_implemented!(
-                        issue = 14079,
-                        "variable as direct argument of ordered-set aggregate",
-                    );
-                };
-
-                if let Some(ref fraction_value) = fraction_datum
-                    && !(0.0..=1.0).contains(&fraction_value.as_float64().0)
-                {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "direct arg in `{}` must between 0.0 and 1.0",
-                        kind
-                    ))
-                    .into());
-                }
-                // note that the fraction can be NULL
-                *fraction = Literal::new(fraction_datum, DataType::Float64).into();
-
+                Self::decimal_to_float64(fraction, &kind)?;
                 if matches!(&kind, AggKind::Builtin(PbAggKind::PercentileCont)) {
                     arg.cast_implicit_mut(DataType::Float64).map_err(|_| {
                         ErrorCode::InvalidInputSyntax(format!(
@@ -511,6 +515,14 @@ impl Binder {
                 }
             }
             (AggKind::Builtin(PbAggKind::Mode), [], [_arg]) => {}
+            (
+                AggKind::Builtin(PbAggKind::ApproxPercentile),
+                [percentile, relative_error],
+                [_percentile_col],
+            ) => {
+                Self::decimal_to_float64(percentile, &kind)?;
+                Self::decimal_to_float64(relative_error, &kind)?;
+            }
             _ => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "invalid direct args or within group argument for `{}` aggregation",
@@ -568,7 +580,11 @@ impl Binder {
         );
 
         if f.distinct {
-            if matches!(kind, AggKind::Builtin(PbAggKind::ApproxCountDistinct)) {
+            if matches!(
+                kind,
+                AggKind::Builtin(PbAggKind::ApproxCountDistinct)
+                    | AggKind::Builtin(PbAggKind::ApproxPercentile)
+            ) {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "DISTINCT is not allowed for approximate aggregation `{}`",
                     kind

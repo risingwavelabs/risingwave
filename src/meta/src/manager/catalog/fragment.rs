@@ -1355,14 +1355,14 @@ impl FragmentManager {
 
                 let worker_slot_mapping = if actor_to_vnode_bitmap.is_empty() {
                     // If there's no `vnode_bitmap`, then the fragment must be a singleton fragment.
-                    // We directly use the single parallel unit to construct the mapping.
+                    // We directly use the single worker slot to construct the mapping.
                     // TODO: also fill `vnode_bitmap` for the actor of singleton fragment so that we
                     // don't need this branch.
 
                     let worker_id = *actor_to_worker.values().exactly_one().unwrap();
                     WorkerSlotMapping::new_single(WorkerSlotId::new(worker_id, 0))
                 } else {
-                    // Generate the parallel unit mapping from the fragment's actor bitmaps.
+                    // Generate the worker slot mapping from the fragment's actor bitmaps with actor locations.
                     assert_eq!(actor_to_vnode_bitmap.len(), actor_to_worker.len());
                     ActorMapping::from_bitmaps(&actor_to_vnode_bitmap)
                         .to_worker_slot(&actor_to_worker)

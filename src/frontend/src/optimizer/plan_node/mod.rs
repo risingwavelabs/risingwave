@@ -893,10 +893,13 @@ mod stream_exchange;
 mod stream_expand;
 mod stream_filter;
 mod stream_fs_fetch;
+mod stream_global_approx_percentile;
 mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
 mod stream_hop_window;
+mod stream_keyed_merge;
+mod stream_local_approx_percentile;
 mod stream_materialize;
 mod stream_now;
 mod stream_over_window;
@@ -1002,10 +1005,13 @@ pub use stream_exchange::StreamExchange;
 pub use stream_expand::StreamExpand;
 pub use stream_filter::StreamFilter;
 pub use stream_fs_fetch::StreamFsFetch;
+pub use stream_global_approx_percentile::StreamGlobalApproxPercentile;
 pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
+pub use stream_keyed_merge::StreamKeyedMerge;
+pub use stream_local_approx_percentile::StreamLocalApproxPercentile;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_now::StreamNow;
 pub use stream_over_window::StreamOverWindow;
@@ -1150,6 +1156,9 @@ macro_rules! for_all_plan_nodes {
             , { Stream, OverWindow }
             , { Stream, FsFetch }
             , { Stream, ChangeLog }
+            , { Stream, GlobalApproxPercentile }
+            , { Stream, LocalApproxPercentile }
+            , { Stream, KeyedMerge }
         }
     };
 }
@@ -1276,6 +1285,9 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, OverWindow }
             , { Stream, FsFetch }
             , { Stream, ChangeLog }
+            , { Stream, GlobalApproxPercentile }
+            , { Stream, LocalApproxPercentile }
+            , { Stream, KeyedMerge }
         }
     };
 }

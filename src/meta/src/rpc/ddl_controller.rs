@@ -1489,9 +1489,7 @@ impl DdlController {
 
         let available_parallelism = cluster_info.parallelism();
         if available_parallelism == 0 {
-            return Err(MetaError::unavailable(
-                "No available parallel units to schedule",
-            ));
+            return Err(MetaError::unavailable("No available slots to schedule"));
         }
 
         let available_parallelism = NonZeroUsize::new(available_parallelism).unwrap();
