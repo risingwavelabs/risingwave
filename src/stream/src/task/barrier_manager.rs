@@ -23,6 +23,7 @@ use futures::stream::{BoxStream, FuturesUnordered};
 use futures::StreamExt;
 use itertools::Itertools;
 use parking_lot::Mutex;
+use risingwave_common::error::tonic::extra::Score;
 use risingwave_pb::stream_service::barrier_complete_response::{
     GroupedSstableInfo, PbCreateMviewProgress,
 };
@@ -372,7 +373,7 @@ pub(super) struct LocalBarrierWorker {
     actor_failure_rx: UnboundedReceiver<(ActorId, StreamError)>,
 
     /// Cached result of [`Self::try_find_root_failure`].
-    cached_root_failure: Option<StreamError>,
+    cached_root_failure: Option<ScoredStreamError>,
 }
 
 impl LocalBarrierWorker {
@@ -380,8 +381,7 @@ impl LocalBarrierWorker {
         let (event_tx, event_rx) = unbounded_channel();
         let (failure_tx, failure_rx) = unbounded_channel();
         let shared_context = Arc::new(SharedContext::new(
-            actor_manager.env.server_address().clone(),
-            actor_manager.env.config(),
+            &actor_manager.env,
             LocalBarrierManager {
                 barrier_event_sender: event_tx,
                 actor_failure_sender: failure_tx,
@@ -802,7 +802,10 @@ impl LocalBarrierWorker {
     /// This is similar to [`Self::notify_actor_failure`], but since there's not always an actor failure,
     /// the given `err` will be used if there's no root failure found.
     async fn notify_other_failure(&mut self, err: StreamError, message: impl Into<String>) {
-        let root_err = self.try_find_root_failure().await.unwrap_or(err);
+        let root_err = self
+            .try_find_root_failure()
+            .await
+            .unwrap_or_else(|| ScoredStreamError::new(err));
 
         self.control_stream_handle.reset_stream_with_err(
             anyhow!(root_err)
@@ -824,10 +827,11 @@ impl LocalBarrierWorker {
     /// Collect actor errors for a while and find the one that might be the root cause.
     ///
     /// Returns `None` if there's no actor error received.
-    async fn try_find_root_failure(&mut self) -> Option<StreamError> {
+    async fn try_find_root_failure(&mut self) -> Option<ScoredStreamError> {
         if self.cached_root_failure.is_some() {
             return self.cached_root_failure.clone();
         }
+
         // fetch more actor errors within a timeout
         let _ = tokio::time::timeout(Duration::from_secs(3), async {
             while let Some((actor_id, error)) = self.actor_failure_rx.recv().await {
@@ -835,7 +839,13 @@ impl LocalBarrierWorker {
             }
         })
         .await;
-        self.cached_root_failure = try_find_root_actor_failure(self.failure_actors.values());
+
+        // Find the error with highest score.
+        self.cached_root_failure = self
+            .failure_actors
+            .values()
+            .map(|e| ScoredStreamError::new(e.clone()))
+            .max_by_key(|e| e.score);
 
         self.cached_root_failure.clone()
     }
@@ -944,63 +954,84 @@ impl LocalBarrierManager {
     }
 }
 
-/// Tries to find the root cause of actor failures, based on hard-coded rules.
-///
-/// Returns `None` if the input is empty.
-pub fn try_find_root_actor_failure<'a>(
-    actor_errors: impl IntoIterator<Item = &'a StreamError>,
-) -> Option<StreamError> {
-    // Explicitly list all error kinds here to notice developers to update this function when
-    // there are changes in error kinds.
+/// A [`StreamError`] with a score, used to find the root cause of actor failures.
+#[derive(Debug, Clone)]
+struct ScoredStreamError {
+    error: StreamError,
+    score: Score,
+}
 
-    fn stream_executor_error_score(e: &StreamExecutorError) -> i32 {
-        use crate::executor::error::ErrorKind;
-        match e.inner() {
-            // `ChannelClosed` or `ExchangeChannelClosed` is likely to be caused by actor exit
-            // and not the root cause.
-            ErrorKind::ChannelClosed(_) | ErrorKind::ExchangeChannelClosed(_) => 1,
+impl std::fmt::Display for ScoredStreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(f)
+    }
+}
 
-            // Normal errors.
-            ErrorKind::Uncategorized(_)
-            | ErrorKind::Storage(_)
-            | ErrorKind::ArrayError(_)
-            | ErrorKind::ExprError(_)
-            | ErrorKind::SerdeError(_)
-            | ErrorKind::SinkError(_)
-            | ErrorKind::RpcError(_)
-            | ErrorKind::AlignBarrier(_, _)
-            | ErrorKind::ConnectorError(_)
-            | ErrorKind::DmlError(_)
-            | ErrorKind::NotImplemented(_) => 999,
-        }
+impl std::error::Error for ScoredStreamError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.error.source()
     }
 
-    fn stream_error_score(e: &StreamError) -> i32 {
-        use crate::error::ErrorKind;
-        match e.inner() {
-            // `UnexpectedExit` wraps the original error. Score on the inner error.
-            ErrorKind::UnexpectedExit { source, .. } => stream_error_score(source),
-
-            // `BarrierSend` is likely to be caused by actor exit and not the root cause.
-            ErrorKind::BarrierSend { .. } => 1,
-
-            // Executor errors first.
-            ErrorKind::Executor(ee) => 2000 + stream_executor_error_score(ee),
-
-            // Then other errors.
-            ErrorKind::Uncategorized(_)
-            | ErrorKind::Storage(_)
-            | ErrorKind::Expression(_)
-            | ErrorKind::Array(_)
-            | ErrorKind::Sink(_)
-            | ErrorKind::Secret(_) => 1000,
-        }
+    fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
+        self.error.provide(request);
+        // HIGHLIGHT: Provide the score to make it retrievable from meta service.
+        request.provide_value(self.score);
     }
+}
 
-    actor_errors
-        .into_iter()
-        .max_by_key(|&e| stream_error_score(e))
-        .cloned()
+impl ScoredStreamError {
+    /// Score the given error based on hard-coded rules.
+    fn new(error: StreamError) -> Self {
+        // Explicitly list all error kinds here to notice developers to update this function when
+        // there are changes in error kinds.
+
+        fn stream_executor_error_score(e: &StreamExecutorError) -> i32 {
+            use crate::executor::error::ErrorKind;
+            match e.inner() {
+                // `ChannelClosed` or `ExchangeChannelClosed` is likely to be caused by actor exit
+                // and not the root cause.
+                ErrorKind::ChannelClosed(_) | ErrorKind::ExchangeChannelClosed(_) => 1,
+
+                // Normal errors.
+                ErrorKind::Uncategorized(_)
+                | ErrorKind::Storage(_)
+                | ErrorKind::ArrayError(_)
+                | ErrorKind::ExprError(_)
+                | ErrorKind::SerdeError(_)
+                | ErrorKind::SinkError(_)
+                | ErrorKind::RpcError(_)
+                | ErrorKind::AlignBarrier(_, _)
+                | ErrorKind::ConnectorError(_)
+                | ErrorKind::DmlError(_)
+                | ErrorKind::NotImplemented(_) => 999,
+            }
+        }
+
+        fn stream_error_score(e: &StreamError) -> i32 {
+            use crate::error::ErrorKind;
+            match e.inner() {
+                // `UnexpectedExit` wraps the original error. Score on the inner error.
+                ErrorKind::UnexpectedExit { source, .. } => stream_error_score(source),
+
+                // `BarrierSend` is likely to be caused by actor exit and not the root cause.
+                ErrorKind::BarrierSend { .. } => 1,
+
+                // Executor errors first.
+                ErrorKind::Executor(ee) => 2000 + stream_executor_error_score(ee),
+
+                // Then other errors.
+                ErrorKind::Uncategorized(_)
+                | ErrorKind::Storage(_)
+                | ErrorKind::Expression(_)
+                | ErrorKind::Array(_)
+                | ErrorKind::Sink(_)
+                | ErrorKind::Secret(_) => 1000,
+            }
+        }
+
+        let score = Score(stream_error_score(&error));
+        Self { error, score }
+    }
 }
 
 #[cfg(test)]

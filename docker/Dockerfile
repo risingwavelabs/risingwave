@@ -55,7 +55,7 @@ RUN cargo install flamegraph
 # COPY --from=rust-planner /risingwave/recipe.json recipe.json
 
 # # Build dependencies - this can be cached if the dependencies don't change
-# RUN cargo chef cook --release --recipe-path recipe.json
+# RUN cargo chef cook --profile production --recipe-path recipe.json
 
 FROM rust-base AS rust-builder
 
@@ -70,11 +70,11 @@ ENV ENABLE_BUILD_DASHBOARD=1
 ENV OPENSSL_STATIC=1
 
 RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --release --features "rw-static-link" --features all-udf && \
+  cargo build -p risingwave_cmd_all --profile production --features "rw-static-link" --features all-udf && \
   mkdir -p /risingwave/bin && \
-    mv /risingwave/target/release/risingwave /risingwave/bin/ && \
-    mv /risingwave/target/release/risingwave.dwp /risingwave/bin/ && \
-  cp ./target/release/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
+    mv /risingwave/target/production/risingwave /risingwave/bin/ && \
+    mv /risingwave/target/production/risingwave.dwp /risingwave/bin/ && \
+  cp ./target/production/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
   chmod +x /risingwave/bin/jeprof && \
   mkdir -p /risingwave/lib && cargo clean
 

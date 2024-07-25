@@ -35,7 +35,6 @@ mod stream_chunk_iter;
 pub mod stream_record;
 pub mod struct_array;
 mod utf8_array;
-mod value_reader;
 
 use std::convert::From;
 use std::hash::{Hash, Hasher};

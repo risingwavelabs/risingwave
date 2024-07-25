@@ -40,6 +40,7 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(maybe_uninit_array_assume_init)]
+#![feature(iter_from_coroutine)]
 
 pub mod hummock;
 pub mod memory;
