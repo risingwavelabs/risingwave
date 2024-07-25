@@ -20,7 +20,6 @@ mod storage_catalog;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -799,12 +798,8 @@ impl IcebergWriter {
             let prometheus_builder = PrometheusWriterBuilder::new(
                 dispatch_builder,
                 WriterMetrics::new(
-                    writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
-                    writer_param
-                        .sink_metrics
-                        .iceberg_write_latency
-                        .deref()
-                        .clone(),
+                    (**writer_param.sink_metrics.iceberg_write_qps).clone(),
+                    (**writer_param.sink_metrics.iceberg_write_latency).clone(),
                 ),
             );
             let schema = Self::schema_with_extra_partition_col(&table, extra_partition_col_idx)?;
@@ -822,12 +817,8 @@ impl IcebergWriter {
             let prometheus_builder = PrometheusWriterBuilder::new(
                 dispatch_builder,
                 WriterMetrics::new(
-                    writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
-                    writer_param
-                        .sink_metrics
-                        .iceberg_write_latency
-                        .deref()
-                        .clone(),
+                    (**writer_param.sink_metrics.iceberg_write_qps).clone(),
+                    (**writer_param.sink_metrics.iceberg_write_latency).clone(),
                 ),
             );
             let schema = table.current_arrow_schema()?;
@@ -879,12 +870,8 @@ impl IcebergWriter {
             let prometheus_builder = PrometheusWriterBuilder::new(
                 dispatch_builder,
                 WriterMetrics::new(
-                    writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
-                    writer_param
-                        .sink_metrics
-                        .iceberg_write_latency
-                        .deref()
-                        .clone(),
+                    (**writer_param.sink_metrics.iceberg_write_qps).clone(),
+                    (**writer_param.sink_metrics.iceberg_write_latency).clone(),
                 ),
             );
             let schema = Self::schema_with_extra_partition_col(&table, extra_partition_col_idx)?;
@@ -902,12 +889,8 @@ impl IcebergWriter {
             let prometheus_builder = PrometheusWriterBuilder::new(
                 dispatch_builder,
                 WriterMetrics::new(
-                    writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
-                    writer_param
-                        .sink_metrics
-                        .iceberg_write_latency
-                        .deref()
-                        .clone(),
+                    (**writer_param.sink_metrics.iceberg_write_qps).clone(),
+                    (**writer_param.sink_metrics.iceberg_write_latency).clone(),
                 ),
             );
             let schema = table.current_arrow_schema()?;

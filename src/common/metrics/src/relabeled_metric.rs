@@ -15,6 +15,7 @@
 use prometheus::core::{MetricVec, MetricVecBuilder};
 use prometheus::{HistogramVec, IntCounterVec};
 
+use crate::guarded_metrics::lazy_guarded_metric::LazyGuardedMetrics;
 use crate::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
     LabelGuardedMetric, LabelGuardedMetricVec, MetricLevel,
@@ -89,7 +90,10 @@ impl<T: MetricVecBuilder> RelabeledMetricVec<MetricVec<T>> {
 }
 
 impl<T: MetricVecBuilder, const N: usize> RelabeledMetricVec<LabelGuardedMetricVec<T, N>> {
-    pub fn with_label_values(&self, vals: &[&str; N]) -> LabelGuardedMetric<T::M, N> {
+    pub fn with_label_values(
+        &self,
+        vals: &[&str; N],
+    ) -> LabelGuardedMetric<LazyGuardedMetrics<T, N>, N> {
         if self.metric_level > self.relabel_threshold {
             // relabel first n labels to empty string
             let mut relabeled_vals = *vals;

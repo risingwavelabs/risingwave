@@ -18,9 +18,8 @@ use std::task::{Context, Poll};
 
 use anyhow::Context as _;
 use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
-use prometheus::Histogram;
 use risingwave_common::config::MetricLevel;
-use risingwave_common::metrics::LabelGuardedMetric;
+use risingwave_common::metrics::LabelGuardedHistogram;
 use tokio::time::Instant;
 
 use super::exchange::input::BoxedInput;
@@ -285,7 +284,7 @@ pub struct SelectReceivers {
     /// watermark column index -> `BufferedWatermarks`
     buffered_watermarks: BTreeMap<usize, BufferedWatermarks<ActorId>>,
     /// If None, then we don't take `Instant::now()` and `observe` during `poll_next`
-    merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram, 2>>,
+    merge_barrier_align_duration: Option<LabelGuardedHistogram<2>>,
 }
 
 impl Stream for SelectReceivers {
@@ -387,7 +386,7 @@ impl SelectReceivers {
     fn new(
         actor_id: u32,
         upstreams: Vec<BoxedInput>,
-        merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram, 2>>,
+        merge_barrier_align_duration: Option<LabelGuardedHistogram<2>>,
     ) -> Self {
         assert!(!upstreams.is_empty());
         let upstream_actor_ids = upstreams.iter().map(|input| input.actor_id()).collect();
