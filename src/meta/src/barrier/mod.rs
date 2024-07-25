@@ -1160,15 +1160,15 @@ fn collect_commit_epoch_info(
     for resp in resps {
         let ssts_iter = resp.synced_sstables.into_iter().map(|grouped| {
             let sst_info = grouped.sst.expect("field not None");
-            sst_to_worker.insert(sst_info.get_object_id(), resp.worker_id);
+            sst_to_worker.insert(sst_info.object_id, resp.worker_id);
             LocalSstableInfo::new(
-                sst_info,
+                sst_info.into(),
                 from_prost_table_stats_map(grouped.table_stats_map),
             )
         });
         synced_ssts.extend(ssts_iter);
         table_watermarks.push(resp.table_watermarks);
-        old_value_ssts.extend(resp.old_value_sstables);
+        old_value_ssts.extend(resp.old_value_sstables.into_iter().map(|s| s.into()));
     }
     let new_table_fragment_info =
         if let Command::CreateStreamingJob { info, .. } = &command_ctx.command {
@@ -1215,10 +1215,7 @@ fn collect_commit_epoch_info(
                     watermarks
                         .into_iter()
                         .map(|(table_id, watermarks)| {
-                            (
-                                TableId::new(table_id),
-                                TableWatermarks::from_protobuf(&watermarks),
-                            )
+                            (TableId::new(table_id), TableWatermarks::from(&watermarks))
                         })
                         .collect()
                 })

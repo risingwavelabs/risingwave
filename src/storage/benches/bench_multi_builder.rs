@@ -25,10 +25,10 @@ use rand::random;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, S3ObjectStore,
 };
-use risingwave_pb::hummock::SstableInfo;
 use risingwave_storage::hummock::iterator::{ConcatIterator, ConcatIteratorInner, HummockIterator};
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use risingwave_storage::hummock::value::HummockValue;

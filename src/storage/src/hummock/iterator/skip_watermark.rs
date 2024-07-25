@@ -21,8 +21,9 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::safe_epoch_read_table_watermarks_impl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
-use risingwave_pb::hummock::PbTableWatermarks;
+use risingwave_hummock_sdk::table_watermark::{
+    ReadTableWatermark, TableWatermarks, WatermarkDirection,
+};
 
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::value::HummockValue;
@@ -53,7 +54,7 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
 
     pub fn from_safe_epoch_watermarks(
         inner: I,
-        safe_epoch_watermarks: &BTreeMap<u32, PbTableWatermarks>,
+        safe_epoch_watermarks: &BTreeMap<u32, TableWatermarks>,
     ) -> Self {
         Self {
             inner,
@@ -185,7 +186,7 @@ impl SkipWatermarkState {
     }
 
     pub fn from_safe_epoch_watermarks(
-        safe_epoch_watermarks: &BTreeMap<u32, PbTableWatermarks>,
+        safe_epoch_watermarks: &BTreeMap<u32, TableWatermarks>,
     ) -> Self {
         let watermarks = safe_epoch_read_table_watermarks_impl(safe_epoch_watermarks);
         Self::new(watermarks)

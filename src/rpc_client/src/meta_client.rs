@@ -1034,7 +1034,7 @@ impl MetaClient {
         version_delta: HummockVersionDelta,
     ) -> Result<(HummockVersion, Vec<CompactionGroupId>)> {
         let req = ReplayVersionDeltaRequest {
-            version_delta: Some(version_delta.to_protobuf()),
+            version_delta: Some(version_delta.into()),
         };
         let resp = self.inner.replay_version_delta(req).await?;
         Ok((
