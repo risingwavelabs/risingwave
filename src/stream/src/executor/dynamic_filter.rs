@@ -97,12 +97,19 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         &mut self,
         chunk: &StreamChunk,
         filter_condition: Option<NonStrictExpression>,
+        below_watermark_condition: Option<NonStrictExpression>,
     ) -> Result<(Vec<Op>, Bitmap), StreamExecutorError> {
         let mut new_ops = Vec::with_capacity(chunk.capacity());
         let mut new_visibility = BitmapBuilder::with_capacity(chunk.capacity());
         let mut last_res = false;
 
         let filter_results = if let Some(cond) = filter_condition {
+            Some(cond.eval_infallible(chunk).await)
+        } else {
+            None
+        };
+
+        let below_watermark = if let Some(cond) = below_watermark_condition {
             Some(cond.eval_infallible(chunk).await)
         } else {
             None
@@ -119,6 +126,16 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                 }
             } else {
                 // A NULL right value implies a false evaluation for all rows
+                false
+            };
+            let below_watermark = if let Some(array) = &below_watermark {
+                if let ArrayImpl::Bool(results) = &**array {
+                    results.value_at(idx).unwrap_or(false)
+                } else {
+                    panic!("below watermark check condition eval must return bool array")
+                }
+            } else {
+                // there was no state cleaning watermark before
                 false
             };
 
@@ -162,9 +179,16 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                 },
             }
 
-            // Do not need to maintain the emitted records in the left table when the condition is always relaxed
-            // Also, if the delete value satisfy the condition, there could not be in the state table.
-            if self.condition_always_relax && satisfied_dyn_filter_cond {
+            // No need to maintain the records in the left table after the records become
+            // below state cleaning watermark.
+            // Here's why:
+            // 1. For >= and >, watermark on rhs means that any future changes that satisfy the
+            //    filter condition should >= state clean watermark, and those below the watermark
+            //    will never satisfy the filter condition.
+            // 2. For < and <=, watermark on rhs means that any future changes that are below
+            //    the watermark will always satisfy the filter condition, so those changes should
+            //    always be directly sent to downstream without any state table maintenance.
+            if below_watermark {
                 continue;
             }
 
@@ -274,11 +298,13 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         assert_eq!(l_data_type, r_data_type);
 
         let build_cond = {
+            let l_data_type = l_data_type.clone();
+            let r_data_type = r_data_type.clone();
             let eval_error_report = self.eval_error_report.clone();
-            move |literal: Datum| {
+            move |cmp: PbExprNodeType, literal: Datum| {
                 literal.map(|scalar| {
                     build_func_non_strict(
-                        self.comparator,
+                        cmp,
                         DataType::Boolean,
                         vec![
                             Box::new(InputRefExpression::new(l_data_type.clone(), self.key_l)),
@@ -331,13 +357,23 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                     // Reuse the logic from `FilterExecutor`
                     let chunk = chunk.compact(); // Is this unnecessary work?
 
-                    // The condition is `None` if it is always false by virtue of a NULL right
-                    // input, so we save evaluating it on the datachunk
+                    // input, so we save evaluating it on the datachunk.
                     let filter_condition =
-                        build_cond(committed_rhs_value.clone().flatten()).transpose()?;
+                        build_cond(self.comparator, committed_rhs_value.clone().flatten())
+                            .transpose()?;
 
-                    let (new_ops, new_visibility) =
-                        self.apply_batch(&chunk, filter_condition).await?;
+                    // The condition is `None` if there's no committed state cleaning watermark before.
+                    // Note that we should not use `state_cleaning_watermark` variable here, because
+                    // it represents outstanding watermark to be applied. Here we need the watermark
+                    // that has been applied to the state table, just like why we use `prev_epoch_value`
+                    // instead of `current_epoch_value` for `filter_condition`.
+                    let below_watermark_condition =
+                        build_cond(LessThan, self.left_table.get_committed_watermark().cloned())
+                            .transpose()?;
+
+                    let (new_ops, new_visibility) = self
+                        .apply_batch(&chunk, filter_condition, below_watermark_condition)
+                        .await?;
 
                     let columns = chunk.into_parts().0.into_parts().0;
 
