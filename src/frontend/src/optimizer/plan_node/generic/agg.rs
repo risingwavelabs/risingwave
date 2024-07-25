@@ -418,7 +418,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 agg_kinds::single_value_state_iff_in_append_only!() if in_append_only => {
                     AggCallState::Value
                 }
-                agg_kinds::single_value_state!() => AggCallState::Value,
+                agg_kinds::single_value_state!()
+                | AggKind::Builtin(PbAggKind::ApproxPercentile) => AggCallState::Value,
                 AggKind::Builtin(
                     PbAggKind::Min
                     | PbAggKind::Max
