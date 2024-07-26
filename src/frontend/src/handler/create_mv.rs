@@ -278,7 +278,7 @@ It only indicates the physical clustering of the data, which may improve the per
     ))
 }
 
-fn ordinal(i: usize) -> String {
+pub fn ordinal(i: usize) -> String {
     let s = i.to_string();
     let suffix = if s.ends_with('1') && !s.ends_with("11") {
         "st"
