@@ -423,4 +423,10 @@ impl StreamManagerService for StreamServiceImpl {
             .await;
         Ok(Response::new(RecoverResponse {}))
     }
+
+    async fn alter_connector_config(
+        &self,
+        request: Request<AlterConnectorConfigRequest>,
+    ) -> Result<Response<AlterConnectorConfigResponse>, Status> {
+    }
 }

@@ -3094,8 +3094,15 @@ impl Parser<'_> {
                 cascade,
             }
         } else if self.parse_keyword(Keyword::ALTER) {
-            if self.parse_keyword(Keyword::COLUMN) {
-                // ALTER COLUMN
+            if self.parse_keyword(Keyword::CONNECTOR) {
+                // ALTER CONNECTOR WITH (...)
+                let config = self.parse_with_properties()?;
+                AlterTableOperation::AlterConnectorConfig {
+                    config: WithProperties(config),
+                }
+            } else {
+                // ALTER [ COLUMN ] column_name SET/DROP NOT NULL
+                let _ = self.parse_keyword(Keyword::COLUMN);
                 let column_name = self.parse_identifier_non_reserved()?;
                 let op = if self.parse_keywords(&[Keyword::SET, Keyword::NOT, Keyword::NULL]) {
                     AlterColumnOperation::SetNotNull {}
@@ -3123,14 +3130,6 @@ impl Parser<'_> {
                     );
                 };
                 AlterTableOperation::AlterColumn { column_name, op }
-            } else if self.parse_keyword(Keyword::CONNECTOR) {
-                // ALTER CONNECTOR WITH (...)
-                let attr = self.parse_with_properties()?;
-                AlterTableOperation::AlterConnectorAttr {
-                    attr: WithProperties(attr),
-                }
-            } else {
-                return self.expected("COLUMN or CONNECTOR after ALTER");
             }
         } else if self.parse_keywords(&[Keyword::REFRESH, Keyword::SCHEMA]) {
             AlterTableOperation::RefreshSchema

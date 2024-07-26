@@ -106,8 +106,8 @@ pub enum AlterTableOperation {
     SetStreamingRateLimit {
         rate_limit: i32,
     },
-    AlterConnectorAttr {
-        attr: WithProperties,
+    AlterConnectorConfig {
+        config: WithProperties,
     },
 }
 
@@ -295,6 +295,9 @@ impl fmt::Display for AlterTableOperation {
             }
             AlterTableOperation::SetStreamingRateLimit { rate_limit } => {
                 write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterTableOperation::AlterConnectorConfig { config } => {
+                write!(f, " CONNECTOR CONFIG {}", config)
             }
         }
     }

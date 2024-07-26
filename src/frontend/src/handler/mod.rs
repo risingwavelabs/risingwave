@@ -711,7 +711,7 @@ pub async fn handle(
         }
         Statement::AlterTable {
             name,
-            operation: AlterTableOperation::AlterConnectorAttr { attr },
+            operation: AlterTableOperation::AlterConnectorConfig { config: attr },
         } => handle_alter_table_connector_attr(handler_args, name, attr),
         Statement::AlterIndex {
             name,
