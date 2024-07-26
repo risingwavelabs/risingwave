@@ -127,38 +127,31 @@ impl ControlStreamHandle {
     }
 
     /// Send `Shutdown` message to the control stream and wait for the stream to be closed
-    /// by the meta service. Notify the caller through `shutdown_sender` once it's done.
-    fn shutdown_stream(&mut self, has_running_actor: bool, shutdown_sender: oneshot::Sender<()>) {
-        if has_running_actor {
-            tracing::warn!("shutdown with running actors, scaling or migration will be triggered");
-        }
-
+    /// by the meta service.
+    async fn shutdown_stream(&mut self) {
         if let Some((sender, _)) = self.pair.take() {
             if sender
                 .send(Ok(StreamingControlStreamResponse {
                     response: Some(streaming_control_stream_response::Response::Shutdown(
-                        ShutdownResponse { has_running_actor },
+                        ShutdownResponse::default(),
                     )),
                 }))
                 .is_err()
             {
                 warn!("failed to notify shutdown of control stream");
             } else {
-                tokio::spawn(async move {
-                    tracing::info!("waiting for meta service to close control stream...");
+                tracing::info!("waiting for meta service to close control stream...");
 
-                    // Wait for the stream to be closed, to ensure that the `Shutdown` message has
-                    // been acknowledged by the meta service for more precise error report.
-                    //
-                    // This is because the meta service will reset the control stream manager and
-                    // drop the connection to us upon recovery. As a result, the receiver part of
-                    // this sender will also be dropped, causing the stream to close.
-                    sender.closed().await;
-
-                    // Notify the caller that the shutdown is done.
-                    let _ = shutdown_sender.send(());
-                });
+                // Wait for the stream to be closed, to ensure that the `Shutdown` message has
+                // been acknowledged by the meta service for more precise error report.
+                //
+                // This is because the meta service will reset the control stream manager and
+                // drop the connection to us upon recovery. As a result, the receiver part of
+                // this sender will also be dropped, causing the stream to close.
+                sender.closed().await;
             }
+        } else {
+            debug!("control stream has been reset, ignore shutdown");
         }
     }
 
@@ -245,6 +238,7 @@ pub(super) enum LocalBarrierEvent {
     Flush(oneshot::Sender<()>),
 }
 
+#[derive(strum_macros::Display)]
 pub(super) enum LocalActorOperation {
     NewControlStream {
         handle: ControlStreamHandle,
@@ -492,6 +486,15 @@ impl LocalBarrierWorker {
                                     response: Some(streaming_control_stream_response::Response::Init(InitResponse {}))
                                 });
                             }
+                            LocalActorOperation::Shutdown { result_sender } => {
+                                if !self.actor_manager_state.handles.is_empty() {
+                                    tracing::warn!(
+                                        "shutdown with running actors, scaling or migration will be triggered"
+                                    );
+                                }
+                                self.control_stream_handle.shutdown_stream().await;
+                                let _ = result_sender.send(());
+                            }
                             actor_op => {
                                 self.handle_actor_op(actor_op);
                             }
@@ -577,8 +580,8 @@ impl LocalBarrierWorker {
 
     fn handle_actor_op(&mut self, actor_op: LocalActorOperation) {
         match actor_op {
-            LocalActorOperation::NewControlStream { .. } => {
-                unreachable!("NewControlStream event should be handled separately in async context")
+            LocalActorOperation::NewControlStream { .. } | LocalActorOperation::Shutdown { .. } => {
+                unreachable!("event {actor_op} should be handled separately in async context")
             }
             LocalActorOperation::DropActors {
                 actors,
@@ -623,10 +626,6 @@ impl LocalBarrierWorker {
             LocalActorOperation::InspectState { result_sender } => {
                 let debug_info = self.to_debug_info();
                 let _ = result_sender.send(debug_info.to_string());
-            }
-            LocalActorOperation::Shutdown { result_sender } => {
-                self.control_stream_handle
-                    .shutdown_stream(!self.actor_manager_state.handles.is_empty(), result_sender);
             }
         }
     }

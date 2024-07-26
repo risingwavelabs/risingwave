@@ -210,25 +210,13 @@ impl ControlStreamManager {
                             .expect("should exist when get collect resp");
                         break Ok((worker_id, command.prev_epoch.value().0, resp));
                     }
-                    Response::Shutdown(resp) => {
-                        let node = self
+                    Response::Shutdown(_) => {
+                        let _ = self
                             .nodes
                             .remove(&worker_id)
                             .expect("should exist when get shutdown resp");
-                        let has_inflight_barrier = !node.inflight_barriers.is_empty();
-
-                        // Trigger recovery only if there are actors running.
-                        //
-                        // We need "or" here because...
-                        // - even if there's no running actor, it's possible that new actors will be created
-                        //   soon because of upcoming inflight barriers;
-                        // - even if there's no inflight barrier, it's possible that the next periodic barrier
-                        //   has not been produced yet.
-                        if resp.has_running_actor || has_inflight_barrier {
-                            break Err(anyhow!("worker node {worker_id} is shutting down").into());
-                        } else {
-                            info!(node = ?node.worker, "idle worker node is shutting down, no need to recover");
-                        }
+                        // TODO: if there's no actor running on the node, we can ignore and not trigger recovery.
+                        break Err(anyhow!("worker node {worker_id} is shutting down").into());
                     }
                     Response::Init(_) => {
                         // This arm should be unreachable.
