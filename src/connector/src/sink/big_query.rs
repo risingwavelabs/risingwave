@@ -225,6 +225,7 @@ impl BigQuerySink {
         Ok(())
     }
 
+    // Used to check whether the BigQuery table field is equal to RisingWave.
     fn get_string_and_check_support_from_datatype(rw_data_type: &DataType) -> Result<String> {
         match rw_data_type {
             DataType::Boolean => Ok("BOOL".to_owned()),
@@ -241,6 +242,9 @@ impl BigQuerySink {
             DataType::Time => Ok("TIME".to_owned()),
             DataType::Timestamp => Ok("DATETIME".to_owned()),
             DataType::Timestamptz => Ok("TIMESTAMP".to_owned()),
+            // Even if Interval is an Pre-GA type,
+            // if the BigQuery table column is indeed of this type,
+            // we have no reason to reject it.
             DataType::Interval => Ok("INTERVAL".to_owned()),
             DataType::Struct(structs) => {
                 let mut elements_vec = vec![];
@@ -264,6 +268,8 @@ impl BigQuerySink {
         }
     }
 
+    // Mapping from RisingWave field `DataType`s to BigQuery `TableFieldSchema` types.
+    // For creating BigQuery table from RisingWave table.
     fn map_field(rw_field: &Field) -> Result<TableFieldSchema> {
         let tfs = match &rw_field.data_type {
             DataType::Boolean => TableFieldSchema::bool(&rw_field.name),
@@ -282,6 +288,8 @@ impl BigQuerySink {
             DataType::Time => TableFieldSchema::time(&rw_field.name),
             DataType::Timestamp => TableFieldSchema::date_time(&rw_field.name),
             DataType::Timestamptz => TableFieldSchema::timestamp(&rw_field.name),
+            // The Interval type is Pre-GA, so we refuse to map it.
+            // see: https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#interval_type
             DataType::Interval => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
                     "Bigquery cannot support Interval"
