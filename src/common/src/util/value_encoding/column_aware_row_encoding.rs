@@ -19,7 +19,7 @@
 //! We have a `Serializer` and a `Deserializer` for each schema of `Row`, which can be reused
 //! until schema changes
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use bitflags::bitflags;
@@ -35,15 +35,6 @@ bitflags! {
         const OFFSET16 = 0b10;
         const OFFSET32 = 0b11;
     }
-}
-
-fn column_ids_are_sorted(column_ids: &[ColumnId]) -> bool {
-    for i in 1..column_ids.len() {
-        if column_ids[i - 1] >= column_ids[i] {
-            return false;
-        }
-    }
-    true
 }
 
 /// `RowEncoding` holds row-specific information for Column-Aware Encoding
@@ -136,7 +127,6 @@ pub struct Serializer {
 impl Serializer {
     /// Create a new `Serializer` with current `column_ids`
     pub fn new(column_ids: &[ColumnId]) -> Self {
-        assert!(column_ids_are_sorted(column_ids));
         // currently we hard-code ColumnId as i32
         let mut encoded_column_ids = Vec::with_capacity(column_ids.len() * 4);
         for id in column_ids {
@@ -177,7 +167,7 @@ impl ValueRowSerializer for Serializer {
 /// Should non-null default values be specified, a new field could be added to Deserializer
 #[derive(Clone)]
 pub struct Deserializer {
-    required_column_ids: Vec<i32>,
+    required_column_ids: HashMap<i32, usize>,
     schema: Arc<[DataType]>,
     default_column_values: Vec<(usize, Datum)>,
 }
@@ -189,9 +179,12 @@ impl Deserializer {
         column_with_default: impl Iterator<Item = (usize, Datum)>,
     ) -> Self {
         assert_eq!(column_ids.len(), schema.len());
-        assert!(column_ids_are_sorted(column_ids));
         Self {
-            required_column_ids: column_ids.iter().map(|id| id.get_id()).collect(),
+            required_column_ids: column_ids
+                .iter()
+                .enumerate()
+                .map(|(i, c)| (c.get_id(), i))
+                .collect::<HashMap<_, _>>(),
             schema,
             default_column_values: column_with_default.collect(),
         }
@@ -219,15 +212,9 @@ impl ValueRowDeserializer for Deserializer {
             datums[*i].clone_from(datum);
         }
 
-        // The algorithm here leverages the fact that both `required_column_ids` and the encoded column ids are sorted
-        // We use two pointers (i and j) to iterate through the two arrays, and only deserialize the columns that are required
-        let mut j = 0usize; // index of required_column_ids
         for i in 0..datum_num {
             let this_id = encoded_bytes.get_i32_le();
-            while self.required_column_ids[j] < this_id {
-                j += 1; // leave the default value as is
-            }
-            if self.required_column_ids[j] == this_id {
+            if let Some(&decoded_idx) = self.required_column_ids.get(&this_id) {
                 let this_offset_start_idx = i * offset_bytes;
                 let mut this_offset_slice =
                     &offsets[this_offset_start_idx..(this_offset_start_idx + offset_bytes)];
@@ -240,15 +227,21 @@ impl ValueRowDeserializer for Deserializer {
                         None
                     } else {
                         let mut data_slice = &data[this_offset..next_offset];
-                        Some(deserialize_value(&self.schema[j], &mut data_slice)?)
+                        Some(deserialize_value(
+                            &self.schema[decoded_idx],
+                            &mut data_slice,
+                        )?)
                     }
                 } else if this_offset == data.len() {
                     None
                 } else {
                     let mut data_slice = &data[this_offset..];
-                    Some(deserialize_value(&self.schema[j], &mut data_slice)?)
+                    Some(deserialize_value(
+                        &self.schema[decoded_idx],
+                        &mut data_slice,
+                    )?)
                 };
-                datums[j] = data;
+                datums[decoded_idx] = data;
             }
         }
         Ok(datums)
