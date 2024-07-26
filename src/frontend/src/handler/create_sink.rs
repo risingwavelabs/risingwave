@@ -781,7 +781,8 @@ fn bind_sink_format_desc(session: &SessionImpl, value: ConnectorSchema) -> Resul
         E::Protobuf => SinkEncode::Protobuf,
         E::Avro => SinkEncode::Avro,
         E::Template => SinkEncode::Template,
-        e @ (E::Native | E::Csv | E::Bytes | E::None | E::Text | E::Parquet) => {
+        E::Parquet => SinkEncode::Parquet,
+        e @ (E::Native | E::Csv | E::Bytes | E::None | E::Text) => {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into());
         }
     };

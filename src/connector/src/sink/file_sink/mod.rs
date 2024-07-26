@@ -85,7 +85,6 @@ impl SinkWriter for OpenDalSinkWriter {
         Ok(())
     }
 
-
     /// For the file sink, currently, the sink decoupling feature is not enabled.
     /// When a checkpoint arrives, the force commit is performed to write the data to the file.
     /// In the future if flush and checkpoint is decoupled, we should enable sink decouple accordingly.
@@ -100,8 +99,6 @@ impl SinkWriter for OpenDalSinkWriter {
 
         Ok(())
     }
-
-
 }
 
 impl OpenDalSinkWriter {
