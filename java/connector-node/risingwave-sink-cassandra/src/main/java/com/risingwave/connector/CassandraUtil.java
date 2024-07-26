@@ -113,7 +113,7 @@ public class CassandraUtil {
             List<ColumnMetadata> cassandraColumnMetadatas, List<String> columnMetadatas) {
         if (cassandraColumnMetadatas.size() != columnMetadatas.size()) {
             throw Status.FAILED_PRECONDITION
-                    .withDescription("Primary key len mismatch")
+                    .withDescription("Primary key length mismatch.")
                     .asRuntimeException();
         }
         Set<String> cassandraColumnsSet =
