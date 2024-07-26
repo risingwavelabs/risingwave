@@ -86,12 +86,14 @@ pub enum ErrorKind {
         actor_id: ActorId,
         reason: &'static str,
     },
+
     #[error("Secret error: {0}")]
     Secret(
         #[from]
         #[backtrace]
         SecretError,
     ),
+
     #[error(transparent)]
     Uncategorized(
         #[from]
