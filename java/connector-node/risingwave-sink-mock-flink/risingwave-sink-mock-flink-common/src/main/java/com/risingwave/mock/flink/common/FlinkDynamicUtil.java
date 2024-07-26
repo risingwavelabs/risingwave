@@ -120,7 +120,7 @@ public class FlinkDynamicUtil {
                 throw Status.FAILED_PRECONDITION
                         .withDescription(
                                 String.format(
-                                        "Name mismatch. RisingWave is %s", columnDesc.getName()))
+                                        "Name mismatch. Column `%s` on RisingWave side is not found on Flink side.", columnDesc.getName()))
                         .asRuntimeException();
             }
             if (!checkType(columnDesc.getDataType(), flinkColumnMap.get(columnDesc.getName()))) {
