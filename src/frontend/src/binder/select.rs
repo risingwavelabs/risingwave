@@ -714,8 +714,8 @@ fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
         AstDataType::Jsonb => "jsonb".to_string(),
         AstDataType::Array(ty) => return data_type_to_alias(ty),
         AstDataType::Custom(ty) => format!("{}", ty),
-        AstDataType::Struct(_) => {
-            // Note: Postgres doesn't have anonymous structs
+        AstDataType::Struct(_) | AstDataType::Map(_) => {
+            // Note: Postgres doesn't have maps and anonymous structs
             return None;
         }
     };

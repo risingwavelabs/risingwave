@@ -115,6 +115,11 @@ where
 /// Consume a data type definition.
 ///
 /// The parser is the main entry point for data type parsing.
+///
+/// Note: in recursion, we should use `data_type_stateful` instead of `data_type`,
+/// otherwise the type parameter will recurse like `Stateful<Stateful<Stateful<...>>>`.
+/// Also note that we cannot use `Parser<'_>` directly to avoid misuse, because we need
+/// generics `<S>` to parameterize over `Parser<'_>` and `Stateful<Parser<'_>>`.
 pub fn data_type<S>(input: &mut S) -> PResult<DataType>
 where
     S: TokenStream,
@@ -166,6 +171,14 @@ fn data_type_stateful_inner<S>(input: &mut StatefulStream<S>) -> PResult<DataTyp
 where
     S: TokenStream,
 {
+    trace(
+        "data_type_inner",
+        alt((keyword_datatype, non_keyword_datatype)),
+    )
+    .parse_next(input)
+}
+
+fn keyword_datatype<S: TokenStream>(input: &mut StatefulStream<S>) -> PResult<DataType> {
     let with_time_zone = || {
         opt(alt((
             (Keyword::WITH, Keyword::TIME, Keyword::ZONE).value(true),
@@ -186,7 +199,7 @@ where
         })
     };
 
-    let keywords = dispatch! {keyword;
+    let mut ty = dispatch! {keyword;
         Keyword::BOOLEAN | Keyword::BOOL => empty.value(DataType::Boolean),
         Keyword::FLOAT => opt(precision_in_range(1..54)).map(DataType::Float),
         Keyword::REAL => empty.value(DataType::Real),
@@ -211,26 +224,32 @@ where
         Keyword::NUMERIC | Keyword::DECIMAL | Keyword::DEC => cut_err(precision_and_scale()).map(|(precision, scale)| {
             DataType::Decimal(precision, scale)
         }),
-        _ =>  fail,
+        _ =>  fail
     };
 
-    trace(
-        "data_type_inner",
-        alt((
-            keywords,
-            trace(
-                "non_keyword_data_type",
-                object_name.map(
-                    |name| match name.to_string().to_ascii_lowercase().as_str() {
-                        // PostgreSQL built-in data types that are not keywords.
-                        "jsonb" => DataType::Jsonb,
-                        "regclass" => DataType::Regclass,
-                        "regproc" => DataType::Regproc,
-                        _ => DataType::Custom(name),
-                    },
-                ),
-            ),
-        )),
+    ty.parse_next(input)
+}
+
+fn non_keyword_datatype<S: TokenStream>(input: &mut StatefulStream<S>) -> PResult<DataType> {
+    let type_name = object_name.parse_next(input)?;
+    match type_name.to_string().to_ascii_lowercase().as_str() {
+        // PostgreSQL built-in data types that are not keywords.
+        "jsonb" => Ok(DataType::Jsonb),
+        "regclass" => Ok(DataType::Regclass),
+        "regproc" => Ok(DataType::Regproc),
+        "map" => cut_err(map_type_arguments).parse_next(input),
+        _ => Ok(DataType::Custom(type_name)),
+    }
+}
+
+fn map_type_arguments<S: TokenStream>(input: &mut StatefulStream<S>) -> PResult<DataType> {
+    delimited(
+        Token::LParen,
+        // key is string or integral type. value is arbitrary type.
+        // We don't validate here, but in binder bind_data_type
+        seq!(keyword_datatype, _:Token::Comma, data_type_stateful),
+        Token::RParen,
     )
+    .map(|(k, v)| DataType::Map(Box::new((k, v))))
     .parse_next(input)
 }
