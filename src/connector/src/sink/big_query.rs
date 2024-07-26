@@ -268,8 +268,8 @@ impl BigQuerySink {
         }
     }
 
-    // Mapping from RisingWave field `DataType`s to BigQuery `TableFieldSchema` types.
-    // For creating BigQuery table from RisingWave table.
+    /// Mapping from RisingWave field `DataType`s to BigQuery `TableFieldSchema` types.
+    /// For creating BigQuery table from RisingWave table.
     fn map_field(rw_field: &Field) -> Result<TableFieldSchema> {
         let tfs = match &rw_field.data_type {
             DataType::Boolean => TableFieldSchema::bool(&rw_field.name),
