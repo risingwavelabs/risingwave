@@ -154,6 +154,8 @@ pub struct SubscriptionCursor {
     dependent_table_id: TableId,
     cursor_need_drop_time: Instant,
     state: State,
+    // fields will be set in the table's catalog when the cursor is created,
+    // and will be reset each time it is created row_stream, this is to avoid changes in the catalog due to alter.
     fields: Vec<Field>,
 }
 
@@ -447,10 +449,7 @@ impl SubscriptionCursor {
             )));
             create_stream_for_cursor_stmt(handle_args, query_stmt).await?
         };
-        Ok((
-            row_stream,
-            Self::build_desc(fields, rw_timestamp.is_none()),
-        ))
+        Ok((row_stream, Self::build_desc(fields, rw_timestamp.is_none())))
     }
 
     async fn try_refill_remaining_rows(
@@ -559,6 +558,8 @@ impl SubscriptionCursor {
         })
     }
 
+    // In the beginning (declare cur), we will give it an empty formats,
+    // this formats is not a real, when we fetch, We fill it with the formats returned from the pg client.
     pub fn set_formats(
         row_stream: &mut PgResponseStream,
         formats: &Vec<Format>,

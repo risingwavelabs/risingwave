@@ -852,7 +852,6 @@ where
                 .unwrap()
                 .describe_statement(prepare_statement)
                 .map_err(PsqlError::Uncategorized)?;
-            println!("param_types: {:?}", row_descriptions);
             self.stream
                 .write_no_flush(&BeMessage::ParameterDescription(
                     &param_types.iter().map(|t| t.to_oid()).collect_vec(),
@@ -873,7 +872,6 @@ where
                 .describe_portal(portal)
                 .map_err(PsqlError::Uncategorized)?;
 
-            println!("param_types: {:?}", row_descriptions);
             if row_descriptions.is_empty() {
                 // According https://www.postgresql.org/docs/current/protocol-flow.html#:~:text=The%20response%20is%20a%20RowDescri[…]0a%20query%20that%20will%20return%20rows%3B,
                 // return NoData message if the statement is not a query.

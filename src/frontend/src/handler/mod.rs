@@ -162,10 +162,7 @@ impl Stream for PgResponseStream {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match &mut *self {
-            PgResponseStream::LocalQuery(inner) => {
-                println!("poll_next LocalQuery,{:?}", inner.formats);
-                inner.poll_next_unpin(cx)
-            }
+            PgResponseStream::LocalQuery(inner) => inner.poll_next_unpin(cx),
             PgResponseStream::DistributedQuery(inner) => inner.poll_next_unpin(cx),
             PgResponseStream::Rows(inner) => inner.poll_next_unpin(cx),
         }
