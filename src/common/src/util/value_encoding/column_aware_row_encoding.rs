@@ -19,9 +19,10 @@
 //! We have a `Serializer` and a `Deserializer` for each schema of `Row`, which can be reused
 //! until schema changes
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
+use ahash::HashMap;
 use bitflags::bitflags;
 
 use super::*;
