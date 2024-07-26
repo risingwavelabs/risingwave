@@ -11,13 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::bitmap::Bitmap;
-use tokio_util::compat::{Compat, FuturesAsyncWriteCompatExt};
 
 pub mod fs;
 pub mod gcs;
 pub mod opendal_sink;
 pub mod s3;
-
-
