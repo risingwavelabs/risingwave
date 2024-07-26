@@ -91,7 +91,7 @@ public class CassandraUtil {
                 throw Status.FAILED_PRECONDITION
                         .withDescription(
                                 String.format(
-                                        "Name mismatch. %s of RisingWave is not found in Cassandra.",
+                                        "Name mismatch. Column `%s` on RisingWave side is not found on Cassandra side.",
                                         columnDesc.getName()))
                         .asRuntimeException();
             }
