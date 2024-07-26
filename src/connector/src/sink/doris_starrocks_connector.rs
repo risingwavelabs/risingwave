@@ -246,22 +246,22 @@ impl InserterInnerBuilder {
         })
     }
 
-    fn build_request(&self, uri: String) -> RequestBuilder {
+    fn build_request(&self, uri: String) -> Result<RequestBuilder> {
         let client = Client::builder()
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
             .redirect(redirect::Policy::none()) // we handle redirect by ourselves
             .build()
-            .unwrap();
+            .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
 
         let mut builder = client.put(uri);
         for (k, v) in &self.header {
             builder = builder.header(k, v);
         }
-        builder
+        Ok(builder)
     }
 
     pub async fn build(&self) -> Result<InserterInner> {
-        let builder = self.build_request(self.url.clone());
+        let builder = self.build_request(self.url.clone())?;
         let resp = builder
             .send()
             .await
@@ -274,7 +274,7 @@ impl InserterInnerBuilder {
         let body = Body::wrap_stream(
             tokio_stream::wrappers::UnboundedReceiverStream::new(receiver).map(Ok::<_, Infallible>),
         );
-        let builder = self.build_request(be_url.into()).body(body);
+        let builder = self.build_request(be_url.into())?.body(body);
 
         let handle: JoinHandle<Result<Vec<u8>>> = tokio::spawn(async move {
             let response = builder
@@ -311,7 +311,7 @@ type Sender = UnboundedSender<Bytes>;
 
 pub struct InserterInner {
     sender: Option<Sender>,
-    join_handle: Option<JoinHandle<Result<Vec<u8>>>>,
+    join_handle: JoinHandle<Result<Vec<u8>>>,
     buffer: BytesMut,
     stream_load_http_timeout: Duration,
 }
@@ -323,7 +323,7 @@ impl InserterInner {
     ) -> Self {
         Self {
             sender: Some(sender),
-            join_handle: Some(join_handle),
+            join_handle,
             buffer: BytesMut::with_capacity(BUFFER_SIZE),
             stream_load_http_timeout,
         }
@@ -355,11 +355,8 @@ impl InserterInner {
     }
 
     async fn wait_handle(&mut self) -> Result<Vec<u8>> {
-        let res = match tokio::time::timeout(
-            self.stream_load_http_timeout,
-            self.join_handle.as_mut().unwrap(),
-        )
-        .await
+        let res = match tokio::time::timeout(self.stream_load_http_timeout, &mut self.join_handle)
+            .await
         {
             Ok(res) => res.map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))??,
             Err(err) => return Err(SinkError::DorisStarrocksConnect(anyhow!(err))),
@@ -470,7 +467,7 @@ impl StarrocksTxnRequestBuilder {
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
             .redirect(redirect::Policy::none())
             .build()
-            .unwrap();
+            .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
 
         Ok(Self {
             url_begin,
