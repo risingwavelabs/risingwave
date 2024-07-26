@@ -225,7 +225,7 @@ impl BigQuerySink {
         Ok(())
     }
 
-    // Used to check whether the BigQuery table field is equal to RisingWave.
+    /// Converts the RisingWave datatype to the string of the corresponding BigQuery type. Used to check whether it matches the field's type in the BigQuery table.
     fn get_string_and_check_support_from_datatype(rw_data_type: &DataType) -> Result<String> {
         match rw_data_type {
             DataType::Boolean => Ok("BOOL".to_owned()),
