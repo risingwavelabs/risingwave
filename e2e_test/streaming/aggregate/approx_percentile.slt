@@ -45,9 +45,11 @@ select * from m1;
 497.7794014558068 907.0313473737922
 
 # Test state encode / decode
+onlyif can-use-recover
 statement ok
 recover;
 
+onlyif can-use-recover
 sleep 10s
 
 # Test 0<x<1 values
