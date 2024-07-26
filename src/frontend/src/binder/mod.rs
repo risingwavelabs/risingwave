@@ -31,6 +31,7 @@ mod bind_param;
 mod create;
 mod delete;
 mod expr;
+pub mod fetch_cursor;
 mod for_system;
 mod insert;
 mod query;
@@ -41,7 +42,6 @@ mod statement;
 mod struct_field;
 mod update;
 mod values;
-pub mod fetch_cursor;
 
 pub use bind_context::{BindContext, Clause, LateralBindContext};
 pub use delete::BoundDelete;

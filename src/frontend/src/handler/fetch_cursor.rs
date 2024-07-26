@@ -14,7 +14,7 @@
 
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
-use pgwire::types::Row;
+use pgwire::types::{Format, Row};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
@@ -32,18 +32,20 @@ pub async fn handle_fetch_cursor_execute(
     handler_args: HandlerArgs,
     portal_result: PortalResult,
 ) -> Result<RwPgResponse> {
-    if let PortalResult{
+    if let PortalResult {
         statement: Statement::FetchCursor { stmt },
-        bound_result: BoundResult{
-            bound: BoundStatement::FetchCursor(fetch_cursor),..},
-        ..
-    } = portal_result {
-        match fetch_cursor.returning_schema {
-            Some(_) => {
-                handle_fetch_cursor(handler_args, stmt).await
+        bound_result:
+            BoundResult {
+                bound: BoundStatement::FetchCursor(fetch_cursor),
+                ..
             },
-            None => {
-                Ok(build_fetch_cursor_response(vec![], vec![]))},
+        result_formats,
+        ..
+    } = portal_result
+    {
+        match fetch_cursor.returning_schema {
+            Some(_) => handle_fetch_cursor(handler_args, stmt, &result_formats).await,
+            None => Ok(build_fetch_cursor_response(vec![], vec![])),
         }
     } else {
         bail_not_implemented!("unsupported portal {}", portal_result)
@@ -52,6 +54,7 @@ pub async fn handle_fetch_cursor_execute(
 pub async fn handle_fetch_cursor(
     handler_args: HandlerArgs,
     stmt: FetchCursorStatement,
+    formats: &Vec<Format>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
     let db_name = session.database();
@@ -61,7 +64,7 @@ pub async fn handle_fetch_cursor(
     let cursor_manager = session.get_cursor_manager();
 
     let (rows, pg_descs) = cursor_manager
-        .get_rows_with_cursor(cursor_name, stmt.count, handler_args)
+        .get_rows_with_cursor(cursor_name, stmt.count, handler_args, formats)
         .await?;
     Ok(build_fetch_cursor_response(rows, pg_descs))
 }
@@ -78,18 +81,21 @@ pub async fn handle_parse(
     statement: Statement,
     specific_param_types: Vec<Option<DataType>>,
 ) -> Result<PrepareStatement> {
-    if let Statement::FetchCursor { stmt } = &statement{
+    if let Statement::FetchCursor { stmt } = &statement {
         let session = handler_args.session.clone();
-            let db_name = session.database();
-            let (_, cursor_name) =
-                Binder::resolve_schema_qualified_name(db_name, stmt.cursor_name.clone())?;
-        let fields = session.get_cursor_manager().get_fields_with_cursor(cursor_name.clone()).await?;
-        
-            let mut binder = Binder::new_with_param_types(&session, specific_param_types);
+        let db_name = session.database();
+        let (_, cursor_name) =
+            Binder::resolve_schema_qualified_name(db_name, stmt.cursor_name.clone())?;
+        let fields = session
+            .get_cursor_manager()
+            .get_fields_with_cursor(cursor_name.clone())
+            .await?;
+
+        let mut binder = Binder::new_with_param_types(&session, specific_param_types);
         let schema = Some(Schema::new(fields));
 
-        let bound = binder.bind_fetch_cursor(cursor_name,stmt.count,schema)?;
-        let bound_result = BoundResult{
+        let bound = binder.bind_fetch_cursor(cursor_name, stmt.count, schema)?;
+        let bound_result = BoundResult {
             stmt_type: StatementType::FETCH_CURSOR,
             must_dist: false,
             bound: BoundStatement::FetchCursor(Box::new(bound)),
@@ -97,12 +103,12 @@ pub async fn handle_parse(
             parsed_params: None,
             dependent_relations: binder.included_relations(),
         };
-        let result = PreparedResult{
+        let result = PreparedResult {
             statement,
             bound_result,
         };
         Ok(PrepareStatement::Prepared(result))
-    }else{
+    } else {
         bail_not_implemented!("unsupported statement {:?}", statement)
     }
 }

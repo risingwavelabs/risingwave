@@ -97,7 +97,9 @@ pub async fn handle_parse(
         | Statement::Update { .. } => {
             query::handle_parse(handler_args, statement, specific_param_types)
         }
-        Statement::FetchCursor { .. } => fetch_cursor::handle_parse(handler_args, statement, specific_param_types).await,
+        Statement::FetchCursor { .. } => {
+            fetch_cursor::handle_parse(handler_args, statement, specific_param_types).await
+        }
         Statement::CreateView { query, .. } => {
             if have_parameter_in_query(query) {
                 bail_not_implemented!("CREATE VIEW with parameters");
@@ -185,7 +187,9 @@ pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal) -> Result
                 | Statement::Insert { .. }
                 | Statement::Delete { .. }
                 | Statement::Update { .. } => query::handle_execute(handler_args, portal).await,
-                Statement::FetchCursor { .. } => fetch_cursor::handle_fetch_cursor_execute(handler_args, portal).await,
+                Statement::FetchCursor { .. } => {
+                    fetch_cursor::handle_fetch_cursor_execute(handler_args, portal).await
+                }
                 _ => unreachable!(),
             }
         }

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::Field;
 use risingwave_common::util::epoch::Epoch;
@@ -133,6 +132,6 @@ pub async fn create_stream_for_cursor_stmt(
         gen_batch_plan_fragmenter(&session, plan_result)?
     };
     let fields = plan_fragmenter_result.schema.fields.clone();
-            let (row_stream, _) = create_stream(session, plan_fragmenter_result, vec![]).await?;
-            Ok((row_stream,fields))
+    let (row_stream, _) = create_stream(session, plan_fragmenter_result, vec![]).await?;
+    Ok((row_stream, fields))
 }

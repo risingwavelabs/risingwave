@@ -1451,7 +1451,8 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }
-        | Statement::Update { .. } | Statement::FetchCursor { .. } => Ok(bound
+        | Statement::Update { .. }
+        | Statement::FetchCursor { .. } => Ok(bound
             .unwrap()
             .output_fields()
             .iter()

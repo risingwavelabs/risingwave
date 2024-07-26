@@ -35,7 +35,6 @@ use risingwave_sqlparser::ast::{
     CompatibleSourceSchema, ConnectorSchema, ObjectName, Query, Select, SelectItem, SetExpr,
     TableFactor, TableWithJoins,
 };
-use thiserror_ext::AsReport;
 
 use crate::error::{ErrorCode, Result as RwResult};
 use crate::session::{current, SessionImpl};
@@ -54,14 +53,14 @@ pin_project! {
         #[pin]
         chunk_stream: VS,
         column_types: Vec<DataType>,
-        formats: Vec<Format>,
+        pub formats: Vec<Format>,
         session_data: StaticSessionData,
     }
 }
 
 // Static session data frozen at the time of the creation of the stream
-struct StaticSessionData {
-    timezone: String,
+pub struct StaticSessionData {
+    pub timezone: String,
 }
 
 impl<VS> DataChunkToRowSetAdapter<VS>
@@ -83,6 +82,10 @@ where
             formats,
             session_data,
         }
+    }
+
+    pub fn set_formats(&mut self, formats: Vec<Format>) {
+        self.formats = formats;
     }
 }
 
@@ -111,7 +114,7 @@ where
 }
 
 /// Format scalars according to postgres convention.
-fn pg_value_format(
+pub fn pg_value_format(
     data_type: &DataType,
     d: ScalarRefImpl<'_>,
     format: Format,

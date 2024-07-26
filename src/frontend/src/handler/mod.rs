@@ -147,13 +147,25 @@ pub enum PgResponseStream {
     DistributedQuery(DataChunkToRowSetAdapter<DistributedQueryStream>),
     Rows(BoxStream<'static, RowSetResult>),
 }
+impl PgResponseStream {
+    pub fn set_formats(&mut self, formats: Vec<Format>) {
+        match self {
+            PgResponseStream::LocalQuery(inner) => inner.set_formats(formats),
+            PgResponseStream::DistributedQuery(inner) => inner.set_formats(formats),
+            PgResponseStream::Rows(_) => {}
+        }
+    }
+}
 
 impl Stream for PgResponseStream {
     type Item = std::result::Result<Vec<Row>, BoxedError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match &mut *self {
-            PgResponseStream::LocalQuery(inner) => inner.poll_next_unpin(cx),
+            PgResponseStream::LocalQuery(inner) => {
+                println!("poll_next LocalQuery,{:?}", inner.formats);
+                inner.poll_next_unpin(cx)
+            }
             PgResponseStream::DistributedQuery(inner) => inner.poll_next_unpin(cx),
             PgResponseStream::Rows(inner) => inner.poll_next_unpin(cx),
         }
@@ -401,7 +413,7 @@ pub async fn handle(
             declare_cursor::handle_declare_cursor(handler_args, stmt).await
         }
         Statement::FetchCursor { stmt } => {
-            fetch_cursor::handle_fetch_cursor(handler_args, stmt).await
+            fetch_cursor::handle_fetch_cursor(handler_args, stmt, &formats).await
         }
         Statement::CloseCursor { stmt } => {
             close_cursor::handle_close_cursor(handler_args, stmt).await

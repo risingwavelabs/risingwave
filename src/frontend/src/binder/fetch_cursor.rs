@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::catalog::Schema;
-use crate::error::Result;
 
+use crate::error::Result;
 use crate::Binder;
 
 #[derive(Debug, Clone)]
@@ -33,7 +33,7 @@ impl Binder {
         count: u32,
         returning_schema: Option<Schema>,
     ) -> Result<BoundFetchCursor> {
-        Ok(BoundFetchCursor{
+        Ok(BoundFetchCursor {
             cursor_name,
             count,
             returning_schema,
