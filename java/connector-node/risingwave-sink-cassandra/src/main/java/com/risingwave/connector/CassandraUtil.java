@@ -125,7 +125,7 @@ public class CassandraUtil {
                 throw Status.FAILED_PRECONDITION
                         .withDescription(
                                 String.format(
-                                        "Primary key mismatch. RisingWave Primary key is %s, not found in cassandra",
+                                        "Primary key mismatch. Primary key `%s` on RisingWave side is not found on Cassandra side",
                                         columnMetadata))
                         .asRuntimeException();
             }
