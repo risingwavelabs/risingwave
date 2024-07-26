@@ -218,7 +218,7 @@ impl BigQuerySink {
             let data_type_string = Self::get_string_and_check_support_from_datatype(&i.data_type)?;
             if data_type_string.ne(value) {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Column type mismatch, column name is {:?}. bigquery type is {:?} risingwave type is {:?} ",i.name,value,data_type_string
+                    "Data type mismatch for column `{:?}`. BigQuery side: `{:?}`, RisingWave side: `{:?}`. ", i.name, value, data_type_string
                 )));
             };
         }
