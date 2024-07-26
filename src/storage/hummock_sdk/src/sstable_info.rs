@@ -65,11 +65,15 @@ impl From<PbSstableInfo> for SstableInfo {
             object_id: pb_sstable_info.object_id,
             sst_id: pb_sstable_info.sst_id,
             key_range: {
-                let pb_keyrange = pb_sstable_info.key_range.unwrap();
-                KeyRange {
-                    left: pb_keyrange.left.into(),
-                    right: pb_keyrange.right.into(),
-                    right_exclusive: pb_keyrange.right_exclusive,
+                // Due to the stripped key range, the key range may be `None`
+                if let Some(pb_keyrange) = pb_sstable_info.key_range {
+                    KeyRange {
+                        left: pb_keyrange.left.into(),
+                        right: pb_keyrange.right.into(),
+                        right_exclusive: pb_keyrange.right_exclusive,
+                    }
+                } else {
+                    KeyRange::inf()
                 }
             },
             file_size: pb_sstable_info.file_size,
@@ -93,11 +97,14 @@ impl From<&PbSstableInfo> for SstableInfo {
             object_id: pb_sstable_info.object_id,
             sst_id: pb_sstable_info.sst_id,
             key_range: {
-                let pb_keyrange = pb_sstable_info.key_range.as_ref().unwrap();
-                KeyRange {
-                    left: pb_keyrange.left.clone().into(),
-                    right: pb_keyrange.right.clone().into(),
-                    right_exclusive: pb_keyrange.right_exclusive,
+                if let Some(pb_keyrange) = &pb_sstable_info.key_range {
+                    KeyRange {
+                        left: pb_keyrange.left.clone().into(),
+                        right: pb_keyrange.right.clone().into(),
+                        right_exclusive: pb_keyrange.right_exclusive,
+                    }
+                } else {
+                    KeyRange::inf()
                 }
             },
             file_size: pb_sstable_info.file_size,
@@ -122,12 +129,19 @@ impl From<SstableInfo> for PbSstableInfo {
             sst_id: sstable_info.sst_id,
             key_range: {
                 let keyrange = sstable_info.key_range;
-                let pb_key_range = PbKeyRange {
-                    left: keyrange.left.into(),
-                    right: keyrange.right.into(),
-                    right_exclusive: keyrange.right_exclusive,
-                };
-                Some(pb_key_range)
+                if keyrange.inf_key_range() {
+                    // For empty key range, we don't need to encode it
+                    // Timetravel will use the default key range to stripped the PbSstableInfo
+                    // Note: If new fields are added, using Default to implement stripped may not work, resulting in an increase in encode size.
+                    None
+                } else {
+                    let pb_key_range = PbKeyRange {
+                        left: keyrange.left.into(),
+                        right: keyrange.right.into(),
+                        right_exclusive: keyrange.right_exclusive,
+                    };
+                    Some(pb_key_range)
+                }
             },
 
             file_size: sstable_info.file_size,
@@ -151,12 +165,16 @@ impl From<&SstableInfo> for PbSstableInfo {
             sst_id: sstable_info.sst_id,
             key_range: {
                 let keyrange = &sstable_info.key_range;
-                let pb_key_range = PbKeyRange {
-                    left: keyrange.left.to_vec(),
-                    right: keyrange.right.to_vec(),
-                    right_exclusive: keyrange.right_exclusive,
-                };
-                Some(pb_key_range)
+                if keyrange.inf_key_range() {
+                    None
+                } else {
+                    let pb_key_range = PbKeyRange {
+                        left: keyrange.left.to_vec(),
+                        right: keyrange.right.to_vec(),
+                        right_exclusive: keyrange.right_exclusive,
+                    };
+                    Some(pb_key_range)
+                }
             },
 
             file_size: sstable_info.file_size,
