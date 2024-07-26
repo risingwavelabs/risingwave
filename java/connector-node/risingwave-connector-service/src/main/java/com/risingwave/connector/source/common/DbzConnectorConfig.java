@@ -151,7 +151,7 @@ public class DbzConnectorConfig {
                             ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
                 } else {
                     // read upstream table schemas and emit incremental changes only
-                    mysqlProps.setProperty("snapshot.mode", "never");
+                    mysqlProps.setProperty("snapshot.mode", "no_data");
                 }
             } else {
                 // if snapshot phase is finished and offset is specified, we will continue binlog
