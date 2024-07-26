@@ -52,6 +52,11 @@ recover;
 onlyif can-use-recover
 sleep 10s
 
+query I
+select * from m1;
+----
+497.7794014558068 907.0313473737922
+
 # Test 0<x<1 values
 statement ok
 insert into t select 0.001, 1 from generate_series(1, 500);
@@ -71,3 +76,9 @@ query I
 select percentile_cont(0.5) within group (order by p_col) as p50, percentile_cont(0.9) within group (order by p_col) as p90 from t group by grp_col;
 ----
 0.001 800
+
+statement ok
+drop materialized view m1;
+
+statement ok
+drop table t;
