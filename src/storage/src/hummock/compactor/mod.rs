@@ -15,12 +15,13 @@
 mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
+use risingwave_hummock_sdk::compact_task::{CompactTask, ValidationTask};
 use risingwave_pb::compactor::{dispatch_compaction_task_request, DispatchCompactionTaskRequest};
 use risingwave_pb::hummock::report_compaction_task_request::{
     Event as ReportCompactionTaskEvent, HeartBeat as SharedHeartBeat,
     ReportTask as ReportSharedTask,
 };
-use risingwave_pb::hummock::{CompactTask, ReportFullScanTaskRequest, ReportVacuumTaskRequest};
+use risingwave_pb::hummock::{PbCompactTask, ReportFullScanTaskRequest, ReportVacuumTaskRequest};
 use risingwave_rpc_client::GrpcCompactorProxyClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
@@ -188,7 +189,7 @@ impl Compactor {
 
         debug_assert!(split_table_outputs
             .iter()
-            .all(|table_info| table_info.sst_info.get_table_ids().is_sorted()));
+            .all(|table_info| table_info.sst_info.table_ids.is_sorted()));
 
         if task_id.is_some() {
             // skip shared buffer compaction
@@ -427,8 +428,12 @@ pub fn start_compactor(
                     if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
                         event: Some(RequestEvent::ReportTask(ReportTask {
                             task_id: compact_task.task_id,
-                            task_status: compact_task.task_status,
-                            sorted_output_ssts: compact_task.sorted_output_ssts.clone(),
+                            task_status: compact_task.task_status.into(),
+                            sorted_output_ssts: compact_task
+                                .sorted_output_ssts
+                                .iter()
+                                .map(|sst| sst.into())
+                                .collect(),
                             table_stats_change: to_prost_table_stats_map(table_stats),
                         })),
                         create_at: SystemTime::now()
@@ -465,6 +470,7 @@ pub fn start_compactor(
 
                         match event {
                             ResponseEvent::CompactTask(compact_task) => {
+                                let compact_task = CompactTask::from(compact_task);
                                 let parallelism =
                                     calculate_task_parallelism(&compact_task, &context);
 
@@ -531,9 +537,7 @@ pub fn start_compactor(
                                             Err(err) => {
                                                 tracing::warn!(error = %err.as_report(), "Failed to track pending SST object id");
                                                 let mut compact_task = compact_task;
-                                                compact_task.set_task_status(
-                                                    TaskStatus::TrackSstObjectIdFailed,
-                                                );
+                                                compact_task.task_status = TaskStatus::TrackSstObjectIdFailed;
                                                 ((compact_task, HashMap::default()), None)
                                             }
                                         };
@@ -548,7 +552,7 @@ pub fn start_compactor(
 
                                     let enable_check_compaction_result =
                                     context.storage_opts.check_compaction_result;
-                                    let need_check_task = !compact_task.sorted_output_ssts.is_empty() && compact_task.task_status() == TaskStatus::Success;
+                                    let need_check_task = !compact_task.sorted_output_ssts.is_empty() && compact_task.task_status == TaskStatus::Success;
 
                                     if enable_check_compaction_result && need_check_task {
                                         match check_compaction_result(&compact_task, context.clone())
@@ -606,6 +610,7 @@ pub fn start_compactor(
                                 });
                             }
                             ResponseEvent::ValidationTask(validation_task) => {
+                                let validation_task = ValidationTask::from(validation_task);
                                 executor.spawn(async move {
                                     validate_ssts(validation_task, context.sstable_store.clone())
                                         .await;
@@ -729,6 +734,7 @@ pub fn start_shared_compactor(
                             SharedComapctorObjectIdManager::new(output_object_ids_deque, cloned_grpc_proxy_client.clone(), context.storage_opts.sstable_id_remote_fetch_number);
                             match dispatch_task.unwrap() {
                                 dispatch_compaction_task_request::Task::CompactTask(compact_task) => {
+                                    let compact_task = CompactTask::from(&compact_task);
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);
@@ -744,7 +750,7 @@ pub fn start_shared_compactor(
                                     shutdown.lock().unwrap().remove(&task_id);
                                     let report_compaction_task_request = ReportCompactionTaskRequest {
                                         event: Some(ReportCompactionTaskEvent::ReportTask(ReportSharedTask {
-                                            compact_task: Some(compact_task.clone()),
+                                            compact_task: Some(PbCompactTask::from(&compact_task)),
                                             table_stats_change: to_prost_table_stats_map(table_stats),
                                         })),
                                     };
@@ -756,11 +762,11 @@ pub fn start_shared_compactor(
                                         Ok(_) => {
                                             // TODO: remove this method after we have running risingwave cluster with fast compact algorithm stably for a long time.
                                             let enable_check_compaction_result = context.storage_opts.check_compaction_result;
-                                            let need_check_task =  !compact_task.sorted_output_ssts.is_empty() && compact_task.task_status() == TaskStatus::Success;
+                                            let need_check_task = !compact_task.sorted_output_ssts.is_empty() && compact_task.task_status == TaskStatus::Success;
                                             if enable_check_compaction_result && need_check_task {
                                                 match check_compaction_result(&compact_task, context.clone()).await {
                                                     Err(e) => {
-                                                        tracing::warn!(error = %e.as_report(), "Failed to check compaction task {}", compact_task.task_id);
+                                                        tracing::warn!(error = %e.as_report(), "Failed to check compaction task {}", task_id);
                                                     },
                                                     Ok(true) => (),
                                                     Ok(false) => {
@@ -818,6 +824,7 @@ pub fn start_shared_compactor(
                                     }
                                 }
                                 dispatch_compaction_task_request::Task::ValidationTask(validation_task) => {
+                                    let validation_task = ValidationTask::from(validation_task);
                                     validate_ssts(validation_task, context.sstable_store.clone()).await;
                                 }
                                 dispatch_compaction_task_request::Task::CancelCompactTask(cancel_compact_task) => {

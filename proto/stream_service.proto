@@ -122,10 +122,12 @@ message StreamingControlStreamRequest {
 
 message StreamingControlStreamResponse {
   message InitResponse {}
+  message ShutdownResponse {}
 
   oneof response {
     InitResponse init = 1;
     BarrierCompleteResponse complete_barrier = 2;
+    ShutdownResponse shutdown = 3;
   }
 }
 

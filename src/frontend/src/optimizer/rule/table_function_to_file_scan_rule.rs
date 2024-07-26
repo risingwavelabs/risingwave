@@ -43,6 +43,7 @@ impl Rule for TableFunctionToFileScanRule {
 
             let schema = Schema::new(fields);
 
+            assert!(logical_table_function.table_function().args.len() >= 6);
             let mut eval_args = vec![];
             for arg in &logical_table_function.table_function().args {
                 assert_eq!(arg.return_type(), DataType::Varchar);
@@ -56,14 +57,13 @@ impl Rule for TableFunctionToFileScanRule {
                     }
                 }
             }
-            assert!(eval_args.len() == 6);
             assert!("parquet".eq_ignore_ascii_case(&eval_args[0]));
             assert!("s3".eq_ignore_ascii_case(&eval_args[1]));
             let s3_region = eval_args[2].clone();
             let s3_access_key = eval_args[3].clone();
             let s3_secret_key = eval_args[4].clone();
-            let file_location = eval_args[5].clone();
-
+            // The rest of the arguments are file locations
+            let file_location = eval_args[5..].iter().cloned().collect_vec();
             Some(
                 LogicalFileScan::new(
                     logical_table_function.ctx(),

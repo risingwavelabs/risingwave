@@ -561,7 +561,7 @@ impl HashKeySer<'_> for Date {
 impl HashKeyDe for Date {
     fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
         let days = buf.get_i32_ne();
-        Date::with_days(days).unwrap()
+        Date::with_days_since_ce(days).unwrap()
     }
 }
 

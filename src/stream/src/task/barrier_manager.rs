@@ -56,7 +56,9 @@ use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::streaming_control_stream_request::{InitRequest, Request};
-use risingwave_pb::stream_service::streaming_control_stream_response::InitResponse;
+use risingwave_pb::stream_service::streaming_control_stream_response::{
+    InitResponse, ShutdownResponse,
+};
 use risingwave_pb::stream_service::{
     streaming_control_stream_response, BarrierCompleteResponse, BuildActorInfo, PartialGraphInfo,
     StreamingControlStreamRequest, StreamingControlStreamResponse,
@@ -119,8 +121,37 @@ impl ControlStreamHandle {
 
             let err = err.into_inner();
             if sender.send(Err(err)).is_err() {
-                warn!("failed to notify finish of control stream");
+                warn!("failed to notify reset of control stream");
             }
+        }
+    }
+
+    /// Send `Shutdown` message to the control stream and wait for the stream to be closed
+    /// by the meta service.
+    async fn shutdown_stream(&mut self) {
+        if let Some((sender, _)) = self.pair.take() {
+            if sender
+                .send(Ok(StreamingControlStreamResponse {
+                    response: Some(streaming_control_stream_response::Response::Shutdown(
+                        ShutdownResponse::default(),
+                    )),
+                }))
+                .is_err()
+            {
+                warn!("failed to notify shutdown of control stream");
+            } else {
+                tracing::info!("waiting for meta service to close control stream...");
+
+                // Wait for the stream to be closed, to ensure that the `Shutdown` message has
+                // been acknowledged by the meta service for more precise error report.
+                //
+                // This is because the meta service will reset the control stream manager and
+                // drop the connection to us upon recovery. As a result, the receiver part of
+                // this sender will also be dropped, causing the stream to close.
+                sender.closed().await;
+            }
+        } else {
+            debug!("control stream has been reset, ignore shutdown");
         }
     }
 
@@ -207,6 +238,7 @@ pub(super) enum LocalBarrierEvent {
     Flush(oneshot::Sender<()>),
 }
 
+#[derive(strum_macros::Display)]
 pub(super) enum LocalActorOperation {
     NewControlStream {
         handle: ControlStreamHandle,
@@ -242,6 +274,9 @@ pub(super) enum LocalActorOperation {
     },
     InspectState {
         result_sender: oneshot::Sender<String>,
+    },
+    Shutdown {
+        result_sender: oneshot::Sender<()>,
     },
 }
 
@@ -451,6 +486,15 @@ impl LocalBarrierWorker {
                                     response: Some(streaming_control_stream_response::Response::Init(InitResponse {}))
                                 });
                             }
+                            LocalActorOperation::Shutdown { result_sender } => {
+                                if !self.actor_manager_state.handles.is_empty() {
+                                    tracing::warn!(
+                                        "shutdown with running actors, scaling or migration will be triggered"
+                                    );
+                                }
+                                self.control_stream_handle.shutdown_stream().await;
+                                let _ = result_sender.send(());
+                            }
                             actor_op => {
                                 self.handle_actor_op(actor_op);
                             }
@@ -534,8 +578,8 @@ impl LocalBarrierWorker {
 
     fn handle_actor_op(&mut self, actor_op: LocalActorOperation) {
         match actor_op {
-            LocalActorOperation::NewControlStream { .. } => {
-                unreachable!("NewControlStream event should be handled separately in async context")
+            LocalActorOperation::NewControlStream { .. } | LocalActorOperation::Shutdown { .. } => {
+                unreachable!("event {actor_op} should be handled separately in async context")
             }
             LocalActorOperation::DropActors {
                 actors,
@@ -633,7 +677,7 @@ impl LocalBarrierWorker {
                                      sst_info,
                                      table_stats,
                                  }| GroupedSstableInfo {
-                                    sst: Some(sst_info),
+                                    sst: Some(sst_info.into()),
                                     table_stats_map: to_prost_table_stats_map(table_stats),
                                 },
                             )
@@ -641,11 +685,11 @@ impl LocalBarrierWorker {
                         worker_id: self.actor_manager.env.worker_id(),
                         table_watermarks: table_watermarks
                             .into_iter()
-                            .map(|(key, value)| (key.table_id, value.to_protobuf()))
+                            .map(|(key, value)| (key.table_id, value.into()))
                             .collect(),
                         old_value_sstables: old_value_ssts
                             .into_iter()
-                            .map(|sst| sst.sst_info)
+                            .map(|sst| sst.sst_info.into())
                             .collect(),
                     },
                 ),

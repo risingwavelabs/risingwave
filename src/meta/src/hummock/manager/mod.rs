@@ -33,8 +33,8 @@ use risingwave_meta_model_v2::{
     hummock_version_delta, hummock_version_stats,
 };
 use risingwave_pb::hummock::{
-    CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot,
-    HummockVersionStats, PbCompactionGroupInfo, SubscribeCompactionEventRequest,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats,
+    PbCompactTaskAssignment, PbCompactionGroupInfo, SubscribeCompactionEventRequest,
 };
 use risingwave_pb::meta::subscribe_response::Operation;
 use tokio::sync::mpsc::UnboundedSender;
@@ -343,7 +343,7 @@ impl HummockManager {
         }
 
         compaction_guard.compact_task_assignment = match &meta_store {
-            MetaStoreImpl::Kv(meta_store) => CompactTaskAssignment::list(meta_store)
+            MetaStoreImpl::Kv(meta_store) => PbCompactTaskAssignment::list(meta_store)
                 .await?
                 .into_iter()
                 .map(|assigned| (assigned.key().unwrap(), assigned))
@@ -353,7 +353,12 @@ impl HummockManager {
                 .await
                 .map_err(MetadataModelError::from)?
                 .into_iter()
-                .map(|m| (m.id as HummockCompactionTaskId, m.into()))
+                .map(|m| {
+                    (
+                        m.id as HummockCompactionTaskId,
+                        PbCompactTaskAssignment::from(m),
+                    )
+                })
                 .collect(),
         };
 

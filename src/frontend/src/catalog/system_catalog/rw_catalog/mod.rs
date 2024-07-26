@@ -39,7 +39,6 @@ mod rw_indexes;
 mod rw_internal_tables;
 mod rw_materialized_views;
 mod rw_meta_snapshot;
-mod rw_parallel_units;
 mod rw_relation_info;
 mod rw_relations;
 mod rw_schemas;

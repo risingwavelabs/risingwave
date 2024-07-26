@@ -165,49 +165,64 @@ impl ControlStreamManager {
         Ok(())
     }
 
+    /// Clear all nodes and response streams in the manager.
+    pub(super) fn clear(&mut self) {
+        *self = Self::new(self.context.clone());
+    }
+
     async fn next_response(
         &mut self,
     ) -> Option<(WorkerId, MetaResult<StreamingControlStreamResponse>)> {
         let (worker_id, response_stream, result) = self.response_streams.next().await?;
-        if result.is_ok() {
-            self.response_streams
-                .push(into_future(worker_id, response_stream));
+
+        match result.as_ref().map(|r| r.response.as_ref().unwrap()) {
+            Ok(streaming_control_stream_response::Response::Shutdown(_)) | Err(_) => {
+                // Do not add it back to the `response_streams` so that it will not be polled again.
+            }
+            _ => {
+                self.response_streams
+                    .push(into_future(worker_id, response_stream));
+            }
         }
+
         Some((worker_id, result))
     }
 
     pub(super) async fn next_complete_barrier_response(
         &mut self,
     ) -> (WorkerId, MetaResult<BarrierCompleteResponse>) {
+        use streaming_control_stream_response::Response;
+
         {
             let (worker_id, result) = pending_on_none(self.next_response()).await;
-            match result {
-                Ok(resp) => match resp.response {
-                    Some(streaming_control_stream_response::Response::CompleteBarrier(resp)) => {
+            let result = match result {
+                Ok(resp) => match resp.response.unwrap() {
+                    Response::CompleteBarrier(resp) => {
                         assert_eq!(worker_id, resp.worker_id);
-                        (worker_id, Ok(resp))
+                        Ok(resp)
                     }
-                    resp => (
-                        worker_id,
-                        Err(anyhow!("get unexpected resp: {:?}", resp).into()),
-                    ),
+                    Response::Shutdown(_) => {
+                        Err(anyhow!("worker node {worker_id} is shutting down").into())
+                    }
+                    Response::Init(_) => {
+                        // This arm should be unreachable.
+                        Err(anyhow!("get unexpected init response").into())
+                    }
                 },
-                Err(err) => {
-                    let node = self
-                        .nodes
-                        .remove(&worker_id)
-                        .expect("should exist when get collect resp");
-                    // Note: No need to use `?` as the backtrace is from meta and not useful.
-                    warn!(node = ?node.worker, err = %err.as_report(), "get error from response stream");
-                    let errors = self.collect_errors(node.worker.id, err).await;
-                    let err = merge_node_rpc_errors("get error from control stream", errors);
-                    (worker_id, Err(err))
-                }
+                Err(err) => Err(err),
+            };
+            if let Err(err) = &result {
+                let node = self
+                    .nodes
+                    .remove(&worker_id)
+                    .expect("should exist when get shutdown resp");
+                warn!(node = ?node.worker, err = %err.as_report(), "get error from response stream");
             }
+            (worker_id, result)
         }
     }
 
-    async fn collect_errors(
+    pub(super) async fn collect_errors(
         &mut self,
         worker_id: WorkerId,
         first_err: MetaError,
@@ -224,6 +239,7 @@ impl ControlStreamManager {
             })
             .await;
         }
+        tracing::debug!(?errors, "collected stream errors");
         errors
     }
 }
@@ -534,7 +550,7 @@ where
     Err(results_err)
 }
 
-fn merge_node_rpc_errors<E: Error + Send + Sync + 'static>(
+pub(super) fn merge_node_rpc_errors<E: Error + Send + Sync + 'static>(
     message: &str,
     errors: impl IntoIterator<Item = (WorkerId, E)>,
 ) -> MetaError {

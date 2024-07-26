@@ -24,7 +24,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub sst_id: HummockSstableObjectId,
     pub object_id: HummockSstableObjectId,
-    pub sstable_info: SstableInfo,
+    pub sstable_info: SstableInfoV2Backend,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -32,4 +32,4 @@ impl ActiveModelBehavior for ActiveModel {}
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
 
-crate::derive_from_blob!(SstableInfo, PbSstableInfo);
+crate::derive_from_blob!(SstableInfoV2Backend, PbSstableInfo);

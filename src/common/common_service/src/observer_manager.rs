@@ -157,7 +157,7 @@ where
                 match self.rx.message().await {
                     Ok(resp) => {
                         if resp.is_none() {
-                            tracing::error!("Stream of notification terminated.");
+                            tracing::warn!("Stream of notification terminated.");
                             self.re_subscribe().await;
                             continue;
                         }

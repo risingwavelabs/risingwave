@@ -35,7 +35,7 @@ pub enum FileFormat {
 /// S3 file scan executor. Currently only support parquet file format.
 pub struct S3FileScanExecutor {
     file_format: FileFormat,
-    location: String,
+    file_location: Vec<String>,
     s3_region: String,
     s3_access_key: String,
     s3_secret_key: String,
@@ -61,7 +61,7 @@ impl Executor for S3FileScanExecutor {
 impl S3FileScanExecutor {
     pub fn new(
         file_format: FileFormat,
-        location: String,
+        file_location: Vec<String>,
         s3_region: String,
         s3_access_key: String,
         s3_secret_key: String,
@@ -71,7 +71,7 @@ impl S3FileScanExecutor {
     ) -> Self {
         Self {
             file_format,
-            location,
+            file_location,
             s3_region,
             s3_access_key,
             s3_secret_key,
@@ -84,35 +84,36 @@ impl S3FileScanExecutor {
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         assert_eq!(self.file_format, FileFormat::Parquet);
+        for file in self.file_location {
+            let mut batch_stream_builder = create_parquet_stream_builder(
+                self.s3_region.clone(),
+                self.s3_access_key.clone(),
+                self.s3_secret_key.clone(),
+                file,
+            )
+            .await?;
 
-        let mut batch_stream_builder = create_parquet_stream_builder(
-            self.s3_region.clone(),
-            self.s3_access_key.clone(),
-            self.s3_secret_key.clone(),
-            self.location.clone(),
-        )
-        .await?;
+            let arrow_schema = batch_stream_builder.schema();
+            assert_eq!(arrow_schema.fields.len(), self.schema.fields.len());
+            for (field, arrow_field) in self.schema.fields.iter().zip(arrow_schema.fields.iter()) {
+                assert_eq!(*field.name, *arrow_field.name());
+            }
 
-        let arrow_schema = batch_stream_builder.schema();
-        assert_eq!(arrow_schema.fields.len(), self.schema.fields.len());
-        for (field, arrow_field) in self.schema.fields.iter().zip(arrow_schema.fields.iter()) {
-            assert_eq!(*field.name, *arrow_field.name());
-        }
+            batch_stream_builder = batch_stream_builder.with_projection(ProjectionMask::all());
 
-        batch_stream_builder = batch_stream_builder.with_projection(ProjectionMask::all());
+            batch_stream_builder = batch_stream_builder.with_batch_size(self.batch_size);
 
-        batch_stream_builder = batch_stream_builder.with_batch_size(self.batch_size);
+            let record_batch_stream = batch_stream_builder
+                .build()
+                .map_err(|e| anyhow!(e).context("fail to build arrow stream builder"))?;
 
-        let record_batch_stream = batch_stream_builder
-            .build()
-            .map_err(|e| anyhow!(e).context("fail to build arrow stream builder"))?;
-
-        #[for_await]
-        for record_batch in record_batch_stream {
-            let record_batch = record_batch.map_err(BatchError::Parquet)?;
-            let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
-            debug_assert_eq!(chunk.data_types(), self.schema.data_types());
-            yield chunk;
+            #[for_await]
+            for record_batch in record_batch_stream {
+                let record_batch = record_batch.map_err(BatchError::Parquet)?;
+                let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+                debug_assert_eq!(chunk.data_types(), self.schema.data_types());
+                yield chunk;
+            }
         }
     }
 }

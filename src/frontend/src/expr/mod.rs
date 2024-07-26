@@ -18,7 +18,7 @@ use futures::FutureExt;
 use paste::paste;
 use risingwave_common::array::ListValue;
 use risingwave_common::types::{DataType, Datum, JsonbVal, Scalar, ScalarImpl};
-use risingwave_expr::aggregate::AggKind;
+use risingwave_expr::aggregate::PbAggKind;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
@@ -203,7 +203,7 @@ impl ExprImpl {
     #[inline(always)]
     pub fn count_star() -> Self {
         AggCall::new(
-            AggKind::Count,
+            PbAggKind::Count.into(),
             vec![],
             false,
             OrderBy::any(),

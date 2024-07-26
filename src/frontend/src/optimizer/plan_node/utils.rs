@@ -287,14 +287,13 @@ pub(crate) fn sum_affected_row(dml: PlanRef) -> Result<PlanRef> {
     let dml = RequiredDist::single().enforce_if_not_satisfies(dml, &Order::any())?;
     // Accumulate the affected rows.
     let sum_agg = PlanAggCall {
-        agg_kind: AggKind::Sum,
+        agg_kind: PbAggKind::Sum.into(),
         return_type: DataType::Int64,
         inputs: vec![InputRef::new(0, DataType::Int64)],
         distinct: false,
         order_by: vec![],
         filter: Condition::true_cond(),
         direct_args: vec![],
-        user_defined: None,
     };
     let agg = Agg::new(vec![sum_agg], IndexSet::empty(), dml);
     let batch_agg = BatchSimpleAgg::new(agg);
@@ -323,7 +322,7 @@ macro_rules! plan_node_name {
 pub(crate) use plan_node_name;
 use risingwave_common::license::Feature;
 use risingwave_common::types::{DataType, Interval};
-use risingwave_expr::aggregate::AggKind;
+use risingwave_expr::aggregate::PbAggKind;
 use risingwave_pb::plan_common::as_of::AsOfType;
 use risingwave_pb::plan_common::{as_of, PbAsOf};
 use risingwave_sqlparser::ast::AsOf;

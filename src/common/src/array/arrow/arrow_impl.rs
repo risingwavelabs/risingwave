@@ -1137,8 +1137,8 @@ mod tests {
     fn date() {
         let array = DateArray::from_iter([
             None,
-            Date::with_days(12345).ok(),
-            Date::with_days(-12345).ok(),
+            Date::with_days_since_ce(12345).ok(),
+            Date::with_days_since_ce(-12345).ok(),
         ]);
         let arrow = arrow_array::Date32Array::from(&array);
         assert_eq!(DateArray::from(&arrow), array);

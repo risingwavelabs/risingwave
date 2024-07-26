@@ -97,7 +97,7 @@ async fn restore_hummock_version(
     );
     let checkpoint_path = version_checkpoint_path(hummock_storage_directory);
     let checkpoint = PbHummockVersionCheckpoint {
-        version: Some(hummock_version.to_protobuf()),
+        version: Some(hummock_version.into()),
         // Ignore stale objects. Full GC will clear them.
         stale_objects: Default::default(),
     };

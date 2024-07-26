@@ -29,4 +29,5 @@ mod sink;
 mod storage;
 mod throttle;
 
+mod compaction;
 mod utils;
