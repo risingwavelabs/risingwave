@@ -207,8 +207,9 @@ impl AggregateFunction for ApproxPercentile {
         cursor += 8;
         let neg_buckets_size =
             usize::from_be_bytes(encoded_state[cursor..cursor + 8].try_into().unwrap());
+        let neg_buckets_end = cursor + neg_buckets_size;
         cursor += 8;
-        while cursor < neg_buckets_size {
+        while cursor < neg_buckets_end {
             let bucket_id =
                 i32::from_be_bytes(encoded_state[cursor..cursor + 4].try_into().unwrap());
             cursor += 4;
