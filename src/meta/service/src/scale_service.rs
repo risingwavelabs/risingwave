@@ -24,8 +24,9 @@ use risingwave_meta_model_v2::FragmentId;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
-    GetClusterInfoRequest, GetClusterInfoResponse, PbWorkerReschedule, RescheduleRequest,
-    RescheduleResponse,
+    GetClusterInfoRequest, GetClusterInfoResponse, GetServerlessStreamingJobsStatusRequest,
+    GetServerlessStreamingJobsStatusResponse, PbWorkerReschedule, RescheduleRequest,
+    RescheduleResponse, UpdateStreamingJobNodeLabelsRequest, UpdateStreamingJobNodeLabelsResponse,
 };
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tonic::{Request, Response, Status};
@@ -218,5 +219,19 @@ impl ScaleService for ScaleServiceImpl {
             success: true,
             revision: next_revision.into(),
         }))
+    }
+
+    async fn update_streaming_job_node_labels(
+        &self,
+        _request: Request<UpdateStreamingJobNodeLabelsRequest>,
+    ) -> Result<Response<UpdateStreamingJobNodeLabelsResponse>, Status> {
+        todo!()
+    }
+
+    async fn get_serverless_streaming_jobs_status(
+        &self,
+        _request: Request<GetServerlessStreamingJobsStatusRequest>,
+    ) -> Result<Response<GetServerlessStreamingJobsStatusResponse>, Status> {
+        todo!()
     }
 }

@@ -1122,7 +1122,7 @@ mod tests {
             table_id: TableId,
             fragments: BTreeMap<FragmentId, Fragment>,
         ) -> MetaResult<()> {
-            // Create fake locations where all actors are scheduled to the same parallel unit.
+            // Create fake locations where all actors are scheduled to the same worker.
             let locations = {
                 let StreamingClusterInfo { worker_nodes, .. }: StreamingClusterInfo = self
                     .global_stream_manager

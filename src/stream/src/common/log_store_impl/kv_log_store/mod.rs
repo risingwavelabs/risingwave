@@ -56,8 +56,8 @@ pub(crate) type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
 
 #[derive(Clone)]
 pub(crate) struct KvLogStoreReadMetrics {
-    pub storage_read_count: LabelGuardedIntCounter<4>,
-    pub storage_read_size: LabelGuardedIntCounter<4>,
+    pub storage_read_count: LabelGuardedIntCounter<5>,
+    pub storage_read_size: LabelGuardedIntCounter<5>,
 }
 
 impl KvLogStoreReadMetrics {
@@ -72,14 +72,14 @@ impl KvLogStoreReadMetrics {
 
 #[derive(Clone)]
 pub(crate) struct KvLogStoreMetrics {
-    pub storage_write_count: LabelGuardedIntCounter<3>,
-    pub storage_write_size: LabelGuardedIntCounter<3>,
-    pub rewind_count: LabelGuardedIntCounter<3>,
-    pub rewind_delay: LabelGuardedHistogram<3>,
-    pub buffer_unconsumed_item_count: LabelGuardedIntGauge<3>,
-    pub buffer_unconsumed_row_count: LabelGuardedIntGauge<3>,
-    pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge<3>,
-    pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge<3>,
+    pub storage_write_count: LabelGuardedIntCounter<4>,
+    pub storage_write_size: LabelGuardedIntCounter<4>,
+    pub rewind_count: LabelGuardedIntCounter<4>,
+    pub rewind_delay: LabelGuardedHistogram<4>,
+    pub buffer_unconsumed_item_count: LabelGuardedIntGauge<4>,
+    pub buffer_unconsumed_row_count: LabelGuardedIntGauge<4>,
+    pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge<4>,
+    pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge<4>,
     pub persistent_log_read_metrics: KvLogStoreReadMetrics,
     pub flushed_buffer_read_metrics: KvLogStoreReadMetrics,
 }
@@ -87,13 +87,19 @@ pub(crate) struct KvLogStoreMetrics {
 impl KvLogStoreMetrics {
     pub(crate) fn new(
         metrics: &StreamingMetrics,
-        identity: &String,
+        actor_id: ActorId,
         sink_param: &SinkParam,
         connector: &'static str,
     ) -> Self {
-        let executor_id = identity;
-        let sink_id = format!("{}", sink_param.sink_id.sink_id);
-        let labels = &[executor_id.as_str(), connector, sink_id.as_str()];
+        let actor_id_str = actor_id.to_string();
+        let sink_id_str = sink_param.sink_id.sink_id.to_string();
+
+        let labels = &[
+            &actor_id_str,
+            connector,
+            &sink_id_str,
+            &sink_param.sink_name,
+        ];
         let storage_write_size = metrics
             .kv_log_store_storage_write_size
             .with_guarded_label_values(labels);
@@ -107,34 +113,38 @@ impl KvLogStoreMetrics {
         let persistent_log_read_size = metrics
             .kv_log_store_storage_read_size
             .with_guarded_label_values(&[
-                executor_id.as_str(),
+                &actor_id_str,
                 connector,
-                sink_id.as_str(),
+                &sink_id_str,
+                &sink_param.sink_name,
                 READ_PERSISTENT_LOG,
             ]);
         let persistent_log_read_count = metrics
             .kv_log_store_storage_read_count
             .with_guarded_label_values(&[
-                executor_id.as_str(),
+                &actor_id_str,
                 connector,
-                sink_id.as_str(),
+                &sink_id_str,
+                &sink_param.sink_name,
                 READ_PERSISTENT_LOG,
             ]);
 
         let flushed_buffer_read_size = metrics
             .kv_log_store_storage_read_size
             .with_guarded_label_values(&[
-                executor_id.as_str(),
+                &actor_id_str,
                 connector,
-                sink_id.as_str(),
+                &sink_id_str,
+                &sink_param.sink_name,
                 READ_FLUSHED_BUFFER,
             ]);
         let flushed_buffer_read_count = metrics
             .kv_log_store_storage_read_count
             .with_guarded_label_values(&[
-                executor_id.as_str(),
+                &actor_id_str,
                 connector,
-                sink_id.as_str(),
+                &sink_id_str,
+                &sink_param.sink_name,
                 READ_FLUSHED_BUFFER,
             ]);
 
@@ -292,6 +302,8 @@ mod v1 {
 }
 
 pub(crate) use v2::KV_LOG_STORE_V2_INFO;
+
+use crate::task::ActorId;
 
 /// A new version of log store schema. Compared to v1, the v2 added a new vnode column to the log store pk,
 /// becomes `epoch`, `seq_id` and `vnode`. In this way, providing a log store pk, we can get exactly one single row.

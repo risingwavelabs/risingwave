@@ -908,7 +908,7 @@ impl GlobalBarrierManagerContext {
     }
 
     /// This function will generate a migration plan, which includes the mapping for all expired and
-    /// in-used parallel unit to a new one.
+    /// in-used worker slot to a new one.
     async fn generate_migration_plan(
         &self,
         expired_workers: HashSet<WorkerId>,

@@ -44,7 +44,7 @@ const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 /// The parallelism for a `TableFragments`.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum TableParallelism {
-    /// This is when the system decides the parallelism, based on the available parallel units.
+    /// This is when the system decides the parallelism, based on the available worker parallelisms.
     Adaptive,
     /// We set this when the `TableFragments` parallelism is changed.
     /// All fragments which are part of the `TableFragment` will have the same parallelism as this.
@@ -164,6 +164,8 @@ impl MetadataModel for TableFragments {
             actor_splits: build_actor_connector_splits(&self.actor_splits),
             ctx: Some(self.ctx.to_protobuf()),
             parallelism: Some(self.assigned_parallelism.into()),
+            node_label: "".to_string(),
+            backfill_done: true,
         }
     }
 
@@ -205,7 +207,7 @@ impl TableFragments {
     }
 
     /// Create a new `TableFragments` with state of `Initial`, with the status of actors set to
-    /// `Inactive` on the given parallel units.
+    /// `Inactive` on the given workers.
     pub fn new(
         table_id: TableId,
         fragments: BTreeMap<FragmentId, Fragment>,

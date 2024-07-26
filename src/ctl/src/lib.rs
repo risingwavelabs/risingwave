@@ -403,7 +403,7 @@ enum MetaCommands {
     ClusterInfo,
     /// get source split info
     SourceSplitInfo,
-    /// Reschedule the parallel unit in the stream graph
+    /// Reschedule the actors in the stream graph
     ///
     /// The format is `fragment_id-[worker_id:count]+[worker_id:count]`
     /// You can provide either decreased `worker_ids` only or increased only, but decreased should be preceded by
@@ -457,7 +457,7 @@ enum MetaCommands {
     /// List all existing connections in the catalog
     ListConnections,
 
-    /// List fragment to parallel units mapping for serving
+    /// List fragment mapping for serving
     ListServingFragmentMapping,
 
     /// Unregister workers from the cluster

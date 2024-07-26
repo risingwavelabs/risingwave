@@ -320,26 +320,52 @@ impl VnodeWatermark {
         }
     }
 
-    pub fn to_protobuf(&self) -> PbVnodeWatermark {
-        PbVnodeWatermark {
-            watermark: self.watermark.to_vec(),
-            vnode_bitmap: Some(self.vnode_bitmap.to_protobuf()),
-        }
-    }
-
-    pub fn from_protobuf(pb: &PbVnodeWatermark) -> Self {
-        Self {
-            vnode_bitmap: Arc::new(Bitmap::from(pb.vnode_bitmap.as_ref().unwrap())),
-            watermark: Bytes::from(pb.watermark.clone()),
-        }
-    }
-
     pub fn vnode_bitmap(&self) -> &Bitmap {
         &self.vnode_bitmap
     }
 
     pub fn watermark(&self) -> &Bytes {
         &self.watermark
+    }
+
+    pub fn to_protobuf(&self) -> PbVnodeWatermark {
+        self.into()
+    }
+}
+
+impl From<PbVnodeWatermark> for VnodeWatermark {
+    fn from(pb: PbVnodeWatermark) -> Self {
+        Self {
+            vnode_bitmap: Arc::new(Bitmap::from(pb.vnode_bitmap.as_ref().unwrap())),
+            watermark: Bytes::from(pb.watermark),
+        }
+    }
+}
+
+impl From<&PbVnodeWatermark> for VnodeWatermark {
+    fn from(pb: &PbVnodeWatermark) -> Self {
+        Self {
+            vnode_bitmap: Arc::new(Bitmap::from(pb.vnode_bitmap.as_ref().unwrap())),
+            watermark: Bytes::from(pb.watermark.clone()),
+        }
+    }
+}
+
+impl From<VnodeWatermark> for PbVnodeWatermark {
+    fn from(watermark: VnodeWatermark) -> Self {
+        Self {
+            watermark: watermark.watermark.into(),
+            vnode_bitmap: Some(watermark.vnode_bitmap.to_protobuf()),
+        }
+    }
+}
+
+impl From<&VnodeWatermark> for PbVnodeWatermark {
+    fn from(watermark: &VnodeWatermark) -> Self {
+        Self {
+            watermark: watermark.watermark.to_vec(),
+            vnode_bitmap: Some(watermark.vnode_bitmap.to_protobuf()),
+        }
     }
 }
 
@@ -360,38 +386,6 @@ impl TableWatermarks {
             direction,
             watermarks: vec![(epoch, Arc::from(watermarks))],
         }
-    }
-
-    pub fn to_protobuf(&self) -> PbTableWatermarks {
-        PbTableWatermarks {
-            epoch_watermarks: self
-                .watermarks
-                .iter()
-                .map(|(epoch, watermarks)| PbEpochNewWatermarks {
-                    watermarks: watermarks.iter().map(VnodeWatermark::to_protobuf).collect(),
-                    epoch: *epoch,
-                })
-                .collect(),
-            is_ascending: match self.direction {
-                WatermarkDirection::Ascending => true,
-                WatermarkDirection::Descending => false,
-            },
-        }
-    }
-
-    pub fn estimated_encode_len(&self) -> usize {
-        self.watermarks.len() * size_of::<HummockEpoch>()
-            + self
-                .watermarks
-                .iter()
-                .map(|(_, watermarks)| {
-                    watermarks
-                        .iter()
-                        .map(|watermark| watermark.estimated_size())
-                        .sum::<usize>()
-                })
-                .sum::<usize>()
-            + size_of::<bool>() // for direction
     }
 
     pub fn add_new_epoch_watermarks(
@@ -417,7 +411,7 @@ impl TableWatermarks {
                     let watermarks = epoch_watermark
                         .watermarks
                         .iter()
-                        .map(VnodeWatermark::from_protobuf)
+                        .map(VnodeWatermark::from)
                         .collect_vec();
                     (epoch, Arc::from(watermarks))
                 })
@@ -576,6 +570,115 @@ impl TableWatermarks {
         *self = TableWatermarks {
             watermarks: result_epoch_watermark,
             direction: self.direction,
+        }
+    }
+}
+
+impl TableWatermarks {
+    pub fn estimated_encode_len(&self) -> usize {
+        self.watermarks.len() * size_of::<HummockEpoch>()
+            + self
+                .watermarks
+                .iter()
+                .map(|(_, watermarks)| {
+                    watermarks
+                        .iter()
+                        .map(|watermark| watermark.estimated_size())
+                        .sum::<usize>()
+                })
+                .sum::<usize>()
+            + size_of::<bool>() // for direction
+    }
+
+    pub fn to_protobuf(&self) -> PbTableWatermarks {
+        self.into()
+    }
+}
+
+impl From<&PbTableWatermarks> for TableWatermarks {
+    fn from(pb: &PbTableWatermarks) -> Self {
+        Self {
+            watermarks: pb
+                .epoch_watermarks
+                .iter()
+                .map(|epoch_watermark| {
+                    let epoch = epoch_watermark.epoch;
+                    let watermarks = epoch_watermark
+                        .watermarks
+                        .iter()
+                        .map(VnodeWatermark::from)
+                        .collect();
+                    (epoch, watermarks)
+                })
+                .collect(),
+            direction: if pb.is_ascending {
+                WatermarkDirection::Ascending
+            } else {
+                WatermarkDirection::Descending
+            },
+        }
+    }
+}
+
+impl From<&TableWatermarks> for PbTableWatermarks {
+    fn from(table_watermarks: &TableWatermarks) -> Self {
+        Self {
+            epoch_watermarks: table_watermarks
+                .watermarks
+                .iter()
+                .map(|(epoch, watermarks)| PbEpochNewWatermarks {
+                    watermarks: watermarks.iter().map(|wm| wm.into()).collect(),
+                    epoch: *epoch,
+                })
+                .collect(),
+            is_ascending: match table_watermarks.direction {
+                WatermarkDirection::Ascending => true,
+                WatermarkDirection::Descending => false,
+            },
+        }
+    }
+}
+
+impl From<PbTableWatermarks> for TableWatermarks {
+    fn from(pb: PbTableWatermarks) -> Self {
+        Self {
+            watermarks: pb
+                .epoch_watermarks
+                .into_iter()
+                .map(|epoch_watermark| {
+                    let epoch = epoch_watermark.epoch;
+                    let watermarks = epoch_watermark
+                        .watermarks
+                        .into_iter()
+                        .map(VnodeWatermark::from)
+                        .collect();
+                    (epoch, watermarks)
+                })
+                .collect(),
+            direction: if pb.is_ascending {
+                WatermarkDirection::Ascending
+            } else {
+                WatermarkDirection::Descending
+            },
+        }
+    }
+}
+
+impl From<TableWatermarks> for PbTableWatermarks {
+    fn from(table_watermarks: TableWatermarks) -> Self {
+        Self {
+            epoch_watermarks: table_watermarks
+                .watermarks
+                .into_iter()
+                .map(|(epoch, watermarks)| PbEpochNewWatermarks {
+                    watermarks: watermarks.iter().map(PbVnodeWatermark::from).collect(),
+                    epoch,
+                })
+                .collect(),
+            is_ascending: match table_watermarks.direction {
+                WatermarkDirection::Ascending => true,
+                WatermarkDirection::Descending => false,
+            },
         }
     }
 }
