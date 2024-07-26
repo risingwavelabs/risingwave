@@ -27,7 +27,7 @@ use risingwave_expr::{build_aggregate, Result};
 /// Then we also need to store the `relative_error` of the sketch, so we can report it
 /// in an internal table, if it changes.
 /// TODO(kwannoel): We also need to test 0 < x < 1 range.
-#[build_aggregate("approx_percentile(float8) -> float8")]
+#[build_aggregate("approx_percentile(float8) -> float8", state = "bytea")]
 fn build(agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
     let quantile = agg.direct_args[0]
         .literal()
@@ -156,7 +156,6 @@ impl AggregateFunction for ApproxPercentile {
         let Some(scalar_state) = datum else {
             return Ok(AggregateState::Any(Box::new(state)));
         };
-        println!("scalar state: {:?}", scalar_state);
         let encoded_state: Box<[u8]> = scalar_state.into_bytea();
         let mut cursor = 0;
         state.count = u64::from_be_bytes(encoded_state[cursor..cursor + 8].try_into().unwrap());
@@ -164,7 +163,7 @@ impl AggregateFunction for ApproxPercentile {
         while cursor < encoded_state.len() {
             let bucket_id =
                 i32::from_be_bytes(encoded_state[cursor..cursor + 4].try_into().unwrap());
-            cursor += 8;
+            cursor += 4;
             let count = u64::from_be_bytes(encoded_state[cursor..cursor + 8].try_into().unwrap());
             cursor += 8;
             state.buckets.insert(bucket_id, count);
