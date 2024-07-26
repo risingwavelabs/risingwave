@@ -33,6 +33,7 @@ use crate::with_options::Get;
 
 pub const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
 pub const SCHEMA_REGISTRY_PASSWORD: &str = "schema.registry.password";
+pub const SCHEMA_REGISTRY_CA: &str = "schema.registry.ca";
 
 pub const SCHEMA_REGISTRY_MAX_DELAY_KEY: &str = "schema.registry.max.delay.sec";
 pub const SCHEMA_REGISTRY_BACKOFF_DURATION_KEY: &str = "schema.registry.backoff.duration.ms";
@@ -67,6 +68,7 @@ impl Default for SchemaRegistryRetryConfig {
 pub struct SchemaRegistryConfig {
     username: Option<String>,
     password: Option<String>,
+    ca_option: Option<String>,
 
     retry_config: SchemaRegistryRetryConfig,
 }
@@ -95,6 +97,7 @@ impl<T: Get> From<&T> for SchemaRegistryConfig {
                     .and_then(|v| v.parse::<usize>().ok())
                     .unwrap_or(DEFAULT_RETRIES_MAX),
             },
+            ca_option: props.get(SCHEMA_REGISTRY_CA).cloned(),
         }
     }
 }
@@ -157,7 +160,23 @@ impl Client {
         }
 
         // `unwrap` as the builder is not affected by any input right now
-        let inner = reqwest::Client::builder().build().unwrap();
+        let mut client_builder = reqwest::Client::builder();
+        if let Some(ca_path) = client_config.ca_option.as_ref() {
+            if ca_path.eq_ignore_ascii_case("ignore") {
+                client_builder = client_builder.danger_accept_invalid_certs(true);
+            } else {
+                client_builder = client_builder.add_root_certificate(
+                    reqwest::Certificate::from_pem(&std::fs::read(ca_path).map_err(|e| {
+                        invalid_option_error!("read ca file error: {}", e.as_report())
+                    })?)
+                    .map_err(|e| invalid_option_error!("parse ca file error: {}", e.as_report()))?,
+                );
+            }
+        }
+
+        let inner = client_builder.build().map_err(|e| {
+            invalid_option_error!("build schema registry client error: {}", e.as_report())
+        })?;
 
         Ok(Client {
             inner,
@@ -320,6 +339,7 @@ mod tests {
                 username: None,
                 password: None,
                 retry_config: SchemaRegistryRetryConfig::default(),
+                ca_option: None,
             },
         )
         .unwrap();
