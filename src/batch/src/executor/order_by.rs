@@ -677,11 +677,11 @@ mod tests {
                 DecimalArray::from_iter([None, Some((-3).into()), None, None, Some(7.into())])
                     .into_ref(),
                 DateArray::from_iter([
-                    Some(Date::with_days(123).unwrap()),
-                    Some(Date::with_days(789).unwrap()),
-                    Some(Date::with_days(456).unwrap()),
+                    Some(Date::with_days_since_ce(123).unwrap()),
+                    Some(Date::with_days_since_ce(789).unwrap()),
+                    Some(Date::with_days_since_ce(456).unwrap()),
                     None,
-                    Some(Date::with_days(345).unwrap()),
+                    Some(Date::with_days_since_ce(345).unwrap()),
                 ])
                 .into_ref(),
             ],
@@ -698,11 +698,11 @@ mod tests {
                 DecimalArray::from_iter([Some(7.into()), Some((-3).into()), None, None, None])
                     .into_ref(),
                 DateArray::from_iter([
-                    Some(Date::with_days(345).unwrap()),
-                    Some(Date::with_days(789).unwrap()),
+                    Some(Date::with_days_since_ce(345).unwrap()),
+                    Some(Date::with_days_since_ce(789).unwrap()),
                     None,
-                    Some(Date::with_days(123).unwrap()),
-                    Some(Date::with_days(456).unwrap()),
+                    Some(Date::with_days_since_ce(123).unwrap()),
+                    Some(Date::with_days_since_ce(456).unwrap()),
                 ])
                 .into_ref(),
             ],
