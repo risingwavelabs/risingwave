@@ -697,7 +697,7 @@ impl GlobalBarrierManager {
                                 || self.state.inflight_actor_infos.actor_map.contains_key(&worker_id) {
                                 self.failure_recovery(e).await;
                             } else {
-                                warn!(?e, worker_id, "no barrier to collect from worker, ignore err");
+                                warn!(e = ?e.as_report(), worker_id, "no barrier to collect from worker, ignore err");
                             }
                         }
                     }
