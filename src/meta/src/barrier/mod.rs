@@ -577,6 +577,14 @@ impl GlobalBarrierManager {
             self.context
                 .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap));
             let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
+            crate::telemetry::report_event(
+                risingwave_pb::telemetry::TelemetryEventStage::Recovery,
+                "normal_recovery",
+                0,
+                None,
+                None,
+                None,
+            );
 
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
             let paused_reason = paused.then_some(PausedReason::Manual);
@@ -808,6 +816,15 @@ impl GlobalBarrierManager {
                 prev_epoch = prev_epoch.value().0
             );
 
+            crate::telemetry::report_event(
+                risingwave_pb::telemetry::TelemetryEventStage::Recovery,
+                "failure_recovery",
+                0,
+                None,
+                None,
+                None,
+            );
+
             // No need to clean dirty tables for barrier recovery,
             // The foreground stream job should cleanup their own tables.
             self.recovery(None, Some(err)).instrument(span).await;
@@ -830,6 +847,15 @@ impl GlobalBarrierManager {
             "adhoc_recovery",
             error = %err.as_report(),
             prev_epoch = prev_epoch.value().0
+        );
+
+        crate::telemetry::report_event(
+            risingwave_pb::telemetry::TelemetryEventStage::Recovery,
+            "adhoc_recovery",
+            0,
+            None,
+            None,
+            None,
         );
 
         // No need to clean dirty tables for barrier recovery,
