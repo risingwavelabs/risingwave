@@ -217,7 +217,8 @@ impl AggregateFunction for ApproxPercentile {
             cursor += 8;
             state.neg_buckets.insert(bucket_id, count);
         }
-        while cursor < encoded_state.len() {
+        let pos_buckets_end = encoded_state.len();
+        while cursor < pos_buckets_end {
             let bucket_id =
                 i32::from_be_bytes(encoded_state[cursor..cursor + 4].try_into().unwrap());
             cursor += 4;
