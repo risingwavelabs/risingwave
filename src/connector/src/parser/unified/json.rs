@@ -261,7 +261,7 @@ impl JsonParseOptions {
                 DataType::Int16,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) => value.try_as_i16().map_err(|_| create_error())?.into(),
-            (DataType::Int16, ValueType::Bool) => (value.as_bool().unwrap() as i16).into(),
+
             (DataType::Int16, ValueType::String)
                 if matches!(
                     self.numeric_handling,
@@ -282,7 +282,7 @@ impl JsonParseOptions {
                 DataType::Int32,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) => value.try_as_i32().map_err(|_| create_error())?.into(),
-            (DataType::Int32, ValueType::Bool) => (value.as_bool().unwrap() as i32).into(),
+
             (DataType::Int32, ValueType::String)
                 if matches!(
                     self.numeric_handling,
@@ -303,7 +303,7 @@ impl JsonParseOptions {
                 DataType::Int64,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) => value.try_as_i64().map_err(|_| create_error())?.into(),
-            (DataType::Int64, ValueType::Bool) => (value.as_bool().unwrap() as i64).into(),
+
             (DataType::Int64, ValueType::String)
                 if matches!(
                     self.numeric_handling,
