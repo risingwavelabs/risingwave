@@ -390,14 +390,16 @@ impl CheckpointControl {
         }
     }
 
-    fn report_collect_failure(&self, worker_id: WorkerId, e: &MetaError) {
+    /// Return whether the collect failure on `worker_id` should trigger a recovery
+    fn on_collect_failure(&self, worker_id: WorkerId, e: &MetaError) -> bool {
         for epoch_node in self.command_ctx_queue.values() {
             if epoch_node.state.node_to_collect.contains(&worker_id) {
                 self.context
                     .report_collect_failure(&epoch_node.command_ctx, e);
-                break;
+                return true;
             }
         }
+        false
     }
 }
 
@@ -691,8 +693,12 @@ impl GlobalBarrierManager {
 
                         }
                         Err(e) => {
-                            self.checkpoint_control.report_collect_failure(worker_id, &e);
-                            self.failure_recovery(e).await;
+                            if self.checkpoint_control.on_collect_failure(worker_id, &e)
+                                || self.state.inflight_actor_infos.actor_map.contains_key(&worker_id) {
+                                self.failure_recovery(e).await;
+                            } else {
+                                warn!(?e, worker_id, "no barrier to collect from worker, ignore err");
+                            }
                         }
                     }
                 }
