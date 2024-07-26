@@ -536,17 +536,54 @@ where
     Err(results_err)
 }
 
-fn merge_node_rpc_errors<E: Error>(
+fn merge_node_rpc_errors<E: Error + Send + Sync + 'static>(
     message: &str,
     errors: impl IntoIterator<Item = (WorkerId, E)>,
 ) -> MetaError {
+    use std::error::request_value;
     use std::fmt::Write;
 
+    use risingwave_common::error::tonic::extra::Score;
+
+    let errors = errors.into_iter().collect_vec();
+
+    if errors.is_empty() {
+        return anyhow!(message.to_owned()).into();
+    }
+
+    // Create the error from the single error.
+    let single_error = |(worker_id, e)| {
+        anyhow::Error::from(e)
+            .context(format!("{message}, in worker node {worker_id}"))
+            .into()
+    };
+
+    if errors.len() == 1 {
+        return single_error(errors.into_iter().next().unwrap());
+    }
+
+    // Find the error with the highest score.
+    let max_score = errors
+        .iter()
+        .filter_map(|(_, e)| request_value::<Score>(e))
+        .max();
+
+    if let Some(max_score) = max_score {
+        let mut errors = errors;
+        let max_scored = errors
+            .extract_if(|(_, e)| request_value::<Score>(e) == Some(max_score))
+            .next()
+            .unwrap();
+
+        return single_error(max_scored);
+    }
+
+    // The errors do not have scores, so simply concatenate them.
     let concat: String = errors
         .into_iter()
-        .fold(format!("{message}:"), |mut s, (w, e)| {
-            write!(&mut s, " worker node {}, {};", w, e.as_report()).unwrap();
+        .fold(format!("{message}: "), |mut s, (w, e)| {
+            write!(&mut s, " in worker node {}, {};", w, e.as_report()).unwrap();
             s
         });
-    anyhow::anyhow!(concat).into()
+    anyhow!(concat).into()
 }

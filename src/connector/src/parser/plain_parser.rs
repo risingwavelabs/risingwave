@@ -17,8 +17,8 @@ use risingwave_common::bail;
 use super::unified::json::TimestamptzHandling;
 use super::unified::kv_event::KvEvent;
 use super::{
-    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType,
-    SourceStreamChunkRowWriter, SpecificParserConfig,
+    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, SourceStreamChunkRowWriter,
+    SpecificParserConfig,
 };
 use crate::error::ConnectorResult;
 use crate::parser::bytes_parser::BytesAccessBuilder;
@@ -65,7 +65,7 @@ impl PlainParser {
             | EncodingProperties::Protobuf(_)
             | EncodingProperties::Avro(_)
             | EncodingProperties::Bytes(_) => {
-                AccessBuilderImpl::new_default(props.encoding_config, EncodingType::Value).await?
+                AccessBuilderImpl::new_default(props.encoding_config).await?
             }
             _ => bail!("Unsupported encoding for Plain"),
         };

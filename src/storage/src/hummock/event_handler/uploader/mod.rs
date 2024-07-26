@@ -965,7 +965,12 @@ impl UploaderData {
             .map(|task_id| {
                 let (sst, spill_table_ids) =
                     self.spilled_data.remove(task_id).expect("should exist");
-                assert_eq!(spill_table_ids, table_ids);
+                assert!(
+                    spill_table_ids.is_subset(&table_ids),
+                    "spilled tabled ids {:?} not a subset of sync table id {:?}",
+                    spill_table_ids,
+                    table_ids
+                );
                 sst
             })
             .collect();
@@ -1160,6 +1165,7 @@ impl HummockUploader {
         let UploaderState::Working(data) = &mut self.state else {
             return;
         };
+        debug!(epoch, ?table_ids, "start epoch");
         for table_id in &table_ids {
             let table_data = data
                 .unsync_data

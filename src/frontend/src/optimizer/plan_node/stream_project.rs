@@ -22,7 +22,7 @@ use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{analyze_monotonicity, monotonicity_variants};
+use crate::optimizer::property::{analyze_monotonicity, monotonicity_variants, MonotonicityMap};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -82,19 +82,21 @@ impl StreamProject {
         let mut watermark_derivations = vec![];
         let mut nondecreasing_exprs = vec![];
         let mut out_watermark_columns = FixedBitSet::with_capacity(core.exprs.len());
+        let mut out_monotonicity_map = MonotonicityMap::new();
         for (expr_idx, expr) in core.exprs.iter().enumerate() {
             use monotonicity_variants::*;
             match analyze_monotonicity(expr) {
-                Inherent(Constant) => {
-                    // XXX(rc): we can produce one watermark on each recovery for this case.
-                }
                 Inherent(monotonicity) => {
-                    if monotonicity.is_non_decreasing() {
+                    out_monotonicity_map.insert(expr_idx, monotonicity);
+                    if monotonicity.is_non_decreasing() && !monotonicity.is_constant() {
+                        // TODO(rc): may be we should also derive watermark for constant later
                         nondecreasing_exprs.push(expr_idx); // to produce watermarks
                         out_watermark_columns.insert(expr_idx);
                     }
                 }
                 FollowingInput(input_idx) => {
+                    let in_monotonicity = input.columns_monotonicity()[input_idx];
+                    out_monotonicity_map.insert(expr_idx, in_monotonicity);
                     if input.watermark_columns().contains(input_idx) {
                         watermark_derivations.push((input_idx, expr_idx)); // to propagate watermarks
                         out_watermark_columns.insert(expr_idx);
@@ -111,6 +113,7 @@ impl StreamProject {
             input.append_only(),
             input.emit_on_window_close(),
             out_watermark_columns,
+            out_monotonicity_map,
         );
 
         StreamProject {

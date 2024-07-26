@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use std::error::Error;
-use std::io::Write;
+use std::io::{Cursor, Write};
 use std::str::FromStr;
 
+use anyhow::Context;
+use byteorder::{BigEndian, ReadBytesExt};
 use bytes::BytesMut;
 use chrono::{DateTime, Datelike, TimeZone, Utc};
 use chrono_tz::Tz;
@@ -134,8 +136,11 @@ impl Timestamptz {
             .map_err(|_| format!("'{time_zone}' is not a valid timezone"))
     }
 
-    pub fn from_protobuf(timestamp_micros: i64) -> ArrayResult<Self> {
-        Ok(Self(timestamp_micros))
+    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<Timestamptz> {
+        let micros = cur
+            .read_i64::<BigEndian>()
+            .context("failed to read i64 from Timestamptz buffer")?;
+        Ok(Self(micros))
     }
 
     pub fn to_protobuf(self, output: &mut impl Write) -> ArrayResult<usize> {

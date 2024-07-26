@@ -17,21 +17,15 @@
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
 
-use std::collections::{BTreeSet, HashMap};
-use std::sync::Arc;
+use std::collections::HashMap;
 
-use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::compact_task;
-use risingwave_pb::hummock::hummock_version::Levels;
 
 use super::{CompactionSelector, DynamicLevelSelectorCore};
 use crate::hummock::compaction::picker::{SpaceReclaimCompactionPicker, SpaceReclaimPickerState};
-use crate::hummock::compaction::{
-    create_compaction_task, CompactionDeveloperConfig, CompactionTask, LocalSelectorStatistic,
-};
-use crate::hummock::level_handler::LevelHandler;
-use crate::hummock::model::CompactionGroup;
+use crate::hummock::compaction::selector::CompactionSelectorContext;
+use crate::hummock::compaction::{create_compaction_task, CompactionTask};
 
 #[derive(Default)]
 pub struct SpaceReclaimCompactionSelector {
@@ -42,14 +36,16 @@ impl CompactionSelector for SpaceReclaimCompactionSelector {
     fn pick_compaction(
         &mut self,
         task_id: HummockCompactionTaskId,
-        group: &CompactionGroup,
-        levels: &Levels,
-        member_table_ids: &BTreeSet<TableId>,
-        level_handlers: &mut [LevelHandler],
-        _selector_stats: &mut LocalSelectorStatistic,
-        _table_id_to_options: HashMap<u32, TableOption>,
-        developer_config: Arc<CompactionDeveloperConfig>,
+        context: CompactionSelectorContext<'_>,
     ) -> Option<CompactionTask> {
+        let CompactionSelectorContext {
+            group,
+            levels,
+            member_table_ids,
+            level_handlers,
+            developer_config,
+            ..
+        } = context;
         let dynamic_level_core =
             DynamicLevelSelectorCore::new(group.compaction_config.clone(), developer_config);
         let mut picker = SpaceReclaimCompactionPicker::new(

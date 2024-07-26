@@ -23,9 +23,14 @@ use futures::TryFutureExt;
 use iceberg::io::{
     FileIOBuilder, FileMetadata, FileRead, S3_ACCESS_KEY_ID, S3_REGION, S3_SECRET_ACCESS_KEY,
 };
+use iceberg::{Error, ErrorKind};
+use opendal::layers::RetryLayer;
+use opendal::services::S3;
+use opendal::Operator;
 use parquet::arrow::async_reader::{AsyncFileReader, MetadataLoader};
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
 use parquet::file::metadata::ParquetMetaData;
+use url::Url;
 
 pub struct ParquetFileReader<R: FileRead> {
     meta: FileMetadata,
@@ -82,4 +87,46 @@ pub async fn create_parquet_stream_builder(
     ParquetRecordBatchStreamBuilder::new(parquet_file_reader)
         .await
         .map_err(|e| anyhow!(e))
+}
+
+pub async fn list_s3_directory(
+    s3_region: String,
+    s3_access_key: String,
+    s3_secret_key: String,
+    dir: String,
+) -> Result<Vec<String>, anyhow::Error> {
+    let url = Url::parse(&dir)?;
+    let bucket = url.host_str().ok_or_else(|| {
+        Error::new(
+            ErrorKind::DataInvalid,
+            format!("Invalid s3 url: {}, missing bucket", dir),
+        )
+    })?;
+
+    let prefix = format!("s3://{}/", bucket);
+    if dir.starts_with(&prefix) {
+        let mut builder = S3::default();
+        builder
+            .region(&s3_region)
+            .access_key_id(&s3_access_key)
+            .secret_access_key(&s3_secret_key)
+            .bucket(bucket);
+        let op = Operator::new(builder)?
+            .layer(RetryLayer::default())
+            .finish();
+
+        op.list(&dir[prefix.len()..])
+            .await
+            .map_err(|e| anyhow!(e))
+            .map(|list| {
+                list.into_iter()
+                    .map(|entry| prefix.to_string() + entry.path())
+                    .collect()
+            })
+    } else {
+        Err(Error::new(
+            ErrorKind::DataInvalid,
+            format!("Invalid s3 url: {}, should start with {}", dir, prefix),
+        ))?
+    }
 }

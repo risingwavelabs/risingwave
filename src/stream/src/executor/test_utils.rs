@@ -277,7 +277,7 @@ pub mod agg_executor {
     use risingwave_common::hash::SerializedKey;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-    use risingwave_expr::aggregate::{AggCall, AggKind};
+    use risingwave_expr::aggregate::{AggCall, AggKind, PbAggKind};
     use risingwave_pb::stream_plan::PbAggNodeVersion;
     use risingwave_storage::StateStore;
 
@@ -328,7 +328,7 @@ pub mod agg_executor {
         is_append_only: bool,
     ) -> AggStateStorage<S> {
         match agg_call.kind {
-            AggKind::Min | AggKind::Max if !is_append_only => {
+            AggKind::Builtin(PbAggKind::Min | PbAggKind::Max) if !is_append_only => {
                 let input_fields = input_ref.schema().fields();
 
                 let mut column_descs = Vec::new();
@@ -354,7 +354,7 @@ pub mod agg_executor {
                     add_column(*idx, input_fields[*idx].data_type(), None);
                 }
 
-                add_column(agg_call.args.val_indices()[0], agg_call.args.arg_types()[0].clone(), if agg_call.kind == AggKind::Max {
+                add_column(agg_call.args.val_indices()[0], agg_call.args.arg_types()[0].clone(), if matches!(agg_call.kind, AggKind::Builtin(PbAggKind::Max)) {
                     Some(OrderType::descending())
                 } else {
                     Some(OrderType::ascending())
@@ -374,13 +374,15 @@ pub mod agg_executor {
 
                 AggStateStorage::MaterializedInput { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns, None), order_columns }
             }
-            AggKind::Min /* append only */
-            | AggKind::Max /* append only */
-            | AggKind::Sum
-            | AggKind::Sum0
-            | AggKind::Count
-            | AggKind::Avg
-            | AggKind::ApproxCountDistinct => {
+            AggKind::Builtin(
+                PbAggKind::Min /* append only */
+                | PbAggKind::Max /* append only */
+                | PbAggKind::Sum
+                | PbAggKind::Sum0
+                | PbAggKind::Count
+                | PbAggKind::Avg
+                | PbAggKind::ApproxCountDistinct
+            ) => {
                 AggStateStorage::Value
             }
             _ => {

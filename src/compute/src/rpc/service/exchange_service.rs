@@ -24,7 +24,7 @@ use risingwave_pb::task_service::{
     permits, GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits,
 };
 use risingwave_stream::executor::exchange::permit::{MessageWithPermits, Receiver};
-use risingwave_stream::executor::Message;
+use risingwave_stream::executor::DispatcherMessage;
 use risingwave_stream::task::LocalStreamManager;
 use thiserror_ext::AsReport;
 use tokio_stream::wrappers::ReceiverStream;
@@ -169,21 +169,14 @@ impl ExchangeServiceImpl {
                 Either::Left(permits_to_add) => {
                     permits.add_permits(permits_to_add);
                 }
-                Either::Right(MessageWithPermits {
-                    mut message,
-                    permits,
-                }) => {
-                    // Erase the mutation of the barrier to avoid decoding in remote side.
-                    if let Message::Barrier(barrier) = &mut message {
-                        barrier.mutation = None;
-                    }
+                Either::Right(MessageWithPermits { message, permits }) => {
                     let proto = message.to_protobuf();
                     // forward the acquired permit to the downstream
                     let response = GetStreamResponse {
                         message: Some(proto),
                         permits: Some(PbPermits { value: permits }),
                     };
-                    let bytes = Message::get_encoded_len(&response);
+                    let bytes = DispatcherMessage::get_encoded_len(&response);
 
                     yield response;
 

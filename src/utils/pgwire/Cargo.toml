@@ -22,7 +22,7 @@ bytes = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = { workspace = true }
 jsonwebtoken = "9"
-openssl = "0.10.60"
+openssl = "0.10.66"
 panic-message = "0.3"
 parking_lot = { workspace = true }
 reqwest = "0.12.2"

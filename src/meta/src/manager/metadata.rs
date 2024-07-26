@@ -29,7 +29,7 @@ use risingwave_pb::stream_plan::{PbDispatchStrategy, StreamActor};
 use risingwave_pb::stream_service::BuildActorInfo;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::oneshot;
-use tokio::time::sleep;
+use tokio::time::{sleep, Instant};
 use tracing::warn;
 
 use crate::barrier::Reschedule;
@@ -104,14 +104,21 @@ impl ActiveStreamingWorkerNodes {
     pub(crate) async fn wait_changed(
         &mut self,
         verbose_internal: Duration,
+        verbose_timeout: Duration,
         verbose_fn: impl Fn(&Self),
-    ) -> ActiveStreamingWorkerChange {
+    ) -> Option<ActiveStreamingWorkerChange> {
+        let start = Instant::now();
         loop {
             if let Either::Left((change, _)) =
                 select(pin!(self.changed()), pin!(sleep(verbose_internal))).await
             {
-                break change;
+                break Some(change);
             }
+
+            if start.elapsed() > verbose_timeout {
+                break None;
+            }
+
             verbose_fn(self)
         }
     }
@@ -459,7 +466,7 @@ impl MetadataManager {
     pub async fn get_upstream_root_fragments(
         &self,
         upstream_table_ids: &HashSet<TableId>,
-    ) -> MetaResult<HashMap<TableId, Fragment>> {
+    ) -> MetaResult<(HashMap<TableId, Fragment>, HashMap<ActorId, u32>)> {
         match self {
             MetadataManager::V1(mgr) => {
                 mgr.fragment_manager
@@ -467,7 +474,7 @@ impl MetadataManager {
                     .await
             }
             MetadataManager::V2(mgr) => {
-                let upstream_root_fragments = mgr
+                let (upstream_root_fragments, actors) = mgr
                     .catalog_controller
                     .get_upstream_root_fragments(
                         upstream_table_ids
@@ -476,10 +483,19 @@ impl MetadataManager {
                             .collect(),
                     )
                     .await?;
-                Ok(upstream_root_fragments
+
+                let actors = actors
                     .into_iter()
-                    .map(|(id, fragment)| ((id as u32).into(), fragment))
-                    .collect())
+                    .map(|(actor, worker)| (actor as u32, worker as u32))
+                    .collect();
+
+                Ok((
+                    upstream_root_fragments
+                        .into_iter()
+                        .map(|(id, fragment)| ((id as u32).into(), fragment))
+                        .collect(),
+                    actors,
+                ))
             }
         }
     }
@@ -541,7 +557,7 @@ impl MetadataManager {
     pub async fn get_downstream_chain_fragments(
         &self,
         job_id: u32,
-    ) -> MetaResult<Vec<(PbDispatchStrategy, PbFragment)>> {
+    ) -> MetaResult<(Vec<(PbDispatchStrategy, PbFragment)>, HashMap<ActorId, u32>)> {
         match &self {
             MetadataManager::V1(mgr) => {
                 mgr.fragment_manager
@@ -549,9 +565,17 @@ impl MetadataManager {
                     .await
             }
             MetadataManager::V2(mgr) => {
-                mgr.catalog_controller
+                let (fragments, actors) = mgr
+                    .catalog_controller
                     .get_downstream_chain_fragments(job_id as _)
-                    .await
+                    .await?;
+
+                let actors = actors
+                    .into_iter()
+                    .map(|(actor, worker)| (actor as u32, worker as u32))
+                    .collect();
+
+                Ok((fragments, actors))
             }
         }
     }
@@ -853,6 +877,17 @@ impl MetadataManager {
         match self {
             MetadataManager::V1(mgr) => mgr.wait_streaming_job_finished(job).await,
             MetadataManager::V2(mgr) => mgr.wait_streaming_job_finished(job.id() as _).await,
+        }
+    }
+
+    pub(crate) async fn notify_finish_failed(&self, err: &MetaError) {
+        match self {
+            MetadataManager::V1(mgr) => {
+                mgr.notify_finish_failed(err).await;
+            }
+            MetadataManager::V2(mgr) => {
+                mgr.notify_finish_failed(err).await;
+            }
         }
     }
 }

@@ -436,8 +436,12 @@ message AggCall {
     LAST_VALUE = 25;
     GROUPING = 26;
     INTERNAL_LAST_SEEN_VALUE = 27;
+    APPROX_PERCENTILE = 28;
+
     // user defined aggregate function
     USER_DEFINED = 100;
+    // wraps a scalar function that takes a list as input as an aggregate function.
+    WRAP_SCALAR = 101;
   }
   Type type = 1;
   repeated InputRef args = 2;
@@ -448,6 +452,8 @@ message AggCall {
   repeated Constant direct_args = 7;
   // optional. only used when the type is USER_DEFINED.
   UserDefinedFunctionMetadata udf = 8;
+  // optional. only used when the type is WRAP_SCALAR.
+  ExprNode scalar = 9;
 }
 
 message WindowFrame {
@@ -579,6 +585,7 @@ message UserDefinedFunction {
 message UserDefinedFunctionMetadata {
   repeated string arg_names = 8;
   repeated data.DataType arg_types = 3;
+  data.DataType return_type = 13;
   string language = 4;
   optional string link = 5;
   optional string identifier = 6;

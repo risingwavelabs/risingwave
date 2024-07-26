@@ -216,6 +216,7 @@ pub mod verify {
     use bytes::Bytes;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
@@ -537,6 +538,14 @@ pub mod verify {
             }
             ret
         }
+
+        fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+            let ret = self.actual.get_table_watermark(vnode);
+            if let Some(expected) = &self.expected {
+                assert_eq!(ret, expected.get_table_watermark(vnode));
+            }
+            ret
+        }
     }
 
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
@@ -827,6 +836,7 @@ pub mod boxed_state_store {
     use futures::FutureExt;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
 
@@ -979,6 +989,8 @@ pub mod boxed_state_store {
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
 
         fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap>;
+
+        fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes>;
     }
 
     #[async_trait::async_trait]
@@ -1047,6 +1059,10 @@ pub mod boxed_state_store {
         fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
             self.update_vnode_bitmap(vnodes)
         }
+
+        fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+            self.get_table_watermark(vnode)
+        }
     }
 
     pub type BoxDynamicDispatchedLocalStateStore = Box<dyn DynamicDispatchedLocalStateStore>;
@@ -1077,6 +1093,10 @@ pub mod boxed_state_store {
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
             self.deref().rev_iter(key_range, read_options)
+        }
+
+        fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+            self.deref().get_table_watermark(vnode)
         }
 
         fn insert(
