@@ -127,7 +127,7 @@ public class FlinkDynamicUtil {
                 throw Status.FAILED_PRECONDITION
                         .withDescription(
                                 String.format(
-                                        "Type mismatch. Name is %s, Sink is %s, RisingWave is %s",
+                                        "Data type mismatch for column `%s`. Flink side: `%s`, RisingWave side: `%s`.",
                                         columnDesc.getName(),
                                         flinkColumnMap.get(columnDesc.getName()),
                                         columnDesc.getDataType().getTypeName()))
