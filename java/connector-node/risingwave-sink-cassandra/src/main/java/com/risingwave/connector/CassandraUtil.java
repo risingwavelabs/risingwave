@@ -100,7 +100,7 @@ public class CassandraUtil {
                 throw Status.FAILED_PRECONDITION
                         .withDescription(
                                 String.format(
-                                        "Type mismatch, name is %s, cassandra is %s, rw is %s",
+                                        "Data type mismatch for column `%s`. Cassandra side: `%s`, RisingWave side: `%s`.",
                                         columnDesc.getName(),
                                         cassandraColumnDescMap.get(cql),
                                         columnDesc.getDataType().getTypeName()))
