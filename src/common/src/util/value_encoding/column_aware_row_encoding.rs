@@ -43,7 +43,7 @@ fn column_ids_are_sorted(column_ids: &[ColumnId]) -> bool {
             return false;
         }
     }
-    return true;
+    true
 }
 
 /// `RowEncoding` holds row-specific information for Column-Aware Encoding
@@ -189,7 +189,7 @@ impl Deserializer {
         column_with_default: impl Iterator<Item = (usize, Datum)>,
     ) -> Self {
         assert_eq!(column_ids.len(), schema.len());
-        assert!(column_ids_are_sorted(&column_ids));
+        assert!(column_ids_are_sorted(column_ids));
         Self {
             required_column_ids: column_ids.iter().map(|id| id.get_id()).collect(),
             schema,
@@ -216,7 +216,7 @@ impl ValueRowDeserializer for Deserializer {
         // initialize datums with default values
         let mut datums: Vec<Datum> = vec![None; self.schema.len()];
         for (i, datum) in &self.default_column_values {
-            datums[*i] = datum.clone();
+            datums[*i].clone_from(datum);
         }
 
         // The algorithm here leverages the fact that both `required_column_ids` and the encoded column ids are sorted
