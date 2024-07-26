@@ -1,0 +1,50 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+
+statement error
+create table t (m map (float, float));
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  invalid map key type: double precision
+
+
+statement ok
+create table t (
+    m1 map(varchar, float),
+    m2 map(int, bool),
+    m3 map(varchar, map(varchar, varchar)),
+    l map(varchar,int)[],
+    s struct<m map(varchar, struct<x int>)>,
+);
+
+
+statement error
+insert into t values (
+    map_from_entries(array['a','b','c'], array[1.0,2.0,3.0]::float[]),
+    map_from_entries(array[1,2,3], array[true,false,true]),
+    map_from_entries(array['a','b'],
+        array[
+            map_from_entries(array['a1'], array['a2']),
+            map_from_entries(array['b1'], array['b2'])
+        ]
+    ),
+    array[
+        map_from_entries(array['a','b','c'], array[1,2,3]),
+        map_from_entries(array['d','e','f'], array[4,5,6])
+    ],
+    row(
+        map_from_entries(array['a','b','c'], array[row(1),row(2),row(3)]::struct<x int>[])
+    )
+);
+----
+connection closed
+
+
+# FIXME:
+statement error
+insert into t(m1) values (map_from_entries(array['a','b','c'], array[1,2,3]));
+----
+connection closed
