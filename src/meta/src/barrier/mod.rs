@@ -25,7 +25,6 @@ use arc_swap::ArcSwap;
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
-use parking_lot::Mutex;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -47,6 +46,7 @@ use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgres
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::{Receiver, Sender};
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn, Instrument};
 
@@ -145,11 +145,15 @@ impl From<&BarrierManagerStatus> for PbRecoveryStatus {
     }
 }
 
+pub enum BarrierManagerRequest {
+    GetDdlProgress(Sender<HashMap<u32, DdlProgress>>),
+}
+
 #[derive(Clone)]
 pub struct GlobalBarrierManagerContext {
     status: Arc<ArcSwap<BarrierManagerStatus>>,
 
-    tracker: Arc<Mutex<CreateMviewProgressTracker>>,
+    request_tx: mpsc::UnboundedSender<BarrierManagerRequest>,
 
     metadata_manager: MetadataManager,
 
@@ -195,6 +199,8 @@ pub struct GlobalBarrierManager {
 
     checkpoint_control: CheckpointControl,
 
+    request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
+
     /// The `prev_epoch` of pending non checkpoint barriers
     pending_non_checkpoint_barriers: Vec<u64>,
 
@@ -215,15 +221,21 @@ struct CheckpointControl {
 
     hummock_version_stats: HummockVersionStats,
 
+    create_mview_tracker: CreateMviewProgressTracker,
+
     context: GlobalBarrierManagerContext,
 }
 
 impl CheckpointControl {
-    async fn new(context: GlobalBarrierManagerContext) -> Self {
+    async fn new(
+        context: GlobalBarrierManagerContext,
+        create_mview_tracker: CreateMviewProgressTracker,
+    ) -> Self {
         Self {
             command_ctx_queue: Default::default(),
             completing_command: CompletingCommand::None,
             hummock_version_stats: context.hummock_manager.get_version_stats().await,
+            create_mview_tracker,
             context,
         }
     }
@@ -403,6 +415,7 @@ impl CheckpointControl {
             }
             node.enqueue_time.observe_duration();
         }
+        self.create_mview_tracker.abort_all();
     }
 }
 
@@ -474,21 +487,23 @@ impl GlobalBarrierManager {
 
         let tracker = CreateMviewProgressTracker::default();
 
+        let (request_tx, request_rx) = mpsc::unbounded_channel();
+
         let context = GlobalBarrierManagerContext {
             status: Arc::new(ArcSwap::new(Arc::new(BarrierManagerStatus::Starting))),
+            request_tx,
             metadata_manager,
             hummock_manager,
             source_manager,
             scale_controller,
             sink_manager,
             metrics,
-            tracker: Arc::new(Mutex::new(tracker)),
             stream_rpc_manager,
             env: env.clone(),
         };
 
         let control_stream_manager = ControlStreamManager::new(context.clone());
-        let checkpoint_control = CheckpointControl::new(context.clone()).await;
+        let checkpoint_control = CheckpointControl::new(context.clone(), tracker).await;
 
         Self {
             enable_recovery,
@@ -498,6 +513,7 @@ impl GlobalBarrierManager {
             env,
             state: initial_invalid_state,
             checkpoint_control,
+            request_rx,
             pending_non_checkpoint_barriers: Vec::new(),
             active_streaming_nodes,
             control_stream_manager,
@@ -624,6 +640,21 @@ impl GlobalBarrierManager {
                 _ = &mut shutdown_rx => {
                     tracing::info!("Barrier manager is stopped");
                     break;
+                }
+
+                request = self.request_rx.recv() => {
+                    if let Some(request) = request {
+                        match request {
+                            BarrierManagerRequest::GetDdlProgress(result_tx) => {
+                                if result_tx.send(self.checkpoint_control.create_mview_tracker.gen_ddl_progress()).is_err() {
+                                    error!("failed to send get ddl progress");
+                                }
+                            }
+                        }
+                    } else {
+                        tracing::info!("end of request stream. meta node may be shutting down. Stop global barrier manager");
+                        return;
+                    }
                 }
 
                 changed_worker = self.active_streaming_nodes.changed() => {
@@ -813,7 +844,6 @@ impl GlobalBarrierManager {
     }
 
     async fn failure_recovery(&mut self, err: MetaError) {
-        self.context.tracker.lock().abort_all();
         self.checkpoint_control.clear_on_err(&err).await;
         self.pending_non_checkpoint_barriers.clear();
 
@@ -850,7 +880,6 @@ impl GlobalBarrierManager {
 
     async fn adhoc_recovery(&mut self) {
         let err = MetaErrorInner::AdhocRecovery.into();
-        self.context.tracker.lock().abort_all();
         self.checkpoint_control.clear_on_err(&err).await;
 
         self.context
@@ -1041,7 +1070,7 @@ struct BarrierCompleteOutput {
 impl CheckpointControl {
     fn apply_command_to_tracker(&mut self, epoch_node: &EpochNode) -> (bool, Vec<TrackingJob>) {
         let command_ctx = &epoch_node.command_ctx;
-        let mut tracker = self.context.tracker.lock();
+        let tracker = &mut self.create_mview_tracker;
         let new_tracking_job_info = if let Command::CreateStreamingJob {
             info,
             replace_table,
@@ -1190,8 +1219,14 @@ impl GlobalBarrierManagerContext {
         Ok(info)
     }
 
-    pub async fn get_ddl_progress(&self) -> Vec<DdlProgress> {
-        let mut ddl_progress = self.tracker.lock().gen_ddl_progress();
+    pub async fn get_ddl_progress(&self) -> MetaResult<Vec<DdlProgress>> {
+        let mut ddl_progress = {
+            let (tx, rx) = oneshot::channel();
+            self.request_tx
+                .send(BarrierManagerRequest::GetDdlProgress(tx))
+                .context("failed to send get ddl progress request")?;
+            rx.await.context("failed to receive get ddl progress")?
+        };
         // If not in tracker, means the first barrier not collected yet.
         // In that case just return progress 0.
         match &self.metadata_manager {
@@ -1227,7 +1262,7 @@ impl GlobalBarrierManagerContext {
             }
         }
 
-        ddl_progress.into_values().collect()
+        Ok(ddl_progress.into_values().collect())
     }
 }
 
