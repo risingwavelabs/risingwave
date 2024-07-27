@@ -1084,7 +1084,8 @@ mod tests {
                 meta_metrics.clone(),
                 stream_rpc_manager.clone(),
                 scale_controller.clone(),
-            );
+            )
+            .await;
 
             let stream_manager = GlobalStreamManager::new(
                 env.clone(),
