@@ -130,6 +130,8 @@ impl<S: StateStore> SourceExecutor<S> {
         let _ = tokio::task::spawn(async move {
             let mut schema_change_rx = rx;
             while let Some((schema_change, parser_tx)) = schema_change_rx.recv().await {
+                tracing::info!("recv a schema change envelope");
+
                 // handle schema change
                 if let Some(ref meta_client) = meta_client {
                     match meta_client

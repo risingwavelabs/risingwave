@@ -167,7 +167,8 @@ public class DbzChangeEventConsumer
             switch (eventType) {
                 case HEARTBEAT:
                     {
-                        var message = msgBuilder.build();
+                        var message =
+                                msgBuilder.setMsgType(CdcMessage.CdcMessageType.HEARTBEAT).build();
                         LOG.debug("heartbeat => {}", message.getOffset());
                         respBuilder.addEvents(message);
                         break;

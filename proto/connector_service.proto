@@ -152,6 +152,7 @@ message CdcMessage {
     DATA = 1;
     TRANSACTION_META = 2;
     SCHEMA_CHANGE = 3;
+    HEARTBEAT = 4;
   }
 
   // The value of the Debezium message

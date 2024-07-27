@@ -62,6 +62,8 @@ impl FrontendService for FrontendServiceImpl {
         request: RpcRequest<GetTableReplacePlanRequest>,
     ) -> Result<RpcResponse<GetTableReplacePlanResponse>, Status> {
         let req = request.into_inner();
+        tracing::info!("get_table_replace_plan for table {}", req.table_name);
+
         let table_change = req.table_change.expect("schema change message is required");
         let replace_plan =
             get_new_table_plan(table_change, req.table_name, req.database_id, req.owner).await?;

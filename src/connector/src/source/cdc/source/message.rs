@@ -24,6 +24,7 @@ pub enum CdcMessageType {
     Data,
     TransactionMeta,
     SchemaChange,
+    Heartbeat,
 }
 
 impl From<cdc_message::CdcMessageType> for CdcMessageType {
@@ -32,6 +33,7 @@ impl From<cdc_message::CdcMessageType> for CdcMessageType {
             cdc_message::CdcMessageType::Data => CdcMessageType::Data,
             cdc_message::CdcMessageType::TransactionMeta => CdcMessageType::TransactionMeta,
             cdc_message::CdcMessageType::SchemaChange => CdcMessageType::SchemaChange,
+            cdc_message::CdcMessageType::Heartbeat => CdcMessageType::Heartbeat,
             cdc_message::CdcMessageType::Unspecified => CdcMessageType::Unknown,
         }
     }

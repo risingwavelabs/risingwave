@@ -101,7 +101,7 @@ impl PlainParser {
             && let Some(data) = payload
         {
             match cdc_meta.msg_type {
-                CdcMessageType::Data => {
+                CdcMessageType::Data | CdcMessageType::Heartbeat => {
                     return self.parse_rows(key, Some(data), writer).await;
                 }
                 CdcMessageType::TransactionMeta => {
@@ -120,6 +120,7 @@ impl PlainParser {
                     };
                 }
                 CdcMessageType::SchemaChange => {
+                    tracing::info!("got schema change message");
                     let accessor = self
                         .schema_change_builder
                         .as_mut()
