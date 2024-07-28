@@ -159,6 +159,12 @@ pub fn parse_schema_change(
                 .as_string()
                 .unwrap();
 
+            let ty = jsonb
+                .access_object_field("type")
+                .unwrap()
+                .as_string()
+                .unwrap();
+
             println!("id: {}", id);
 
             let mut column_descs: Vec<ColumnDesc> = vec![];
@@ -206,6 +212,7 @@ pub fn parse_schema_change(
                         is_hidden: false,
                     })
                     .collect_vec(),
+                change_type: ty.as_str().into(),
             });
         }
 

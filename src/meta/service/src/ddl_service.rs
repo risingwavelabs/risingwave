@@ -940,7 +940,7 @@ impl DdlService for DdlServiceImpl {
             .first()
             .ok_or_else(|| MetaError::from(anyhow!("no frontend worker available")))?;
 
-        tracing::info!("get client for frontend {:?}", worker);
+        tracing::info!(">> get client for frontend {:?}", worker);
         let client = self
             .env
             .frontend_client_pool()
@@ -957,14 +957,14 @@ impl DdlService for DdlServiceImpl {
         for table_change in schema_change.table_changes {
             let cdc_table_name = table_change.cdc_table_name.clone();
 
-            tracing::info!("auto schema change cdc table: {}", cdc_table_name);
+            tracing::info!(">> auto schema change cdc table: {}", cdc_table_name);
 
             // get the table catalog corresponding to the cdc table
             let tables: Vec<Table> = self
                 .metadata_manager
                 .get_table_catalog_by_cdc_table_name(cdc_table_name.replace("\"", ""))
                 .await?;
-            tracing::info!("number of table to replace: {}", tables.len());
+            tracing::info!(">> number of table to replace: {}", tables.len());
 
             for table in tables {
                 // send a request to the frontend to get the ReplaceTablePlan
@@ -991,7 +991,7 @@ impl DdlService for DdlServiceImpl {
                             plan,
                         )))
                         .await?;
-                    tracing::info!("replace table {} success", table.id);
+                    tracing::info!(">> replace table {} success", table.id);
                 }
             }
         }

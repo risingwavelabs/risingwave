@@ -98,7 +98,6 @@ pub async fn get_new_table_definition_for_cdc_table(
     }
 
     // since the DDL is committed on upstream, so we can safely replace the original columns with new columns
-    // replace original columns with new columns
     let mut new_column_defs = vec![];
     for col in new_columns.into_iter() {
         let ty = to_ast_data_type(col.data_type())?;
@@ -118,6 +117,7 @@ fn to_ast_data_type(ty: &DataType) -> Result<AstDataType> {
         DataType::Float32 => Ok(AstDataType::Real),
         DataType::Float64 => Ok(AstDataType::Double),
         DataType::Date => Ok(AstDataType::Date),
+        DataType::Varchar => Ok(AstDataType::Varchar),
         DataType::Time => Ok(AstDataType::Time(false)),
         DataType::Timestamp => Ok(AstDataType::Timestamp(false)),
         DataType::Timestamptz => Ok(AstDataType::Timestamp(true)),

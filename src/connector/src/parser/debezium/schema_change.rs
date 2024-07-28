@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::ColumnCatalog;
+use risingwave_pb::ddl_service::table_schema_change::TableChangeType as PbTableChangeType;
 use risingwave_pb::ddl_service::{
     SchemaChangeEnvelope as PbSchemaChangeEnvelope, TableSchemaChange as PbTableSchemaChange,
 };
@@ -22,10 +23,42 @@ pub struct SchemaChangeEnvelope {
     pub table_changes: Vec<TableSchemaChange>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum TableChangeType {
+    Unspecified,
+    Alter,
+}
+
+impl TableChangeType {
+    pub fn from_proto(value: PbTableChangeType) -> Self {
+        match value {
+            PbTableChangeType::Alter => TableChangeType::Alter,
+            PbTableChangeType::Unspecified => TableChangeType::Unspecified,
+        }
+    }
+
+    pub fn to_proto(self) -> PbTableChangeType {
+        match self {
+            TableChangeType::Alter => PbTableChangeType::Alter,
+            TableChangeType::Unspecified => PbTableChangeType::Unspecified,
+        }
+    }
+}
+
+impl From<&str> for TableChangeType {
+    fn from(value: &str) -> Self {
+        match value {
+            "ALTER" => TableChangeType::Alter,
+            _ => TableChangeType::Unspecified,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct TableSchemaChange {
     pub(crate) cdc_table_name: String,
     pub(crate) columns: Vec<ColumnCatalog>,
+    pub(crate) change_type: TableChangeType,
 }
 
 impl SchemaChangeEnvelope {
@@ -40,6 +73,7 @@ impl SchemaChangeEnvelope {
                     .map(|column| column.to_protobuf())
                     .collect();
                 PbTableSchemaChange {
+                    change_type: table_change.change_type.to_proto() as _,
                     cdc_table_name: table_change.cdc_table_name.clone(),
                     columns,
                 }

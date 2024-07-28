@@ -261,11 +261,12 @@ impl FrontendEnv {
             .unwrap();
         info!("advertise addr is {}", frontend_address);
 
+        let frontend_rpc_addr = opts.health_check_listener_addr.parse().unwrap();
         // Register in meta by calling `AddWorkerNode` RPC.
         let (meta_client, system_params_reader) = MetaClient::register_new(
             opts.meta_addr,
             WorkerType::Frontend,
-            &frontend_address,
+            &frontend_rpc_addr,
             Default::default(),
             &config.meta,
         )
@@ -355,7 +356,7 @@ impl FrontendEnv {
 
         let health_srv = HealthServiceImpl::new();
         let frontend_srv = FrontendServiceImpl::new();
-        let host = opts.health_check_listener_addr.clone();
+        let frontend_rpc_addr = opts.health_check_listener_addr.parse().unwrap();
 
         let telemetry_manager = TelemetryManager::new(
             Arc::new(meta_client.clone()),
@@ -376,7 +377,7 @@ impl FrontendEnv {
             tonic::transport::Server::builder()
                 .add_service(HealthServer::new(health_srv))
                 .add_service(FrontendServiceServer::new(frontend_srv))
-                .serve(host.parse().unwrap())
+                .serve(frontend_rpc_addr)
                 .await
                 .unwrap();
         });
