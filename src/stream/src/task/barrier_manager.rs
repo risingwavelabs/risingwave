@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Display;
 use std::future::pending;
 use std::sync::Arc;
@@ -49,6 +49,7 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
@@ -60,7 +61,7 @@ use risingwave_pb::stream_service::streaming_control_stream_response::{
     InitResponse, ShutdownResponse,
 };
 use risingwave_pb::stream_service::{
-    streaming_control_stream_response, BarrierCompleteResponse, BuildActorInfo, PartialGraphInfo,
+    streaming_control_stream_response, BarrierCompleteResponse, BuildActorInfo,
     StreamingControlStreamRequest, StreamingControlStreamResponse,
 };
 
@@ -536,7 +537,16 @@ impl LocalBarrierWorker {
         match request.request.expect("should not be empty") {
             Request::InjectBarrier(req) => {
                 let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
-                self.send_barrier(barrier, req.graph_info)?;
+                self.send_barrier(
+                    &barrier,
+                    req.actor_ids_to_send.into_iter().collect(),
+                    req.actor_ids_to_collect.into_iter().collect(),
+                    req.table_ids_to_sync
+                        .into_iter()
+                        .map(TableId::new)
+                        .collect(),
+                    PartialGraphId::new(req.partial_graph_id),
+                )?;
                 Ok(())
             }
             Request::RemovePartialGraph(req) => {
@@ -721,22 +731,20 @@ impl LocalBarrierWorker {
     /// to find the root cause.
     fn send_barrier(
         &mut self,
-        barrier: Barrier,
-        graph_infos: HashMap<u32, PartialGraphInfo>,
+        barrier: &Barrier,
+        to_send: HashSet<ActorId>,
+        to_collect: HashSet<ActorId>,
+        table_ids: HashSet<TableId>,
+        partial_graph_id: PartialGraphId,
     ) -> StreamResult<()> {
-        let all_to_collect = || {
-            graph_infos
-                .values()
-                .flat_map(|info| info.actor_ids_to_collect.iter())
-                .cloned()
-        };
         if !cfg!(test) {
             // The barrier might be outdated and been injected after recovery in some certain extreme
             // scenarios. So some newly creating actors in the barrier are possibly not rebuilt during
             // recovery. Check it here and return an error here if some actors are not found to
             // avoid collection hang. We need some refine in meta side to remove this workaround since
             // it will cause another round of unnecessary recovery.
-            let missing_actor_ids = all_to_collect()
+            let missing_actor_ids = to_collect
+                .iter()
                 .filter(|id| !self.actor_manager_state.handles.contains_key(id))
                 .collect_vec();
             if !missing_actor_ids.is_empty() {
@@ -744,7 +752,7 @@ impl LocalBarrierWorker {
                     "to collect actors not found, they should be cleaned when recovering: {:?}",
                     missing_actor_ids
                 );
-                return Err(anyhow!("to collect actors not found: {:?}", missing_actor_ids).into());
+                return Err(anyhow!("to collect actors not found: {:?}", to_collect).into());
             }
         }
 
@@ -755,31 +763,29 @@ impl LocalBarrierWorker {
         }
         debug!(
             target: "events::stream::barrier::manager::send",
-            "send barrier {:?}, graph_info: {:?}",
+            "send barrier {:?}, senders = {:?}, actor_ids_to_collect = {:?}",
             barrier,
-            graph_infos,
+            to_send,
+            to_collect
         );
 
-        for actor_id in all_to_collect() {
-            if self.failure_actors.contains_key(&actor_id) {
+        for actor_id in &to_collect {
+            if self.failure_actors.contains_key(actor_id) {
                 // The failure actors could exit before the barrier is issued, while their
                 // up-downstream actors could be stuck somehow. Return error directly to trigger the
                 // recovery.
                 return Err(StreamError::barrier_send(
                     barrier.clone(),
-                    actor_id,
+                    *actor_id,
                     "actor has already failed",
                 ));
             }
         }
 
-        self.state.transform_to_issued(&barrier, &graph_infos);
+        self.state
+            .transform_to_issued(barrier, to_collect, table_ids, partial_graph_id);
 
-        for actor_id in graph_infos
-            .values()
-            .flat_map(|infos| infos.actor_ids_to_send.iter())
-            .cloned()
-        {
+        for actor_id in to_send {
             match self.barrier_senders.get(&actor_id) {
                 Some(senders) => {
                     for sender in senders {
@@ -1137,7 +1143,6 @@ impl LocalBarrierManager {
 
 #[cfg(test)]
 pub(crate) mod barrier_test_utils {
-    use std::collections::HashMap;
     use std::sync::Arc;
 
     use assert_matches::assert_matches;
@@ -1145,7 +1150,7 @@ pub(crate) mod barrier_test_utils {
     use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
     use risingwave_pb::stream_service::{
         streaming_control_stream_request, streaming_control_stream_response, InjectBarrierRequest,
-        PbPartialGraphInfo, StreamingControlStreamRequest, StreamingControlStreamResponse,
+        StreamingControlStreamRequest, StreamingControlStreamResponse,
     };
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
     use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -1207,14 +1212,10 @@ pub(crate) mod barrier_test_utils {
                         InjectBarrierRequest {
                             request_id: "".to_string(),
                             barrier: Some(barrier.to_protobuf()),
-                            graph_info: HashMap::from_iter([(
-                                u32::MAX,
-                                PbPartialGraphInfo {
-                                    actor_ids_to_send: actor_to_send.into_iter().collect(),
-                                    actor_ids_to_collect: actor_to_collect.into_iter().collect(),
-                                    table_ids_to_sync: vec![],
-                                },
-                            )]),
+                            actor_ids_to_send: actor_to_send.into_iter().collect(),
+                            actor_ids_to_collect: actor_to_collect.into_iter().collect(),
+                            table_ids_to_sync: vec![],
+                            partial_graph_id: u32::MAX,
                         },
                     )),
                 }))

@@ -30,8 +30,8 @@ use risingwave_pb::stream_plan::{Barrier, BarrierMutation};
 use risingwave_pb::stream_service::{
     streaming_control_stream_request, streaming_control_stream_response, BarrierCompleteResponse,
     BroadcastActorInfoTableRequest, BuildActorInfo, BuildActorsRequest, DropActorsRequest,
-    InjectBarrierRequest, PartialGraphInfo, StreamingControlStreamRequest,
-    StreamingControlStreamResponse, UpdateActorsRequest,
+    InjectBarrierRequest, StreamingControlStreamRequest, StreamingControlStreamResponse,
+    UpdateActorsRequest,
 };
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::StreamClient;
@@ -312,14 +312,10 @@ impl ControlStreamManager {
                                     InjectBarrierRequest {
                                         request_id: StreamRpcManager::new_request_id(),
                                         barrier: Some(barrier),
-                                        graph_info: HashMap::from_iter([(
-                                            u32::MAX,
-                                            PartialGraphInfo {
-                                                actor_ids_to_send,
-                                                actor_ids_to_collect,
-                                                table_ids_to_sync,
-                                            },
-                                        )]),
+                                        actor_ids_to_send,
+                                        actor_ids_to_collect,
+                                        table_ids_to_sync,
+                                        partial_graph_id: u32::MAX,
                                     },
                                 ),
                             ),

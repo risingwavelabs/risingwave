@@ -947,18 +947,13 @@ mod tests {
                             }));
                         }
                         streaming_control_stream_request::Request::InjectBarrier(req) => {
-                            assert_eq!(req.graph_info.len(), 1);
                             let _ = tx.send(Ok(StreamingControlStreamResponse {
                                 response: Some(
                                     streaming_control_stream_response::Response::CompleteBarrier(
                                         BarrierCompleteResponse {
                                             epoch: req.barrier.unwrap().epoch.unwrap().prev,
                                             worker_id,
-                                            partial_graph_id: *req
-                                                .graph_info
-                                                .keys()
-                                                .next()
-                                                .unwrap(),
+                                            partial_graph_id: req.partial_graph_id,
                                             ..BarrierCompleteResponse::default()
                                         },
                                     ),

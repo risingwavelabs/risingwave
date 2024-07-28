@@ -52,18 +52,13 @@ message DropActorsResponse {
   common.Status status = 2;
 }
 
-message PartialGraphInfo {
-  repeated uint32 actor_ids_to_send = 1;
-  repeated uint32 actor_ids_to_collect = 2;
-  repeated uint32 table_ids_to_sync = 3;
-}
-
 message InjectBarrierRequest {
   string request_id = 1;
   stream_plan.Barrier barrier = 2;
-  reserved 3, 4, 5;
-  reserved "actor_ids_to_send", "actor_ids_to_collect", "table_ids_to_sync";
-  map<uint32, PartialGraphInfo> graph_info = 6;
+  repeated uint32 actor_ids_to_send = 3;
+  repeated uint32 actor_ids_to_collect = 4;
+  repeated uint32 table_ids_to_sync = 5;
+  uint32 partial_graph_id = 6;
 }
 
 message BarrierCompleteResponse {

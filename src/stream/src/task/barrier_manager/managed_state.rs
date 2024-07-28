@@ -32,7 +32,6 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::SyncResult;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
-use risingwave_pb::stream_service::PartialGraphInfo;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
@@ -406,47 +405,37 @@ impl ManagedBarrierState {
     pub(super) fn transform_to_issued(
         &mut self,
         barrier: &Barrier,
-        graph_infos: &HashMap<u32, PartialGraphInfo>,
+        actor_ids_to_collect: HashSet<ActorId>,
+        table_ids: HashSet<TableId>,
+        partial_graph_id: PartialGraphId,
     ) {
         let actor_to_stop = barrier.all_stop_actors();
-        for (partial_graph_id, graph_info) in graph_infos {
-            let partial_graph_id = PartialGraphId::new(*partial_graph_id);
+        let graph_state = self
+            .graph_states
+            .entry(partial_graph_id)
+            .or_insert_with(|| {
+                PartialGraphManagedBarrierState::new(
+                    partial_graph_id.is_global_graph(),
+                    self.state_store.clone(),
+                    self.streaming_metrics.clone(),
+                    self.barrier_await_tree_reg.clone(),
+                )
+            });
 
-            let graph_state = self
-                .graph_states
-                .entry(partial_graph_id)
-                .or_insert_with(|| {
-                    PartialGraphManagedBarrierState::new(
-                        partial_graph_id.is_global_graph(),
-                        self.state_store.clone(),
-                        self.streaming_metrics.clone(),
-                        self.barrier_await_tree_reg.clone(),
-                    )
-                });
-
-            graph_state.transform_to_issued(
-                barrier,
-                graph_info.actor_ids_to_collect.iter().cloned().collect(),
-                graph_info
-                    .table_ids_to_sync
-                    .iter()
-                    .map(|table_id| TableId::new(*table_id))
-                    .collect(),
-            );
-
-            for actor_id in &graph_info.actor_ids_to_collect {
-                self.actor_states
-                    .entry(*actor_id)
-                    .or_insert_with(InflightActorState::not_started)
-                    .issue_barrier(
-                        partial_graph_id,
-                        barrier,
-                        actor_to_stop
-                            .map(|actors| actors.contains(actor_id))
-                            .unwrap_or(false),
-                    );
-            }
+        for actor_id in &actor_ids_to_collect {
+            self.actor_states
+                .entry(*actor_id)
+                .or_insert_with(InflightActorState::not_started)
+                .issue_barrier(
+                    partial_graph_id,
+                    barrier,
+                    actor_to_stop
+                        .map(|actors| actors.contains(actor_id))
+                        .unwrap_or(false),
+                );
         }
+
+        graph_state.transform_to_issued(barrier, actor_ids_to_collect, table_ids);
     }
 
     pub(super) fn next_completed_epoch(
