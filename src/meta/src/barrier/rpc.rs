@@ -15,7 +15,6 @@
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::future::Future;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -31,7 +30,7 @@ use risingwave_pb::stream_plan::{Barrier, BarrierMutation};
 use risingwave_pb::stream_service::{
     streaming_control_stream_request, streaming_control_stream_response, BarrierCompleteResponse,
     BroadcastActorInfoTableRequest, BuildActorInfo, BuildActorsRequest, DropActorsRequest,
-    InjectBarrierRequest, PbPartialGraphInfo, StreamingControlStreamRequest,
+    InjectBarrierRequest, PartialGraphInfo, StreamingControlStreamRequest,
     StreamingControlStreamResponse, UpdateActorsRequest,
 };
 use risingwave_rpc_client::error::RpcError;
@@ -47,7 +46,8 @@ use uuid::Uuid;
 use super::command::CommandContext;
 use super::GlobalBarrierManagerContext;
 use crate::barrier::info::InflightActorInfo;
-use crate::manager::{MetaSrvEnv, WorkerId};
+use crate::manager::{InflightFragmentInfo, MetaSrvEnv, WorkerId};
+use crate::model::FragmentId;
 use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
@@ -248,8 +248,9 @@ impl ControlStreamManager {
     /// Send inject-barrier-rpc to stream service and wait for its response before returns.
     pub(super) fn inject_barrier(
         &mut self,
-        command_context: Arc<CommandContext>,
-        inflight_actor_info_after_apply_command: &InflightActorInfo,
+        command_context: &CommandContext,
+        pre_applied_fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+        applied_fragment_infos: Option<&HashMap<FragmentId, InflightFragmentInfo>>,
     ) -> MetaResult<HashSet<WorkerId>> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
             "inject_barrier_err"
@@ -261,31 +262,27 @@ impl ControlStreamManager {
         info.node_map
             .iter()
             .map(|(node_id, worker_node)| {
-                let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
-                let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
+                let actor_ids_to_send: Vec<_> =
+                    InflightActorInfo::actor_ids_to_send(pre_applied_fragment_infos, *node_id)
+                        .collect();
+                let actor_ids_to_collect: Vec<_> =
+                    InflightActorInfo::actor_ids_to_collect(pre_applied_fragment_infos, *node_id)
+                        .collect();
                 if actor_ids_to_collect.is_empty() {
                     // No need to send or collect barrier for this node.
                     assert!(actor_ids_to_send.is_empty());
                 }
-                let graph_info = HashMap::from_iter([(
-                    u32::MAX,
-                    PbPartialGraphInfo {
-                        actor_ids_to_send,
-                        actor_ids_to_collect,
-                        table_ids_to_sync: inflight_actor_info_after_apply_command
-                            .existing_table_ids()
-                            .iter()
-                            .map(|table_id| table_id.table_id)
-                            .collect(),
-                    },
-                )]);
+                let table_ids_to_sync = if let Some(fragment_infos) = applied_fragment_infos {
+                    InflightActorInfo::existing_table_ids(fragment_infos)
+                        .map(|table_id| table_id.table_id)
+                        .collect()
+                } else {
+                    Default::default()
+                };
 
                 {
                     let Some(node) = self.nodes.get_mut(node_id) else {
-                        if graph_info
-                            .values()
-                            .all(|info| info.actor_ids_to_collect.is_empty())
-                        {
+                        if actor_ids_to_collect.is_empty() {
                             // Worker node get disconnected but has no actor to collect. Simply skip it.
                             return Ok(());
                         }
@@ -315,7 +312,14 @@ impl ControlStreamManager {
                                     InjectBarrierRequest {
                                         request_id: StreamRpcManager::new_request_id(),
                                         barrier: Some(barrier),
-                                        graph_info,
+                                        graph_info: HashMap::from_iter([(
+                                            u32::MAX,
+                                            PartialGraphInfo {
+                                                actor_ids_to_send,
+                                                actor_ids_to_collect,
+                                                table_ids_to_sync,
+                                            },
+                                        )]),
                                     },
                                 ),
                             ),

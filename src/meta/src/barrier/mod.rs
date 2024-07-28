@@ -781,10 +781,11 @@ impl GlobalBarrierManager {
 
         send_latency_timer.observe_duration();
 
-        let node_to_collect = match self
-            .control_stream_manager
-            .inject_barrier(command_ctx.clone(), &self.state.inflight_actor_infos)
-        {
+        let node_to_collect = match self.control_stream_manager.inject_barrier(
+            &command_ctx,
+            &command_ctx.info.fragment_infos,
+            Some(&self.state.inflight_actor_infos.fragment_infos),
+        ) {
             Ok(node_to_collect) => node_to_collect,
             Err(err) => {
                 for notifier in notifiers {
@@ -1207,6 +1208,7 @@ fn collect_commit_epoch_info(
         table_watermarks.push(resp.table_watermarks);
         old_value_ssts.extend(resp.old_value_sstables.into_iter().map(|s| s.into()));
     }
+
     let new_table_fragment_info =
         if let Command::CreateStreamingJob { info, .. } = &command_ctx.command {
             let table_fragments = &info.table_fragments;
@@ -1261,7 +1263,10 @@ fn collect_commit_epoch_info(
         sst_to_worker,
         new_table_fragment_info,
         table_new_change_log,
-        BTreeMap::from_iter([(epoch, command_ctx.info.existing_table_ids())]),
+        BTreeMap::from_iter([(
+            epoch,
+            InflightActorInfo::existing_table_ids(&command_ctx.info.fragment_infos).collect(),
+        )]),
         epoch,
     )
 }

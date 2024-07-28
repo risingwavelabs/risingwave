@@ -335,7 +335,9 @@ impl GlobalBarrierManager {
                     let info = info;
 
                     self.context
-                        .purge_state_table_from_hummock(&info.existing_table_ids())
+                        .purge_state_table_from_hummock(
+                            &InflightActorInfo::existing_table_ids(&info.fragment_infos).collect(),
+                        )
                         .await
                         .context("purge state table from hummock")?;
 
@@ -385,8 +387,11 @@ impl GlobalBarrierManager {
                         tracing::Span::current(), // recovery span
                     ));
 
-                    let mut node_to_collect =
-                        control_stream_manager.inject_barrier(command_ctx.clone(), &info)?;
+                    let mut node_to_collect = control_stream_manager.inject_barrier(
+                        &command_ctx,
+                        &info.fragment_infos,
+                        Some(&info.fragment_infos),
+                    )?;
                     while !node_to_collect.is_empty() {
                         let (worker_id, result) = control_stream_manager
                             .next_complete_barrier_response()

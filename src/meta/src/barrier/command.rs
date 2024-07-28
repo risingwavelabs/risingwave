@@ -41,12 +41,10 @@ use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use thiserror_ext::AsReport;
 use tracing::warn;
 
-use super::info::{
-    CommandActorChanges, CommandFragmentChanges, CommandNewFragmentInfo, InflightActorInfo,
-};
+use super::info::{CommandActorChanges, CommandFragmentChanges, InflightActorInfo};
 use super::trace::TracedEpoch;
 use crate::barrier::GlobalBarrierManagerContext;
-use crate::manager::{DdlType, MetadataManager, StreamingJob, WorkerId};
+use crate::manager::{DdlType, InflightFragmentInfo, MetadataManager, StreamingJob, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
 use crate::MetaResult;
@@ -109,8 +107,8 @@ impl ReplaceTablePlan {
     fn actor_changes(&self) -> CommandActorChanges {
         let mut fragment_changes = HashMap::new();
         for fragment in self.new_table_fragments.fragments.values() {
-            let fragment_change = CommandFragmentChanges::NewFragment(CommandNewFragmentInfo {
-                new_actors: fragment
+            let fragment_change = CommandFragmentChanges::NewFragment(InflightFragmentInfo {
+                actors: fragment
                     .actors
                     .iter()
                     .map(|actor| {
@@ -124,7 +122,7 @@ impl ReplaceTablePlan {
                         )
                     })
                     .collect(),
-                table_ids: fragment
+                state_table_ids: fragment
                     .state_table_ids
                     .iter()
                     .map(|table_id| TableId::new(*table_id))
@@ -159,12 +157,12 @@ pub struct CreateStreamingJobCommandInfo {
 }
 
 impl CreateStreamingJobCommandInfo {
-    fn new_fragment_info(&self) -> impl Iterator<Item = (FragmentId, CommandNewFragmentInfo)> + '_ {
+    fn new_fragment_info(&self) -> impl Iterator<Item = (FragmentId, InflightFragmentInfo)> + '_ {
         self.table_fragments.fragments.values().map(|fragment| {
             (
                 fragment.fragment_id,
-                CommandNewFragmentInfo {
-                    new_actors: fragment
+                InflightFragmentInfo {
+                    actors: fragment
                         .actors
                         .iter()
                         .map(|actor| {
@@ -178,7 +176,7 @@ impl CreateStreamingJobCommandInfo {
                             )
                         })
                         .collect(),
-                    table_ids: fragment
+                    state_table_ids: fragment
                         .state_table_ids
                         .iter()
                         .map(|table_id| TableId::new(*table_id))
