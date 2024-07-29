@@ -469,7 +469,6 @@ impl DiagnoseCommand {
 
         let top_k = 10;
         let mut top_tombstone_delete_sst = BinaryHeap::with_capacity(top_k);
-        let mut top_range_delete_sst = BinaryHeap::with_capacity(top_k);
         for compaction_group in version.levels.values() {
             let mut visit_level = |level: &Level| {
                 sst_num += level.table_infos.len();
@@ -485,15 +484,6 @@ impl DiagnoseCommand {
                         delete_ratio: tombstone_delete_ratio,
                     };
                     top_k_sstables(top_k, &mut top_tombstone_delete_sst, e);
-
-                    let range_delete_ratio =
-                        sst.range_tombstone_count * 10000 / sst.total_key_count;
-                    let e = SstableSort {
-                        compaction_group_id: compaction_group.group_id,
-                        sst_id: sst.sst_id,
-                        delete_ratio: range_delete_ratio,
-                    };
-                    top_k_sstables(top_k, &mut top_range_delete_sst, e);
                 }
             };
             let Some(ref l0) = compaction_group.l0 else {
@@ -533,8 +523,6 @@ impl DiagnoseCommand {
         let _ = writeln!(s, "top tombstone delete ratio");
         let _ = writeln!(s, "{}", format_table(top_tombstone_delete_sst));
         let _ = writeln!(s);
-        let _ = writeln!(s, "top range delete ratio");
-        let _ = writeln!(s, "{}", format_table(top_range_delete_sst));
 
         let _ = writeln!(s);
         self.write_storage_prometheus(s).await;
