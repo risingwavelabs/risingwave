@@ -154,6 +154,10 @@ pub struct OpenDalSinkWriter {
 /// The choice of writer used during the actual writing process depends on the encode type of the sink.
 enum FileWriterEnum {
     ParquetFileWriter(AsyncArrowWriter<Compat<FuturesAsyncWriter>>),
+    // `FileWriter` is used to write files other than parquet format to the file system.
+    // Since only sinks in parquet format are currently supported, its implementation is temporarily commented out.
+
+    // FileWriter(OpendalWriter)
 }
 
 #[async_trait]
