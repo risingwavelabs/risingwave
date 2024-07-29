@@ -405,7 +405,7 @@ impl InflightActorState {
                     start_prev_epoch
                 );
             } else {
-                assert!(self.status.is_stopping(), "actor has been stopped and has not inflight barrier. unlikely to get further barrier");
+                assert!(!self.status.is_stopping(), "actor has been stopped and has not inflight barrier. unlikely to get further barrier");
             }
             self.pending_subscribers
                 .entry(start_prev_epoch)
