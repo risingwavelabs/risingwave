@@ -689,7 +689,7 @@ impl ClusterManagerCore {
             .collect()
     }
 
-    // List all parallel units on running nodes
+    // List all serving worker nodes
     pub fn list_serving_worker_node(&self, worker_state: Option<State>) -> Vec<WorkerNode> {
         self.list_worker_node(Some(WorkerType::ComputeNode), worker_state)
             .into_iter()
@@ -815,7 +815,7 @@ mod tests {
             worker_nodes.push(worker_node);
         }
 
-        // Since no worker is active, the parallel unit count should be 0.
+        // Since no worker is active, the parallelism should be 0.
         assert_cluster_manager(&cluster_manager, 0).await;
 
         for worker_node in worker_nodes {

@@ -279,21 +279,20 @@ impl SinkParam {
 
 #[derive(Clone)]
 pub struct SinkMetrics {
-    pub sink_commit_duration_metrics: LabelGuardedHistogram<3>,
-    pub connector_sink_rows_received: LabelGuardedIntCounter<2>,
-    pub log_store_first_write_epoch: LabelGuardedIntGauge<3>,
-    pub log_store_latest_write_epoch: LabelGuardedIntGauge<3>,
-    pub log_store_write_rows: LabelGuardedIntCounter<3>,
-    pub log_store_latest_read_epoch: LabelGuardedIntGauge<3>,
-    pub log_store_read_rows: LabelGuardedIntCounter<3>,
+    pub sink_commit_duration_metrics: LabelGuardedHistogram<4>,
+    pub connector_sink_rows_received: LabelGuardedIntCounter<3>,
+    pub log_store_first_write_epoch: LabelGuardedIntGauge<4>,
+    pub log_store_latest_write_epoch: LabelGuardedIntGauge<4>,
+    pub log_store_write_rows: LabelGuardedIntCounter<4>,
+    pub log_store_latest_read_epoch: LabelGuardedIntGauge<4>,
+    pub log_store_read_rows: LabelGuardedIntCounter<4>,
+    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
 
-    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<3>,
-
-    pub iceberg_write_qps: LabelGuardedIntCounter<2>,
-    pub iceberg_write_latency: LabelGuardedHistogram<2>,
-    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<2>,
-    pub iceberg_position_delete_cache_num: LabelGuardedIntGauge<2>,
-    pub iceberg_partition_num: LabelGuardedIntGauge<2>,
+    pub iceberg_write_qps: LabelGuardedIntCounter<3>,
+    pub iceberg_write_latency: LabelGuardedHistogram<3>,
+    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<3>,
+    pub iceberg_position_delete_cache_num: LabelGuardedIntGauge<3>,
+    pub iceberg_partition_num: LabelGuardedIntGauge<3>,
 }
 
 impl SinkMetrics {

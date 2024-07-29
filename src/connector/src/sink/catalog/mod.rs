@@ -15,6 +15,7 @@
 pub mod desc;
 
 use std::collections::BTreeMap;
+use std::fmt::{Display, Formatter};
 
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -28,6 +29,7 @@ use risingwave_pb::catalog::{
     PbCreateType, PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus,
 };
 use risingwave_pb::secret::PbSecretRef;
+use serde_derive::Serialize;
 
 use super::{
     SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
@@ -125,15 +127,21 @@ pub struct SinkFormatDesc {
 }
 
 /// TODO: consolidate with [`crate::source::SourceFormat`] and [`crate::parser::ProtocolProperties`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum SinkFormat {
     AppendOnly,
     Upsert,
     Debezium,
 }
 
+impl Display for SinkFormat {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 /// TODO: consolidate with [`crate::source::SourceEncode`] and [`crate::parser::EncodingProperties`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum SinkEncode {
     Json,
     Protobuf,
@@ -141,6 +149,12 @@ pub enum SinkEncode {
     Template,
     Parquet,
     Text,
+}
+
+impl Display for SinkEncode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 impl SinkFormatDesc {
