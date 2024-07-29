@@ -592,15 +592,15 @@ impl StarrocksTxnRequestBuilder {
     }
 
     pub async fn build_txn_inserter(&self, label: String) -> Result<InserterInner> {
-        let request = self.build_request(self.url_load.clone(), Method::PUT, label)?;
+        let request = self.build_request(self.url_load.clone(), Method::PUT, label.clone())?;
         let mut be_request =
             match send_stream_load_request(self.client.clone(), request, &self.fe_host).await? {
                 StreamLoadResponse::BeRequest(be_request) => be_request,
                 StreamLoadResponse::HttpResponse(resp) => {
-                    return Err(SinkError::DorisStarrocksConnect(anyhow!(
-                        "expect a be request but got a response: {:?}",
-                        resp
-                    )))
+                    // If we get a response here, it should be from BE, so we extract the URL
+                    // and create a new request based on it.
+                    let url = resp.url().clone();
+                    self.build_request(url.into(), Method::PUT, label)?
                 }
             };
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
