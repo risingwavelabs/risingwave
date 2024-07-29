@@ -168,7 +168,7 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         s3.credentials.secret = '{config['S3_SECRET_KEY']}',
         s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
     ) FORMAT PLAIN ENCODE PARQUET;''')
-    
+
     total_rows = file_num * item_num_per_file
     MAX_RETRIES = 40
     for retry_no in range(MAX_RETRIES):
@@ -232,11 +232,10 @@ if __name__ == "__main__":
     # clean up s3 files
     for idx, _ in enumerate(data):
        client.remove_object(config["S3_BUCKET"], _s3(idx))
-       
+
     do_sink(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id)
-    
+
      # clean up s3 files
     for idx, _ in enumerate(data):
        client.remove_object(config["S3_BUCKET"], _s3(idx))
-       
-       
+
