@@ -19,7 +19,13 @@
     <dependency>
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>
-      <version>42.5.5</version>
+      <version>42.7.3</version>
+    </dependency>
+
+    <dependency>
+      <groupId>commons-dbutils</groupId>
+      <artifactId>commons-dbutils</artifactId>
+      <version>1.8.1</version>
     </dependency>
 
     <!-- JUnit 5 -->

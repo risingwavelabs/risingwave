@@ -81,12 +81,20 @@ impl DdlController {
             .unwrap();
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
+        let id = streaming_job.id();
+        let name = streaming_job.name();
+        let definition = streaming_job.definition();
+        let source_id = match &streaming_job {
+            StreamingJob::Table(Some(src), _, _) | StreamingJob::Source(src) => Some(src.id),
+            _ => None,
+        };
+
         // create streaming job.
         match self
             .create_streaming_job_inner_v2(
                 mgr,
                 ctx,
-                &mut streaming_job,
+                streaming_job,
                 fragment_graph,
                 affected_table_replace_info,
             )
@@ -94,11 +102,11 @@ impl DdlController {
         {
             Ok(version) => Ok(version),
             Err(err) => {
-                tracing::error!(id = job_id, error = ?err.as_report(), "failed to create streaming job");
+                tracing::error!(id = job_id, error = %err.as_report(), "failed to create streaming job");
                 let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
-                    id: streaming_job.id(),
-                    name: streaming_job.name(),
-                    definition: streaming_job.definition(),
+                    id,
+                    name,
+                    definition,
                     error: err.as_report().to_string(),
                 };
                 self.env.event_log_manager_ref().add_event_logs(vec![
@@ -110,11 +118,10 @@ impl DdlController {
                     .await?;
                 if aborted {
                     tracing::warn!(id = job_id, "aborted streaming job");
-                    match &streaming_job {
-                        StreamingJob::Table(Some(src), _, _) | StreamingJob::Source(src) => {
-                            self.source_manager.unregister_sources(vec![src.id]).await;
-                        }
-                        _ => {}
+                    if let Some(source_id) = source_id {
+                        self.source_manager
+                            .unregister_sources(vec![source_id])
+                            .await;
                     }
                 }
                 Err(err)
@@ -126,12 +133,12 @@ impl DdlController {
         &self,
         mgr: &MetadataManagerV2,
         ctx: StreamContext,
-        streaming_job: &mut StreamingJob,
+        mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         affected_table_replace_info: Option<ReplaceTableInfo>,
     ) -> MetaResult<NotificationVersion> {
         let mut fragment_graph =
-            StreamFragmentGraph::new(&self.env, fragment_graph, streaming_job).await?;
+            StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job).await?;
         streaming_job.set_table_fragment_id(fragment_graph.table_fragment_id());
         streaming_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
 
@@ -173,6 +180,8 @@ impl DdlController {
             )
             .await?;
 
+        let streaming_job = &ctx.streaming_job;
+
         match streaming_job {
             StreamingJob::Table(None, table, TableJobType::SharedCdcSource) => {
                 Self::validate_cdc_table(table, &table_fragments).await?;
@@ -181,13 +190,7 @@ impl DdlController {
                 // Register the source on the connector node.
                 self.source_manager.register_source(source).await?;
             }
-            StreamingJob::Sink(sink, target_table) => {
-                if let Some((StreamingJob::Table(source, table, _), ..)) =
-                    &ctx.replace_table_job_info
-                {
-                    *target_table = Some((table.clone(), source.clone()));
-                }
-
+            StreamingJob::Sink(sink, _) => {
                 // Validate the sink on the connector node.
                 validate_sink(sink).await?;
             }
@@ -204,50 +207,25 @@ impl DdlController {
 
         // create streaming jobs.
         let stream_job_id = streaming_job.id();
-        match (streaming_job.create_type(), streaming_job) {
+        match (streaming_job.create_type(), &streaming_job) {
             (CreateType::Unspecified, _)
             | (CreateType::Foreground, _)
             // FIXME(kwannoel): Unify background stream's creation path with MV below.
             | (CreateType::Background, StreamingJob::Sink(_, _)) => {
-                let replace_table_job_info = ctx.replace_table_job_info.as_ref().map(
-                    |(streaming_job, ctx, table_fragments)| {
-                        (
-                            streaming_job.clone(),
-                            ctx.merge_updates.clone(),
-                            table_fragments.table_id().table_id(),
-                        )
-                    },
-                );
-
-                self.stream_manager
+                let version = self.stream_manager
                     .create_streaming_job(table_fragments, ctx)
                     .await?;
-
-                let version = mgr
-                    .catalog_controller
-                    .finish_streaming_job(stream_job_id as _, replace_table_job_info)
-                    .await?;
-
                 Ok(version)
             }
             (CreateType::Background, _) => {
                 let ctrl = self.clone();
-                let mgr = mgr.clone();
                 let fut = async move {
-                    let result = ctrl
+                    let _ = ctrl
                         .stream_manager
                         .create_streaming_job(table_fragments, ctx)
                         .await.inspect_err(|err| {
                             tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
                         });
-                    if result.is_ok() {
-                        let _ = mgr
-                            .catalog_controller
-                            .finish_streaming_job(stream_job_id as _, None)
-                            .await.inspect_err(|err| {
-                                tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to finish background streaming job");
-                            });
-                    }
                 };
                 tokio::spawn(fut);
                 Ok(IGNORED_NOTIFICATION_VERSION)

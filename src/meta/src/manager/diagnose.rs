@@ -21,8 +21,8 @@ use itertools::Itertools;
 use prometheus_http_query::response::Data::Vector;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::StackTraceResponseExt;
+use risingwave_hummock_sdk::level::Level;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::Level;
 use risingwave_pb::meta::event_log::Event;
 use risingwave_pb::meta::EventLog;
 use risingwave_pb::monitor_service::StackTraceResponse;
@@ -667,7 +667,7 @@ impl DiagnoseCommand {
 
         let mut all = StackTraceResponse::default();
 
-        let compute_clients = ComputeClientPool::default();
+        let compute_clients = ComputeClientPool::adhoc();
         for worker_node in &worker_nodes {
             if let Ok(client) = compute_clients.get(worker_node).await
                 && let Ok(result) = client.stack_trace().await

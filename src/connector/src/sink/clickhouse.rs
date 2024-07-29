@@ -823,7 +823,7 @@ impl ClickHouseFieldWithNull {
     ) -> Result<Vec<ClickHouseFieldWithNull>> {
         let clickhouse_schema_feature = clickhouse_schema_feature_vec
             .get(clickhouse_schema_feature_index)
-            .unwrap();
+            .ok_or_else(|| SinkError::ClickHouse(format!("No column found from clickhouse table schema, index is {clickhouse_schema_feature_index}")))?;
         if data.is_none() {
             if !clickhouse_schema_feature.can_null {
                 return Err(SinkError::ClickHouse(
@@ -1011,7 +1011,7 @@ pub fn build_fields_name_type_from_schema(schema: &Schema) -> Result<Vec<(String
             for i in &field.sub_fields {
                 if matches!(i.data_type, DataType::Struct(_)) {
                     return Err(SinkError::ClickHouse(
-                        "Only one level of nesting is supported for sturct".to_string(),
+                        "Only one level of nesting is supported for struct".to_string(),
                     ));
                 } else {
                     vec.push((

@@ -13,25 +13,25 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::mem::take;
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::catalog::CreateType;
+use risingwave_meta_model_v2::ObjectId;
+use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
 use super::command::CommandContext;
-use super::notifier::Notifier;
-use crate::barrier::{
-    Command, TableActorMap, TableDefinitionMap, TableFragmentMap, TableNotifierMap,
-    TableUpstreamMvCountMap,
+use crate::barrier::{Command, CreateStreamingJobCommandInfo, ReplaceTablePlan};
+use crate::manager::{
+    DdlType, MetadataManager, MetadataManagerV1, MetadataManagerV2, StreamingJob,
 };
-use crate::manager::{DdlType, MetadataManager};
 use crate::model::{ActorId, TableFragments};
-use crate::{MetaError, MetaResult};
+use crate::MetaResult;
 
 type ConsumedRows = u64;
 
@@ -92,6 +92,7 @@ impl Progress {
     fn update(&mut self, actor: ActorId, new_state: BackfillState, upstream_total_key_count: u64) {
         self.upstream_total_key_count = upstream_total_key_count;
         let total_actors = self.states.len();
+        tracing::debug!(?actor, states = ?self.states, "update progress for actor");
         match self.states.remove(&actor).unwrap() {
             BackfillState::Init => {}
             BackfillState::ConsumingUpstream(_, old_consumed_rows) => {
@@ -155,86 +156,72 @@ impl Progress {
 ///    On recovery, the barrier manager will recover and start managing the job.
 pub enum TrackingJob {
     New(TrackingCommand),
-    Recovered(RecoveredTrackingJob),
+    RecoveredV1(RecoveredTrackingJobV1),
+    RecoveredV2(RecoveredTrackingJobV2),
 }
 
 impl TrackingJob {
-    fn metadata_manager(&self) -> &MetadataManager {
-        match self {
-            TrackingJob::New(command) => command.context.metadata_manager(),
-            TrackingJob::Recovered(recovered) => &recovered.metadata_manager,
-        }
-    }
-
-    /// Returns whether the `TrackingJob` requires a checkpoint to complete.
-    pub(crate) fn is_checkpoint_required(&self) -> bool {
-        match self {
-            // Recovered tracking job is always a streaming job,
-            // It requires a checkpoint to complete.
-            TrackingJob::Recovered(_) => true,
+    pub(crate) async fn pre_finish(&self, metadata_manager: &MetadataManager) -> MetaResult<()> {
+        match &self {
             TrackingJob::New(command) => {
-                command.context.kind.is_initial() || command.context.kind.is_checkpoint()
-            }
-        }
-    }
-
-    pub(crate) async fn pre_finish(&self) -> MetaResult<()> {
-        let table_fragments = match &self {
-            TrackingJob::New(command) => match &command.context.command {
-                Command::CreateStreamingJob {
-                    table_fragments, ..
-                } => Some(table_fragments),
-                _ => None,
-            },
-            TrackingJob::Recovered(recovered) => Some(&recovered.fragments),
-        };
-        // Update the state of the table fragments from `Creating` to `Created`, so that the
-        // fragments can be scaled.
-        if let Some(table_fragments) = table_fragments {
-            match self.metadata_manager() {
-                MetadataManager::V1(mgr) => {
-                    mgr.fragment_manager
-                        .mark_table_fragments_created(table_fragments.table_id())
-                        .await?;
+                let CreateStreamingJobCommandInfo {
+                    table_fragments,
+                    streaming_job,
+                    internal_tables,
+                    ..
+                } = &command.info;
+                match metadata_manager {
+                    MetadataManager::V1(mgr) => {
+                        mgr.fragment_manager
+                            .mark_table_fragments_created(table_fragments.table_id())
+                            .await?;
+                        mgr.catalog_manager
+                            .finish_stream_job(streaming_job.clone(), internal_tables.clone())
+                            .await?;
+                        Ok(())
+                    }
+                    MetadataManager::V2(mgr) => {
+                        mgr.catalog_controller
+                            .finish_streaming_job(
+                                streaming_job.id() as i32,
+                                command.replace_table_info.clone(),
+                            )
+                            .await?;
+                        Ok(())
+                    }
                 }
-                MetadataManager::V2(_) => {}
             }
-        }
-        Ok(())
-    }
-
-    pub(crate) fn notify_finished(self) {
-        match self {
-            TrackingJob::New(command) => {
-                command
-                    .notifiers
-                    .into_iter()
-                    .for_each(Notifier::notify_finished);
+            TrackingJob::RecoveredV1(recovered) => {
+                let manager = &recovered.metadata_manager;
+                manager
+                    .fragment_manager
+                    .mark_table_fragments_created(recovered.fragments.table_id())
+                    .await?;
+                manager
+                    .catalog_manager
+                    .finish_stream_job(
+                        recovered.streaming_job.clone(),
+                        recovered.internal_tables.clone(),
+                    )
+                    .await?;
+                Ok(())
             }
-            TrackingJob::Recovered(recovered) => {
-                recovered.finished.notify_finished();
-            }
-        }
-    }
-
-    pub(crate) fn notify_finish_failed(self, err: MetaError) {
-        match self {
-            TrackingJob::New(command) => {
-                command
-                    .notifiers
-                    .into_iter()
-                    .for_each(|n| n.notify_finish_failed(err.clone()));
-            }
-            TrackingJob::Recovered(recovered) => {
-                recovered.finished.notify_finish_failed(err);
+            TrackingJob::RecoveredV2(recovered) => {
+                recovered
+                    .metadata_manager
+                    .catalog_controller
+                    .finish_streaming_job(recovered.id, None)
+                    .await?;
+                Ok(())
             }
         }
     }
 
-    pub(crate) fn table_to_create(&self) -> Option<TableId> {
+    pub(crate) fn table_to_create(&self) -> TableId {
         match self {
-            TrackingJob::New(command) => command.context.table_to_create(),
-            TrackingJob::Recovered(recovered) => Some(recovered.fragments.table_id()),
+            TrackingJob::New(command) => command.info.table_fragments.table_id(),
+            TrackingJob::RecoveredV1(recovered) => recovered.fragments.table_id(),
+            TrackingJob::RecoveredV2(recovered) => (recovered.id as u32).into(),
         }
     }
 }
@@ -245,42 +232,46 @@ impl std::fmt::Debug for TrackingJob {
             TrackingJob::New(command) => write!(
                 f,
                 "TrackingJob::New({:?})",
-                command.context.table_to_create()
+                command.info.table_fragments.table_id()
             ),
-            TrackingJob::Recovered(recovered) => {
+            TrackingJob::RecoveredV1(recovered) => {
                 write!(
                     f,
-                    "TrackingJob::Recovered({:?})",
+                    "TrackingJob::RecoveredV1({:?})",
                     recovered.fragments.table_id()
                 )
+            }
+            TrackingJob::RecoveredV2(recovered) => {
+                write!(f, "TrackingJob::RecoveredV2({:?})", recovered.id)
             }
         }
     }
 }
 
-pub struct RecoveredTrackingJob {
+pub struct RecoveredTrackingJobV1 {
     pub fragments: TableFragments,
-    pub finished: Notifier,
-    pub metadata_manager: MetadataManager,
+    pub streaming_job: StreamingJob,
+    pub internal_tables: Vec<Table>,
+    pub metadata_manager: MetadataManagerV1,
+}
+
+pub struct RecoveredTrackingJobV2 {
+    pub id: ObjectId,
+    pub metadata_manager: MetadataManagerV2,
 }
 
 /// The command tracking by the [`CreateMviewProgressTracker`].
 pub(super) struct TrackingCommand {
-    /// The context of the command.
-    pub context: Arc<CommandContext>,
-
-    /// Should be called when the command is finished.
-    pub notifiers: Vec<Notifier>,
+    pub info: CreateStreamingJobCommandInfo,
+    pub replace_table_info: Option<ReplaceTablePlan>,
 }
 
-/// Track the progress of all creating mviews. When creation is done, `notify_finished` will be
-/// called on registered notifiers.
-///
 /// Tracking is done as follows:
 /// 1. We identify a `StreamJob` by its `TableId` of its `Materialized` table.
 /// 2. For each stream job, there are several actors which run its tasks.
 /// 3. With `progress_map` we can use the ID of the `StreamJob` to view its progress.
 /// 4. With `actor_map` we can use an actor's `ActorId` to find the ID of the `StreamJob`.
+#[derive(Default)]
 pub(super) struct CreateMviewProgressTracker {
     /// Progress of the create-mview DDL indicated by the `TableId`.
     progress_map: HashMap<TableId, (Progress, TrackingJob)>,
@@ -300,48 +291,73 @@ impl CreateMviewProgressTracker {
     /// Other state are persisted by the `BackfillExecutor`, such as:
     /// 1. `CreateMviewProgress`.
     /// 2. `Backfill` position.
-    pub fn recover(
-        table_map: TableActorMap,
-        mut upstream_mv_counts: TableUpstreamMvCountMap,
-        mut definitions: TableDefinitionMap,
+    pub fn recover_v1(
         version_stats: HummockVersionStats,
-        mut finished_notifiers: TableNotifierMap,
-        mut table_fragment_map: TableFragmentMap,
-        metadata_manager: MetadataManager,
+        mviews: HashMap<
+            TableId,
+            (
+                TableFragments,
+                Table,      // mview table
+                Vec<Table>, // internal tables
+            ),
+        >,
+        metadata_manager: MetadataManagerV1,
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
-        let table_map: HashMap<_, HashSet<ActorId>> = table_map.into();
-        for (creating_table_id, actors) in table_map {
-            // 1. Recover `BackfillState` in the tracker.
+        for (creating_table_id, (table_fragments, mview, internal_tables)) in mviews {
+            let actors = table_fragments.backfill_actor_ids();
             let mut states = HashMap::new();
+            tracing::debug!(?actors, ?creating_table_id, "recover progress for actors");
             for actor in actors {
                 actor_map.insert(actor, creating_table_id);
                 states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0));
             }
-            let upstream_mv_count = upstream_mv_counts.remove(&creating_table_id).unwrap();
-            let upstream_total_key_count = upstream_mv_count
-                .iter()
-                .map(|(upstream_mv, count)| {
-                    *count as u64
-                        * version_stats
-                            .table_stats
-                            .get(&upstream_mv.table_id)
-                            .map_or(0, |stat| stat.total_key_count as u64)
-                })
-                .sum();
-            let definition = definitions.remove(&creating_table_id).unwrap();
-            let progress = Progress {
+
+            let progress = Self::recover_progress(
                 states,
-                done_count: 0, // Fill only after first barrier pass
-                upstream_mv_count,
-                upstream_total_key_count,
-                consumed_rows: 0, // Fill only after first barrier pass
+                table_fragments.dependent_table_ids(),
+                mview.definition.clone(),
+                &version_stats,
+            );
+            let tracking_job = TrackingJob::RecoveredV1(RecoveredTrackingJobV1 {
+                fragments: table_fragments,
+                metadata_manager: metadata_manager.clone(),
+                internal_tables,
+                streaming_job: StreamingJob::MaterializedView(mview),
+            });
+            progress_map.insert(creating_table_id, (progress, tracking_job));
+        }
+        Self {
+            progress_map,
+            actor_map,
+            finished_jobs: Vec::new(),
+        }
+    }
+
+    pub fn recover_v2(
+        mview_map: HashMap<TableId, (String, TableFragments)>,
+        version_stats: HummockVersionStats,
+        metadata_manager: MetadataManagerV2,
+    ) -> Self {
+        let mut actor_map = HashMap::new();
+        let mut progress_map = HashMap::new();
+        for (creating_table_id, (definition, table_fragments)) in mview_map {
+            let mut states = HashMap::new();
+            let actors = table_fragments.backfill_actor_ids();
+            for actor in actors {
+                actor_map.insert(actor, creating_table_id);
+                states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0));
+            }
+
+            let progress = Self::recover_progress(
+                states,
+                table_fragments.dependent_table_ids(),
                 definition,
-            };
-            let tracking_job = TrackingJob::Recovered(RecoveredTrackingJob {
-                fragments: table_fragment_map.remove(&creating_table_id).unwrap(),
-                finished: finished_notifiers.remove(&creating_table_id).unwrap(),
+                &version_stats,
+            );
+            let tracking_job = TrackingJob::RecoveredV2(RecoveredTrackingJobV2 {
+                id: creating_table_id.table_id as i32,
                 metadata_manager: metadata_manager.clone(),
             });
             progress_map.insert(creating_table_id, (progress, tracking_job));
@@ -353,11 +369,29 @@ impl CreateMviewProgressTracker {
         }
     }
 
-    pub fn new() -> Self {
-        Self {
-            progress_map: Default::default(),
-            actor_map: Default::default(),
-            finished_jobs: Vec::new(),
+    fn recover_progress(
+        states: HashMap<ActorId, BackfillState>,
+        upstream_mv_count: HashMap<TableId, usize>,
+        definition: String,
+        version_stats: &HummockVersionStats,
+    ) -> Progress {
+        let upstream_total_key_count = upstream_mv_count
+            .iter()
+            .map(|(upstream_mv, count)| {
+                *count as u64
+                    * version_stats
+                        .table_stats
+                        .get(&upstream_mv.table_id)
+                        .map_or(0, |stat| stat.total_key_count as u64)
+            })
+            .sum();
+        Progress {
+            states,
+            done_count: 0, // Fill only after first barrier pass
+            upstream_mv_count,
+            upstream_total_key_count,
+            consumed_rows: 0, // Fill only after first barrier pass
+            definition,
         }
     }
 
@@ -386,35 +420,26 @@ impl CreateMviewProgressTracker {
     /// If not checkpoint, jobs which do not require checkpoint can be finished.
     ///
     /// Returns whether there are still remaining stashed jobs to finish.
-    pub(super) async fn finish_jobs(&mut self, checkpoint: bool) -> MetaResult<bool> {
+    pub(super) fn take_finished_jobs(&mut self) -> Vec<TrackingJob> {
         tracing::trace!(finished_jobs=?self.finished_jobs, progress_map=?self.progress_map, "finishing jobs");
-        for job in self
-            .finished_jobs
-            .extract_if(|job| checkpoint || !job.is_checkpoint_required())
-        {
-            // The command is ready to finish. We can now call `pre_finish`.
-            job.pre_finish().await?;
-            job.notify_finished();
-        }
-        Ok(!self.finished_jobs.is_empty())
+        take(&mut self.finished_jobs)
+    }
+
+    pub(super) fn has_pending_finished_jobs(&self) -> bool {
+        !self.finished_jobs.is_empty()
     }
 
     pub(super) fn cancel_command(&mut self, id: TableId) {
         let _ = self.progress_map.remove(&id);
-        self.finished_jobs
-            .retain(|x| x.table_to_create() != Some(id));
+        self.finished_jobs.retain(|x| x.table_to_create() != id);
         self.actor_map.retain(|_, table_id| *table_id != id);
     }
 
     /// Notify all tracked commands that error encountered and clear them.
-    pub fn abort_all(&mut self, err: &MetaError) {
+    pub fn abort_all(&mut self) {
         self.actor_map.clear();
-        self.finished_jobs.drain(..).for_each(|job| {
-            job.notify_finish_failed(err.clone());
-        });
-        self.progress_map
-            .drain()
-            .for_each(|(_, (_, job))| job.notify_finish_failed(err.clone()));
+        self.finished_jobs.clear();
+        self.progress_map.clear();
     }
 
     /// Add a new create-mview DDL command to track.
@@ -422,32 +447,43 @@ impl CreateMviewProgressTracker {
     /// If the actors to track is empty, return the given command as it can be finished immediately.
     pub fn add(
         &mut self,
-        command: TrackingCommand,
+        command_ctx: &Arc<CommandContext>,
         version_stats: &HummockVersionStats,
     ) -> Option<TrackingJob> {
-        let actors = command.context.actors_to_track();
-        if actors.is_empty() {
-            // The command can be finished immediately.
-            return Some(TrackingJob::New(command));
-        }
+        let (info, actors, replace_table_info) = if let Command::CreateStreamingJob {
+            info,
+            replace_table,
+        } = &command_ctx.command
+        {
+            let CreateStreamingJobCommandInfo {
+                table_fragments, ..
+            } = info;
+            let actors = table_fragments.tracking_progress_actor_ids();
+            if actors.is_empty() {
+                // The command can be finished immediately.
+                return Some(TrackingJob::New(TrackingCommand {
+                    info: info.clone(),
+                    replace_table_info: replace_table.clone(),
+                }));
+            }
+            (info.clone(), actors, replace_table.clone())
+        } else {
+            return None;
+        };
 
-        let (
-            creating_mv_id,
-            upstream_mv_count,
-            upstream_total_key_count,
-            definition,
-            ddl_type,
-            create_type,
-        ) = if let Command::CreateStreamingJob {
+        let CreateStreamingJobCommandInfo {
             table_fragments,
-            dispatchers,
             upstream_root_actors,
+            dispatchers,
             definition,
             ddl_type,
             create_type,
             ..
-        } = &command.context.command
-        {
+        } = &info;
+
+        let creating_mv_id = table_fragments.table_id();
+
+        let (upstream_mv_count, upstream_total_key_count, ddl_type, create_type) = {
             // Keep track of how many times each upstream MV appears.
             let mut upstream_mv_count = HashMap::new();
             for (table_id, actors) in upstream_root_actors {
@@ -471,15 +507,11 @@ impl CreateMviewProgressTracker {
                 })
                 .sum();
             (
-                table_fragments.table_id(),
                 upstream_mv_count,
                 upstream_total_key_count,
-                definition.to_string(),
                 ddl_type,
                 create_type,
             )
-        } else {
-            unreachable!("Must be CreateStreamingJob.");
         };
 
         for &actor in &actors {
@@ -490,7 +522,7 @@ impl CreateMviewProgressTracker {
             actors,
             upstream_mv_count,
             upstream_total_key_count,
-            definition,
+            definition.clone(),
         );
         if *ddl_type == DdlType::Sink && *create_type == CreateType::Background {
             // We return the original tracking job immediately.
@@ -498,11 +530,21 @@ impl CreateMviewProgressTracker {
             // We don't need to wait for sink to finish backfill.
             // This still contains the notifiers, so we can tell listeners
             // that the sink job has been created.
-            Some(TrackingJob::New(command))
+            Some(TrackingJob::New(TrackingCommand {
+                info,
+                replace_table_info,
+            }))
         } else {
-            let old = self
-                .progress_map
-                .insert(creating_mv_id, (progress, TrackingJob::New(command)));
+            let old = self.progress_map.insert(
+                creating_mv_id,
+                (
+                    progress,
+                    TrackingJob::New(TrackingCommand {
+                        info,
+                        replace_table_info,
+                    }),
+                ),
+            );
             assert!(old.is_none());
             None
         }
@@ -554,6 +596,7 @@ impl CreateMviewProgressTracker {
                     })
                     .sum();
 
+                tracing::debug!(?table_id, "updating progress for table");
                 progress.update(actor, new_state, upstream_total_key_count);
 
                 if progress.is_done() {

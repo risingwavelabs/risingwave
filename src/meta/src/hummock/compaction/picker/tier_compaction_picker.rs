@@ -14,8 +14,8 @@
 
 use std::sync::Arc;
 
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
+use risingwave_hummock_sdk::level::{InputLevel, Levels, OverlappingLevel};
+use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
@@ -55,7 +55,7 @@ impl TierCompactionPicker {
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type() != LevelType::Overlapping {
+            if level.level_type != LevelType::Overlapping {
                 continue;
             }
 
@@ -165,8 +165,8 @@ pub mod tests {
     use std::sync::Arc;
 
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::new_sub_level;
-    use risingwave_pb::hummock::hummock_version::Levels;
-    use risingwave_pb::hummock::{LevelType, OverlappingLevel};
+    use risingwave_hummock_sdk::level::{Levels, OverlappingLevel};
+    use risingwave_pb::hummock::LevelType;
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::picker::{

@@ -28,7 +28,8 @@ use risingwave_common::config::{
     MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
 };
 use risingwave_common::lru::init_global_sequencer_args;
-use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
+use risingwave_common::monitor::{RouterExt, TcpConfig};
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -38,9 +39,7 @@ use risingwave_common::util::pretty_bytes::convert;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
-use risingwave_common_service::metrics_manager::MetricsManager;
-use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_common_service::tracing::TracingExtractLayer;
+use risingwave_common_service::{MetricsManager, ObserverManager, TracingExtractLayer};
 use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
 use risingwave_dml::dml_manager::DmlManager;
 use risingwave_pb::common::WorkerType;
@@ -217,6 +216,12 @@ pub async fn compute_node_serve(
     .await
     .unwrap();
 
+    LocalSecretManager::init(
+        opts.temp_secret_file_dir,
+        meta_client.cluster_id().to_string(),
+        worker_id,
+    );
+
     // Initialize observer manager.
     let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params.clone()));
     let compute_observer_node = ComputeObserverNode::new(system_params_manager.clone());
@@ -340,7 +345,9 @@ pub async fn compute_node_serve(
     ));
 
     // Initialize batch environment.
-    let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
+    let batch_client_pool = Arc::new(ComputeClientPool::new(
+        config.batch_exchange_connection_pool_size(),
+    ));
     let batch_env = BatchEnvironment::new(
         batch_mgr.clone(),
         advertise_addr.clone(),
@@ -349,7 +356,7 @@ pub async fn compute_node_serve(
         state_store.clone(),
         batch_task_metrics.clone(),
         batch_executor_metrics.clone(),
-        client_pool,
+        batch_client_pool,
         dml_mgr.clone(),
         source_metrics.clone(),
         batch_spill_metrics.clone(),
@@ -357,6 +364,9 @@ pub async fn compute_node_serve(
     );
 
     // Initialize the streaming environment.
+    let stream_client_pool = Arc::new(ComputeClientPool::new(
+        config.streaming_exchange_connection_pool_size(),
+    ));
     let stream_env = StreamEnvironment::new(
         advertise_addr.clone(),
         stream_config,
@@ -366,6 +376,7 @@ pub async fn compute_node_serve(
         system_params_manager.clone(),
         source_metrics,
         meta_client.clone(),
+        stream_client_pool,
     );
 
     let stream_mgr = LocalStreamManager::new(
@@ -394,7 +405,7 @@ pub async fn compute_node_serve(
         meta_cache,
         block_cache,
     );
-    let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr);
+    let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr.clone());
     let health_srv = HealthServiceImpl::new();
 
     let telemetry_manager = TelemetryManager::new(
@@ -458,8 +469,12 @@ pub async fn compute_node_serve(
     // Wait for the shutdown signal.
     shutdown.cancelled().await;
 
-    // TODO(shutdown): gracefully unregister from the meta service (need to cautious since it may
-    // trigger auto-scaling)
+    // Unregister from the meta service, then...
+    // - batch queries will not be scheduled to this compute node,
+    // - streaming actors will not be scheduled to this compute node after next recovery.
+    meta_client.try_unregister().await;
+    // Shutdown the streaming manager.
+    let _ = stream_mgr.shutdown().await;
 
     // NOTE(shutdown): We can't simply join the tonic server here because it only returns when all
     // existing connections are closed, while we have long-running streaming calls that never

@@ -31,7 +31,7 @@ hyper-rustls = { version = "0.24.2", features = ["webpki-roots"] }
 hyper-tls = "0.5.0"
 itertools = { workspace = true }
 madsim = "0.2.27"
-opendal = { version = "0.47", features = [
+opendal = { workspace = true, features = [
     "executors-tokio",
     "services-azblob",
     "services-fs",
@@ -42,7 +42,6 @@ opendal = { version = "0.47", features = [
     "services-s3",
     "services-webhdfs",
     "services-azfile",
-    # "service-hdfs",
 ] }
 prometheus = { version = "0.13", features = ["process"] }
 reqwest = "0.12.2" # required by opendal

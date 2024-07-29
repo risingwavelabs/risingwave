@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use anyhow::Context;
+use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
@@ -37,6 +38,7 @@ use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result};
 use crate::session::SessionImpl;
+use crate::utils::resolve_secret_ref_in_with_options;
 use crate::{Binder, WithOptions};
 
 fn format_type_to_format(from: FormatType) -> Option<Format> {
@@ -63,6 +65,7 @@ fn encode_type_to_encode(from: EncodeType) -> Option<Encode> {
         EncodeType::Json => Encode::Json,
         EncodeType::Bytes => Encode::Bytes,
         EncodeType::Template => Encode::Template,
+        EncodeType::Parquet => Encode::Parquet,
         EncodeType::None => Encode::None,
         EncodeType::Text => Encode::Text,
     })
@@ -161,7 +164,8 @@ pub async fn refresh_sr_and_get_columns_diff(
     }
 
     let (Some(columns_from_resolve_source), source_info) =
-        bind_columns_from_source(session, connector_schema, &with_properties).await?
+        bind_columns_from_source(session, connector_schema, Either::Right(&with_properties))
+            .await?
     else {
         // Source without schema registry is rejected.
         unreachable!("source without schema registry is rejected")
@@ -253,11 +257,20 @@ pub async fn handle_alter_source_with_sr(
     source.definition =
         alter_definition_format_encode(&source.definition, connector_schema.row_options.clone())?;
 
-    let format_encode_options = WithOptions::try_from(connector_schema.row_options())?.into_inner();
+    let (format_encode_options, format_encode_secret_ref) = resolve_secret_ref_in_with_options(
+        WithOptions::try_from(connector_schema.row_options())?,
+        session.as_ref(),
+    )?
+    .into_parts();
     source
         .info
         .format_encode_options
         .extend(format_encode_options);
+
+    source
+        .info
+        .format_encode_secret_refs
+        .extend(format_encode_secret_ref);
 
     let mut pb_source = source.to_prost(schema_id, database_id);
 

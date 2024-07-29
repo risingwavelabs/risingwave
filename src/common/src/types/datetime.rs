@@ -17,10 +17,12 @@
 use std::error::Error;
 use std::fmt::Display;
 use std::hash::Hash;
-use std::io::Write;
+use std::io::{Cursor, Write};
 use std::str::FromStr;
 
-use bytes::{Bytes, BytesMut};
+use anyhow::Context;
+use byteorder::{BigEndian, ReadBytesExt};
+use bytes::BytesMut;
 use chrono::{
     DateTime, Datelike, Days, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday,
 };
@@ -28,7 +30,6 @@ use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::ZeroHeapSize;
 use thiserror::Error;
 
-use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::{CheckedAdd, DataType, Interval};
 use crate::array::{ArrayError, ArrayResult};
@@ -427,47 +428,8 @@ impl ToText for Timestamp {
     }
 }
 
-impl ToBinary for Date {
-    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
-        match ty {
-            super::DataType::Date => {
-                let mut output = BytesMut::new();
-                self.0.to_sql(&Type::ANY, &mut output).unwrap();
-                Ok(Some(output.freeze()))
-            }
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl ToBinary for Time {
-    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
-        match ty {
-            super::DataType::Time => {
-                let mut output = BytesMut::new();
-                self.0.to_sql(&Type::ANY, &mut output).unwrap();
-                Ok(Some(output.freeze()))
-            }
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl ToBinary for Timestamp {
-    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
-        match ty {
-            super::DataType::Timestamp => {
-                let mut output = BytesMut::new();
-                self.0.to_sql(&Type::ANY, &mut output).unwrap();
-                Ok(Some(output.freeze()))
-            }
-            _ => unreachable!(),
-        }
-    }
-}
-
 impl Date {
-    pub fn with_days(days: i32) -> Result<Self> {
+    pub fn with_days_since_ce(days: i32) -> Result<Self> {
         Ok(Date::new(
             NaiveDate::from_num_days_from_ce_opt(days)
                 .ok_or_else(|| InvalidParamsError::date(days))?,
@@ -490,6 +452,14 @@ impl Date {
             .num_days_from_ce()
     }
 
+    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<Date> {
+        let days = cur
+            .read_i32::<BigEndian>()
+            .context("failed to read i32 from Date buffer")?;
+
+        Ok(Date::with_days_since_ce(days)?)
+    }
+
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output
             .write(&(self.0.num_days_from_ce()).to_be_bytes())
@@ -501,7 +471,7 @@ impl Date {
     }
 
     pub fn from_num_days_from_ce_uncheck(days: i32) -> Self {
-        Self::with_days(days).unwrap()
+        Self::with_days_since_ce(days).unwrap()
     }
 
     pub fn and_hms_uncheck(self, hour: u32, min: u32, sec: u32) -> Timestamp {
@@ -522,6 +492,14 @@ impl Time {
             NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
                 .ok_or_else(|| InvalidParamsError::time(secs, nano))?,
         ))
+    }
+
+    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<Time> {
+        let nano = cur
+            .read_u64::<BigEndian>()
+            .context("failed to read u64 from Time buffer")?;
+
+        Ok(Time::with_nano(nano)?)
     }
 
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
@@ -576,6 +554,14 @@ impl Timestamp {
                 .map(|t| t.naive_utc())
                 .ok_or_else(|| InvalidParamsError::datetime(secs, nsecs))?
         }))
+    }
+
+    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<Timestamp> {
+        let micros = cur
+            .read_i64::<BigEndian>()
+            .context("failed to read i64 from Timestamp buffer")?;
+
+        Ok(Timestamp::with_micros(micros)?)
     }
 
     /// Although `Timestamp` takes 12 bytes, we drop 4 bytes in protobuf encoding.

@@ -25,17 +25,18 @@ use itertools::Itertools;
 use more_asserts::assert_gt;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::is_max_epoch;
-use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
+use risingwave_common_service::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::key::{
     is_empty_key_range, vnode, vnode_range, TableKey, TableKeyRange,
 };
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
-use tracing::error;
 
 use super::local_hummock_storage::LocalHummockStorage;
 use super::version::{read_filter_for_version, CommittedVersion, HummockVersionReader};
@@ -52,6 +53,7 @@ use crate::hummock::event_handler::{
 use crate::hummock::iterator::change_log::ChangeLogIterator;
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
+use crate::hummock::time_travel_version_cache::SimpleTimeTravelVersionCache;
 use crate::hummock::utils::{validate_safe_epoch, wait_for_epoch};
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
 use crate::hummock::{
@@ -72,7 +74,7 @@ impl Drop for HummockStorageShutdownGuard {
         let _ = self
             .shutdown_sender
             .send(HummockEvent::Shutdown)
-            .inspect_err(|e| error!(event = ?e.0, "unable to send shutdown"));
+            .inspect_err(|e| tracing::debug!(event = ?e.0, "unable to send shutdown"));
     }
 }
 
@@ -115,6 +117,10 @@ pub struct HummockStorage {
     write_limiter: WriteLimiterRef,
 
     compact_await_tree_reg: Option<CompactionAwaitTreeRegRef>,
+
+    hummock_meta_client: Arc<dyn HummockMetaClient>,
+
+    simple_time_travel_version_cache: Arc<SimpleTimeTravelVersionCache>,
 }
 
 pub type ReadVersionTuple = (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion);
@@ -232,6 +238,8 @@ impl HummockStorage {
             min_current_epoch,
             write_limiter,
             compact_await_tree_reg: await_tree_reg,
+            hummock_meta_client,
+            simple_time_travel_version_cache: Arc::new(SimpleTimeTravelVersionCache::new()),
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -254,7 +262,10 @@ impl HummockStorage {
     ) -> StorageResult<Option<Bytes>> {
         let key_range = (Bound::Included(key.clone()), Bound::Included(key.clone()));
 
-        let (key_range, read_version_tuple) = if read_options.read_version_from_backup {
+        let (key_range, read_version_tuple) = if read_options.read_version_from_time_travel {
+            self.build_read_version_by_time_travel(epoch, read_options.table_id, key_range)
+                .await?
+        } else if read_options.read_version_from_backup {
             self.build_read_version_tuple_from_backup(epoch, read_options.table_id, key_range)
                 .await?
         } else {
@@ -276,7 +287,10 @@ impl HummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageIterator> {
-        let (key_range, read_version_tuple) = if read_options.read_version_from_backup {
+        let (key_range, read_version_tuple) = if read_options.read_version_from_time_travel {
+            self.build_read_version_by_time_travel(epoch, read_options.table_id, key_range)
+                .await?
+        } else if read_options.read_version_from_backup {
             self.build_read_version_tuple_from_backup(epoch, read_options.table_id, key_range)
                 .await?
         } else {
@@ -294,7 +308,10 @@ impl HummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageRevIterator> {
-        let (key_range, read_version_tuple) = if read_options.read_version_from_backup {
+        let (key_range, read_version_tuple) = if read_options.read_version_from_time_travel {
+            self.build_read_version_by_time_travel(epoch, read_options.table_id, key_range)
+                .await?
+        } else if read_options.read_version_from_backup {
             self.build_read_version_tuple_from_backup(epoch, read_options.table_id, key_range)
                 .await?
         } else {
@@ -304,6 +321,33 @@ impl HummockStorage {
         self.hummock_version_reader
             .rev_iter(key_range, epoch, read_options, read_version_tuple, None)
             .await
+    }
+
+    async fn build_read_version_by_time_travel(
+        &self,
+        epoch: u64,
+        table_id: TableId,
+        key_range: TableKeyRange,
+    ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
+        let fetch = async {
+            let pb_version = self
+                .hummock_meta_client
+                .get_version_by_epoch(epoch)
+                .await
+                .inspect_err(|e| tracing::error!("{}", e.to_report_string()))
+                .map_err(|e| HummockError::meta_error(e.to_report_string()))?;
+            let version = HummockVersion::from_rpc_protobuf(&pb_version);
+            validate_safe_epoch(&version, table_id, epoch)?;
+            let (tx, _rx) = unbounded_channel();
+            Ok(PinnedVersion::new(version, tx))
+        };
+        let version = self
+            .simple_time_travel_version_cache
+            .get_or_insert(epoch, fetch)
+            .await?;
+        Ok(get_committed_read_version_tuple(
+            version, table_id, key_range, epoch,
+        ))
     }
 
     async fn build_read_version_tuple_from_backup(
@@ -454,6 +498,15 @@ impl HummockStorage {
         )
     }
 
+    /// Declare the start of an epoch. This information is provided for spill so that the spill task won't
+    /// include data of two or more syncs.
+    // TODO: remove this method when we support spill task that can include data of more two or more syncs
+    pub fn start_epoch(&self, epoch: HummockEpoch, table_ids: HashSet<TableId>) {
+        let _ = self
+            .hummock_event_sender
+            .send(HummockEvent::StartEpoch { epoch, table_ids });
+    }
+
     pub fn sstable_store(&self) -> SstableStoreRef {
         self.context.sstable_store.clone()
     }
@@ -565,16 +618,14 @@ impl StateStore for HummockStorage {
 
     fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
         let (tx, rx) = oneshot::channel();
-        self.hummock_event_sender
-            .send(HummockEvent::SyncEpoch {
-                new_sync_epoch: epoch,
-                sync_result_sender: tx,
-                table_ids,
-            })
-            .expect("should send success");
+        let _ = self.hummock_event_sender.send(HummockEvent::SyncEpoch {
+            new_sync_epoch: epoch,
+            sync_result_sender: tx,
+            table_ids,
+        });
         rx.map(|recv_result| {
             Ok(recv_result
-                .expect("should wait success")?
+                .map_err(|_| HummockError::other("failed to receive sync result"))??
                 .into_sync_result())
         })
     }
@@ -642,9 +693,6 @@ impl StateStore for HummockStorage {
         Ok(())
     }
 }
-
-#[cfg(any(test, feature = "test"))]
-use risingwave_hummock_sdk::version::HummockVersion;
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {

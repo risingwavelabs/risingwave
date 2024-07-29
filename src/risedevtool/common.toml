@@ -15,6 +15,7 @@ PREFIX_LOG = "${PREFIX}/log"
 PREFIX_TMP = "${PREFIX}/tmp"
 PREFIX_DOCKER = "${PREFIX}/rw-docker"
 PREFIX_PROFILING = "${PREFIX}/profiling"
+PREFIX_SECRET = "${PREFIX}/secrets"
 
 BUILD_MODE_DIR = { source = "${ENABLE_RELEASE_PROFILE}", default_value = "debug", mapping = { true = "release" } }
 RISINGWAVE_BUILD_PROFILE = { source = "${ENABLE_RELEASE_PROFILE}", default_value = "dev", mapping = { true = "release" } }

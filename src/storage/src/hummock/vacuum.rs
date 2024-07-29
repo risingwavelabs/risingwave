@@ -99,11 +99,12 @@ impl Vacuum {
         sstable_store: SstableStoreRef,
     ) -> HummockResult<(Vec<HummockSstableObjectId>, u64, u64)> {
         tracing::info!(
-            "Try to full scan SSTs with timestamp {}",
-            full_scan_task.sst_retention_time_sec
+            timestamp = full_scan_task.sst_retention_time_sec,
+            prefix = full_scan_task.prefix.as_ref().unwrap_or(&String::from("")),
+            "Try to full scan SSTs"
         );
         let metadata_iter = sstable_store
-            .list_object_metadata_from_object_store()
+            .list_object_metadata_from_object_store(full_scan_task.prefix.clone())
             .await?;
         Vacuum::full_scan_inner(full_scan_task, metadata_iter).await
     }

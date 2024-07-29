@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use risingwave_common::bail;
@@ -29,6 +28,7 @@ use crate::parser::additional_columns::source_add_partition_offset_cols;
 use crate::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use crate::source::monitor::SourceMetrics;
 use crate::source::{SourceColumnDesc, SourceColumnType, UPSTREAM_SOURCE_KEY};
+use crate::WithOptionsSecResolved;
 
 pub const DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 16;
 
@@ -55,7 +55,7 @@ pub struct SourceDescBuilder {
     columns: Vec<ColumnCatalog>,
     metrics: Arc<SourceMetrics>,
     row_id_index: Option<usize>,
-    with_properties: BTreeMap<String, String>,
+    with_properties: WithOptionsSecResolved,
     source_info: PbStreamSourceInfo,
     connector_message_buffer_size: usize,
     pk_indices: Vec<usize>,
@@ -66,7 +66,7 @@ impl SourceDescBuilder {
         columns: Vec<PbColumnCatalog>,
         metrics: Arc<SourceMetrics>,
         row_id_index: Option<usize>,
-        with_properties: BTreeMap<String, String>,
+        with_properties: WithOptionsSecResolved,
         source_info: PbStreamSourceInfo,
         connector_message_buffer_size: usize,
         pk_indices: Vec<usize>,
@@ -199,11 +199,13 @@ pub mod test_utils {
                 ))
             })
             .collect();
+        let options_with_secret =
+            crate::WithOptionsSecResolved::without_secrets(with_properties.clone());
         SourceDescBuilder {
             columns,
             metrics: Default::default(),
             row_id_index,
-            with_properties,
+            with_properties: options_with_secret,
             source_info,
             connector_message_buffer_size: DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE,
             pk_indices,
