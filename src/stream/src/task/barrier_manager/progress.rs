@@ -49,7 +49,7 @@ impl LocalBarrierWorker {
         state: BackfillState,
     ) {
         if let Some(actor_state) = self.state.actor_states.get(&actor)
-            && let Some((partial_graph_id, _)) = actor_state.inflight_barriers.get(&epoch.prev)
+            && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
             && let Some(graph_state) = self.state.graph_states.get_mut(partial_graph_id)
         {
             graph_state
