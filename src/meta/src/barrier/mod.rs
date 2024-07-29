@@ -390,16 +390,14 @@ impl CheckpointControl {
         }
     }
 
-    /// Return whether the collect failure on `worker_id` should trigger a recovery
-    fn on_collect_failure(&self, worker_id: WorkerId, e: &MetaError) -> bool {
+    /// Return the earliest command waiting on the `worker_id`.
+    fn command_wait_collect_from_worker(&self, worker_id: WorkerId) -> Option<&CommandContext> {
         for epoch_node in self.command_ctx_queue.values() {
             if epoch_node.state.node_to_collect.contains(&worker_id) {
-                self.context
-                    .report_collect_failure(&epoch_node.command_ctx, e);
-                return true;
+                return Some(&epoch_node.command_ctx);
             }
         }
-        false
+        None
     }
 }
 
@@ -701,10 +699,14 @@ impl GlobalBarrierManager {
 
                         }
                         Err(e) => {
-                            if self.checkpoint_control.on_collect_failure(worker_id, &e)
+                            let failed_command = self.checkpoint_control.command_wait_collect_from_worker(worker_id);
+                            if failed_command.is_some()
                                 || self.state.inflight_actor_infos.actor_map.contains_key(&worker_id) {
                                 let errors = self.control_stream_manager.collect_errors(worker_id, e).await;
                                 let err = merge_node_rpc_errors("get error from control stream", errors);
+                                if let Some(failed_command) = failed_command {
+                                    self.context.report_collect_failure(failed_command, &err);
+                                }
                                 self.failure_recovery(err).await;
                             } else {
                                 warn!(e = ?e.as_report(), worker_id, "no barrier to collect from worker, ignore err");
