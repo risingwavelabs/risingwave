@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 // Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -113,6 +114,7 @@ async fn test_snapshot_inner(
         .await;
 
     let epoch1 = test_epoch(1);
+    hummock_storage.start_epoch(epoch1, HashSet::from_iter([Default::default()]));
     local.init_for_test(epoch1).await.unwrap();
     local
         .ingest_batch(
@@ -134,6 +136,7 @@ async fn test_snapshot_inner(
         .await
         .unwrap();
     let epoch2 = epoch1.next_epoch();
+    hummock_storage.start_epoch(epoch2, HashSet::from_iter([Default::default()]));
     local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     if enable_sync {
         let res = hummock_storage.seal_and_sync_epoch(epoch1).await.unwrap();
@@ -174,6 +177,7 @@ async fn test_snapshot_inner(
         .await
         .unwrap();
     let epoch3 = epoch2.next_epoch();
+    hummock_storage.start_epoch(epoch3, HashSet::from_iter([Default::default()]));
     local.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
     if enable_sync {
         let res = hummock_storage.seal_and_sync_epoch(epoch2).await.unwrap();
@@ -243,6 +247,7 @@ async fn test_snapshot_range_scan_inner(
     let mut local = hummock_storage
         .new_local(NewLocalOptions::for_test(Default::default()))
         .await;
+    hummock_storage.start_epoch(epoch, HashSet::from_iter([Default::default()]));
     local.init_for_test(epoch).await.unwrap();
 
     local

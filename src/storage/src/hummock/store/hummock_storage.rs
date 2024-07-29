@@ -29,15 +29,14 @@ use risingwave_common_service::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::key::{
     is_empty_key_range, vnode, vnode_range, TableKey, TableKeyRange,
 };
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
-use tracing::error;
 
 use super::local_hummock_storage::LocalHummockStorage;
 use super::version::{read_filter_for_version, CommittedVersion, HummockVersionReader};
@@ -75,7 +74,7 @@ impl Drop for HummockStorageShutdownGuard {
         let _ = self
             .shutdown_sender
             .send(HummockEvent::Shutdown)
-            .inspect_err(|e| error!(event = ?e.0, "unable to send shutdown"));
+            .inspect_err(|e| tracing::debug!(event = ?e.0, "unable to send shutdown"));
     }
 }
 
@@ -497,6 +496,15 @@ impl HummockStorage {
             version_update_notifier_tx,
             self.context.storage_opts.mem_table_spill_threshold,
         )
+    }
+
+    /// Declare the start of an epoch. This information is provided for spill so that the spill task won't
+    /// include data of two or more syncs.
+    // TODO: remove this method when we support spill task that can include data of more two or more syncs
+    pub fn start_epoch(&self, epoch: HummockEpoch, table_ids: HashSet<TableId>) {
+        let _ = self
+            .hummock_event_sender
+            .send(HummockEvent::StartEpoch { epoch, table_ids });
     }
 
     pub fn sstable_store(&self) -> SstableStoreRef {

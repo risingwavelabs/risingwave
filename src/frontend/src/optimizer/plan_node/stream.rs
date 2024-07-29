@@ -15,6 +15,7 @@
 use fixedbitset::FixedBitSet;
 
 use super::generic::PhysicalPlanRef;
+use crate::optimizer::property::MonotonicityMap;
 
 /// A subtrait of [`PhysicalPlanRef`] for stream plans.
 ///
@@ -29,6 +30,7 @@ pub trait StreamPlanRef: PhysicalPlanRef {
     fn append_only(&self) -> bool;
     fn emit_on_window_close(&self) -> bool;
     fn watermark_columns(&self) -> &FixedBitSet;
+    fn columns_monotonicity(&self) -> &MonotonicityMap;
 }
 
 /// Prelude for stream plan nodes.

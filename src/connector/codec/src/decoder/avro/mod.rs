@@ -235,9 +235,11 @@ impl<'a> AvroParseOptions<'a> {
                 .map_err(|_| create_error())?
                 .into(),
             // ---- Date -----
-            (DataType::Date, Value::Date(days)) => Date::with_days(days + unix_epoch_days())
-                .map_err(|_| create_error())?
-                .into(),
+            (DataType::Date, Value::Date(days)) => {
+                Date::with_days_since_ce(days + unix_epoch_days())
+                    .map_err(|_| create_error())?
+                    .into()
+            }
             // ---- Varchar -----
             (DataType::Varchar, Value::Enum(_, symbol)) => borrowed!(symbol.as_str()),
             (DataType::Varchar, Value::String(s)) => borrowed!(s.as_str()),

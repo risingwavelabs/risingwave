@@ -24,7 +24,7 @@ use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHE
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{data_types, DataType, ScalarImpl, Timestamptz};
 use risingwave_common::{bail_not_implemented, current_cluster_version, must_match, no_function};
-use risingwave_expr::aggregate::{agg_kinds, AggKind};
+use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
 use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, RangeFrameBounds, RangeFrameOffset,
     RowsFrameBounds, SessionFrameBounds, SessionFrameGap, WindowFuncKind,
@@ -38,11 +38,10 @@ use thiserror_ext::AsReport;
 
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, UdfContext};
-use crate::catalog::function_catalog::FunctionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
-    AggCall, CastContext, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal,
-    Now, OrderBy, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
+    AggCall, CastContext, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, InputRef,
+    Literal, Now, OrderBy, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
 };
 use crate::utils::Condition;
 
@@ -116,6 +115,32 @@ impl Binder {
             .map(|arg| self.bind_function_arg(arg.clone()))
             .flatten_ok()
             .try_collect()?;
+
+        // `aggregate:` on a scalar function
+        if f.aggregate {
+            let mut scalar_inputs = inputs
+                .iter()
+                .enumerate()
+                .map(|(i, expr)| {
+                    InputRef::new(i, DataType::List(Box::new(expr.return_type()))).into()
+                })
+                .collect_vec();
+            let scalar: ExprImpl = if let Ok(schema) = self.first_valid_schema()
+                && let Some(func) =
+                    schema.get_function_by_name_inputs(&function_name, &mut scalar_inputs)
+            {
+                if !func.kind.is_scalar() {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "expect a scalar function after `aggregate:`".to_string(),
+                    )
+                    .into());
+                }
+                UserDefinedFunction::new(func.clone(), scalar_inputs).into()
+            } else {
+                self.bind_builtin_scalar_function(&function_name, scalar_inputs, f.variadic)?
+            };
+            return self.bind_agg(f, AggKind::WrapScalar(scalar.to_expr_proto()));
+        }
 
         // user defined function
         // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
@@ -226,7 +251,7 @@ impl Binder {
                         return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
                     }
                     Aggregate => {
-                        return self.bind_agg(f, AggKind::UserDefined, Some(func.clone()));
+                        return self.bind_agg(f, AggKind::UserDefined(func.as_ref().into()));
                     }
                 }
             }
@@ -236,7 +261,7 @@ impl Binder {
         if f.over.is_none()
             && let Ok(kind) = function_name.parse()
         {
-            return self.bind_agg(f, kind, None);
+            return self.bind_agg(f, AggKind::Builtin(kind));
         }
 
         if f.distinct || !f.order_by.is_empty() || f.filter.is_some() {
@@ -355,21 +380,16 @@ impl Binder {
         Ok(body)
     }
 
-    pub(super) fn bind_agg(
-        &mut self,
-        f: Function,
-        kind: AggKind,
-        user_defined: Option<Arc<FunctionCatalog>>,
-    ) -> Result<ExprImpl> {
+    pub(super) fn bind_agg(&mut self, f: Function, kind: AggKind) -> Result<ExprImpl> {
         self.ensure_aggregate_allowed()?;
 
         let distinct = f.distinct;
         let filter_expr = f.filter.clone();
 
         let (direct_args, args, order_by) = if matches!(kind, agg_kinds::ordered_set!()) {
-            self.bind_ordered_set_agg(f, kind)?
+            self.bind_ordered_set_agg(f, kind.clone())?
         } else {
-            self.bind_normal_agg(f, kind)?
+            self.bind_normal_agg(f, kind.clone())?
         };
 
         let filter = match filter_expr {
@@ -394,26 +414,44 @@ impl Binder {
             None => Condition::true_cond(),
         };
 
-        if let Some(user_defined) = user_defined {
-            Ok(AggCall::new_user_defined(
-                args,
-                distinct,
-                order_by,
-                filter,
-                direct_args,
-                user_defined,
-            )?
-            .into())
-        } else {
-            Ok(ExprImpl::AggCall(Box::new(AggCall::new(
-                kind,
-                args,
-                distinct,
-                order_by,
-                filter,
-                direct_args,
-            )?)))
+        Ok(ExprImpl::AggCall(Box::new(AggCall::new(
+            kind,
+            args,
+            distinct,
+            order_by,
+            filter,
+            direct_args,
+        )?)))
+    }
+
+    fn decimal_to_float64(decimal_expr: &mut ExprImpl, kind: &AggKind) -> Result<()> {
+        if decimal_expr.cast_implicit_mut(DataType::Float64).is_err() {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "direct arg in `{}` must be castable to float64",
+                kind
+            ))
+            .into());
         }
+
+        let Some(Ok(fraction_datum)) = decimal_expr.try_fold_const() else {
+            bail_not_implemented!(
+                issue = 14079,
+                "variable as direct argument of ordered-set aggregate",
+            );
+        };
+
+        if let Some(ref fraction_value) = fraction_datum
+            && !(0.0..=1.0).contains(&fraction_value.as_float64().0)
+        {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "direct arg in `{}` must between 0.0 and 1.0",
+                kind
+            ))
+            .into());
+        }
+        // note that the fraction can be NULL
+        *decimal_expr = Literal::new(fraction_datum, DataType::Float64).into();
+        Ok(())
     }
 
     fn bind_ordered_set_agg(
@@ -460,36 +498,14 @@ impl Binder {
         let order_by = OrderBy::new(vec![self.bind_order_by_expr(within_group)?]);
 
         // check signature and do implicit cast
-        match (kind, direct_args.as_mut_slice(), args.as_mut_slice()) {
-            (AggKind::PercentileCont | AggKind::PercentileDisc, [fraction], [arg]) => {
-                if fraction.cast_implicit_mut(DataType::Float64).is_err() {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "direct arg in `{}` must be castable to float64",
-                        kind
-                    ))
-                    .into());
-                }
-
-                let Some(Ok(fraction_datum)) = fraction.try_fold_const() else {
-                    bail_not_implemented!(
-                        issue = 14079,
-                        "variable as direct argument of ordered-set aggregate",
-                    );
-                };
-
-                if let Some(ref fraction_value) = fraction_datum
-                    && !(0.0..=1.0).contains(&fraction_value.as_float64().0)
-                {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "direct arg in `{}` must between 0.0 and 1.0",
-                        kind
-                    ))
-                    .into());
-                }
-                // note that the fraction can be NULL
-                *fraction = Literal::new(fraction_datum, DataType::Float64).into();
-
-                if kind == AggKind::PercentileCont {
+        match (&kind, direct_args.as_mut_slice(), args.as_mut_slice()) {
+            (
+                AggKind::Builtin(PbAggKind::PercentileCont | PbAggKind::PercentileDisc),
+                [fraction],
+                [arg],
+            ) => {
+                Self::decimal_to_float64(fraction, &kind)?;
+                if matches!(&kind, AggKind::Builtin(PbAggKind::PercentileCont)) {
                     arg.cast_implicit_mut(DataType::Float64).map_err(|_| {
                         ErrorCode::InvalidInputSyntax(format!(
                             "arg in `{}` must be castable to float64",
@@ -498,7 +514,15 @@ impl Binder {
                     })?;
                 }
             }
-            (AggKind::Mode, [], [_arg]) => {}
+            (AggKind::Builtin(PbAggKind::Mode), [], [_arg]) => {}
+            (
+                AggKind::Builtin(PbAggKind::ApproxPercentile),
+                [percentile, relative_error],
+                [_percentile_col],
+            ) => {
+                Self::decimal_to_float64(percentile, &kind)?;
+                Self::decimal_to_float64(relative_error, &kind)?;
+            }
             _ => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "invalid direct args or within group argument for `{}` aggregation",
@@ -556,7 +580,11 @@ impl Binder {
         );
 
         if f.distinct {
-            if kind == AggKind::ApproxCountDistinct {
+            if matches!(
+                kind,
+                AggKind::Builtin(PbAggKind::ApproxCountDistinct)
+                    | AggKind::Builtin(PbAggKind::ApproxPercentile)
+            ) {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "DISTINCT is not allowed for approximate aggregation `{}`",
                     kind
@@ -983,6 +1011,7 @@ impl Binder {
                 ("acosh", raw_call(ExprType::Acosh)),
                 ("atanh", raw_call(ExprType::Atanh)),
                 ("asind", raw_call(ExprType::Asind)),
+                ("acosd", raw_call(ExprType::Acosd)),
                 ("degrees", raw_call(ExprType::Degrees)),
                 ("radians", raw_call(ExprType::Radians)),
                 ("sqrt", raw_call(ExprType::Sqrt)),

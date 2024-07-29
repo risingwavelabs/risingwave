@@ -26,6 +26,7 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
@@ -48,7 +49,7 @@ use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc};
 use crate::with_options::WithOptions;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
-    impl_split, match_source_name_str,
+    impl_split, match_source_name_str, WithOptionsSecResolved,
 };
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
@@ -387,16 +388,19 @@ impl ConnectorProperties {
     /// `deny_unknown_fields`: Since `WITH` options are persisted in meta, we do not deny unknown fields when restoring from
     /// existing data to avoid breaking backwards compatibility. We only deny unknown fields when creating new sources.
     pub fn extract(
-        mut with_properties: BTreeMap<String, String>,
+        with_properties: WithOptionsSecResolved,
         deny_unknown_fields: bool,
     ) -> Result<Self> {
-        let connector = with_properties
+        let (options, secret_refs) = with_properties.into_parts();
+        let mut options_with_secret =
+            LocalSecretManager::global().fill_secrets(options, secret_refs)?;
+        let connector = options_with_secret
             .remove(UPSTREAM_SOURCE_KEY)
             .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
         match_source_name_str!(
             connector.to_lowercase().as_str(),
             PropType,
-            PropType::try_from_btreemap(with_properties, deny_unknown_fields)
+            PropType::try_from_btreemap(options_with_secret, deny_unknown_fields)
                 .map(ConnectorProperties::from),
             |other| bail!("connector '{}' is not supported", other)
         )
@@ -690,7 +694,9 @@ mod tests {
             "nexmark.split.num" => "1",
         ));
 
-        let props = ConnectorProperties::extract(props, true).unwrap();
+        let props =
+            ConnectorProperties::extract(WithOptionsSecResolved::without_secrets(props), true)
+                .unwrap();
 
         if let ConnectorProperties::Nexmark(props) = props {
             assert_eq!(props.table_type, Some(EventType::Person));
@@ -710,7 +716,9 @@ mod tests {
             "broker.rewrite.endpoints" => r#"{"b-1:9092":"dns-1", "b-2:9092":"dns-2"}"#,
         ));
 
-        let props = ConnectorProperties::extract(props, true).unwrap();
+        let props =
+            ConnectorProperties::extract(WithOptionsSecResolved::without_secrets(props), true)
+                .unwrap();
         if let ConnectorProperties::Kafka(k) = props {
             let btreemap = btreemap! {
                 "b-1:9092".to_string() => "dns-1".to_string(),
@@ -745,7 +753,11 @@ mod tests {
             "table.name" => "orders",
         ));
 
-        let conn_props = ConnectorProperties::extract(user_props_mysql, true).unwrap();
+        let conn_props = ConnectorProperties::extract(
+            WithOptionsSecResolved::without_secrets(user_props_mysql),
+            true,
+        )
+        .unwrap();
         if let ConnectorProperties::MysqlCdc(c) = conn_props {
             assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
             assert_eq!(c.properties.get("database.port").unwrap(), "3306");
@@ -757,7 +769,11 @@ mod tests {
             panic!("extract cdc config failed");
         }
 
-        let conn_props = ConnectorProperties::extract(user_props_postgres, true).unwrap();
+        let conn_props = ConnectorProperties::extract(
+            WithOptionsSecResolved::without_secrets(user_props_postgres),
+            true,
+        )
+        .unwrap();
         if let ConnectorProperties::PostgresCdc(c) = conn_props {
             assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
             assert_eq!(c.properties.get("database.port").unwrap(), "5432");

@@ -31,7 +31,8 @@ use crate::ast::*;
 use crate::keywords::{self, Keyword};
 use crate::parser_v2;
 use crate::parser_v2::{
-    dollar_quoted_string, keyword, literal_i64, literal_uint, single_quoted_string, ParserExt as _,
+    dollar_quoted_string, keyword, literal_i64, literal_uint, single_quoted_string, token_number,
+    ParserExt as _,
 };
 use crate::tokenizer::*;
 
@@ -609,7 +610,8 @@ impl Parser<'_> {
                 Keyword::ARRAY if self.peek_token() == Token::LBracket => self.parse_array_expr(),
                 // `LEFT` and `RIGHT` are reserved as identifier but okay as function
                 Keyword::LEFT | Keyword::RIGHT => {
-                    self.parse_function(ObjectName(vec![w.to_ident()?]))
+                    *self = checkpoint;
+                    self.parse_function()
                 }
                 Keyword::OPERATOR if self.peek_token().token == Token::LParen => {
                     let op = UnaryOperator::PGQualified(Box::new(self.parse_qualified_operator()?));
@@ -643,24 +645,15 @@ impl Parser<'_> {
                 // Here `w` is a word, check if it's a part of a multi-part
                 // identifier, a function call, or a simple identifier:
                 _ => match self.peek_token().token {
-                    Token::LParen | Token::Period => {
-                        let mut id_parts: Vec<Ident> = vec![w.to_ident()?];
-                        while self.consume_token(&Token::Period) {
-                            let ckpt = *self;
-                            let token = self.next_token();
-                            match token.token {
-                                Token::Word(w) => id_parts.push(w.to_ident()?),
-                                _ => {
-                                    *self = ckpt;
-                                    return self.expected("an identifier or a '*' after '.'");
-                                }
-                            }
-                        }
-
-                        if self.peek_token().token == Token::LParen {
-                            self.parse_function(ObjectName(id_parts))
+                    Token::LParen | Token::Period | Token::Colon => {
+                        *self = checkpoint;
+                        if let Ok(object_name) = self.parse_object_name()
+                            && !matches!(self.peek_token().token, Token::LParen | Token::Colon)
+                        {
+                            Ok(Expr::CompoundIdentifier(object_name.0))
                         } else {
-                            Ok(Expr::CompoundIdentifier(id_parts))
+                            *self = checkpoint;
+                            self.parse_function()
                         }
                     }
                     _ => Ok(Expr::Identifier(w.to_ident()?)),
@@ -819,7 +812,16 @@ impl Parser<'_> {
         Ok(QualifiedOperator { schema, name })
     }
 
-    pub fn parse_function(&mut self, name: ObjectName) -> PResult<Expr> {
+    /// Parse a function call.
+    pub fn parse_function(&mut self) -> PResult<Expr> {
+        // [aggregate:]
+        let aggregate = if self.parse_keyword(Keyword::AGGREGATE) {
+            self.expect_token(&Token::Colon)?;
+            true
+        } else {
+            false
+        };
+        let name = self.parse_object_name()?;
         self.expect_token(&Token::LParen)?;
         let distinct = self.parse_all_or_distinct()?;
         let (args, order_by, variadic) = self.parse_optional_args()?;
@@ -875,6 +877,7 @@ impl Parser<'_> {
         };
 
         Ok(Expr::Function(Function {
+            aggregate,
             name,
             args,
             variadic,
@@ -3495,6 +3498,18 @@ impl Parser<'_> {
                     Some('\'') => Ok(Value::SingleQuotedString(w.value)),
                     _ => self.expected_at(checkpoint, "A value")?,
                 },
+                Keyword::SECRET => {
+                    let secret_name = self.parse_object_name()?;
+                    let ref_as = if self.parse_keywords(&[Keyword::AS, Keyword::FILE]) {
+                        SecretRefAsType::File
+                    } else {
+                        SecretRefAsType::Text
+                    };
+                    Ok(Value::Ref(SecretRef {
+                        secret_name,
+                        ref_as,
+                    }))
+                }
                 _ => self.expected_at(checkpoint, "a concrete value"),
             },
             Token::Number(ref n) => Ok(Value::Number(n.clone())),
@@ -3573,23 +3588,13 @@ impl Parser<'_> {
 
     /// Parse a map key string
     pub fn parse_map_key(&mut self) -> PResult<Expr> {
-        let checkpoint = *self;
-        let token = self.next_token();
-        match token.token {
-            Token::Word(Word {
-                value,
-                keyword: Keyword::NoKeyword,
-                ..
-            }) => {
-                if self.peek_token() == Token::LParen {
-                    return self.parse_function(ObjectName(vec![Ident::new_unchecked(value)]));
-                }
-                Ok(Expr::Value(Value::SingleQuotedString(value)))
-            }
-            Token::SingleQuotedString(s) => Ok(Expr::Value(Value::SingleQuotedString(s))),
-            Token::Number(s) => Ok(Expr::Value(Value::Number(s))),
-            _ => self.expected_at(checkpoint, "literal string, number or function"),
-        }
+        alt((
+            Self::parse_function,
+            single_quoted_string.map(|s| Expr::Value(Value::SingleQuotedString(s))),
+            token_number.map(|s| Expr::Value(Value::Number(s))),
+            fail.expect("literal string, number or function"),
+        ))
+        .parse_next(self)
     }
 
     /// Parse a SQL datatype (in the context of a CREATE TABLE statement for example) and convert

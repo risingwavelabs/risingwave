@@ -47,7 +47,7 @@ impl LogicalFileScan {
         s3_region: String,
         s3_access_key: String,
         s3_secret_key: String,
-        file_location: String,
+        file_location: Vec<String>,
     ) -> Self {
         assert!("parquet".eq_ignore_ascii_case(&file_format));
         assert!("s3".eq_ignore_ascii_case(&storage_type));
@@ -106,13 +106,13 @@ impl ToBatch for LogicalFileScan {
 
 impl ToStream for LogicalFileScan {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        bail!("FileScan is not supported in streaming mode")
+        bail!("file_scan function is not supported in streaming mode")
     }
 
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        bail!("FileScan is not supported in streaming mode")
+        bail!("file_scan function is not supported in streaming mode")
     }
 }

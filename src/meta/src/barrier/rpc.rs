@@ -24,6 +24,7 @@ use futures::future::try_join_all;
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{pin_mut, FutureExt, StreamExt};
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
@@ -166,25 +167,39 @@ impl ControlStreamManager {
         Ok(())
     }
 
+    /// Clear all nodes and response streams in the manager.
+    pub(super) fn clear(&mut self) {
+        *self = Self::new(self.context.clone());
+    }
+
     async fn next_response(
         &mut self,
     ) -> Option<(WorkerId, MetaResult<StreamingControlStreamResponse>)> {
         let (worker_id, response_stream, result) = self.response_streams.next().await?;
-        if result.is_ok() {
-            self.response_streams
-                .push(into_future(worker_id, response_stream));
+
+        match result.as_ref().map(|r| r.response.as_ref().unwrap()) {
+            Ok(streaming_control_stream_response::Response::Shutdown(_)) | Err(_) => {
+                // Do not add it back to the `response_streams` so that it will not be polled again.
+            }
+            _ => {
+                self.response_streams
+                    .push(into_future(worker_id, response_stream));
+            }
         }
+
         Some((worker_id, result))
     }
 
     pub(super) async fn next_complete_barrier_response(
         &mut self,
     ) -> MetaResult<(WorkerId, u64, BarrierCompleteResponse)> {
+        use streaming_control_stream_response::Response;
+
         loop {
             let (worker_id, result) = pending_on_none(self.next_response()).await;
             match result {
-                Ok(resp) => match resp.response {
-                    Some(streaming_control_stream_response::Response::CompleteBarrier(resp)) => {
+                Ok(resp) => match resp.response.unwrap() {
+                    Response::CompleteBarrier(resp) => {
                         let node = self
                             .nodes
                             .get_mut(&worker_id)
@@ -195,26 +210,37 @@ impl ControlStreamManager {
                             .expect("should exist when get collect resp");
                         break Ok((worker_id, command.prev_epoch.value().0, resp));
                     }
-                    resp => {
-                        break Err(anyhow!("get unexpected resp: {:?}", resp).into());
+                    Response::Shutdown(_) => {
+                        let _ = self
+                            .nodes
+                            .remove(&worker_id)
+                            .expect("should exist when get shutdown resp");
+                        // TODO: if there's no actor running on the node, we can ignore and not trigger recovery.
+                        break Err(anyhow!("worker node {worker_id} is shutting down").into());
+                    }
+                    Response::Init(_) => {
+                        // This arm should be unreachable.
+                        break Err(anyhow!("get unexpected init response").into());
                     }
                 },
                 Err(err) => {
-                    let mut node = self
+                    let node = self
                         .nodes
                         .remove(&worker_id)
                         .expect("should exist when get collect resp");
                     // Note: No need to use `?` as the backtrace is from meta and not useful.
                     warn!(node = ?node.worker, err = %err.as_report(), "get error from response stream");
-                    if let Some(command) = node.inflight_barriers.pop_front() {
+
+                    if let Some(command) = node.inflight_barriers.into_iter().next() {
+                        // FIXME: this future can be cancelled during collection, so the error collection
+                        // might not work as expected.
                         let errors = self.collect_errors(node.worker.id, err).await;
                         let err = merge_node_rpc_errors("get error from control stream", errors);
                         self.context.report_collect_failure(&command, &err);
                         break Err(err);
                     } else {
                         // for node with no inflight barrier, simply ignore the error
-                        info!(node = ?node.worker, "no inflight barrier no node. Ignore error");
-                        continue;
+                        info!(node = ?node.worker, error = %err.as_report(), "no inflight barrier in the node, ignore error");
                     }
                 }
             }
@@ -238,6 +264,7 @@ impl ControlStreamManager {
             })
             .await;
         }
+        tracing::debug!(?errors, "collected stream errors");
         errors
     }
 }
@@ -247,6 +274,7 @@ impl ControlStreamManager {
     pub(super) fn inject_barrier(
         &mut self,
         command_context: Arc<CommandContext>,
+        table_ids_to_sync: HashSet<TableId>,
     ) -> MetaResult<HashSet<WorkerId>> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
             "inject_barrier_err"
@@ -263,9 +291,13 @@ impl ControlStreamManager {
                 if actor_ids_to_collect.is_empty() {
                     // No need to send or collect barrier for this node.
                     assert!(actor_ids_to_send.is_empty());
-                    Ok(())
-                } else {
+                }
+                {
                     let Some(node) = self.nodes.get_mut(node_id) else {
+                        if actor_ids_to_collect.is_empty() {
+                            // Worker node get disconnected but has no actor to collect. Simply skip it.
+                            return Ok(());
+                        }
                         return Err(
                             anyhow!("unconnected worker node: {:?}", worker_node.host).into()
                         );
@@ -294,9 +326,7 @@ impl ControlStreamManager {
                                         barrier: Some(barrier),
                                         actor_ids_to_send,
                                         actor_ids_to_collect,
-                                        table_ids_to_sync: command_context
-                                            .info
-                                            .existing_table_ids()
+                                        table_ids_to_sync: table_ids_to_sync
                                             .iter()
                                             .map(|table_id| table_id.table_id)
                                             .collect(),
@@ -532,17 +562,54 @@ where
     Err(results_err)
 }
 
-fn merge_node_rpc_errors<E: Error>(
+fn merge_node_rpc_errors<E: Error + Send + Sync + 'static>(
     message: &str,
     errors: impl IntoIterator<Item = (WorkerId, E)>,
 ) -> MetaError {
+    use std::error::request_value;
     use std::fmt::Write;
 
+    use risingwave_common::error::tonic::extra::Score;
+
+    let errors = errors.into_iter().collect_vec();
+
+    if errors.is_empty() {
+        return anyhow!(message.to_owned()).into();
+    }
+
+    // Create the error from the single error.
+    let single_error = |(worker_id, e)| {
+        anyhow::Error::from(e)
+            .context(format!("{message}, in worker node {worker_id}"))
+            .into()
+    };
+
+    if errors.len() == 1 {
+        return single_error(errors.into_iter().next().unwrap());
+    }
+
+    // Find the error with the highest score.
+    let max_score = errors
+        .iter()
+        .filter_map(|(_, e)| request_value::<Score>(e))
+        .max();
+
+    if let Some(max_score) = max_score {
+        let mut errors = errors;
+        let max_scored = errors
+            .extract_if(|(_, e)| request_value::<Score>(e) == Some(max_score))
+            .next()
+            .unwrap();
+
+        return single_error(max_scored);
+    }
+
+    // The errors do not have scores, so simply concatenate them.
     let concat: String = errors
         .into_iter()
-        .fold(format!("{message}:"), |mut s, (w, e)| {
-            write!(&mut s, " worker node {}, {};", w, e.as_report()).unwrap();
+        .fold(format!("{message}: "), |mut s, (w, e)| {
+            write!(&mut s, " in worker node {}, {};", w, e.as_report()).unwrap();
             s
         });
-    anyhow::anyhow!(concat).into()
+    anyhow!(concat).into()
 }

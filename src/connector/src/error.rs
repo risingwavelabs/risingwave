@@ -72,6 +72,7 @@ def_anyhow_newtype! {
     mongodb::error::Error => "Mongodb error",
 
     openssl::error::ErrorStack => "OpenSSL error",
+    risingwave_common::secret::SecretError => "Secret error",
 }
 
 pub type ConnectorResult<T, E = ConnectorError> = std::result::Result<T, E>;
