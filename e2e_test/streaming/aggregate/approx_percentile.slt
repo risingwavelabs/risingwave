@@ -3,7 +3,7 @@ statement ok
 create table t(p_col double, grp_col int);
 
 statement ok
-insert into t select generate_series, 1 from generate_series(-1000, 1000);
+insert into t select a, 1 from generate_series(-1000, 1000) t(a);
 
 statement ok
 flush;
