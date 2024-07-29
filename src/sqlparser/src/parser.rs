@@ -1812,6 +1812,16 @@ impl Parser<'_> {
         self.expected(expected)
     }
 
+    pub fn parse_word(&mut self, expected: &str) -> bool {
+        match self.peek_token().token {
+            Token::Word(w) if w.value == expected => {
+                self.next_token();
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Look for an expected keyword and consume it if it exists
     #[must_use]
     pub fn parse_keyword(&mut self, expected: Keyword) -> bool {
@@ -3078,10 +3088,10 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
-            } else if let Some(rate_limit) = self.parse_alter_streaming_rate_limit()? {
+            } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(true)? {
                 AlterTableOperation::SetStreamingRateLimit { rate_limit }
             } else {
-                return self.expected("SCHEMA/PARALLELISM/STREAMING_RATE_LIMIT after SET");
+                return self.expected("SCHEMA/PARALLELISM/SOURCE_RATE_LIMIT after SET");
             }
         } else if self.parse_keyword(Keyword::DROP) {
             let _ = self.parse_keyword(Keyword::COLUMN);
@@ -3136,7 +3146,7 @@ impl Parser<'_> {
     /// BACKFILL_RATE_LIMIT = default | NUMBER
     /// BACKFILL_RATE_LIMIT TO default | NUMBER
     pub fn parse_alter_backfill_rate_limit(&mut self) -> PResult<Option<i32>> {
-        if !self.parse_keyword(Keyword::BACKFILL_RATE_LIMIT) {
+        if !self.parse_word("BACKFILL_RATE_LIMIT") {
             return Ok(None);
         }
         if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
@@ -3155,14 +3165,15 @@ impl Parser<'_> {
         Ok(Some(rate_limit))
     }
 
-    /// STREAMING_RATE_LIMIT = default | NUMBER
-    /// STREAMING_RATE_LIMIT TO default | NUMBER
-    pub fn parse_alter_streaming_rate_limit(&mut self) -> PResult<Option<i32>> {
-        if !self.parse_keyword(Keyword::STREAMING_RATE_LIMIT) {
+    /// SOURCE_RATE_LIMIT = default | NUMBER
+    /// SOURCE_RATE_LIMIT TO default | NUMBER
+    pub fn parse_alter_source_rate_limit(&mut self, is_table: bool) -> PResult<Option<i32>> {
+        if !self.parse_word("SOURCE_RATE_LIMIT") {
             return Ok(None);
         }
         if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
-            return self.expected("TO or = after ALTER TABLE SET STREAMING_RATE_LIMIT");
+            let ddl = if is_table { "TABLE" } else { "SOURCE" };
+            return self.expected(&format!("TO or = after ALTER {ddl} SET SOURCE_RATE_LIMIT"));
         }
         let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
             -1
@@ -3376,8 +3387,8 @@ impl Parser<'_> {
                 AlterSourceOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
-            } else if let Some(rate_limit) = self.parse_alter_streaming_rate_limit()? {
-                AlterSourceOperation::SetStreamingRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(false)? {
+                AlterSourceOperation::SetSourceRateLimit { rate_limit }
             } else {
                 return self.expected("SCHEMA after SET");
             }
