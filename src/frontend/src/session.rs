@@ -344,7 +344,8 @@ impl FrontendEnv {
         let observer_join_handle = observer_manager.start().await;
         join_handles.push(observer_join_handle);
 
-        meta_client.activate(&frontend_address).await?;
+        // meta_client.activate(&frontend_address).await?;
+        meta_client.activate(&frontend_rpc_addr).await?;
 
         let frontend_metrics = Arc::new(GLOBAL_FRONTEND_METRICS.clone());
         let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
