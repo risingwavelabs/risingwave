@@ -27,15 +27,17 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
+use risingwave_hummock_sdk::change_log::EpochNewChangeLog;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, FullKey, TableKey, TableKeyRange, UserKey,
 };
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
-use risingwave_pb::hummock::{EpochNewChangeLog, LevelType, SstableInfo};
+use risingwave_pb::hummock::LevelType;
 use sync_point::sync_point;
 use tracing::warn;
 
@@ -612,7 +614,7 @@ impl HummockVersionReader {
                 continue;
             }
 
-            match level.level_type() {
+            match level.level_type {
                 LevelType::Overlapping | LevelType::Unspecified => {
                     let sstable_infos = prune_overlapping_ssts(
                         &level.table_infos,
@@ -648,8 +650,6 @@ impl HummockVersionReader {
                     table_info_idx = table_info_idx.saturating_sub(1);
                     let ord = level.table_infos[table_info_idx]
                         .key_range
-                        .as_ref()
-                        .unwrap()
                         .compare_right_with_user_key(full_key.user_key.as_ref());
                     // the case that the key falls into the gap between two ssts
                     if ord == Ordering::Less {
@@ -862,7 +862,7 @@ impl HummockVersionReader {
                 continue;
             }
 
-            if level.level_type == LevelType::Nonoverlapping as i32 {
+            if level.level_type == LevelType::Nonoverlapping {
                 let table_infos = prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref);
                 let sstables = table_infos
                     .filter(|sstable_info| {
@@ -927,7 +927,7 @@ impl HummockVersionReader {
                         .sstable_store
                         .sstable(sstable_info, local_stats)
                         .await?;
-                    assert_eq!(sstable_info.get_object_id(), sstable.id);
+                    assert_eq!(sstable_info.object_id, sstable.id);
                     if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
                         if !hit_sstable_bloom_filter(
                             &sstable,
