@@ -191,13 +191,27 @@ impl Display for &'_ PartialGraphManagedBarrierState {
     }
 }
 
+enum InflightActorStatus {
+    /// The actor is just spawned and not issued any barrier yet
+    NotStarted,
+    /// The actor has been issued some barriers, and not issued any stop barrier yet
+    Running,
+    /// The actor has been issued a stop barrier
+    Stopping,
+}
+
+impl InflightActorStatus {
+    pub(super) fn is_stopping(&self) -> bool {
+        matches!(self, InflightActorStatus::Stopping)
+    }
+}
+
 pub(crate) struct InflightActorState {
     pending_subscribers: BTreeMap<u64, Vec<mpsc::UnboundedSender<SubscribeMutationItem>>>,
     started_subscribers: Vec<mpsc::UnboundedSender<SubscribeMutationItem>>,
     /// `prev_epoch` -> partial graph id
     pub(super) inflight_barriers: BTreeMap<u64, (PartialGraphId, Option<Arc<Mutation>>)>,
-    /// Whether the actor has been issued a stop barrier
-    is_stopping: bool,
+    status: InflightActorStatus,
 }
 
 impl InflightActorState {
@@ -206,7 +220,7 @@ impl InflightActorState {
             pending_subscribers: Default::default(),
             started_subscribers: vec![],
             inflight_barriers: BTreeMap::default(),
-            is_stopping: false,
+            status: InflightActorStatus::NotStarted,
         }
     }
 
@@ -216,7 +230,6 @@ impl InflightActorState {
         barrier: &Barrier,
         is_stop: bool,
     ) {
-        assert!(!self.is_stopping, "stopped actor should not issue barrier");
         if let Some((first_epoch, _)) = self.pending_subscribers.first_key_value() {
             assert!(
                 *first_epoch >= barrier.epoch.prev,
@@ -242,10 +255,16 @@ impl InflightActorState {
             barrier.epoch.prev,
             (partial_graph_id, barrier.mutation.clone()),
         );
-        self.is_stopping = is_stop;
         if is_stop {
             assert!(self.pending_subscribers.is_empty());
             self.started_subscribers.clear();
+            assert!(
+                !self.status.is_stopping(),
+                "stopped actor should not issue barrier"
+            );
+            self.status = InflightActorStatus::Stopping;
+        } else {
+            self.status = InflightActorStatus::Running;
         }
     }
 
@@ -255,8 +274,12 @@ impl InflightActorState {
         assert_eq!(prev_epoch, epoch.prev);
         (
             prev_partial_graph_id,
-            self.inflight_barriers.is_empty() && self.is_stopping,
+            self.inflight_barriers.is_empty() && self.status.is_stopping(),
         )
+    }
+
+    pub(super) fn is_running(&self) -> bool {
+        matches!(&self.status, InflightActorStatus::Running)
     }
 }
 
@@ -368,7 +391,8 @@ impl InflightActorState {
                     return;
                 }
             }
-            if !self.is_stopping {
+            if !self.status.is_stopping() {
+                // Only add the subscribers when the actor is not stopped yet.
                 self.started_subscribers.push(tx);
             }
         } else {
@@ -380,6 +404,8 @@ impl InflightActorState {
                     last_epoch,
                     start_prev_epoch
                 );
+            } else {
+                assert!(self.status.is_stopping(), "actor has been stopped and has not inflight barrier. unlikely to get further barrier");
             }
             self.pending_subscribers
                 .entry(start_prev_epoch)

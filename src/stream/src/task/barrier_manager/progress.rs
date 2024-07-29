@@ -57,6 +57,8 @@ impl LocalBarrierWorker {
                 .entry(epoch.curr)
                 .or_default()
                 .insert(actor, state);
+        } else {
+            warn!(?epoch, actor, ?state, "ignore create mview progress");
         }
     }
 }
