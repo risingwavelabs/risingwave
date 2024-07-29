@@ -1055,7 +1055,7 @@ impl WriteResult {
                     .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
                     .context("Failed to parse data file from json")?;
             } else {
-                bail!("iceberg sink metadata should have data_files object");
+                bail!("Iceberg sink metadata should have data_files object");
             }
             Ok(Self {
                 data_files,
