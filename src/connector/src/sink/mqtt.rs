@@ -261,7 +261,7 @@ impl MqttSinkWriter {
             },
             _ => {
                 return Err(SinkError::Config(anyhow!(
-                    "Mqtt sink only supports append-only mode"
+                    "MQTT sink only supports append-only mode"
                 )))
             }
         };
