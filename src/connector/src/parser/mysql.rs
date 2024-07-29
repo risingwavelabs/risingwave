@@ -153,7 +153,7 @@ pub fn mysql_typename_to_rw_type(type_name: &str) -> anyhow::Result<DataType> {
         "date" => Ok(DataType::Date),
         "time" => Ok(DataType::Time),
         "timestamp" => Ok(DataType::Timestamptz),
-        "datetime" => Ok(DataType::Timestamptz),
+        "datetime" => Ok(DataType::Timestamp),
         "json" => Ok(DataType::Jsonb),
         "binary" | "varbinary" | "blob" | "mediumblob" | "longblob" => Ok(DataType::Bytea),
         _ => Err(anyhow::anyhow!("unsupported type: {}", type_name)),
