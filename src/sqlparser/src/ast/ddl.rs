@@ -102,8 +102,8 @@ pub enum AlterTableOperation {
         deferred: bool,
     },
     RefreshSchema,
-    /// `SET STREAMING_RATE_LIMIT TO <rate_limit>`
-    SetStreamingRateLimit {
+    /// `SET SOURCE_RATE_LIMIT TO <rate_limit>`
+    SetSourceRateLimit {
         rate_limit: i32,
     },
 }
@@ -290,8 +290,8 @@ impl fmt::Display for AlterTableOperation {
             AlterTableOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
             }
-            AlterTableOperation::SetStreamingRateLimit { rate_limit } => {
-                write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
+            AlterTableOperation::SetSourceRateLimit { rate_limit } => {
+                write!(f, "SET SOURCE_RATE_LIMIT TO {}", rate_limit)
             }
         }
     }

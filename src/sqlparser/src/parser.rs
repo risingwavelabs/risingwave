@@ -3089,7 +3089,7 @@ impl Parser<'_> {
                     deferred,
                 }
             } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(true)? {
-                AlterTableOperation::SetStreamingRateLimit { rate_limit }
+                AlterTableOperation::SetSourceRateLimit { rate_limit }
             } else {
                 return self.expected("SCHEMA/PARALLELISM/SOURCE_RATE_LIMIT after SET");
             }
@@ -3402,7 +3402,7 @@ impl Parser<'_> {
             AlterSourceOperation::RefreshSchema
         } else {
             return self.expected(
-                "RENAME, ADD COLUMN, OWNER TO, SET or STREAMING_RATE_LIMIT after ALTER SOURCE",
+                "RENAME, ADD COLUMN, OWNER TO, SET or SOURCE_RATE_LIMIT after ALTER SOURCE",
             );
         };
 
