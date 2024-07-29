@@ -133,7 +133,7 @@ impl MqttConfig {
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY {
             Err(SinkError::Config(anyhow!(
-                "Mqtt sink only supports append-only mode"
+                "MQTT sink only supports append-only mode"
             )))
         } else {
             Ok(config)
