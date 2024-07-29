@@ -137,6 +137,14 @@ pub fn parse_transaction_meta(
     })
 }
 
+macro_rules! jsonb_access_field {
+    ($col:expr, $field:expr, $as_type:tt) => {
+        $crate::paste! {
+            $col.access_object_field($field).unwrap().[<as_ $as_type>]().unwrap()
+        }
+    };
+}
+
 pub fn parse_schema_change(
     accessor: &impl Access,
     connector_props: &ConnectorProperties,
@@ -153,34 +161,16 @@ pub fn parse_schema_change(
                 _ => unreachable!(""),
             };
 
-            let id = jsonb
-                .access_object_field("id")
-                .unwrap()
-                .as_string()
-                .unwrap();
-
-            println!("id: {}", id);
+            let id = jsonb_access_field!(jsonb, "id", string);
+            let ty = jsonb_access_field!(jsonb, "type", string);
 
             let mut column_descs: Vec<ColumnDesc> = vec![];
             if let Some(table) = jsonb.access_object_field("table")
                 && let Some(columns) = table.access_object_field("columns")
             {
                 for col in columns.array_elements().unwrap() {
-                    let name = col
-                        .access_object_field("name")
-                        .unwrap()
-                        .as_string()
-                        .unwrap();
-                    let type_name = col
-                        .access_object_field("typeName")
-                        .unwrap()
-                        .as_string()
-                        .unwrap();
-                    let position = col
-                        .access_object_field("position")
-                        .unwrap()
-                        .as_number()
-                        .unwrap();
+                    let name = jsonb_access_field!(col, "name", string);
+                    let type_name = jsonb_access_field!(col, "typeName", string);
 
                     let data_type = match *connector_props {
                         ConnectorProperties::PostgresCdc(_) => {
@@ -198,7 +188,7 @@ pub fn parse_schema_change(
                 }
             }
             schema_changes.push(TableSchemaChange {
-                up_table_full_name: id,
+                cdc_table_name: id.replace('"', ""), // remove the double quotes
                 columns: column_descs
                     .into_iter()
                     .map(|column_desc| ColumnCatalog {

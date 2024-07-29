@@ -7,6 +7,6 @@ pub struct SchemaChangeEnvelope {
 
 #[derive(Debug)]
 pub struct TableSchemaChange {
-    pub(crate) up_table_full_name: String,
+    pub(crate) cdc_table_name: String,
     pub(crate) columns: Vec<ColumnCatalog>,
 }
