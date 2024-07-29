@@ -121,7 +121,7 @@ impl BigQueryFutureManager {
         self.offset_queue.push_back(Some(offset));
     }
 
-    pub async fn wait_next_offset(&mut self) -> Result<Option<TruncateOffset>> {
+    pub async fn next_offset(&mut self) -> Result<Option<TruncateOffset>> {
         if let Some(Some(TruncateOffset::Barrier { .. })) = self.offset_queue.front() {
             return Ok(self.offset_queue.pop_front().unwrap());
         }
@@ -160,7 +160,7 @@ impl LogSinker for BigQueryLogSinker {
     async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<!> {
         loop {
             tokio::select!(
-                offset = self.bigquery_future_manager.wait_next_offset() => {
+                offset = self.bigquery_future_manager.next_offset() => {
                     if let Some(offset) = offset?{
                         log_reader.truncate(offset)?;
                     }
