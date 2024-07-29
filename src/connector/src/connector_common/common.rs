@@ -104,7 +104,7 @@ impl AwsAuthProps {
         }
     }
 
-    fn build_credential_provider(&self) -> ConnectorResult<SharedCredentialsProvider> {
+    async fn build_credential_provider(&self) -> ConnectorResult<SharedCredentialsProvider> {
         if self.access_key.is_some() && self.secret_key.is_some() {
             Ok(SharedCredentialsProvider::new(
                 aws_credential_types::Credentials::from_keys(
@@ -114,7 +114,9 @@ impl AwsAuthProps {
                 ),
             ))
         } else {
-            bail!("Both \"access_key\" and \"secret_key\" are required.")
+            Ok(SharedCredentialsProvider::new(
+                aws_config::default_provider::credentials::default_provider().await,
+            ))
         }
     }
 
@@ -140,7 +142,7 @@ impl AwsAuthProps {
     pub async fn build_config(&self) -> ConnectorResult<SdkConfig> {
         let region = self.build_region().await?;
         let credentials_provider = self
-            .with_role_provider(self.build_credential_provider()?)
+            .with_role_provider(self.build_credential_provider().await?)
             .await?;
         let mut config_loader = aws_config::from_env()
             .region(region)
