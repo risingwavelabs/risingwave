@@ -117,7 +117,7 @@ impl Sink for NatsSink {
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
             return Err(SinkError::Nats(anyhow!(
-                "Nats sink only supports append-only mode"
+                "NATS sink only supports append-only mode"
             )));
         }
         let _client = (self.config.common.build_client().await)
