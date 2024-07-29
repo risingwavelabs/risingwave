@@ -433,12 +433,12 @@ pub struct TablePartitionInfo {
 pub enum PartitionInfo {
     Table(TablePartitionInfo),
     Source(Vec<SplitImpl>),
-    File,
+    File(Vec<String>),
 }
 
 #[derive(Clone, Debug)]
 pub struct FileScanInfo {
-    // Currently we only support one file, so we don't need to support any partition info.
+    pub file_location: Vec<String>,
 }
 
 /// Fragment part of `Query`.
@@ -754,10 +754,14 @@ impl StageGraph {
             complete_stages.insert(stage.id, complete_stage);
             parallelism
         } else {
-            assert!(matches!(&stage.file_scan_info, Some(FileScanInfo {})));
+            assert!(stage.file_scan_info.is_some());
+            let parallelism = min(
+                self.batch_parallelism / 2,
+                stage.file_scan_info.as_ref().unwrap().file_location.len(),
+            );
             complete_stages.insert(
                 stage.id,
-                Arc::new(stage.clone_with_exchange_info(exchange_info, Some(1))),
+                Arc::new(stage.clone_with_exchange_info(exchange_info, Some(parallelism as u32))),
             );
             None
         };
@@ -1090,9 +1094,10 @@ impl BatchPlanFragmenter {
             return Ok(None);
         }
 
-        if let Some(_batch_file_scan) = node.as_batch_file_scan() {
-            // Currently the file scan only support one file, so we just need a empty struct.
-            return Ok(Some(FileScanInfo {}));
+        if let Some(batch_file_scan) = node.as_batch_file_scan() {
+            return Ok(Some(FileScanInfo {
+                file_location: batch_file_scan.core.file_location.clone(),
+            }));
         }
 
         node.inputs()
