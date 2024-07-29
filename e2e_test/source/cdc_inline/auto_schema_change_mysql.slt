@@ -45,11 +45,6 @@ system ok
 mysql -e "
   USE mytest;
   ALTER TABLE customers ADD COLUMN v1 VARCHAR(255);
-"
-
-system ok
-mysql -e "
-  USE mytest;
   ALTER TABLE customers ADD COLUMN v2 double(5,2);
 "
 
