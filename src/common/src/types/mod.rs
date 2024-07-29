@@ -1009,7 +1009,7 @@ impl ScalarImpl {
             Ty::Timestamptz => Self::Timestamptz(Timestamptz::deserialize(de)?),
             Ty::Date => Self::Date({
                 let days = i32::deserialize(de)?;
-                Date::with_days(days)
+                Date::with_days_since_ce(days)
                     .map_err(|e| memcomparable::Error::Message(e.to_report_string()))?
             }),
             Ty::Jsonb => Self::Jsonb(JsonbVal::memcmp_deserialize(de)?),

@@ -1719,9 +1719,9 @@ dependencies = [
 
 [[package]]
 name = "aws-smithy-runtime-api"
-version = "1.6.2"
+version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4179bd8a1c943e1aceb46c5b9fc014a561bd6c35a2153e816ba29076ee49d245"
+checksum = "30819352ed0a04ecf6a2f3477e344d2d1ba33d43e0f09ad9047c12e0d923616f"
 dependencies = [
  "aws-smithy-async",
  "aws-smithy-types",
@@ -9948,7 +9948,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.12.1",
+ "parking_lot 0.11.2",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -11035,6 +11035,7 @@ dependencies = [
  "async-trait",
  "await-tree",
  "clap",
+ "jsonbb",
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.1",
@@ -11093,6 +11094,7 @@ dependencies = [
  "tokio-stream",
  "tower",
  "tracing",
+ "uuid",
  "workspace-hack",
 ]
 
@@ -11745,6 +11747,7 @@ dependencies = [
  "hex",
  "hyper 0.14.27",
  "itertools 0.12.1",
+ "jsonbb",
  "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
@@ -12277,6 +12280,7 @@ dependencies = [
  "governor",
  "hytra",
  "itertools 0.12.1",
+ "jsonbb",
  "local_stats_alloc",
  "lru 0.7.6",
  "madsim-tokio",

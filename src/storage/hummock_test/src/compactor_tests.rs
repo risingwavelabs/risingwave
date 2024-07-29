@@ -803,7 +803,6 @@ pub(crate) mod tests {
             filter_key_extractor_manager,
         )
         .await;
-
         hummock_manager_ref
             .report_compact_task(
                 result_task.task_id,
@@ -1932,7 +1931,6 @@ pub(crate) mod tests {
             ..Default::default()
         };
         let (ret, fast_ret) = run_fast_and_normal_runner(compact_ctx.clone(), task).await;
-
         let mut fast_tables = Vec::with_capacity(fast_ret.len());
         let mut normal_tables = Vec::with_capacity(ret.len());
         let mut stats = StoreLocalStatistic::default();
