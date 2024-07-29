@@ -45,11 +45,13 @@ select * from m1;
 ----
 -982.5779489474152 -804.4614206837127 0 804.4614206837127 982.5779489474152
 
-# statement ok
-# recover;
+# Test state encode / decode
+onlyif can-use-recover
+statement ok
+recover;
 
-# wait recovery
-# sleep 10s
+onlyif can-use-recover
+sleep 10s
 
 query I
 select * from m1;
