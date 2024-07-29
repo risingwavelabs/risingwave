@@ -136,7 +136,6 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         self.agg_calls.iter().all(|c| {
             matches!(c.agg_kind, agg_kinds::single_value_state!())
                 || (matches!(c.agg_kind, agg_kinds::single_value_state_iff_in_append_only!() if stream_input_append_only))
-                || (matches!(c.agg_kind, AggKind::Builtin(PbAggKind::ApproxPercentile)))
         })
     }
 
@@ -418,8 +417,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 agg_kinds::single_value_state_iff_in_append_only!() if in_append_only => {
                     AggCallState::Value
                 }
-                agg_kinds::single_value_state!()
-                | AggKind::Builtin(PbAggKind::ApproxPercentile) => AggCallState::Value,
+                agg_kinds::single_value_state!() => AggCallState::Value,
                 AggKind::Builtin(
                     PbAggKind::Min
                     | PbAggKind::Max

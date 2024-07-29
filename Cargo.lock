@@ -11415,6 +11415,7 @@ dependencies = [
  "arrow-udf-wasm",
  "async-trait",
  "auto_enums",
+ "bytes",
  "chrono",
  "chrono-tz 0.9.0",
  "criterion",

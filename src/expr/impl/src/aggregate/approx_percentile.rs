@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::mem::size_of;
 use std::ops::Range;
 
+use bytes::{Buf, Bytes};
 use risingwave_common::array::*;
 use risingwave_common::row::Row;
 use risingwave_common::types::*;
@@ -61,10 +62,12 @@ struct State {
 
 impl EstimateSize for State {
     fn estimated_heap_size(&self) -> usize {
-        let count_size = 1;
-        let pos_buckets_size = self.pos_buckets.len() * 2;
+        let count_size = size_of::<BucketCount>();
+        let pos_buckets_size =
+            self.pos_buckets.len() * (size_of::<BucketId>() + size_of::<Count>());
         let zero_bucket_size = size_of::<Count>();
-        let neg_buckets_size = self.pos_buckets.len() * 2;
+        let neg_buckets_size =
+            self.neg_buckets.len() * (size_of::<BucketId>() + size_of::<Count>());
         count_size + pos_buckets_size + zero_bucket_size + neg_buckets_size
     }
 }
@@ -179,8 +182,7 @@ impl AggregateFunction for ApproxPercentile {
         let mut encoded_state = Vec::with_capacity(state.estimated_heap_size());
         encoded_state.extend_from_slice(&state.count.to_be_bytes());
         encoded_state.extend_from_slice(&state.zeros.to_be_bytes());
-        let neg_buckets_size =
-            state.neg_buckets.len() * (size_of::<BucketId>() + size_of::<Count>());
+        let neg_buckets_size = state.neg_buckets.len() as u64;
         encoded_state.extend_from_slice(&neg_buckets_size.to_be_bytes());
         for (bucket_id, count) in &state.neg_buckets {
             encoded_state.extend_from_slice(&bucket_id.to_be_bytes());
@@ -200,30 +202,18 @@ impl AggregateFunction for ApproxPercentile {
             return Ok(AggregateState::Any(Box::new(state)));
         };
         let encoded_state: Box<[u8]> = scalar_state.into_bytea();
-        let mut cursor = 0;
-        state.count = u64::from_be_bytes(encoded_state[cursor..cursor + 8].try_into().unwrap());
-        cursor += 8;
-        state.zeros = u64::from_be_bytes(encoded_state[cursor..cursor + 8].try_into().unwrap());
-        cursor += 8;
-        let neg_buckets_size =
-            usize::from_be_bytes(encoded_state[cursor..cursor + 8].try_into().unwrap());
-        let neg_buckets_end = cursor + neg_buckets_size;
-        cursor += 8;
-        while cursor < neg_buckets_end {
-            let bucket_id =
-                i32::from_be_bytes(encoded_state[cursor..cursor + 4].try_into().unwrap());
-            cursor += 4;
-            let count = u64::from_be_bytes(encoded_state[cursor..cursor + 8].try_into().unwrap());
-            cursor += 8;
+        let mut buf = Bytes::from(encoded_state);
+        state.count = buf.get_u64();
+        state.zeros = buf.get_u64();
+        let neg_buckets_size = buf.get_u64();
+        for _ in 0..neg_buckets_size {
+            let bucket_id = buf.get_i32();
+            let count = buf.get_u64();
             state.neg_buckets.insert(bucket_id, count);
         }
-        let pos_buckets_end = encoded_state.len();
-        while cursor < pos_buckets_end {
-            let bucket_id =
-                i32::from_be_bytes(encoded_state[cursor..cursor + 4].try_into().unwrap());
-            cursor += 4;
-            let count = u64::from_be_bytes(encoded_state[cursor..cursor + 8].try_into().unwrap());
-            cursor += 8;
+        while !buf.is_empty() {
+            let bucket_id = buf.get_i32();
+            let count = buf.get_u64();
             state.pos_buckets.insert(bucket_id, count);
         }
         Ok(AggregateState::Any(Box::new(state)))
