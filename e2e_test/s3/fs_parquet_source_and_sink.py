@@ -115,7 +115,7 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         return 's3_test_parquet'
 
     # Execute a SELECT statement
-    cur.execute(f'''CREATE sink s1 as select
+    cur.execute(f'''CREATE sink test_file_sink as select
         id,
         name,
         sex,
@@ -193,7 +193,8 @@ def do_sink(config, file_num, item_num_per_file, prefix):
     _assert_eq('sum(id)', result[1], (total_rows - 1) * total_rows / 2)
 
     print('File sink test pass!')
-
+    cur.execute(f'drop sink test_file_sink')
+    cur.execute(f'drop table test_sink_table')
     cur.close()
     conn.close()
 

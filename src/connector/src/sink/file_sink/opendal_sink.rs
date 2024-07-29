@@ -87,6 +87,11 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
     const SINK_NAME: &'static str = S::SINK_NAME;
 
     async fn validate(&self) -> Result<()> {
+        if !self.is_append_only {
+            return Err(SinkError::Config(
+                anyhow!("File only supports append-only mode at present, please change the query to append-only, or use `force_append_only = 'true'`")
+            ));
+        }
         Ok(())
     }
 
