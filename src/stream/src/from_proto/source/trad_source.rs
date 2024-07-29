@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
-
 use risingwave_common::catalog::{
     default_key_column_name_version_mapping, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
