@@ -172,6 +172,7 @@ impl SubscriptionCursor {
             let fields = table_catalog
                 .columns
                 .iter()
+                .filter(|c| !c.is_hidden)
                 .map(|c| Field::with_name(c.data_type().clone(), c.name()))
                 .collect();
             let fields = Self::build_desc(fields, true);
