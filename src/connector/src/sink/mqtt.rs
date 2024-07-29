@@ -175,7 +175,7 @@ impl Sink for MqttSink {
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
             return Err(SinkError::Mqtt(anyhow!(
-                "Mqtt sink only supports append-only mode"
+                "MQTT sink only supports append-only mode"
             )));
         }
 
