@@ -10716,6 +10716,7 @@ dependencies = [
  "async-trait",
  "await-tree",
  "clap",
+ "jsonbb",
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.1",
@@ -10774,6 +10775,7 @@ dependencies = [
  "tokio-stream",
  "tower",
  "tracing",
+ "uuid",
  "workspace-hack",
 ]
 
@@ -11398,6 +11400,7 @@ dependencies = [
  "hex",
  "hyper 0.14.27",
  "itertools 0.12.1",
+ "jsonbb",
  "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
@@ -11923,6 +11926,7 @@ dependencies = [
  "governor",
  "hytra",
  "itertools 0.12.1",
+ "jsonbb",
  "local_stats_alloc",
  "lru 0.7.6",
  "madsim-tokio",

@@ -36,6 +36,8 @@ impl ExecutorBuilder for SourceBackfillExecutorBuilder {
         let source_info = node.get_info()?;
 
         let source_desc_builder = super::source::create_source_desc_builder(
+            "source backfill",
+            &source_id,
             node.columns.clone(),
             &params,
             source_info.clone(),

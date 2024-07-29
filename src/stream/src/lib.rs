@@ -54,6 +54,7 @@ pub mod error;
 pub mod executor;
 mod from_proto;
 pub mod task;
+pub mod telemetry;
 
 #[cfg(test)]
 risingwave_expr_impl::enable!();
