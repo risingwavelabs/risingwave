@@ -962,7 +962,7 @@ impl DdlService for DdlServiceImpl {
             // get the table catalog corresponding to the cdc table
             let tables: Vec<Table> = self
                 .metadata_manager
-                .get_table_catalog_by_cdc_table_name(cdc_table_name.replace("\"", ""))
+                .get_table_catalog_by_cdc_table_name(cdc_table_name)
                 .await?;
             tracing::info!(">> number of table to replace: {}", tables.len());
 
