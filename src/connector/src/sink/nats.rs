@@ -79,7 +79,7 @@ impl NatsConfig {
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY {
             Err(SinkError::Config(anyhow!(
-                "Nats sink only supports append-only mode"
+                "NATS sink only supports append-only mode"
             )))
         } else {
             Ok(config)
