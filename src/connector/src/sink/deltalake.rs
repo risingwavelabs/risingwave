@@ -356,7 +356,7 @@ impl Sink for DeltaLakeSink {
             .collect();
         if deltalake_fields.len() != self.param.schema().fields().len() {
             return Err(SinkError::DeltaLake(anyhow!(
-                "column mismatch, risingwave is {}, deltalake is {}",
+                "Columns mismatch. RisingWave is {}, DeltaLake is {}",
                 self.param.schema().fields().len(),
                 deltalake_fields.len()
             )));
