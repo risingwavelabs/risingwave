@@ -99,7 +99,7 @@ impl PlainParser {
             && let Some(data) = payload
         {
             match cdc_meta.msg_type {
-                CdcMessageType::Data => {
+                CdcMessageType::Data | CdcMessageType::Heartbeat => {
                     return self.parse_rows(key, Some(data), writer).await;
                 }
                 CdcMessageType::TransactionMeta => {
@@ -130,7 +130,7 @@ impl PlainParser {
                         Err(err) => Err(err)?,
                     };
                 }
-                CdcMessageType::Unknown => {
+                CdcMessageType::Unspecified => {
                     unreachable!()
                 }
             }

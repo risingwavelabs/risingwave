@@ -149,9 +149,10 @@ message SinkCoordinatorStreamResponse {
 message CdcMessage {
   enum CdcMessageType {
     UNSPECIFIED = 0;
-    DATA = 1;
-    TRANSACTION_META = 2;
-    SCHEMA_CHANGE = 3;
+    HEARTBEAT = 1;
+    DATA = 2;
+    TRANSACTION_META = 3;
+    SCHEMA_CHANGE = 4;
   }
 
   // The value of the Debezium message
@@ -161,7 +162,7 @@ message CdcMessage {
   string full_table_name = 4;
   int64 source_ts_ms = 5;
 
-  // Deprecated: use `type` instead
+  // Deprecated: use `msg_type` instead
   reserved "is_transaction_meta";
   reserved 6;
 

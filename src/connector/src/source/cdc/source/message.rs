@@ -20,7 +20,8 @@ use crate::source::SourceMeta;
 
 #[derive(Clone, Debug)]
 pub enum CdcMessageType {
-    Unknown,
+    Unspecified,
+    Heartbeat,
     Data,
     TransactionMeta,
     SchemaChange,
@@ -30,9 +31,10 @@ impl From<cdc_message::CdcMessageType> for CdcMessageType {
     fn from(msg_type: cdc_message::CdcMessageType) -> Self {
         match msg_type {
             cdc_message::CdcMessageType::Data => CdcMessageType::Data,
+            cdc_message::CdcMessageType::Heartbeat => CdcMessageType::Heartbeat,
             cdc_message::CdcMessageType::TransactionMeta => CdcMessageType::TransactionMeta,
             cdc_message::CdcMessageType::SchemaChange => CdcMessageType::SchemaChange,
-            cdc_message::CdcMessageType::Unspecified => CdcMessageType::Unknown,
+            cdc_message::CdcMessageType::Unspecified => CdcMessageType::Unspecified,
         }
     }
 }
