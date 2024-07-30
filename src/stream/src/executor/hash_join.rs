@@ -12,16 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::collections::{BTreeMap, HashSet};
-use std::num::NonZeroU32;
-use std::sync::LazyLock;
 use std::time::Duration;
 
-use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::Op;
 use risingwave_common::hash::{HashKey, NullBitmap};
-use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -843,7 +839,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     let join_key_data_types = side_update.ht.join_key_data_types();
                     let key = key.deserialize(join_key_data_types)?;
                     tracing::warn!(target: "high_join_amplification",
-                        suppressed_count,
                         matched_rows_len = rows.len(),
                         update_table_id = side_update.ht.table_id(),
                         match_table_id = side_match.ht.table_id(),
