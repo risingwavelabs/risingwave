@@ -99,7 +99,7 @@ macro_rules! for_all_params {
             { enable_tracing,                           bool,   Some(false),                                true,   "Whether to enable distributed tracing.", },
             { use_new_object_prefix_strategy,           bool,   None,                                       false,  "Whether to split object prefix.", },
             { license_key,                              String, Some(default_license_key()),                true,   "The license key to activate enterprise features.", },
-            { time_travel_retention_ms,         u64,    Some(0_u64),                                        true,   "The data retention period for time travel, where 0 indicates that it's disabled.", },
+            { time_travel_retention_ms,                 u64,    Some(0_u64),                                true,   "The data retention period for time travel, where 0 indicates that it's disabled.", },
         }
     };
 }
@@ -459,6 +459,7 @@ mod tests {
             (ENABLE_TRACING_KEY, "true"),
             (USE_NEW_OBJECT_PREFIX_STRATEGY_KEY, "false"),
             (LICENSE_KEY_KEY, "foo"),
+            (TIME_TRAVEL_RETENTION_MS_KEY, "0"),
             ("a_deprecated_param", "foo"),
         ];
 
