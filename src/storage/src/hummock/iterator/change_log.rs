@@ -25,6 +25,7 @@ use crate::error::StorageResult;
 use crate::hummock::iterator::{Forward, HummockIterator, MergeIterator};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SstableIterator};
+use crate::monitor::IterLocalMetricsGuard;
 use crate::store::{ChangeLogValue, StateStoreReadLogItem, StateStoreReadLogItemRef};
 use crate::StateStoreIter;
 
@@ -339,9 +340,21 @@ impl<NI: HummockIterator<Direction = Forward>, OI: HummockIterator<Direction = F
     }
 }
 
+impl Drop for ChangeLogIterator {
+    fn drop(&mut self) {
+        self.inner
+            .new_value_iter
+            .collect_local_statistic(&mut self.stats_guard.local_stats);
+        self.inner
+            .old_value_iter
+            .collect_local_statistic(&mut self.stats_guard.local_stats);
+    }
+}
+
 pub struct ChangeLogIterator {
     inner: ChangeLogIteratorInner<MergeIterator<SstableIterator>, MergeIterator<SstableIterator>>,
     initial_read: bool,
+    stats_guard: IterLocalMetricsGuard,
 }
 
 impl ChangeLogIterator {
@@ -351,6 +364,7 @@ impl ChangeLogIterator {
         new_value_iter: MergeIterator<SstableIterator>,
         old_value_iter: MergeIterator<SstableIterator>,
         table_id: TableId,
+        stats_guard: IterLocalMetricsGuard,
     ) -> HummockResult<Self> {
         let make_user_key = |table_key| UserKey {
             table_id,
@@ -368,6 +382,7 @@ impl ChangeLogIterator {
         Ok(Self {
             inner,
             initial_read: false,
+            stats_guard,
         })
     }
 }

@@ -63,7 +63,9 @@ use crate::hummock::{
 use crate::mem_table::{
     ImmId, ImmutableMemtable, MemTableHummockIterator, MemTableHummockRevIterator,
 };
-use crate::monitor::{GetLocalMetricsGuard, HummockStateStoreMetrics, StoreLocalStatistic};
+use crate::monitor::{
+    GetLocalMetricsGuard, HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic,
+};
 use crate::store::{gen_min_epoch, ReadLogOptions, ReadOptions};
 
 pub type CommittedVersion = PinnedVersion;
@@ -984,6 +986,7 @@ impl HummockVersionReader {
             ssts: impl Iterator<Item = &SstableInfo>,
             sstable_store: &SstableStoreRef,
             read_options: Arc<SstableIteratorReadOptions>,
+            local_stat: &mut StoreLocalStatistic,
         ) -> HummockResult<MergeIterator<SstableIterator>> {
             let iters = try_join_all(ssts.map(|sst| {
                 let sstable_store = sstable_store.clone();
@@ -991,16 +994,23 @@ impl HummockVersionReader {
                 async move {
                     let mut local_stat = StoreLocalStatistic::default();
                     let table_holder = sstable_store.sstable(sst, &mut local_stat).await?;
-                    Ok::<_, HummockError>(SstableIterator::new(
-                        table_holder,
-                        sstable_store,
-                        read_options,
+                    Ok::<_, HummockError>((
+                        SstableIterator::new(table_holder, sstable_store, read_options),
+                        local_stat,
                     ))
                 }
             }))
             .await?;
-            Ok::<_, HummockError>(MergeIterator::new(iters))
+            Ok::<_, HummockError>(MergeIterator::new(iters.into_iter().map(
+                |(iter, stats)| {
+                    local_stat.add(&stats);
+                    iter
+                },
+            )))
         }
+
+        let mut local_stat = StoreLocalStatistic::default();
+
         let new_value_iter = make_iter(
             change_log
                 .iter()
@@ -1008,6 +1018,7 @@ impl HummockVersionReader {
                 .filter(|sst| filter_single_sst(sst, options.table_id, &key_range)),
             &self.sstable_store,
             read_options.clone(),
+            &mut local_stat,
         )
         .await?;
         let old_value_iter = make_iter(
@@ -1017,6 +1028,7 @@ impl HummockVersionReader {
                 .filter(|sst| filter_single_sst(sst, options.table_id, &key_range)),
             &self.sstable_store,
             read_options.clone(),
+            &mut local_stat,
         )
         .await?;
         ChangeLogIterator::new(
@@ -1025,6 +1037,11 @@ impl HummockVersionReader {
             new_value_iter,
             old_value_iter,
             options.table_id,
+            IterLocalMetricsGuard::new(
+                self.state_store_metrics.clone(),
+                options.table_id,
+                local_stat,
+            ),
         )
         .await
     }
