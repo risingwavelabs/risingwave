@@ -227,13 +227,31 @@ impl KinesisSinkPayloadWriter {
                     .as_ref()
                     .expect("should have set stream name")
             );
-            Retry::spawn(
+            let output = Retry::spawn(
                 ExponentialBackoff::from_millis(100).map(jitter).take(3),
                 || builder.clone().send(),
             )
             .await
             .with_context(|| context_fmt.clone())
             .map_err(SinkError::Kinesis)?;
+            if let Some(num_failed) = output.failed_record_count()
+                && num_failed > 0
+            {
+                let mut found = 0;
+                for result in output.records() {
+                    if result.error_code().is_none() && result.error_message().is_none() {
+                        continue;
+                    }
+                    found += 1;
+                    // TODO(bohan): resend corresponding records in next call
+                    tracing::warn!(
+                        code = result.error_code().unwrap_or_default(),
+                        message = result.error_message().unwrap_or_default(),
+                        "Error records from a partially successful PutRecords",
+                    )
+                }
+                debug_assert_eq!(num_failed, found);
+            }
             Ok(())
         }
         .boxed()
