@@ -170,7 +170,9 @@ impl ValueRowSerializer for Serializer {
 pub struct Deserializer {
     required_column_ids: HashMap<i32, usize>,
     schema: Arc<[DataType]>,
-    default_column_values: Vec<(usize, Datum)>,
+
+    /// A row with default values for each column or `None` if no default value is specified
+    default_row: Vec<Datum>,
 }
 
 impl Deserializer {
@@ -180,6 +182,10 @@ impl Deserializer {
         column_with_default: impl Iterator<Item = (usize, Datum)>,
     ) -> Self {
         assert_eq!(column_ids.len(), schema.len());
+        let mut default_row: Vec<Datum> = vec![None; schema.len()];
+        for (i, datum) in column_with_default {
+            default_row[i] = datum;
+        }
         Self {
             required_column_ids: column_ids
                 .iter()
@@ -187,7 +193,7 @@ impl Deserializer {
                 .map(|(i, c)| (c.get_id(), i))
                 .collect::<HashMap<_, _>>(),
             schema,
-            default_column_values: column_with_default.collect(),
+            default_row,
         }
     }
 }
@@ -207,12 +213,7 @@ impl ValueRowDeserializer for Deserializer {
         let offsets = &encoded_bytes[offsets_start_idx..data_start_idx];
         let data = &encoded_bytes[data_start_idx..];
 
-        // initialize datums with default values
-        let mut datums: Vec<Datum> = vec![None; self.schema.len()];
-        for (i, datum) in &self.default_column_values {
-            datums[*i].clone_from(datum);
-        }
-
+        let mut row = self.default_row.clone();
         for i in 0..datum_num {
             let this_id = encoded_bytes.get_i32_le();
             if let Some(&decoded_idx) = self.required_column_ids.get(&this_id) {
@@ -242,10 +243,10 @@ impl ValueRowDeserializer for Deserializer {
                         &mut data_slice,
                     )?)
                 };
-                datums[decoded_idx] = data;
+                row[decoded_idx] = data;
             }
         }
-        Ok(datums)
+        Ok(row)
     }
 }
 
