@@ -243,7 +243,7 @@ impl KinesisSinkPayloadWriter {
                         continue;
                     }
                     found += 1;
-                    // TODO(bohan): resend corresponding records in next call
+                    // TODO(yiming): resend corresponding records in next call
                     tracing::warn!(
                         code = result.error_code().unwrap_or_default(),
                         message = result.error_message().unwrap_or_default(),
