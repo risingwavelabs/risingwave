@@ -454,6 +454,8 @@ pub async fn handle_create_sink(
 
     let mut target_table_replace_plan = None;
     if let Some(table_catalog) = target_table_catalog {
+        use crate::handler::alter_table_column::hijack_merger_for_target_table;
+
         check_cycle_for_sink(session.as_ref(), sink.clone(), table_catalog.id())?;
 
         let (mut graph, mut table, source) =
@@ -470,15 +472,19 @@ pub async fn handle_create_sink(
             .clone_from(&table_catalog.incoming_sinks);
 
         let incoming_sink_ids: HashSet<_> = table_catalog.incoming_sinks.iter().copied().collect();
-        let mut incoming_sinks = fetch_incoming_sinks(&session, &incoming_sink_ids)?;
-        incoming_sinks.push(Arc::new(sink.clone()));
-        for sink in incoming_sinks {
-            crate::handler::alter_table_column::hijack_merger_for_target_table(
+        let incoming_sinks = fetch_incoming_sinks(&session, &incoming_sink_ids)?;
+
+        for existing_sink in incoming_sinks {
+            hijack_merger_for_target_table(
                 &mut graph,
                 table_catalog.columns(),
-                &sink,
+                &existing_sink,
+                Some(&existing_sink.unique_identity()),
             )?;
         }
+
+        // for new creating sink, we don't have a unique identity because the sink id is not generated yet.
+        hijack_merger_for_target_table(&mut graph, table_catalog.columns(), &sink, None)?;
 
         target_table_replace_plan = Some(ReplaceTablePlan {
             source,
@@ -696,9 +702,10 @@ pub(crate) async fn reparse_table_for_sink(
 pub(crate) fn insert_merger_to_union_with_project(
     node: &mut StreamNode,
     project_node: &PbNodeBody,
-    uniq_name: &str,
+    uniq_identity: Option<&str>,
 ) {
     if let Some(NodeBody::Union(_union_node)) = &mut node.node_body {
+        // TODO: MergeNode is used as a placeholder, see issue #17658
         node.input.push(StreamNode {
             input: vec![StreamNode {
                 node_body: Some(NodeBody::Merge(MergeNode {
@@ -706,7 +713,7 @@ pub(crate) fn insert_merger_to_union_with_project(
                 })),
                 ..Default::default()
             }],
-            identity: uniq_name.to_string(),
+            identity: uniq_identity.unwrap_or("").to_string(),
             fields: node.fields.clone(),
             node_body: Some(project_node.clone()),
             ..Default::default()
@@ -716,7 +723,7 @@ pub(crate) fn insert_merger_to_union_with_project(
     }
 
     for input in &mut node.input {
-        insert_merger_to_union_with_project(input, project_node, uniq_name);
+        insert_merger_to_union_with_project(input, project_node, uniq_identity);
     }
 }
 

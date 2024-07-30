@@ -1092,7 +1092,6 @@ impl DdlController {
         if let Some(creating_sink_table_fragments) = creating_sink_table_fragments {
             let sink_fragment = creating_sink_table_fragments.sink_fragment().unwrap();
             let sink = sink.expect("sink not found");
-            let uniq_name = &format!("{}.{}.{}", sink.database_id, sink.schema_id, sink.name);
             Self::inject_replace_table_plan_for_sink(
                 Some(sink.id),
                 &sink_fragment,
@@ -1100,7 +1099,7 @@ impl DdlController {
                 &mut replace_table_ctx,
                 &mut table_fragments,
                 target_fragment_id,
-                uniq_name,
+                None,
             );
         }
 
@@ -1126,8 +1125,6 @@ impl DdlController {
                     continue;
                 };
 
-                let uniq_name = &format!("{}.{}.{}", sink.database_id, sink.schema_id, sink.name);
-
                 let sink_table_fragments = mgr
                     .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(sink_id))
                     .await?;
@@ -1141,7 +1138,7 @@ impl DdlController {
                     &mut replace_table_ctx,
                     &mut table_fragments,
                     target_fragment_id,
-                    uniq_name,
+                    Some(&sink.unique_identity()),
                 );
             }
         }
@@ -1169,7 +1166,7 @@ impl DdlController {
         replace_table_ctx: &mut ReplaceTableContext,
         table_fragments: &mut TableFragments,
         target_fragment_id: FragmentId,
-        uniq_name: &str,
+        unique_identity: Option<&str>,
     ) {
         let sink_actor_ids = sink_fragment
             .actors
@@ -1254,7 +1251,10 @@ impl DdlController {
                                 let merge_stream_node =
                                     input_project_node.input.iter_mut().exactly_one().unwrap();
 
-                                if input_project_node.identity.as_str() != uniq_name {
+                                // we need to align nodes here
+                                if input_project_node.identity.as_str()
+                                    != unique_identity.unwrap_or("")
+                                {
                                     continue;
                                 }
 
@@ -1897,8 +1897,6 @@ impl DdlController {
             for sink in catalogs {
                 let sink_id = &sink.id;
 
-                let uniq_name = &format!("{}.{}.{}", sink.database_id, sink.schema_id, sink.name);
-
                 let sink_table_fragments = self
                     .metadata_manager
                     .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(*sink_id))
@@ -1913,7 +1911,7 @@ impl DdlController {
                     &mut ctx,
                     &mut table_fragments,
                     target_fragment_id,
-                    uniq_name,
+                    Some(&sink.unique_identity()),
                 );
 
                 if sink.original_target_columns.is_empty() {

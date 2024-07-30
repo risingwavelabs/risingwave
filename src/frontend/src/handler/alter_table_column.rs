@@ -107,7 +107,12 @@ pub async fn replace_table_with_definition(
         .collect_vec();
 
     for sink in fetch_incoming_sinks(session, &incoming_sink_ids)? {
-        hijack_merger_for_target_table(&mut graph, &target_columns, &sink)?;
+        hijack_merger_for_target_table(
+            &mut graph,
+            &target_columns,
+            &sink,
+            Some(&sink.unique_identity()),
+        )?;
     }
 
     table.incoming_sinks = incoming_sink_ids.iter().copied().collect();
@@ -124,6 +129,7 @@ pub(crate) fn hijack_merger_for_target_table(
     graph: &mut StreamFragmentGraph,
     target_columns: &[ColumnCatalog],
     sink: &SinkCatalog,
+    uniq_identify: Option<&str>,
 ) -> Result<()> {
     let mut sink_columns = sink.original_target_columns.clone();
     if sink_columns.is_empty() {
@@ -164,14 +170,7 @@ pub(crate) fn hijack_merger_for_target_table(
 
     for fragment in graph.fragments.values_mut() {
         if let Some(node) = &mut fragment.node {
-            insert_merger_to_union_with_project(
-                node,
-                &pb_project,
-                &format!(
-                    "{}.{}.{}",
-                    sink.database_id.database_id, sink.schema_id.schema_id, sink.name
-                ),
-            );
+            insert_merger_to_union_with_project(node, &pb_project, uniq_identify);
         }
     }
 

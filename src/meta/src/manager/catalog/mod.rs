@@ -322,6 +322,7 @@ impl CatalogManager {
         Ok(())
     }
 
+    // Fill in the original_target_columns that wasn't written in the previous version for the table sink.
     async fn table_sink_catalog_update(&self) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let mut sinks = BTreeMapTransaction::new(&mut core.database.sinks);

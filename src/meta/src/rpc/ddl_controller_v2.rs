@@ -487,8 +487,6 @@ impl DdlController {
             for sink in catalogs {
                 let sink_id = &sink.id;
 
-                let uniq_name = &format!("{}.{}.{}", sink.database_id, sink.schema_id, sink.name);
-
                 let sink_table_fragments = self
                     .metadata_manager
                     .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(*sink_id))
@@ -503,7 +501,7 @@ impl DdlController {
                     &mut ctx,
                     &mut table_fragments,
                     target_fragment_id,
-                    uniq_name,
+                    Some(&sink.unique_identity()),
                 );
 
                 if sink.original_target_columns.is_empty() {

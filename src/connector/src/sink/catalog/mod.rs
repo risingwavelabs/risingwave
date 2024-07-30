@@ -450,6 +450,11 @@ impl SinkCatalog {
     pub fn downstream_pk_indices(&self) -> Vec<usize> {
         self.downstream_pk.clone()
     }
+
+    pub fn unique_identity(&self) -> String {
+        // We need to align with meta here, so we've utilized the proto method.
+        self.to_proto().unique_identity()
+    }
 }
 
 impl From<PbSink> for SinkCatalog {
