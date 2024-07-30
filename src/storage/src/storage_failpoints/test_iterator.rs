@@ -403,7 +403,6 @@ async fn test_failpoints_compactor_iterator_recreate() {
         table.meta.block_metas.clone(),
         info,
         HashSet::from_iter(std::iter::once(0)),
-        0,
         &stats,
         Arc::new(TaskProgress::default()),
         sstable_store,

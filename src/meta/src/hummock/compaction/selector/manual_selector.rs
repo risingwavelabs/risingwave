@@ -19,9 +19,11 @@
 
 use std::collections::HashSet;
 
+use bytes::Bytes;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
+use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockSstableId};
-use risingwave_pb::hummock::{compact_task, KeyRange};
+use risingwave_pb::hummock::compact_task;
 
 use super::{CompactionSelector, DynamicLevelSelectorCore};
 use crate::hummock::compaction::picker::{
@@ -47,8 +49,8 @@ impl Default for ManualCompactionOption {
         Self {
             sst_ids: vec![],
             key_range: KeyRange {
-                left: vec![],
-                right: vec![],
+                left: Bytes::default(),
+                right: Bytes::default(),
                 right_exclusive: false,
             },
             internal_table_id: HashSet::default(),

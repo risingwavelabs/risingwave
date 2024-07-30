@@ -37,6 +37,7 @@ use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
     TracedReadOptions, TracedSealCurrentEpochOptions, TracedWriteOptions,
 };
+use risingwave_pb::hummock::PbVnodeWatermark;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
@@ -778,8 +779,11 @@ impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
                 (
                     direction == WatermarkDirection::Ascending,
                     watermarks
-                        .iter()
-                        .map(|watermark| Message::encode_to_vec(&watermark.to_protobuf()))
+                        .into_iter()
+                        .map(|watermark| {
+                            let pb_watermark = PbVnodeWatermark::from(watermark);
+                            Message::encode_to_vec(&pb_watermark)
+                        })
                         .collect(),
                 )
             }),
@@ -801,10 +805,10 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
                         WatermarkDirection::Descending
                     },
                     watermarks
-                        .iter()
+                        .into_iter()
                         .map(|serialized_watermark| {
                             Message::decode(serialized_watermark.as_slice())
-                                .map(|pb| VnodeWatermark::from_protobuf(&pb))
+                                .map(|pb: PbVnodeWatermark| VnodeWatermark::from(pb))
                                 .expect("should not failed")
                         })
                         .collect(),

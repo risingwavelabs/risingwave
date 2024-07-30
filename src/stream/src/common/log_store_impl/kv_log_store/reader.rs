@@ -68,8 +68,8 @@ fn initial_rewind_backoff_policy() -> RewindBackoffPolicy {
 struct RewindDelay {
     last_rewind_truncate_offset: Option<TruncateOffset>,
     backoff_policy: RewindBackoffPolicy,
-    rewind_count: LabelGuardedIntCounter<3>,
-    rewind_delay: LabelGuardedHistogram<3>,
+    rewind_count: LabelGuardedIntCounter<4>,
+    rewind_delay: LabelGuardedHistogram<4>,
 }
 
 impl RewindDelay {

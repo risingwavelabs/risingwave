@@ -154,6 +154,7 @@ message ExprNode {
     ACOSH = 265;
     ATANH = 266;
     SINH = 267;
+    ACOSD = 268;
     // skips 268,269,270 so that acosd, atand, atan2d are close to others
     TRUNC = 271;
     LN = 272;
@@ -436,6 +437,8 @@ message AggCall {
     LAST_VALUE = 25;
     GROUPING = 26;
     INTERNAL_LAST_SEEN_VALUE = 27;
+    APPROX_PERCENTILE = 28;
+
     // user defined aggregate function
     USER_DEFINED = 100;
     // wraps a scalar function that takes a list as input as an aggregate function.

@@ -330,7 +330,7 @@ impl ExternalChange {
     }
 }
 
-/// The parallel unit location of actors.
+/// The worker slot location of actors.
 type ActorLocations = BTreeMap<GlobalActorId, WorkerSlotId>;
 
 /// The actual mutable state of building an actor graph.

@@ -57,8 +57,11 @@ impl Rule for DistinctAggRule {
                 c.agg_kind
             );
             let agg_kind_ok = !matches!(c.agg_kind, agg_kinds::simply_cannot_two_phase!());
-            let order_ok = matches!(c.agg_kind, agg_kinds::result_unaffected_by_order_by!())
-                || c.order_by.is_empty();
+            let order_ok = matches!(
+                c.agg_kind,
+                agg_kinds::result_unaffected_by_order_by!()
+                    | AggKind::Builtin(PbAggKind::ApproxPercentile)
+            ) || c.order_by.is_empty();
             agg_kind_ok && order_ok
         }) {
             tracing::warn!("DistinctAggRule: unsupported agg kind, fallback to backend impl");

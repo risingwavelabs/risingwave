@@ -167,25 +167,39 @@ impl ControlStreamManager {
         Ok(())
     }
 
+    /// Clear all nodes and response streams in the manager.
+    pub(super) fn clear(&mut self) {
+        *self = Self::new(self.context.clone());
+    }
+
     async fn next_response(
         &mut self,
     ) -> Option<(WorkerId, MetaResult<StreamingControlStreamResponse>)> {
         let (worker_id, response_stream, result) = self.response_streams.next().await?;
-        if result.is_ok() {
-            self.response_streams
-                .push(into_future(worker_id, response_stream));
+
+        match result.as_ref().map(|r| r.response.as_ref().unwrap()) {
+            Ok(streaming_control_stream_response::Response::Shutdown(_)) | Err(_) => {
+                // Do not add it back to the `response_streams` so that it will not be polled again.
+            }
+            _ => {
+                self.response_streams
+                    .push(into_future(worker_id, response_stream));
+            }
         }
+
         Some((worker_id, result))
     }
 
     pub(super) async fn next_complete_barrier_response(
         &mut self,
     ) -> MetaResult<(WorkerId, u64, BarrierCompleteResponse)> {
+        use streaming_control_stream_response::Response;
+
         loop {
             let (worker_id, result) = pending_on_none(self.next_response()).await;
             match result {
-                Ok(resp) => match resp.response {
-                    Some(streaming_control_stream_response::Response::CompleteBarrier(resp)) => {
+                Ok(resp) => match resp.response.unwrap() {
+                    Response::CompleteBarrier(resp) => {
                         let node = self
                             .nodes
                             .get_mut(&worker_id)
@@ -196,26 +210,37 @@ impl ControlStreamManager {
                             .expect("should exist when get collect resp");
                         break Ok((worker_id, command.prev_epoch.value().0, resp));
                     }
-                    resp => {
-                        break Err(anyhow!("get unexpected resp: {:?}", resp).into());
+                    Response::Shutdown(_) => {
+                        let _ = self
+                            .nodes
+                            .remove(&worker_id)
+                            .expect("should exist when get shutdown resp");
+                        // TODO: if there's no actor running on the node, we can ignore and not trigger recovery.
+                        break Err(anyhow!("worker node {worker_id} is shutting down").into());
+                    }
+                    Response::Init(_) => {
+                        // This arm should be unreachable.
+                        break Err(anyhow!("get unexpected init response").into());
                     }
                 },
                 Err(err) => {
-                    let mut node = self
+                    let node = self
                         .nodes
                         .remove(&worker_id)
                         .expect("should exist when get collect resp");
                     // Note: No need to use `?` as the backtrace is from meta and not useful.
                     warn!(node = ?node.worker, err = %err.as_report(), "get error from response stream");
-                    if let Some(command) = node.inflight_barriers.pop_front() {
+
+                    if let Some(command) = node.inflight_barriers.into_iter().next() {
+                        // FIXME: this future can be cancelled during collection, so the error collection
+                        // might not work as expected.
                         let errors = self.collect_errors(node.worker.id, err).await;
                         let err = merge_node_rpc_errors("get error from control stream", errors);
                         self.context.report_collect_failure(&command, &err);
                         break Err(err);
                     } else {
                         // for node with no inflight barrier, simply ignore the error
-                        info!(node = ?node.worker, "no inflight barrier no node. Ignore error");
-                        continue;
+                        info!(node = ?node.worker, error = %err.as_report(), "no inflight barrier in the node, ignore error");
                     }
                 }
             }
@@ -239,6 +264,7 @@ impl ControlStreamManager {
             })
             .await;
         }
+        tracing::debug!(?errors, "collected stream errors");
         errors
     }
 }

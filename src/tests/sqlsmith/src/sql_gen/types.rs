@@ -185,6 +185,7 @@ pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSi
                         PbAggKind::PercentileCont,
                         PbAggKind::PercentileDisc,
                         PbAggKind::Mode,
+                        PbAggKind::ApproxPercentile, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
                         PbAggKind::JsonbObjectAgg, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
                         PbAggKind::StddevSamp, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
                         PbAggKind::VarSamp, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293

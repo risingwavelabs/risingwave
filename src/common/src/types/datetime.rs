@@ -429,7 +429,7 @@ impl ToText for Timestamp {
 }
 
 impl Date {
-    pub fn with_days(days: i32) -> Result<Self> {
+    pub fn with_days_since_ce(days: i32) -> Result<Self> {
         Ok(Date::new(
             NaiveDate::from_num_days_from_ce_opt(days)
                 .ok_or_else(|| InvalidParamsError::date(days))?,
@@ -457,7 +457,7 @@ impl Date {
             .read_i32::<BigEndian>()
             .context("failed to read i32 from Date buffer")?;
 
-        Ok(Date::with_days(days)?)
+        Ok(Date::with_days_since_ce(days)?)
     }
 
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
@@ -471,7 +471,7 @@ impl Date {
     }
 
     pub fn from_num_days_from_ce_uncheck(days: i32) -> Self {
-        Self::with_days(days).unwrap()
+        Self::with_days_since_ce(days).unwrap()
     }
 
     pub fn and_hms_uncheck(self, hour: u32, min: u32, sec: u32) -> Timestamp {

@@ -38,6 +38,9 @@ impl std::fmt::Debug for AggCall {
                 .field("return_type", &self.return_type)
                 .field("args", &self.args)
                 .field("filter", &self.filter)
+                .field("distinct", &self.distinct)
+                .field("order_by", &self.order_by)
+                .field("direct_args", &self.direct_args)
                 .finish()
         } else {
             let mut builder = f.debug_tuple(&format!("{}", self.agg_kind));

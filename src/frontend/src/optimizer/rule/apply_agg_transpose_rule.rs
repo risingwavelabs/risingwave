@@ -172,6 +172,7 @@ impl Rule for ApplyAggTransposeRule {
                         | PbAggKind::LastValue
                         | PbAggKind::InternalLastSeenValue
                         // All statistical aggregates only consider non-null inputs.
+                        | PbAggKind::ApproxPercentile
                         | PbAggKind::VarPop
                         | PbAggKind::VarSamp
                         | PbAggKind::StddevPop

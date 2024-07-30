@@ -313,7 +313,10 @@ pub mod agg_kinds {
                     | PbAggKind::StddevSamp
                     | PbAggKind::VarPop
                     | PbAggKind::VarSamp
-                    | PbAggKind::Grouping,
+                    | PbAggKind::Grouping
+                    // ApproxPercentile always uses custom agg executors,
+                    // rather than an aggregation operator
+                    | PbAggKind::ApproxPercentile
             )
         };
     }
@@ -422,7 +425,8 @@ pub mod agg_kinds {
                     | PbAggKind::BoolAnd
                     | PbAggKind::BoolOr
                     | PbAggKind::ApproxCountDistinct
-                    | PbAggKind::InternalLastSeenValue,
+                    | PbAggKind::InternalLastSeenValue
+                    | PbAggKind::ApproxPercentile,
             ) | AggKind::UserDefined(_)
         };
     }
@@ -443,7 +447,10 @@ pub mod agg_kinds {
     macro_rules! ordered_set {
         () => {
             AggKind::Builtin(
-                PbAggKind::PercentileCont | PbAggKind::PercentileDisc | PbAggKind::Mode,
+                PbAggKind::PercentileCont
+                    | PbAggKind::PercentileDisc
+                    | PbAggKind::Mode
+                    | PbAggKind::ApproxPercentile,
             )
         };
     }

@@ -15,8 +15,10 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::split_sst;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, to_prost_table_stats_map, PbTableStatsMap,
 };
@@ -26,8 +28,7 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::hummock::compact_task::{self};
-use risingwave_pb::hummock::hummock_version_delta::ChangeLogDelta;
-use risingwave_pb::hummock::{HummockSnapshot, SstableInfo};
+use risingwave_pb::hummock::HummockSnapshot;
 use sea_orm::TransactionTrait;
 
 use crate::hummock::error::{Error, Result};
@@ -349,7 +350,7 @@ impl HummockManager {
         let mut sst_to_cg_vec = Vec::with_capacity(sstables.len());
         for commit_sst in sstables {
             let mut group_table_ids: BTreeMap<u64, Vec<u32>> = BTreeMap::new();
-            for table_id in commit_sst.sst_info.get_table_ids() {
+            for table_id in &commit_sst.sst_info.table_ids {
                 match table_compaction_group_mapping.get(&TableId::new(*table_id)) {
                     Some(cg_id_from_meta) => {
                         group_table_ids
@@ -361,7 +362,7 @@ impl HummockManager {
                         tracing::warn!(
                             "table {} in SST {} doesn't belong to any compaction group",
                             table_id,
-                            commit_sst.sst_info.get_object_id(),
+                            commit_sst.sst_info.object_id,
                         );
                     }
                 }

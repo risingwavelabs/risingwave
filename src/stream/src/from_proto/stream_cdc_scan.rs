@@ -95,12 +95,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
 
         let database_name = table_config.database.clone();
         let table_reader = table_type
-            .create_table_reader(
-                table_config,
-                table_schema.clone(),
-                table_pk_indices.clone(),
-                scan_options.snapshot_batch_size,
-            )
+            .create_table_reader(table_config, table_schema.clone(), table_pk_indices.clone())
             .await?;
 
         let external_table = ExternalStorageTable::new(

@@ -82,6 +82,10 @@ message WorkerNode {
   optional uint64 started_at = 9;
 
   uint32 parallelism = 10;
+
+  // Meta may assign labels to worker nodes to partition workload by label.
+  // This is used for serverless backfilling of materialized views.
+  string node_label = 11;
 }
 
 message Buffer {

@@ -1,4 +1,5 @@
 [env]
+CARGO_MAKE_CRATE_INSTALLATION_LOCKED = true
 RISEDEV = "1"
 RUST_BACKTRACE = "1"
 OS = { source = "${CARGO_MAKE_RUST_TARGET_OS}", mapping = { linux = "linux", macos = "darwin" } }
