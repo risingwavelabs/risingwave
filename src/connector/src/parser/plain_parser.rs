@@ -328,7 +328,7 @@ mod tests {
                         "orders".to_string(),
                         0,
                         transactional
-                            .then(|| cdc_message::CdcMessageType::TransactionMeta)
+                            .then_some(cdc_message::CdcMessageType::TransactionMeta)
                             .unwrap_or(cdc_message::CdcMessageType::Data),
                     )),
                     split_id: SplitId::from("1001"),
@@ -358,7 +358,7 @@ mod tests {
                         "orders".to_string(),
                         0,
                         transactional
-                            .then(|| cdc_message::CdcMessageType::TransactionMeta)
+                            .then_some(cdc_message::CdcMessageType::TransactionMeta)
                             .unwrap_or(cdc_message::CdcMessageType::Data),
                     )),
                     split_id: SplitId::from("1001"),
