@@ -46,7 +46,7 @@ use crate::expr::{
 use crate::utils::Condition;
 
 // Defines system functions that without args, ref: https://www.postgresql.org/docs/current/functions-info.html
-pub const SYS_FUNCTION_WITHOUT_ARGS: &[&str] = &[
+const SYS_FUNCTION_WITHOUT_ARGS: &[&str] = &[
     "session_user",
     "user",
     "current_user",
@@ -54,6 +54,12 @@ pub const SYS_FUNCTION_WITHOUT_ARGS: &[&str] = &[
     "current_schema",
     "current_timestamp",
 ];
+
+pub(super) fn is_sys_function_without_args(ident: &Ident) -> bool {
+    SYS_FUNCTION_WITHOUT_ARGS
+        .iter()
+        .any(|e| ident.real_value().as_str() == *e && ident.quote_style().is_none())
+}
 
 /// The global max calling depth for the global counter in `udf_context`
 /// To reduce the chance that the current running rw thread
