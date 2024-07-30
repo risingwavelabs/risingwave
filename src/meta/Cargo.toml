@@ -38,6 +38,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 hyper = "0.14" # required by tonic
 itertools = { workspace = true }
+jsonbb = { workspace = true }
 maplit = "1.0.2"
 memcomparable = { version = "0.2" }
 mime_guess = "2"
@@ -71,12 +72,12 @@ sync-point = { path = "../utils/sync-point" }
 thiserror = "1"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "macros",
+  "time",
+  "signal",
 ] }
 tokio-retry = "0.3"
 tokio-stream = { version = "0.1", features = ["net"] }
@@ -89,10 +90,10 @@ uuid = { version = "1", features = ["v4"] }
 [target.'cfg(not(madsim))'.dependencies]
 axum = { workspace = true }
 tower-http = { version = "0.5", features = [
-    "add-extension",
-    "cors",
-    "fs",
-    "compression-gzip",
+  "add-extension",
+  "cors",
+  "fs",
+  "compression-gzip",
 ] }
 workspace-hack = { path = "../workspace-hack" }
 

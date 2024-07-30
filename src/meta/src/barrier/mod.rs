@@ -577,6 +577,14 @@ impl GlobalBarrierManager {
             self.context
                 .set_status(BarrierManagerStatus::Recovering(RecoveryReason::Bootstrap));
             let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
+            crate::telemetry::report_event(
+                risingwave_pb::telemetry::TelemetryEventStage::Recovery,
+                "normal_recovery",
+                0,
+                None,
+                None,
+                None,
+            );
 
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
             let paused_reason = paused.then_some(PausedReason::Manual);
@@ -808,6 +816,15 @@ impl GlobalBarrierManager {
                 prev_epoch = prev_epoch.value().0
             );
 
+            crate::telemetry::report_event(
+                risingwave_pb::telemetry::TelemetryEventStage::Recovery,
+                "failure_recovery",
+                0,
+                None,
+                None,
+                None,
+            );
+
             // No need to clean dirty tables for barrier recovery,
             // The foreground stream job should cleanup their own tables.
             self.recovery(None, Some(err)).instrument(span).await;
@@ -830,6 +847,15 @@ impl GlobalBarrierManager {
             "adhoc_recovery",
             error = %err.as_report(),
             prev_epoch = prev_epoch.value().0
+        );
+
+        crate::telemetry::report_event(
+            risingwave_pb::telemetry::TelemetryEventStage::Recovery,
+            "adhoc_recovery",
+            0,
+            None,
+            None,
+            None,
         );
 
         // No need to clean dirty tables for barrier recovery,
@@ -985,24 +1011,18 @@ impl GlobalBarrierManagerContext {
     }
 
     fn report_complete_event(&self, duration_sec: f64, command_ctx: &CommandContext) {
-        {
-            {
-                {
-                    // Record barrier latency in event log.
-                    use risingwave_pb::meta::event_log;
-                    let event = event_log::EventBarrierComplete {
-                        prev_epoch: command_ctx.prev_epoch.value().0,
-                        cur_epoch: command_ctx.curr_epoch.value().0,
-                        duration_sec,
-                        command: command_ctx.command.to_string(),
-                        barrier_kind: command_ctx.kind.as_str_name().to_string(),
-                    };
-                    self.env
-                        .event_log_manager_ref()
-                        .add_event_logs(vec![event_log::Event::BarrierComplete(event)]);
-                }
-            }
-        }
+        // Record barrier latency in event log.
+        use risingwave_pb::meta::event_log;
+        let event = event_log::EventBarrierComplete {
+            prev_epoch: command_ctx.prev_epoch.value().0,
+            cur_epoch: command_ctx.curr_epoch.value().0,
+            duration_sec,
+            command: command_ctx.command.to_string(),
+            barrier_kind: command_ctx.kind.as_str_name().to_string(),
+        };
+        self.env
+            .event_log_manager_ref()
+            .add_event_logs(vec![event_log::Event::BarrierComplete(event)]);
     }
 }
 

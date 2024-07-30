@@ -425,7 +425,8 @@ pub mod agg_kinds {
                     | PbAggKind::BoolAnd
                     | PbAggKind::BoolOr
                     | PbAggKind::ApproxCountDistinct
-                    | PbAggKind::InternalLastSeenValue,
+                    | PbAggKind::InternalLastSeenValue
+                    | PbAggKind::ApproxPercentile,
             ) | AggKind::UserDefined(_)
         };
     }

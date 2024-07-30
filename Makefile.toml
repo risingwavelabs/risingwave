@@ -766,7 +766,7 @@ set -e
 for tool in cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-make cargo-udeps
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
-  cargo binstall -y --no-symlinks $tool
+  cargo binstall -y --locked --no-symlinks $tool
   echo
 done
 
