@@ -16,6 +16,7 @@ postmaster enable_tracing
 postmaster license_key
 postmaster max_concurrent_creating_streaming_jobs
 postmaster pause_on_next_bootstrap
+postmaster time_travel_retention_ms
 user application_name
 user background_ddl
 user batch_enable_distributed_dml
