@@ -18,7 +18,9 @@ use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
 
 use crate::parser::AccessError;
-use crate::schema::schema_registry::{ConcurrentRequestError, WireFormatError};
+use crate::schema::schema_registry::{
+    ConcurrentRequestError, SchemaRegistryClientError, WireFormatError,
+};
 use crate::schema::InvalidOptionError;
 use crate::sink::SinkError;
 
@@ -73,6 +75,7 @@ def_anyhow_newtype! {
 
     openssl::error::ErrorStack => "OpenSSL error",
     risingwave_common::secret::SecretError => "Secret error",
+    SchemaRegistryClientError => "Schema registry client error",
 }
 
 pub type ConnectorResult<T, E = ConnectorError> = std::result::Result<T, E>;

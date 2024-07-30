@@ -27,7 +27,7 @@ use crate::schema::{invalid_option_error, InvalidOptionError};
 
 pub const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
 pub const SCHEMA_REGISTRY_PASSWORD: &str = "schema.registry.password";
-pub const SCHEMA_REGISTRY_CA: &str = "schema.registry.ca";
+pub const SCHEMA_REGISTRY_CA_PATH: &str = "schema.registry.ca_pem_path";
 
 #[derive(Debug, Clone, Default)]
 pub struct SchemaRegistryAuth {
@@ -41,7 +41,7 @@ impl From<&HashMap<String, String>> for SchemaRegistryAuth {
         SchemaRegistryAuth {
             username: props.get(SCHEMA_REGISTRY_USERNAME).cloned(),
             password: props.get(SCHEMA_REGISTRY_PASSWORD).cloned(),
-            ca_option: props.get(SCHEMA_REGISTRY_CA).cloned(),
+            ca_option: props.get(SCHEMA_REGISTRY_CA_PATH).cloned(),
         }
     }
 }
@@ -51,7 +51,7 @@ impl From<&BTreeMap<String, String>> for SchemaRegistryAuth {
         SchemaRegistryAuth {
             username: props.get(SCHEMA_REGISTRY_USERNAME).cloned(),
             password: props.get(SCHEMA_REGISTRY_PASSWORD).cloned(),
-            ca_option: props.get(SCHEMA_REGISTRY_CA).cloned(),
+            ca_option: props.get(SCHEMA_REGISTRY_CA_PATH).cloned(),
         }
     }
 }
@@ -74,11 +74,23 @@ pub struct ConcurrentRequestError {
 
 type SrResult<T> = Result<T, ConcurrentRequestError>;
 
+#[derive(thiserror::Error, Debug)]
+pub enum SchemaRegistryClientError {
+    #[error(transparent)]
+    InvalidOption(#[from] InvalidOptionError),
+    #[error("read ca file error: {0}")]
+    ReadFile(#[source] std::io::Error),
+    #[error("parse ca file error: {0}")]
+    ParsePem(#[source] reqwest::Error),
+    #[error("build schema registry client error: {0}")]
+    Build(#[source] reqwest::Error),
+}
+
 impl Client {
     pub(crate) fn new(
         url: Vec<Url>,
         client_config: &SchemaRegistryAuth,
-    ) -> Result<Self, InvalidOptionError> {
+    ) -> Result<Self, SchemaRegistryClientError> {
         let valid_urls = url
             .iter()
             .map(|url| (url.cannot_be_a_base(), url))
@@ -86,7 +98,9 @@ impl Client {
             .map(|(_, url)| url.clone())
             .collect_vec();
         if valid_urls.is_empty() {
-            return Err(invalid_option_error!("non-base: {}", url.iter().join(" ")));
+            return Err(SchemaRegistryClientError::InvalidOption(
+                invalid_option_error!("non-base: {}", url.iter().join(" ")),
+            ));
         } else {
             tracing::debug!(
                 "schema registry client will use url {:?} to connect",
@@ -94,24 +108,23 @@ impl Client {
             );
         }
 
-        // `unwrap` as the builder is not affected by any input right now
         let mut client_builder = reqwest::Client::builder();
         if let Some(ca_path) = client_config.ca_option.as_ref() {
             if ca_path.eq_ignore_ascii_case("ignore") {
                 client_builder = client_builder.danger_accept_invalid_certs(true);
             } else {
                 client_builder = client_builder.add_root_certificate(
-                    reqwest::Certificate::from_pem(&std::fs::read(ca_path).map_err(|e| {
-                        invalid_option_error!("read ca file error: {}", e.as_report())
-                    })?)
-                    .map_err(|e| invalid_option_error!("parse ca file error: {}", e.as_report()))?,
+                    reqwest::Certificate::from_pem(
+                        &std::fs::read(ca_path).map_err(SchemaRegistryClientError::ReadFile)?,
+                    )
+                    .map_err(SchemaRegistryClientError::ParsePem)?,
                 );
             }
         }
 
-        let inner = client_builder.build().map_err(|e| {
-            invalid_option_error!("build schema registry client error: {}", e.as_report())
-        })?;
+        let inner = client_builder
+            .build()
+            .map_err(SchemaRegistryClientError::Build)?;
 
         Ok(Client {
             inner,
