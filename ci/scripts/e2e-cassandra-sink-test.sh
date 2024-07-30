@@ -37,10 +37,10 @@ risedev ci-start ci-sink-test
 sleep 40
 
 echo "--- install cassandra"
-wget $(get_latest_cassandra_download_url)  --output cassandra_latest.tar.gz
+wget $(get_latest_cassandra_download_url) -O cassandra_latest.tar.gz
 tar xfvz cassandra_latest.tar.gz
-LATEST_CASSANDRA_VERSION=$(get_latest_cassandra_version)
-CASSANDRA_DIR="./apache-cassandra-${LATEST_CASSANDRA_VERSION}"
+export LATEST_CASSANDRA_VERSION=$(get_latest_cassandra_version)
+export CASSANDRA_DIR="./apache-cassandra-${LATEST_CASSANDRA_VERSION}"
 # remove bundled packages, and use installed packages, because Python 3.12 has removed asyncore, but I failed to install libev support for bundled Python driver.
 rm ${CASSANDRA_DIR}/lib/six-1.12.0-py2.py3-none-any.zip
 rm ${CASSANDRA_DIR}/lib/cassandra-driver-internal-only-3.25.0.zip
