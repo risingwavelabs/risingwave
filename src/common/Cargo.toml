@@ -166,6 +166,10 @@ name = "bench_hash_key_encoding"
 harness = false
 
 [[bench]]
+name = "bench_column_aware_row_encoding"
+harness = false
+
+[[bench]]
 name = "bench_data_chunk_encoding"
 harness = false
 
