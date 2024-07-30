@@ -501,7 +501,6 @@ impl LocalStateStore for LocalHummockStorage {
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64, mut opts: SealCurrentEpochOptions) {
-        println!("seal_current_epoch next_epoch {}", next_epoch);
         assert!(!self.is_dirty());
         if let Some(new_level) = &opts.switch_op_consistency_level {
             self.mem_table.op_consistency_level.update(new_level);
@@ -558,7 +557,6 @@ impl LocalHummockStorage {
     ) -> StorageResult<usize> {
         let epoch = write_options.epoch;
         let table_id = write_options.table_id;
-        println!("flush_inner table_id {:?}", table_id);
 
         let table_id_label = table_id.to_string();
         self.stats

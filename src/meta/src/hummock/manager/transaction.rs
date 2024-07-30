@@ -23,13 +23,13 @@ use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::{
     GroupDelta, HummockVersion, HummockVersionDelta, IntraLevelDelta,
 };
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId, LocalSstableInfo};
 use risingwave_pb::hummock::{
-    CompatibilityVersion, GroupConstruct, HummockVersionStats, StateTableInfoDelta,
+    CompactionConfig, CompatibilityVersion, GroupConstruct, HummockVersionStats,
+    StateTableInfoDelta,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
-use super::BatchCommitForNewCg;
 use crate::manager::NotificationManager;
 use crate::model::{
     InMemValTransaction, MetadataModelResult, Transactional, ValTransaction, VarTransaction,
@@ -113,6 +113,7 @@ impl<'a> HummockVersionTransaction<'a> {
     }
 
     /// Returns a duplicate delta, used by time travel.
+    #[expect(clippy::type_complexity)]
     pub(super) fn pre_commit_epoch(
         &mut self,
         epoch: HummockEpoch,
@@ -120,12 +121,55 @@ impl<'a> HummockVersionTransaction<'a> {
         new_table_ids: HashMap<TableId, CompactionGroupId>,
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         change_log_delta: HashMap<TableId, ChangeLogDelta>,
-        batch_commit_for_new_cg: Option<(Vec<BatchCommitForNewCg>, u64)>,
+        batch_commit_for_new_cg: Option<(
+            HashMap<CompactionGroupId, BTreeMap<u64, Vec<LocalSstableInfo>>>,
+            u64,
+            CompactionConfig,
+        )>,
     ) -> HummockVersionDelta {
         let mut new_version_delta = self.new_delta();
         new_version_delta.max_committed_epoch = epoch;
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
+
+        if let Some((batch_commit_for_new_cg, start_sst_id, compaction_group_config)) =
+            batch_commit_for_new_cg
+        {
+            let mut start_sst_id = start_sst_id;
+
+            for (compaction_group_id, batch_commit_sst) in batch_commit_for_new_cg {
+                let group_deltas = &mut new_version_delta
+                    .group_deltas
+                    .entry(compaction_group_id)
+                    .or_default()
+                    .group_deltas;
+
+                #[expect(deprecated)]
+                group_deltas.push(GroupDelta::GroupConstruct(GroupConstruct {
+                    group_config: Some(compaction_group_config.clone()),
+                    group_id: compaction_group_id,
+                    parent_group_id: StaticCompactionGroupId::NewCompactionGroup
+                        as CompactionGroupId,
+                    new_sst_start_id: start_sst_id,
+                    table_ids: vec![],
+                    version: CompatibilityVersion::NoMemberTableIds as i32,
+                }));
+
+                for (epoch, insert_ssts) in batch_commit_sst {
+                    start_sst_id += insert_ssts.len() as u64;
+                    let l0_sub_level_id = epoch;
+                    let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
+                        0,
+                        l0_sub_level_id, // default
+                        vec![],
+                        insert_ssts.into_iter().map(|s| s.sst_info).collect(), // default
+                        0,                                                     // default
+                    ));
+                    group_deltas.push(group_delta);
+                }
+            }
+        }
+
         // Append SSTs to a new version.
         for (compaction_group_id, inserted_table_infos) in commit_sstables {
             let group_deltas = &mut new_version_delta
@@ -143,43 +187,6 @@ impl<'a> HummockVersionTransaction<'a> {
             ));
 
             group_deltas.push(group_delta);
-        }
-
-        if let Some((batch_commit_for_new_cg, start_sst_id)) = batch_commit_for_new_cg {
-            let mut start_sst_id = start_sst_id;
-
-            for commit_for_new_cg in batch_commit_for_new_cg {
-                let (compaction_group_id, compaction_group_config) =
-                    commit_for_new_cg.compaction_group.unwrap();
-                let group_deltas = &mut new_version_delta
-                    .group_deltas
-                    .entry(compaction_group_id)
-                    .or_default()
-                    .group_deltas;
-
-                #[expect(deprecated)]
-                group_deltas.push(GroupDelta::GroupConstruct(GroupConstruct {
-                    group_config: Some(compaction_group_config),
-                    group_id: compaction_group_id,
-                    parent_group_id: StaticCompactionGroupId::StateDefault as u64,
-                    new_sst_start_id: start_sst_id,
-                    table_ids: vec![],
-                    version: CompatibilityVersion::NoMemberTableIds as i32,
-                }));
-
-                for (epoch, insert_ssts) in commit_for_new_cg.epoch_to_ssts {
-                    start_sst_id += insert_ssts.len() as u64;
-                    let l0_sub_level_id = epoch;
-                    let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
-                        0,
-                        l0_sub_level_id, // default
-                        vec![],
-                        insert_ssts.into_iter().map(|s| s.sst_info).collect(), // default
-                        0,                                                     // default
-                    ));
-                    group_deltas.push(group_delta);
-                }
-            }
         }
 
         // update state table info

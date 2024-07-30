@@ -567,7 +567,6 @@ impl LocalInstanceUnsyncData {
     // start syncing the imm inclusively before the `epoch`
     // returning data with newer data coming first
     fn sync(&mut self, epoch: HummockEpoch) -> Vec<UploaderImm> {
-        println!("sync epoch {:?}", epoch);
         // firstly added from old to new
         let mut ret = Vec::new();
         while let Some(epoch_data) = self.sealed_data.back()

@@ -1318,5 +1318,6 @@ fn collect_commit_epoch_info(
         table_new_change_log,
         BTreeMap::from_iter([(epoch, command_ctx.info.existing_table_ids())]),
         epoch,
+        vec![],
     )
 }

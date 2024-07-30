@@ -41,6 +41,7 @@ use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::selector::{default_compaction_selector, LocalSelectorStatistic};
 use crate::hummock::compaction::{CompactionDeveloperConfig, CompactionSelectorContext};
 use crate::hummock::level_handler::LevelHandler;
+pub use crate::hummock::manager::CommitEpochInfo;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
 use crate::manager::{

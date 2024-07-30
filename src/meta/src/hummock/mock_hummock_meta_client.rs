@@ -23,7 +23,6 @@ use fail::fail_point;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -48,7 +47,6 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use super::BatchCommitForNewCg;
 use crate::hummock::compaction::selector::{
     default_compaction_selector, CompactionSelector, SpaceReclaimCompactionSelector,
 };
@@ -96,6 +94,10 @@ impl MockHummockMetaClient {
             )
             .await
             .unwrap_or(None)
+    }
+
+    pub fn context_id(&self) -> HummockContextId {
+        self.context_id
     }
 }
 
@@ -195,61 +197,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                     version.state_table_info.info().keys().cloned().collect(),
                 )]),
                 epoch,
-            ))
-            .await
-            .map_err(mock_err)?;
-        Ok(())
-    }
-
-    async fn commit_multi_epoch(
-        &self,
-        epoch: HummockEpoch,
-        sync_result: SyncResult,
-        batch_commit: Vec<(BTreeMap<HummockEpoch, Vec<LocalSstableInfo>>, Vec<TableId>)>,
-    ) -> Result<()> {
-        let version: HummockVersion = self.hummock_manager.get_current_version().await;
-        let sst_to_worker = sync_result
-            .uncommitted_ssts
-            .iter()
-            .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, self.context_id))
-            .collect();
-        let new_table_watermark = sync_result.table_watermarks;
-        let table_change_log = build_table_change_log_delta(
-            sync_result
-                .old_value_ssts
-                .into_iter()
-                .map(|sst| sst.sst_info),
-            sync_result.uncommitted_ssts.iter().map(|sst| &sst.sst_info),
-            &vec![epoch],
-            version
-                .state_table_info
-                .info()
-                .keys()
-                .map(|table_id| (table_id.table_id, 0)),
-        );
-
-        let batch_commit_for_new_cg = batch_commit
-            .into_iter()
-            .map(|(epoch_to_ssts, table_ids)| BatchCommitForNewCg {
-                epoch_to_ssts,
-                table_ids,
-                compaction_group: None,
-            })
-            .collect_vec();
-
-        self.hummock_manager
-            .commit_epoch(CommitEpochInfo::new_for_multi_epoch(
-                sync_result.uncommitted_ssts,
-                new_table_watermark,
-                sst_to_worker,
-                None,
-                table_change_log,
-                BTreeMap::from_iter([(
-                    epoch,
-                    version.state_table_info.info().keys().cloned().collect(),
-                )]),
-                epoch,
-                batch_commit_for_new_cg,
+                vec![],
             ))
             .await
             .map_err(mock_err)?;

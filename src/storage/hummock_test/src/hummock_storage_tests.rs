@@ -25,6 +25,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::range::RangeBoundsExt;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{
     gen_key_from_bytes, prefixed_range_with_vnode, FullKey, TableKey, UserKey, TABLE_PREFIX_LEN,
 };
@@ -32,7 +33,8 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
-use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo, SyncResult};
+use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo};
+use risingwave_meta::hummock::{BatchCommitForNewCg, CommitEpochInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::version::read_filter_for_version;
@@ -2484,111 +2486,232 @@ async fn test_table_watermark() {
 #[tokio::test]
 async fn test_commit_multi_epoch() {
     let test_env = prepare_hummock_test_env().await;
-    let sr = SyncResult {
-        sync_size: 100,
-        uncommitted_ssts: vec![LocalSstableInfo {
-            sst_info: SstableInfo {
-                sst_id: 1,
-                object_id: 1,
-                ..Default::default()
-            },
-            table_stats: Default::default(),
-        }],
-        table_watermarks: HashMap::new(),
-        old_value_ssts: vec![],
+    let context_id = test_env.meta_client.context_id();
+    let context_id_map = |object_ids: &[_]| {
+        HashMap::from_iter(object_ids.iter().map(|object_id| (*object_id, context_id)))
     };
+    let existing_table_id = TableId::new(1);
+    test_env.register_table_id(existing_table_id).await;
+    let initial_epoch = test_env
+        .manager
+        .get_current_version()
+        .await
+        .max_committed_epoch;
 
-    let epoch_1 = test_epoch(1);
-    let epoch_to_ssts = vec![(
-        BTreeMap::from_iter([(
-            epoch_1,
-            vec![LocalSstableInfo {
-                sst_info: SstableInfo {
-                    sst_id: 2,
-                    object_id: 2,
-                    ..Default::default()
-                },
+    let epoch1 = initial_epoch.next_epoch();
+    let sst1_epoch1 = SstableInfo {
+        sst_id: 1,
+        object_id: 1,
+        table_ids: vec![existing_table_id.table_id],
+        ..Default::default()
+    };
+    test_env
+        .manager
+        .commit_epoch(CommitEpochInfo {
+            sstables: vec![LocalSstableInfo {
+                sst_info: sst1_epoch1.clone(),
                 table_stats: Default::default(),
             }],
-        )]),
-        vec![TableId::from(2)],
-    )];
-
-    test_env
-        .meta_client
-        .commit_multi_epoch(epoch_1, sr, epoch_to_ssts)
+            new_table_watermarks: Default::default(),
+            sst_to_context: context_id_map(&[sst1_epoch1.object_id]),
+            new_table_fragment_info: None,
+            change_log_delta: Default::default(),
+            table_committed_epoch: BTreeMap::from_iter([(
+                epoch1,
+                HashSet::from_iter([existing_table_id]),
+            )]),
+            max_committed_epoch: epoch1,
+            batch_commit_for_new_cg: vec![],
+        })
         .await
         .unwrap();
 
-    let v = test_env
-        .meta_client
-        .hummock_manager_ref()
-        .get_current_version()
-        .await;
-
-    let levels = &v.levels;
-    assert_eq!(3, levels.len());
-    let new_cg_id = 5;
-    let ssts = &levels.get(&new_cg_id).unwrap().level0().sub_levels[0].table_infos;
-    assert_eq!(1, ssts.len());
-    let sst = &ssts[0];
-    assert_eq!(2, sst.sst_id);
-    assert!(v
-        .state_table_info
-        .compaction_group_member_table_ids(new_cg_id)
-        .contains(&TableId::from(2)));
-
-    let epoch_2 = epoch_1.next_epoch();
-
-    let sr = SyncResult {
-        sync_size: 100,
-        uncommitted_ssts: vec![LocalSstableInfo {
-            sst_info: SstableInfo {
-                sst_id: 3,
-                object_id: 3,
-                ..Default::default()
-            },
-            table_stats: Default::default(),
-        }],
-        table_watermarks: HashMap::new(),
-        old_value_ssts: vec![],
+    let old_cg_id_set: HashSet<_> = {
+        let old_version = test_env.manager.get_current_version().await;
+        let cg = old_version
+            .levels
+            .get(&(StaticCompactionGroupId::StateDefault as _))
+            .unwrap();
+        let sub_levels = &cg.l0.as_ref().unwrap().sub_levels;
+        assert_eq!(sub_levels.len(), 1);
+        let sub_level = &sub_levels[0];
+        assert_eq!(sub_level.sub_level_id, epoch1);
+        assert_eq!(sub_level.table_infos.len(), 1);
+        assert_eq!(sub_level.table_infos[0], sst1_epoch1);
+        old_version.levels.keys().cloned().collect()
     };
-    let epoch_to_ssts = vec![(
-        BTreeMap::from_iter([(
-            epoch_2,
-            vec![LocalSstableInfo {
-                sst_info: SstableInfo {
-                    sst_id: 4,
-                    object_id: 4,
-                    ..Default::default()
-                },
-                table_stats: Default::default(),
-            }],
-        )]),
-        vec![TableId::from(5)],
-    )];
+
+    let epoch2 = epoch1.next_epoch();
+
+    let batch_commit_table_id = TableId::new(2);
+
+    let sst_epoch2 = SstableInfo {
+        sst_id: 2,
+        object_id: 2,
+        table_ids: vec![existing_table_id.table_id, batch_commit_table_id.table_id],
+        ..Default::default()
+    };
+
+    let sst2_epoch1 = SstableInfo {
+        sst_id: 3,
+        object_id: 3,
+        table_ids: vec![batch_commit_table_id.table_id],
+        ..Default::default()
+    };
 
     test_env
-        .meta_client
-        .commit_multi_epoch(epoch_2, sr, epoch_to_ssts)
+        .manager
+        .commit_epoch(CommitEpochInfo {
+            sstables: vec![LocalSstableInfo {
+                sst_info: sst_epoch2.clone(),
+                table_stats: Default::default(),
+            }],
+            new_table_watermarks: Default::default(),
+            sst_to_context: context_id_map(&[sst_epoch2.object_id, sst2_epoch1.object_id]),
+            new_table_fragment_info: None,
+            change_log_delta: Default::default(),
+            table_committed_epoch: BTreeMap::from_iter([(
+                epoch2,
+                HashSet::from_iter([existing_table_id, batch_commit_table_id]),
+            )]),
+            max_committed_epoch: epoch2,
+            batch_commit_for_new_cg: vec![BatchCommitForNewCg {
+                epoch_to_ssts: BTreeMap::from_iter([(
+                    epoch1,
+                    vec![LocalSstableInfo {
+                        sst_info: sst2_epoch1.clone(),
+                        table_stats: Default::default(),
+                    }],
+                )]),
+                table_ids: vec![batch_commit_table_id],
+            }],
+        })
         .await
         .unwrap();
 
-    let v = test_env
-        .meta_client
-        .hummock_manager_ref()
-        .get_current_version()
-        .await;
+    let new_version = test_env.manager.get_current_version().await;
+    let old_cg = new_version
+        .levels
+        .get(&(StaticCompactionGroupId::StateDefault as _))
+        .unwrap();
+    let sub_levels = &old_cg.l0.as_ref().unwrap().sub_levels;
+    assert_eq!(sub_levels.len(), 2);
+    let sub_level1 = &sub_levels[0];
+    assert_eq!(sub_level1.sub_level_id, epoch1);
+    assert_eq!(sub_level1.table_infos.len(), 1);
+    assert_eq!(sub_level1.table_infos[0], sst1_epoch1);
+    let sub_level2 = &sub_levels[1];
+    assert_eq!(sub_level2.sub_level_id, epoch2);
+    assert_eq!(sub_level2.table_infos.len(), 1);
+    assert_eq!(sub_level2.table_infos[0].object_id, sst_epoch2.object_id);
 
-    let levels = &v.levels;
-    assert_eq!(4, levels.len());
-    let new_cg_id = 6;
-    let ssts = &levels.get(&new_cg_id).unwrap().level0().sub_levels[0].table_infos;
-    assert_eq!(1, ssts.len());
-    let sst = &ssts[0];
-    assert_eq!(4, sst.sst_id);
-    assert!(v
-        .state_table_info
-        .compaction_group_member_table_ids(new_cg_id)
-        .contains(&TableId::from(5)));
+    let new_cg_id_set: HashSet<_> = new_version.levels.keys().cloned().collect();
+    let added_cg_id_set = &new_cg_id_set - &old_cg_id_set;
+    assert_eq!(added_cg_id_set.len(), 1);
+    let new_cg_id = added_cg_id_set.into_iter().next().unwrap();
+
+    let new_cg = new_version.levels.get(&new_cg_id).unwrap();
+    let sub_levels = &new_cg.l0.as_ref().unwrap().sub_levels;
+    assert_eq!(sub_levels.len(), 2);
+    let sub_level1 = &sub_levels[0];
+    assert_eq!(sub_level1.sub_level_id, epoch1);
+    assert_eq!(sub_level1.table_infos.len(), 1);
+    assert_eq!(sub_level1.table_infos[0], sst2_epoch1);
+    let sub_level2 = &sub_levels[1];
+    assert_eq!(sub_level2.sub_level_id, epoch2);
+    assert_eq!(sub_level2.table_infos.len(), 1);
+    assert_eq!(sub_level2.table_infos[0].object_id, sst_epoch2.object_id);
+
+    // let epoch_to_ssts = vec![(
+    //     BTreeMap::from_iter([(
+    //         epoch_1,
+    //         vec![LocalSstableInfo {
+    //             sst_info: SstableInfo {
+    //                 sst_id: 2,
+    //                 object_id: 2,
+    //                 ..Default::default()
+    //             },
+    //             table_stats: Default::default(),
+    //         }],
+    //     )]),
+    //     vec![TableId::from(2)],
+    // )];
+    //
+    // test_env
+    //     .meta_client
+    //     .commit_multi_epoch(epoch_1, sr, epoch_to_ssts)
+    //     .await
+    //     .unwrap();
+    //
+    // let v = test_env
+    //     .meta_client
+    //     .hummock_manager_ref()
+    //     .get_current_version()
+    //     .await;
+    //
+    // let levels = &v.levels;
+    // assert_eq!(3, levels.len());
+    // let new_cg_id = 5;
+    // let ssts = &levels.get(&new_cg_id).unwrap().level0().sub_levels[0].table_infos;
+    // assert_eq!(1, ssts.len());
+    // let sst = &ssts[0];
+    // assert_eq!(2, sst.sst_id);
+    // assert!(v
+    //     .state_table_info
+    //     .compaction_group_member_table_ids(new_cg_id)
+    //     .contains(&TableId::from(2)));
+    //
+    // let epoch_2 = epoch_1.next_epoch();
+    //
+    // let sr = SyncResult {
+    //     sync_size: 100,
+    //     uncommitted_ssts: vec![LocalSstableInfo {
+    //         sst_info: SstableInfo {
+    //             sst_id: 3,
+    //             object_id: 3,
+    //             ..Default::default()
+    //         },
+    //         table_stats: Default::default(),
+    //     }],
+    //     table_watermarks: HashMap::new(),
+    //     old_value_ssts: vec![],
+    // };
+    // let epoch_to_ssts = vec![(
+    //     BTreeMap::from_iter([(
+    //         epoch_2,
+    //         vec![LocalSstableInfo {
+    //             sst_info: SstableInfo {
+    //                 sst_id: 4,
+    //                 object_id: 4,
+    //                 ..Default::default()
+    //             },
+    //             table_stats: Default::default(),
+    //         }],
+    //     )]),
+    //     vec![TableId::from(5)],
+    // )];
+    //
+    // test_env
+    //     .meta_client
+    //     .commit_multi_epoch(epoch_2, sr, epoch_to_ssts)
+    //     .await
+    //     .unwrap();
+    //
+    // let v = test_env
+    //     .meta_client
+    //     .hummock_manager_ref()
+    //     .get_current_version()
+    //     .await;
+    //
+    // let levels = &v.levels;
+    // assert_eq!(4, levels.len());
+    // let new_cg_id = 6;
+    // let ssts = &levels.get(&new_cg_id).unwrap().level0().sub_levels[0].table_infos;
+    // assert_eq!(1, ssts.len());
+    // let sst = &ssts[0];
+    // assert_eq!(4, sst.sst_id);
+    // assert!(v
+    //     .state_table_info
+    //     .compaction_group_member_table_ids(new_cg_id)
+    //     .contains(&TableId::from(5)));
 }

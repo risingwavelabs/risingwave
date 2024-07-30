@@ -28,7 +28,7 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::hummock::compact_task::{self};
-use risingwave_pb::hummock::{CompactionConfig, HummockSnapshot};
+use risingwave_pb::hummock::HummockSnapshot;
 use sea_orm::TransactionTrait;
 
 use crate::hummock::error::{Error, Result};
@@ -56,7 +56,6 @@ pub struct NewTableFragmentInfo {
 pub struct BatchCommitForNewCg {
     pub epoch_to_ssts: BTreeMap<HummockEpoch, Vec<LocalSstableInfo>>,
     pub table_ids: Vec<TableId>,
-    pub compaction_group: Option<(CompactionGroupId, CompactionConfig)>,
 }
 
 pub struct CommitEpochInfo {
@@ -81,27 +80,6 @@ impl CommitEpochInfo {
         change_log_delta: HashMap<TableId, ChangeLogDelta>,
         table_committed_epoch: BTreeMap<HummockEpoch, HashSet<TableId>>,
         max_committed_epoch: HummockEpoch,
-    ) -> Self {
-        Self::new_for_multi_epoch(
-            sstables,
-            new_table_watermarks,
-            sst_to_context,
-            new_table_fragment_info,
-            change_log_delta,
-            table_committed_epoch,
-            max_committed_epoch,
-            Vec::default(),
-        )
-    }
-
-    pub fn new_for_multi_epoch(
-        sstables: Vec<LocalSstableInfo>,
-        new_table_watermarks: HashMap<TableId, TableWatermarks>,
-        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
-        new_table_fragment_info: Option<NewTableFragmentInfo>,
-        change_log_delta: HashMap<TableId, ChangeLogDelta>,
-        table_committed_epoch: BTreeMap<HummockEpoch, HashSet<TableId>>,
-        max_committed_epoch: HummockEpoch,
         batch_commit_for_new_cg: Vec<BatchCommitForNewCg>,
     ) -> Self {
         Self {
@@ -119,11 +97,12 @@ impl CommitEpochInfo {
 
 impl HummockManager {
     #[cfg(any(test, feature = "test"))]
-    pub async fn commit_epoch_for_test(
+    pub async fn commit_epoch_with_batch_cg_for_test(
         &self,
         epoch: HummockEpoch,
         sstables: Vec<impl Into<LocalSstableInfo>>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+        batch_commit_for_new_cg: Vec<BatchCommitForNewCg>,
     ) -> Result<()> {
         let tables = self
             .versioning
@@ -143,9 +122,21 @@ impl HummockManager {
             HashMap::new(),
             BTreeMap::from_iter([(epoch, tables)]),
             epoch,
+            batch_commit_for_new_cg,
         );
         self.commit_epoch(info).await?;
         Ok(())
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub async fn commit_epoch_for_test(
+        &self,
+        epoch: HummockEpoch,
+        sstables: Vec<impl Into<LocalSstableInfo>>,
+        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+    ) -> Result<()> {
+        self.commit_epoch_with_batch_cg_for_test(epoch, sstables, sst_to_context, vec![])
+            .await
     }
 
     /// Caller should ensure `epoch` > `max_committed_epoch`
@@ -159,9 +150,9 @@ impl HummockManager {
             sst_to_context,
             new_table_fragment_info,
             change_log_delta,
-            table_committed_epoch: _,
+            table_committed_epoch,
             max_committed_epoch: epoch,
-            mut batch_commit_for_new_cg,
+            batch_commit_for_new_cg,
         } = commit_info;
         let mut versioning_guard = self.versioning.write().await;
         let _timer = start_measure_real_process_timer!(self, "commit_epoch");
@@ -198,6 +189,7 @@ impl HummockManager {
         let state_table_info = version.latest_version().state_table_info.clone();
 
         let mut table_compaction_group_mapping = state_table_info.build_table_compaction_group_id();
+
         let mut new_table_ids = HashMap::new();
         // Add new table
         if let Some(new_fragment_table_info) = new_table_fragment_info {
@@ -222,41 +214,39 @@ impl HummockManager {
             }
         }
 
-        let mut new_id_count = 0;
         let batch_commit_for_new_cg = if !batch_commit_for_new_cg.is_empty() {
-            // The new config will be persisted later.
-            let config = self
-                .compaction_group_manager
-                .read()
-                .await
-                .default_compaction_config()
-                .as_ref()
-                .clone();
-
+            let mut new_id_count = 0;
+            let mut batch_commit_info = HashMap::new();
             for BatchCommitForNewCg {
                 epoch_to_ssts,
                 table_ids,
-                compaction_group,
-            } in &mut batch_commit_for_new_cg
+            } in batch_commit_for_new_cg
             {
                 let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
-                *compaction_group = Some((new_compaction_group_id, config.clone()));
 
-                new_id_count += epoch_to_ssts
-                    .iter()
-                    .map(|(_, ssts)| ssts.len())
-                    .sum::<usize>();
+                new_id_count += epoch_to_ssts.values().map(|ssts| ssts.len()).sum::<usize>();
 
                 on_handle_add_new_table(
                     &state_table_info,
-                    table_ids,
+                    &table_ids,
                     new_compaction_group_id,
                     &mut table_compaction_group_mapping,
                     &mut new_table_ids,
                 )?;
+
+                batch_commit_info.insert(new_compaction_group_id, epoch_to_ssts);
             }
             let start_sst_id = next_sstable_object_id(&self.env, new_id_count).await?;
-            Some((batch_commit_for_new_cg, start_sst_id))
+            Some((
+                batch_commit_info,
+                start_sst_id,
+                (*self
+                    .compaction_group_manager
+                    .read()
+                    .await
+                    .default_compaction_config())
+                .clone(),
+            ))
         } else {
             None
         };
@@ -277,20 +267,20 @@ impl HummockManager {
         );
 
         // TODO: remove the sanity check when supporting partial checkpoint
-        // assert_eq!(1, table_committed_epoch.len());
-        // assert_eq!(
-        //     table_committed_epoch.iter().next().expect("non-empty"),
-        //     (
-        //         &epoch,
-        //         &version
-        //             .latest_version()
-        //             .state_table_info
-        //             .info()
-        //             .keys()
-        //             .cloned()
-        //             .collect()
-        //     )
-        // );
+        assert_eq!(1, table_committed_epoch.len());
+        assert_eq!(
+            table_committed_epoch.iter().next().expect("non-empty"),
+            (
+                &epoch,
+                &version
+                    .latest_version()
+                    .state_table_info
+                    .info()
+                    .keys()
+                    .cloned()
+                    .collect()
+            )
+        );
 
         // Apply stats changes.
         let mut version_stats = HummockVersionStatsTransaction::new(
