@@ -44,7 +44,7 @@ sleep 3s
 ############## Create MV on source
 
 statement ok
-SET STREAMING_RATE_LIMIT=0;
+SET SOURCE_RATE_LIMIT=0;
 
 statement ok
 create materialized view rl_mv1 as select count(*) from kafka_source;
@@ -56,7 +56,7 @@ statement ok
 create materialized view rl_mv3 as select count(*) from kafka_source;
 
 statement ok
-SET STREAMING_RATE_LIMIT=default;
+SET SOURCE_RATE_LIMIT=default;
 
 ############## MVs should have 0 records, since source has (rate_limit = 0)
 
@@ -82,11 +82,11 @@ select * from rl_mv3;
 
 skipif in-memory
 query I
-alter source kafka_source set streaming_rate_limit to 1000;
+alter source kafka_source set source_rate_limit to 1000;
 
 skipif in-memory
 query I
-alter source kafka_source set streaming_rate_limit to default;
+alter source kafka_source set source_rate_limit to default;
 
 skipif in-memory
 sleep 3s
