@@ -22,17 +22,11 @@ use itertools::Itertools;
 use risingwave_common::array::ListValue;
 use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
-use risingwave_common::types::{data_types, DataType, ScalarImpl, Timestamptz};
-use risingwave_common::{bail_not_implemented, current_cluster_version, must_match, no_function};
-use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
-use risingwave_expr::window_function::{
-    Frame, FrameBound, FrameBounds, FrameExclusion, RangeFrameBounds, RangeFrameOffset,
-    RowsFrameBounds, SessionFrameBounds, SessionFrameGap, WindowFuncKind,
-};
-use risingwave_sqlparser::ast::{
-    self, Function, FunctionArg, FunctionArgExpr, Ident, WindowFrameBound, WindowFrameBounds,
-    WindowFrameExclusion, WindowFrameUnits, WindowSpec,
-};
+use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
+use risingwave_common::{bail_not_implemented, current_cluster_version, no_function};
+use risingwave_expr::aggregate::AggKind;
+use risingwave_expr::window_function::WindowFuncKind;
+use risingwave_sqlparser::ast::{self, Function, FunctionArg, FunctionArgExpr, Ident};
 use risingwave_sqlparser::parser::ParserError;
 use thiserror_ext::AsReport;
 
@@ -40,10 +34,12 @@ use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, UdfContext};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
-    AggCall, CastContext, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, InputRef,
-    Literal, Now, OrderBy, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
+    CastContext, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, InputRef, Literal,
+    Now, TableFunction, TableFunctionType, UserDefinedFunction,
 };
-use crate::utils::Condition;
+
+mod aggregate;
+mod window;
 
 // Defines system functions that without args, ref: https://www.postgresql.org/docs/current/functions-info.html
 const SYS_FUNCTION_WITHOUT_ARGS: &[&str] = &[
@@ -145,7 +141,7 @@ impl Binder {
             } else {
                 self.bind_builtin_scalar_function(&function_name, scalar_inputs, f.variadic)?
             };
-            return self.bind_agg(f, AggKind::WrapScalar(scalar.to_expr_proto()));
+            return self.bind_aggregate_function(f, AggKind::WrapScalar(scalar.to_expr_proto()));
         }
 
         // user defined function
@@ -257,7 +253,10 @@ impl Binder {
                         return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
                     }
                     Aggregate => {
-                        return self.bind_agg(f, AggKind::UserDefined(func.as_ref().into()));
+                        return self.bind_aggregate_function(
+                            f,
+                            AggKind::UserDefined(func.as_ref().into()),
+                        );
                     }
                 }
             }
@@ -267,7 +266,7 @@ impl Binder {
         if f.over.is_none()
             && let Ok(kind) = function_name.parse()
         {
-            return self.bind_agg(f, AggKind::Builtin(kind));
+            return self.bind_aggregate_function(f, AggKind::Builtin(kind));
         }
 
         if f.distinct || !f.order_by.is_empty() || f.filter.is_some() {
@@ -384,476 +383,6 @@ impl Binder {
         self.context.lambda_args = orig_lambda_args;
 
         Ok(body)
-    }
-
-    pub(super) fn bind_agg(&mut self, f: Function, kind: AggKind) -> Result<ExprImpl> {
-        self.ensure_aggregate_allowed()?;
-
-        let distinct = f.distinct;
-        let filter_expr = f.filter.clone();
-
-        let (direct_args, args, order_by) = if matches!(kind, agg_kinds::ordered_set!()) {
-            self.bind_ordered_set_agg(f, kind.clone())?
-        } else {
-            self.bind_normal_agg(f, kind.clone())?
-        };
-
-        let filter = match filter_expr {
-            Some(filter) => {
-                let mut clause = Some(Clause::Filter);
-                std::mem::swap(&mut self.context.clause, &mut clause);
-                let expr = self
-                    .bind_expr_inner(*filter)
-                    .and_then(|expr| expr.enforce_bool_clause("FILTER"))?;
-                self.context.clause = clause;
-                if expr.has_subquery() {
-                    bail_not_implemented!("subquery in filter clause");
-                }
-                if expr.has_agg_call() {
-                    bail_not_implemented!("aggregation function in filter clause");
-                }
-                if expr.has_table_function() {
-                    bail_not_implemented!("table function in filter clause");
-                }
-                Condition::with_expr(expr)
-            }
-            None => Condition::true_cond(),
-        };
-
-        Ok(ExprImpl::AggCall(Box::new(AggCall::new(
-            kind,
-            args,
-            distinct,
-            order_by,
-            filter,
-            direct_args,
-        )?)))
-    }
-
-    fn decimal_to_float64(decimal_expr: &mut ExprImpl, kind: &AggKind) -> Result<()> {
-        if decimal_expr.cast_implicit_mut(DataType::Float64).is_err() {
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                "direct arg in `{}` must be castable to float64",
-                kind
-            ))
-            .into());
-        }
-
-        let Some(Ok(fraction_datum)) = decimal_expr.try_fold_const() else {
-            bail_not_implemented!(
-                issue = 14079,
-                "variable as direct argument of ordered-set aggregate",
-            );
-        };
-
-        if let Some(ref fraction_value) = fraction_datum
-            && !(0.0..=1.0).contains(&fraction_value.as_float64().0)
-        {
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                "direct arg in `{}` must between 0.0 and 1.0",
-                kind
-            ))
-            .into());
-        }
-        // note that the fraction can be NULL
-        *decimal_expr = Literal::new(fraction_datum, DataType::Float64).into();
-        Ok(())
-    }
-
-    fn bind_ordered_set_agg(
-        &mut self,
-        f: Function,
-        kind: AggKind,
-    ) -> Result<(Vec<Literal>, Vec<ExprImpl>, OrderBy)> {
-        // Syntax:
-        // aggregate_name ( [ expression [ , ... ] ] ) WITHIN GROUP ( order_by_clause ) [ FILTER
-        // ( WHERE filter_clause ) ]
-
-        assert!(matches!(kind, agg_kinds::ordered_set!()));
-
-        if !f.order_by.is_empty() {
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                "ORDER BY is not allowed for ordered-set aggregation `{}`",
-                kind
-            ))
-            .into());
-        }
-        if f.distinct {
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                "DISTINCT is not allowed for ordered-set aggregation `{}`",
-                kind
-            ))
-            .into());
-        }
-
-        let within_group = *f.within_group.ok_or_else(|| {
-            ErrorCode::InvalidInputSyntax(format!(
-                "WITHIN GROUP is expected for ordered-set aggregation `{}`",
-                kind
-            ))
-        })?;
-
-        let mut direct_args: Vec<_> = f
-            .args
-            .into_iter()
-            .map(|arg| self.bind_function_arg(arg))
-            .flatten_ok()
-            .try_collect()?;
-        let mut args =
-            self.bind_function_expr_arg(FunctionArgExpr::Expr(within_group.expr.clone()))?;
-        let order_by = OrderBy::new(vec![self.bind_order_by_expr(within_group)?]);
-
-        // check signature and do implicit cast
-        match (&kind, direct_args.as_mut_slice(), args.as_mut_slice()) {
-            (
-                AggKind::Builtin(PbAggKind::PercentileCont | PbAggKind::PercentileDisc),
-                [fraction],
-                [arg],
-            ) => {
-                Self::decimal_to_float64(fraction, &kind)?;
-                if matches!(&kind, AggKind::Builtin(PbAggKind::PercentileCont)) {
-                    arg.cast_implicit_mut(DataType::Float64).map_err(|_| {
-                        ErrorCode::InvalidInputSyntax(format!(
-                            "arg in `{}` must be castable to float64",
-                            kind
-                        ))
-                    })?;
-                }
-            }
-            (AggKind::Builtin(PbAggKind::Mode), [], [_arg]) => {}
-            (
-                AggKind::Builtin(PbAggKind::ApproxPercentile),
-                [percentile, relative_error],
-                [_percentile_col],
-            ) => {
-                Self::decimal_to_float64(percentile, &kind)?;
-                Self::decimal_to_float64(relative_error, &kind)?;
-            }
-            _ => {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "invalid direct args or within group argument for `{}` aggregation",
-                    kind
-                ))
-                .into())
-            }
-        }
-
-        Ok((
-            direct_args
-                .into_iter()
-                .map(|arg| *arg.into_literal().unwrap())
-                .collect(),
-            args,
-            order_by,
-        ))
-    }
-
-    fn bind_normal_agg(
-        &mut self,
-        f: Function,
-        kind: AggKind,
-    ) -> Result<(Vec<Literal>, Vec<ExprImpl>, OrderBy)> {
-        // Syntax:
-        // aggregate_name (expression [ , ... ] [ order_by_clause ] ) [ FILTER ( WHERE
-        //   filter_clause ) ]
-        // aggregate_name (ALL expression [ , ... ] [ order_by_clause ] ) [ FILTER ( WHERE
-        //   filter_clause ) ]
-        // aggregate_name (DISTINCT expression [ , ... ] [ order_by_clause ] ) [ FILTER ( WHERE
-        //   filter_clause ) ]
-        // aggregate_name ( * ) [ FILTER ( WHERE filter_clause ) ]
-
-        assert!(!matches!(kind, agg_kinds::ordered_set!()));
-
-        if f.within_group.is_some() {
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                "WITHIN GROUP is not allowed for non-ordered-set aggregation `{}`",
-                kind
-            ))
-            .into());
-        }
-
-        let args: Vec<_> = f
-            .args
-            .iter()
-            .map(|arg| self.bind_function_arg(arg.clone()))
-            .flatten_ok()
-            .try_collect()?;
-        let order_by = OrderBy::new(
-            f.order_by
-                .into_iter()
-                .map(|e| self.bind_order_by_expr(e))
-                .try_collect()?,
-        );
-
-        if f.distinct {
-            if matches!(
-                kind,
-                AggKind::Builtin(PbAggKind::ApproxCountDistinct)
-                    | AggKind::Builtin(PbAggKind::ApproxPercentile)
-            ) {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "DISTINCT is not allowed for approximate aggregation `{}`",
-                    kind
-                ))
-                .into());
-            }
-
-            if args.is_empty() {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "DISTINCT is not allowed for aggregate function `{}` without args",
-                    kind
-                ))
-                .into());
-            }
-
-            // restrict arguments[1..] to be constant because we don't support multiple distinct key
-            // indices for now
-            if args.iter().skip(1).any(|arg| arg.as_literal().is_none()) {
-                bail_not_implemented!("non-constant arguments other than the first one for DISTINCT aggregation is not supported now");
-            }
-
-            // restrict ORDER BY to align with PG, which says:
-            // > If DISTINCT is specified in addition to an order_by_clause, then all the ORDER BY
-            // > expressions must match regular arguments of the aggregate; that is, you cannot sort
-            // > on an expression that is not included in the DISTINCT list.
-            if !order_by.sort_exprs.iter().all(|e| args.contains(&e.expr)) {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "ORDER BY expressions must match regular arguments of the aggregate for `{}` when DISTINCT is provided",
-                    kind
-                ))
-                .into());
-            }
-        }
-
-        Ok((vec![], args, order_by))
-    }
-
-    /// Bind window function calls according to PostgreSQL syntax.
-    /// See <https://www.postgresql.org/docs/current/sql-expressions.html#SYNTAX-WINDOW-FUNCTIONS> for syntax detail.
-    pub(super) fn bind_window_function(
-        &mut self,
-        kind: WindowFuncKind,
-        inputs: Vec<ExprImpl>,
-        WindowSpec {
-            partition_by,
-            order_by,
-            window_frame,
-        }: WindowSpec,
-    ) -> Result<ExprImpl> {
-        self.ensure_window_function_allowed()?;
-        let partition_by = partition_by
-            .into_iter()
-            .map(|arg| self.bind_expr_inner(arg))
-            .try_collect()?;
-        let order_by = OrderBy::new(
-            order_by
-                .into_iter()
-                .map(|order_by_expr| self.bind_order_by_expr(order_by_expr))
-                .collect::<Result<_>>()?,
-        );
-        let frame = if let Some(frame) = window_frame {
-            let exclusion = if let Some(exclusion) = frame.exclusion {
-                match exclusion {
-                    WindowFrameExclusion::CurrentRow => FrameExclusion::CurrentRow,
-                    WindowFrameExclusion::Group | WindowFrameExclusion::Ties => {
-                        bail_not_implemented!(
-                            issue = 9124,
-                            "window frame exclusion `{}` is not supported yet",
-                            exclusion
-                        );
-                    }
-                    WindowFrameExclusion::NoOthers => FrameExclusion::NoOthers,
-                }
-            } else {
-                FrameExclusion::NoOthers
-            };
-            let bounds = match frame.units {
-                WindowFrameUnits::Rows => {
-                    let (start, end) = must_match!(frame.bounds, WindowFrameBounds::Bounds { start, end } => (start, end));
-                    let (start, end) = self.bind_window_frame_usize_bounds(start, end)?;
-                    FrameBounds::Rows(RowsFrameBounds { start, end })
-                }
-                unit @ (WindowFrameUnits::Range | WindowFrameUnits::Session) => {
-                    let order_by_expr = order_by
-                        .sort_exprs
-                        .iter()
-                        // for `RANGE | SESSION` frame, there should be exactly one `ORDER BY` column
-                        .exactly_one()
-                        .map_err(|_| {
-                            ErrorCode::InvalidInputSyntax(format!(
-                                "there should be exactly one ordering column for `{}` frame",
-                                unit
-                            ))
-                        })?;
-                    let order_data_type = order_by_expr.expr.return_type();
-                    let order_type = order_by_expr.order_type;
-
-                    let offset_data_type = match &order_data_type {
-                        // for numeric ordering columns, `offset`/`gap` should be the same type
-                        // NOTE: actually in PG it can be a larger type, but we don't support this here
-                        t @ data_types::range_frame_numeric!() => t.clone(),
-                        // for datetime ordering columns, `offset`/`gap` should be interval
-                        t @ data_types::range_frame_datetime!() => {
-                            if matches!(t, DataType::Date | DataType::Time) {
-                                bail_not_implemented!(
-                                    "`{}` frame with offset of type `{}` is not implemented yet, please manually cast the `ORDER BY` column to `timestamp`",
-                                    unit,
-                                    t
-                                );
-                            }
-                            DataType::Interval
-                        }
-                        // other types are not supported
-                        t => {
-                            return Err(ErrorCode::NotSupported(
-                                format!(
-                                    "`{}` frame with offset of type `{}` is not supported",
-                                    unit, t
-                                ),
-                                "Please re-consider the `ORDER BY` column".to_string(),
-                            )
-                            .into())
-                        }
-                    };
-
-                    if unit == WindowFrameUnits::Range {
-                        let (start, end) = must_match!(frame.bounds, WindowFrameBounds::Bounds { start, end } => (start, end));
-                        let (start, end) = self.bind_window_frame_scalar_impl_bounds(
-                            start,
-                            end,
-                            &offset_data_type,
-                        )?;
-                        FrameBounds::Range(RangeFrameBounds {
-                            order_data_type,
-                            order_type,
-                            offset_data_type,
-                            start: start.map(RangeFrameOffset::new),
-                            end: end.map(RangeFrameOffset::new),
-                        })
-                    } else {
-                        let gap = must_match!(frame.bounds, WindowFrameBounds::Gap(gap) => gap);
-                        let gap_value =
-                            self.bind_window_frame_bound_offset(*gap, offset_data_type.clone())?;
-                        FrameBounds::Session(SessionFrameBounds {
-                            order_data_type,
-                            order_type,
-                            gap_data_type: offset_data_type,
-                            gap: SessionFrameGap::new(gap_value),
-                        })
-                    }
-                }
-                WindowFrameUnits::Groups => {
-                    bail_not_implemented!(
-                        issue = 9124,
-                        "window frame in `GROUPS` mode is not supported yet",
-                    );
-                }
-            };
-
-            // Validate the frame bounds, may return `ExprError` to user if the bounds given are not valid.
-            bounds.validate()?;
-
-            Some(Frame { bounds, exclusion })
-        } else {
-            None
-        };
-        Ok(WindowFunction::new(kind, partition_by, order_by, inputs, frame)?.into())
-    }
-
-    fn bind_window_frame_usize_bounds(
-        &mut self,
-        start: WindowFrameBound,
-        end: Option<WindowFrameBound>,
-    ) -> Result<(FrameBound<usize>, FrameBound<usize>)> {
-        let mut convert_offset = |offset: Box<ast::Expr>| -> Result<usize> {
-            let offset = self
-                .bind_window_frame_bound_offset(*offset, DataType::Int64)?
-                .into_int64();
-            if offset < 0 {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "offset in window frame bounds must be non-negative".to_string(),
-                )
-                .into());
-            }
-            Ok(offset as usize)
-        };
-        let mut convert_bound = |bound| -> Result<FrameBound<usize>> {
-            Ok(match bound {
-                WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
-                WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
-                WindowFrameBound::Preceding(Some(offset)) => {
-                    FrameBound::Preceding(convert_offset(offset)?)
-                }
-                WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
-                WindowFrameBound::Following(Some(offset)) => {
-                    FrameBound::Following(convert_offset(offset)?)
-                }
-            })
-        };
-        let start = convert_bound(start)?;
-        let end = if let Some(end_bound) = end {
-            convert_bound(end_bound)?
-        } else {
-            FrameBound::CurrentRow
-        };
-        Ok((start, end))
-    }
-
-    fn bind_window_frame_scalar_impl_bounds(
-        &mut self,
-        start: WindowFrameBound,
-        end: Option<WindowFrameBound>,
-        offset_data_type: &DataType,
-    ) -> Result<(FrameBound<ScalarImpl>, FrameBound<ScalarImpl>)> {
-        let mut convert_bound = |bound| -> Result<FrameBound<_>> {
-            Ok(match bound {
-                WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
-                WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
-                WindowFrameBound::Preceding(Some(offset)) => FrameBound::Preceding(
-                    self.bind_window_frame_bound_offset(*offset, offset_data_type.clone())?,
-                ),
-                WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
-                WindowFrameBound::Following(Some(offset)) => FrameBound::Following(
-                    self.bind_window_frame_bound_offset(*offset, offset_data_type.clone())?,
-                ),
-            })
-        };
-        let start = convert_bound(start)?;
-        let end = if let Some(end_bound) = end {
-            convert_bound(end_bound)?
-        } else {
-            FrameBound::CurrentRow
-        };
-        Ok((start, end))
-    }
-
-    fn bind_window_frame_bound_offset(
-        &mut self,
-        offset: ast::Expr,
-        cast_to: DataType,
-    ) -> Result<ScalarImpl> {
-        let mut offset = self.bind_expr(offset)?;
-        if !offset.is_const() {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "offset/gap in window frame bounds must be constant".to_string(),
-            )
-            .into());
-        }
-        if offset.cast_implicit_mut(cast_to.clone()).is_err() {
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                "offset/gap in window frame bounds must be castable to {}",
-                cast_to
-            ))
-            .into());
-        }
-        let offset = offset.fold_const()?;
-        let Some(offset) = offset else {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "offset/gap in window frame bounds must not be NULL".to_string(),
-            )
-            .into());
-        };
-        Ok(offset)
     }
 
     fn bind_builtin_scalar_function(
@@ -1587,29 +1116,6 @@ impl Binder {
         ])
     }
 
-    fn ensure_window_function_allowed(&self) -> Result<()> {
-        if let Some(clause) = self.context.clause {
-            match clause {
-                Clause::Where
-                | Clause::Values
-                | Clause::GroupBy
-                | Clause::Having
-                | Clause::Filter
-                | Clause::GeneratedColumn
-                | Clause::From
-                | Clause::Insert
-                | Clause::JoinOn => {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "window functions are not allowed in {}",
-                        clause
-                    ))
-                    .into());
-                }
-            }
-        }
-        Ok(())
-    }
-
     fn ensure_now_function_allowed(&self) -> Result<()> {
         if self.is_for_stream()
             && !matches!(
@@ -1643,27 +1149,6 @@ impl Binder {
                 "Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?".to_string(),
             )
             .into());
-        }
-        Ok(())
-    }
-
-    fn ensure_aggregate_allowed(&self) -> Result<()> {
-        if let Some(clause) = self.context.clause {
-            match clause {
-                Clause::Where
-                | Clause::Values
-                | Clause::From
-                | Clause::GeneratedColumn
-                | Clause::Insert
-                | Clause::JoinOn => {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "aggregate functions are not allowed in {}",
-                        clause
-                    ))
-                    .into())
-                }
-                Clause::Having | Clause::Filter | Clause::GroupBy => {}
-            }
         }
         Ok(())
     }
