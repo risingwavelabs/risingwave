@@ -26,9 +26,7 @@ use crate::parser::simd_json_parser::DebeziumJsonAccessBuilder;
 use crate::parser::unified::debezium::{parse_schema_change, parse_transaction_meta};
 use crate::parser::unified::AccessImpl;
 use crate::parser::upsert_parser::get_key_column_name;
-use crate::parser::{
-    BytesProperties, JsonAccessBuilder, JsonProperties, ParseResult, ParserFormat,
-};
+use crate::parser::{BytesProperties, ParseResult, ParserFormat};
 use crate::source::cdc::CdcMessageType;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceMeta};
 
@@ -212,6 +210,7 @@ mod tests {
     use risingwave_pb::connector_service::cdc_message;
 
     use super::*;
+    use crate::parser::schema_change::TableChangeType;
     use crate::parser::{MessageMeta, SourceStreamChunkBuilder, TransactionControl};
     use crate::source::cdc::DebeziumCdcMeta;
     use crate::source::{ConnectorProperties, DataType, SourceMessage, SplitId};
@@ -328,7 +327,9 @@ mod tests {
                     meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
                         "orders".to_string(),
                         0,
-                        cdc_message::CdcMessageType::TransactionMeta,
+                        transactional
+                            .then(|| cdc_message::CdcMessageType::TransactionMeta)
+                            .unwrap_or(cdc_message::CdcMessageType::Data),
                     )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
@@ -356,7 +357,9 @@ mod tests {
                     meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
                         "orders".to_string(),
                         0,
-                        cdc_message::CdcMessageType::TransactionMeta,
+                        transactional
+                            .then(|| cdc_message::CdcMessageType::TransactionMeta)
+                            .unwrap_or(cdc_message::CdcMessageType::Data),
                     )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
@@ -495,6 +498,18 @@ mod tests {
             )
             .await;
 
-        res.unwrap();
+        let res = res.unwrap();
+        match res {
+            ParseResult::SchemaChange(schema_change) => {
+                assert_eq!(schema_change.table_changes.len(), 1);
+                let table_change = &schema_change.table_changes[0];
+                assert_eq!(table_change.cdc_table_name, "mydb.test");
+                assert_eq!(table_change.change_type, TableChangeType::Alter);
+                assert_eq!(table_change.columns.len(), 3);
+                let column_names = table_change.columns.iter().map(|c| c.name()).collect_vec();
+                assert_eq!(column_names, vec!["id", "v1", "v2"]);
+            }
+            _ => panic!("unexpected parse result: {:?}", res),
+        }
     }
 }

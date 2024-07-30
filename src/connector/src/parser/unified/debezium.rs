@@ -13,11 +13,9 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use jsonbb::ValueRef;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::types::{
-    DataType, Datum, DatumCow, Scalar, ScalarImpl, ScalarRefImpl, StructType, Timestamptz,
-    ToDatumRef,
+    DataType, Datum, DatumCow, Scalar, ScalarImpl, ScalarRefImpl, Timestamptz, ToDatumRef,
 };
 use risingwave_connector_codec::decoder::AccessExt;
 use risingwave_pb::plan_common::additional_column::ColumnType;
@@ -196,6 +194,7 @@ pub fn parse_schema_change(
                         is_hidden: false,
                     })
                     .collect_vec(),
+                change_type: ty.as_str().into(),
             });
         }
 

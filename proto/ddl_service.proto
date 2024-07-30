@@ -6,6 +6,7 @@ import "catalog.proto";
 import "common.proto";
 import "meta.proto";
 import "stream_plan.proto";
+import "plan_common.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
@@ -442,6 +443,21 @@ message CommentOnRequest {
 message CommentOnResponse {
   common.Status status = 1;
   uint64 version = 2;
+}
+
+message TableSchemaChange {
+  enum TableChangeType {
+    UNSPECIFIED = 0;
+    ALTER = 1;
+  }
+
+  TableChangeType change_type = 1;
+  string cdc_table_name = 2;
+  repeated plan_common.ColumnCatalog columns = 3;
+}
+
+message SchemaChangeEnvelope {
+  repeated TableSchemaChange table_changes = 1;
 }
 
 service DdlService {
