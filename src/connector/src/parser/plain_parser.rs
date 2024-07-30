@@ -327,9 +327,11 @@ mod tests {
                     meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
                         "orders".to_string(),
                         0,
-                        transactional
-                            .then_some(cdc_message::CdcMessageType::TransactionMeta)
-                            .unwrap_or(cdc_message::CdcMessageType::Data),
+                        if transactional {
+                            cdc_message::CdcMessageType::TransactionMeta
+                        } else {
+                            cdc_message::CdcMessageType::Data
+                        },
                     )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
@@ -357,9 +359,11 @@ mod tests {
                     meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
                         "orders".to_string(),
                         0,
-                        transactional
-                            .then_some(cdc_message::CdcMessageType::TransactionMeta)
-                            .unwrap_or(cdc_message::CdcMessageType::Data),
+                        if transactional {
+                            cdc_message::CdcMessageType::TransactionMeta
+                        } else {
+                            cdc_message::CdcMessageType::Data
+                        },
                     )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
