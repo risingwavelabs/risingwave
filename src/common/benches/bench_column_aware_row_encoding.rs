@@ -22,7 +22,7 @@ use risingwave_common::types::{DataType, Date, ScalarImpl};
 use risingwave_common::util::value_encoding::column_aware_row_encoding::*;
 use risingwave_common::util::value_encoding::*;
 
-fn bench_column_aware_encoding(c: &mut Criterion) {
+fn bench_column_aware_encoding_16_columns(c: &mut Criterion) {
     let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
     // The schema is inspired by the TPC-H lineitem table
@@ -67,7 +67,7 @@ fn bench_column_aware_encoding(c: &mut Criterion) {
         .map(|i| ColumnId::from(i as i32))
         .collect::<Vec<_>>();
 
-    c.bench_function("bench_column_aware_row_encoding_encode", |b| {
+    c.bench_function("column_aware_row_encoding_16_columns_encode", |b| {
         let serializer = Serializer::new(&column_ids[..]);
         b.iter(|| {
             black_box(serializer.serialize(&row));
@@ -77,7 +77,7 @@ fn bench_column_aware_encoding(c: &mut Criterion) {
     let serializer = Serializer::new(&column_ids[..]);
     let encoded = serializer.serialize(&row);
 
-    c.bench_function("bench_column_aware_row_encoding_decode", |b| {
+    c.bench_function("column_aware_row_encoding_16_columns_decode", |b| {
         let deserializer =
             Deserializer::new(&column_ids[..], data_types.clone(), std::iter::empty());
         b.iter(|| {
@@ -87,5 +87,50 @@ fn bench_column_aware_encoding(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_column_aware_encoding);
+fn bench_column_aware_encoding_4_columns(c: &mut Criterion) {
+    let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+    // The schema is inspired by the TPC-H nation table
+    let data_types = Arc::new([
+        DataType::Int32,
+        DataType::Varchar,
+        DataType::Int32,
+        DataType::Varchar,
+    ]);
+    let row = OwnedRow::new(vec![
+        Some(ScalarImpl::Int32(rng.gen())),
+        Some(ScalarImpl::Utf8("United States".into())),
+        Some(ScalarImpl::Int32(rng.gen())),
+        Some(ScalarImpl::Utf8("No comments".into())),
+    ]);
+
+    let column_ids = (1..=data_types.len())
+        .map(|i| ColumnId::from(i as i32))
+        .collect::<Vec<_>>();
+
+    c.bench_function("column_aware_row_encoding_4_columns_encode", |b| {
+        let serializer = Serializer::new(&column_ids[..]);
+        b.iter(|| {
+            black_box(serializer.serialize(&row));
+        });
+    });
+
+    let serializer = Serializer::new(&column_ids[..]);
+    let encoded = serializer.serialize(&row);
+
+    c.bench_function("column_aware_row_encoding_4_columns_decode", |b| {
+        let deserializer =
+            Deserializer::new(&column_ids[..], data_types.clone(), std::iter::empty());
+        b.iter(|| {
+            let result = deserializer.deserialize(&encoded).unwrap();
+            black_box(result);
+        });
+    });
+}
+
+criterion_group!(
+    benches,
+    bench_column_aware_encoding_16_columns,
+    bench_column_aware_encoding_4_columns,
+);
 criterion_main!(benches);
