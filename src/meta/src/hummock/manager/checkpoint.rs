@@ -22,10 +22,10 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_pb::hummock::hummock_version_checkpoint::{
-    StaleObjects as PbStaleObjects, StaleObjects,
+use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
+use risingwave_pb::hummock::{
+    PbHummockVersion, PbHummockVersionArchive, PbHummockVersionCheckpoint,
 };
-use risingwave_pb::hummock::{PbHummockVersionArchive, PbHummockVersionCheckpoint};
 use thiserror_ext::AsReport;
 use tracing::warn;
 
@@ -60,7 +60,7 @@ impl HummockVersionCheckpoint {
 
     pub fn to_protobuf(&self) -> PbHummockVersionCheckpoint {
         PbHummockVersionCheckpoint {
-            version: Some(self.version.to_protobuf()),
+            version: Some(PbHummockVersion::from(&self.version)),
             stale_objects: self.stale_objects.clone(),
         }
     }
@@ -197,11 +197,11 @@ impl HummockManager {
         );
         if self.env.opts.enable_hummock_data_archive {
             archive = Some(PbHummockVersionArchive {
-                version: Some(old_checkpoint.version.to_protobuf()),
+                version: Some(PbHummockVersion::from(&old_checkpoint.version)),
                 version_deltas: versioning
                     .hummock_version_deltas
                     .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
-                    .map(|(_, version_delta)| version_delta.to_protobuf())
+                    .map(|(_, version_delta)| version_delta.into())
                     .collect(),
             });
         }

@@ -167,7 +167,7 @@ impl AsyncTruncateSinkWriter for NatsSinkWriter {
         chunk: StreamChunk,
         mut add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        let mut data = chunk_to_json(chunk, &self.json_encoder).unwrap();
+        let mut data = chunk_to_json(chunk, &self.json_encoder)?;
         for item in &mut data {
             let publish_ack_future = Retry::spawn(
                 ExponentialBackoff::from_millis(100).map(jitter).take(3),

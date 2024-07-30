@@ -19,9 +19,11 @@ use std::sync::Arc;
 use bytes::{Bytes, BytesMut};
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
+use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
-use risingwave_pb::hummock::{BloomFilterType, SstableInfo};
+use risingwave_pb::hummock::BloomFilterType;
 
 use super::utils::CompressionAlgorithm;
 use super::{
@@ -498,12 +500,12 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let sst_info = SstableInfo {
             object_id: self.sstable_id,
             sst_id: self.sstable_id,
-            bloom_filter_kind: bloom_filter_kind as i32,
-            key_range: Some(risingwave_pb::hummock::KeyRange {
-                left: meta.smallest_key.clone(),
-                right: meta.largest_key.clone(),
+            bloom_filter_kind,
+            key_range: KeyRange {
+                left: Bytes::from(meta.smallest_key.clone()),
+                right: Bytes::from(meta.largest_key.clone()),
                 right_exclusive,
-            }),
+            },
             file_size: meta.estimated_size as u64,
             table_ids: self.table_ids.into_iter().collect(),
             meta_offset: meta.meta_offset,
@@ -525,7 +527,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             self.epoch_set.len()
         );
         let bloom_filter_size = meta.bloom_filter.len();
-        let sstable_file_size = sst_info.get_file_size() as usize;
+        let sstable_file_size = sst_info.file_size as usize;
 
         let writer_output = self.writer.finish(meta).await?;
         Ok(SstableBuilderOutput::<W::Output> {
@@ -715,13 +717,10 @@ pub(super) mod tests {
         let output = b.finish().await.unwrap();
         let info = output.sst_info.sst_info;
 
-        assert_bytes_eq!(
-            test_key_of(0).encode(),
-            info.key_range.as_ref().unwrap().left
-        );
+        assert_bytes_eq!(test_key_of(0).encode(), info.key_range.left);
         assert_bytes_eq!(
             test_key_of(TEST_KEYS_COUNT - 1).encode(),
-            info.key_range.as_ref().unwrap().right
+            info.key_range.right
         );
         let (data, meta) = output.writer_output;
         assert_eq!(info.file_size, meta.estimated_size as u64);

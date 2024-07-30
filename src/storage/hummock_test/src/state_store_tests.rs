@@ -1302,7 +1302,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         sync_result
             .uncommitted_ssts
             .iter()
-            .map(|LocalSstableInfo { sst_info, .. }| sst_info.get_object_id())
+            .map(|LocalSstableInfo { sst_info, .. }| sst_info.object_id)
             .min()
             .unwrap()
     };

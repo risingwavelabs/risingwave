@@ -405,6 +405,27 @@ impl StageRunner {
                     expr_context.clone(),
                 ));
             }
+        } else if let Some(file_scan_info) = self.stage.file_scan_info.as_ref() {
+            let chunk_size = (file_scan_info.file_location.len() as f32
+                / self.stage.parallelism.unwrap() as f32)
+                .ceil() as usize;
+            for (id, files) in file_scan_info.file_location.chunks(chunk_size).enumerate() {
+                let task_id = PbTaskId {
+                    query_id: self.stage.query_id.id.clone(),
+                    stage_id: self.stage.id,
+                    task_id: id as u64,
+                };
+                let plan_fragment =
+                    self.create_plan_fragment(id as u64, Some(PartitionInfo::File(files.to_vec())));
+                let worker =
+                    self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
+                futures.push(self.schedule_task(
+                    task_id,
+                    plan_fragment,
+                    worker,
+                    expr_context.clone(),
+                ));
+            }
         } else {
             for id in 0..self.stage.parallelism.unwrap() {
                 let task_id = PbTaskId {

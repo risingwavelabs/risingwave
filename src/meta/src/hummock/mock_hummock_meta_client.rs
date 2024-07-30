@@ -25,7 +25,9 @@ use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
+use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
@@ -36,7 +38,7 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{Event, ReportTask};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    compact_task, CompactTask, HummockSnapshot, PbHummockVersion, SubscribeCompactionEventRequest,
+    compact_task, HummockSnapshot, PbHummockVersion, SubscribeCompactionEventRequest,
     SubscribeCompactionEventResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
@@ -165,7 +167,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         let sst_to_worker = sync_result
             .uncommitted_ssts
             .iter()
-            .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), self.context_id))
+            .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, self.context_id))
             .collect();
         let new_table_watermark = sync_result.table_watermarks;
         let table_change_log = build_table_change_log_delta(
@@ -209,7 +211,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         let sst_to_worker = sync_result
             .uncommitted_ssts
             .iter()
-            .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), self.context_id))
+            .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, self.context_id))
             .collect();
         let new_table_watermark = sync_result.table_watermarks;
         let table_change_log = build_table_change_log_delta(
@@ -351,7 +353,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                     .unwrap()
                 {
                     let resp = SubscribeCompactionEventResponse {
-                        event: Some(ResponseEvent::CompactTask(task)),
+                        event: Some(ResponseEvent::CompactTask(task.into())),
                         create_at: SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .expect("Clock may have gone backwards")
@@ -381,7 +383,10 @@ impl HummockMetaClient for MockHummockMetaClient {
                             .report_compact_task(
                                 task_id,
                                 TaskStatus::try_from(task_status).unwrap(),
-                                sorted_output_ssts,
+                                sorted_output_ssts
+                                    .into_iter()
+                                    .map(SstableInfo::from)
+                                    .collect_vec(),
                                 Some(table_stats_change),
                             )
                             .await

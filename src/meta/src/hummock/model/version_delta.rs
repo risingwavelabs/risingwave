@@ -29,7 +29,7 @@ impl MetadataModel for HummockVersionDelta {
     }
 
     fn to_protobuf(&self) -> Self::PbType {
-        self.to_protobuf()
+        self.into()
     }
 
     fn from_protobuf(prost: Self::PbType) -> Self {

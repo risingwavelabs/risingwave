@@ -28,11 +28,11 @@ use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::key::{
     gen_key_from_bytes, prefixed_range_with_vnode, FullKey, TableKey, UserKey, TABLE_PREFIX_LEN,
 };
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo, SyncResult};
-use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::version::read_filter_for_version;
@@ -2529,16 +2529,10 @@ async fn test_commit_multi_epoch() {
     let levels = &v.levels;
     assert_eq!(3, levels.len());
     let new_cg_id = 5;
-    let ssts = &levels
-        .get(&new_cg_id)
-        .unwrap()
-        .get_l0()
-        .unwrap()
-        .get_sub_levels()[0]
-        .table_infos;
+    let ssts = &levels.get(&new_cg_id).unwrap().level0().sub_levels[0].table_infos;
     assert_eq!(1, ssts.len());
     let sst = &ssts[0];
-    assert_eq!(2, sst.get_sst_id());
+    assert_eq!(2, sst.sst_id);
     assert!(v
         .state_table_info
         .compaction_group_member_table_ids(new_cg_id)
@@ -2589,16 +2583,10 @@ async fn test_commit_multi_epoch() {
     let levels = &v.levels;
     assert_eq!(4, levels.len());
     let new_cg_id = 6;
-    let ssts = &levels
-        .get(&new_cg_id)
-        .unwrap()
-        .get_l0()
-        .unwrap()
-        .get_sub_levels()[0]
-        .table_infos;
+    let ssts = &levels.get(&new_cg_id).unwrap().level0().sub_levels[0].table_infos;
     assert_eq!(1, ssts.len());
     let sst = &ssts[0];
-    assert_eq!(4, sst.get_sst_id());
+    assert_eq!(4, sst.sst_id);
     assert!(v
         .state_table_info
         .compaction_group_member_table_ids(new_cg_id)

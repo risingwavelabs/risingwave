@@ -16,15 +16,16 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::{Deref, DerefMut};
 
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
-use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::version::{
+    GroupDelta, HummockVersion, HummockVersionDelta, IntraLevelDelta,
+};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId};
-use risingwave_pb::hummock::group_delta::DeltaType;
-use risingwave_pb::hummock::hummock_version_delta::ChangeLogDelta;
 use risingwave_pb::hummock::{
-    CompatibilityVersion, GroupConstruct, GroupDelta, HummockVersionStats, IntraLevelDelta,
-    SstableInfo, StateTableInfoDelta,
+    CompatibilityVersion, GroupConstruct, HummockVersionStats, StateTableInfoDelta,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
@@ -125,7 +126,6 @@ impl<'a> HummockVersionTransaction<'a> {
         new_version_delta.max_committed_epoch = epoch;
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
-
         // Append SSTs to a new version.
         for (compaction_group_id, inserted_table_infos) in commit_sstables {
             let group_deltas = &mut new_version_delta
@@ -134,14 +134,14 @@ impl<'a> HummockVersionTransaction<'a> {
                 .or_default()
                 .group_deltas;
             let l0_sub_level_id = epoch;
-            let group_delta = GroupDelta {
-                delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                    level_idx: 0,
-                    inserted_table_infos,
-                    l0_sub_level_id,
-                    ..Default::default()
-                })),
-            };
+            let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
+                0,
+                l0_sub_level_id,
+                vec![], // default
+                inserted_table_infos,
+                0, // default
+            ));
+
             group_deltas.push(group_delta);
         }
 
@@ -158,31 +158,25 @@ impl<'a> HummockVersionTransaction<'a> {
                     .group_deltas;
 
                 #[expect(deprecated)]
-                group_deltas.push(GroupDelta {
-                    delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
-                        group_config: Some(compaction_group_config),
-                        group_id: compaction_group_id,
-                        parent_group_id: StaticCompactionGroupId::StateDefault as u64,
-                        new_sst_start_id: start_sst_id,
-                        table_ids: vec![],
-                        version: CompatibilityVersion::NoMemberTableIds as i32,
-                    })),
-                });
+                group_deltas.push(GroupDelta::GroupConstruct(GroupConstruct {
+                    group_config: Some(compaction_group_config),
+                    group_id: compaction_group_id,
+                    parent_group_id: StaticCompactionGroupId::StateDefault as u64,
+                    new_sst_start_id: start_sst_id,
+                    table_ids: vec![],
+                    version: CompatibilityVersion::NoMemberTableIds as i32,
+                }));
 
                 for (epoch, insert_ssts) in commit_for_new_cg.epoch_to_ssts {
                     start_sst_id += insert_ssts.len() as u64;
                     let l0_sub_level_id = epoch;
-                    let group_delta = GroupDelta {
-                        delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                            level_idx: 0,
-                            inserted_table_infos: insert_ssts
-                                .into_iter()
-                                .map(|s| s.sst_info)
-                                .collect(),
-                            l0_sub_level_id,
-                            ..Default::default()
-                        })),
-                    };
+                    let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
+                        0,
+                        l0_sub_level_id, // default
+                        vec![],
+                        insert_ssts.into_iter().map(|s| s.sst_info).collect(), // default
+                        0,                                                     // default
+                    ));
                     group_deltas.push(group_delta);
                 }
             }

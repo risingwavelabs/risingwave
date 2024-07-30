@@ -1166,6 +1166,7 @@ impl HummockUploader {
         let UploaderState::Working(data) = &mut self.state else {
             return;
         };
+        debug!(epoch, ?table_ids, "start epoch");
         for table_id in &table_ids {
             let table_data = data
                 .unsync_data
