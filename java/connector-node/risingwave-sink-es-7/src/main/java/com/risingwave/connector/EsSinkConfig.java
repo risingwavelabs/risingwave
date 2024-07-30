@@ -44,6 +44,9 @@ public class EsSinkConfig extends CommonSinkConfig {
     @JsonProperty(value = "max_task_num")
     private Integer maxTaskNum;
 
+    @JsonProperty(value = "retry_on_conflict")
+    private Integer retryOnConflict;
+
     @JsonCreator
     public EsSinkConfig(@JsonProperty(value = "url") String url) {
         this.url = url;
@@ -104,6 +107,15 @@ public class EsSinkConfig extends CommonSinkConfig {
 
     public EsSinkConfig withMaxTaskNum(Integer maxTaskNum) {
         this.maxTaskNum = maxTaskNum;
+        return this;
+    }
+
+    public Integer getRetryOnConflict() {
+        return retryOnConflict;
+    }
+
+    public EsSinkConfig withRetryOnConflict(Integer retryOnConflict) {
+        this.retryOnConflict = retryOnConflict;
         return this;
     }
 }
