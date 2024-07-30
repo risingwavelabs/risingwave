@@ -40,6 +40,7 @@ use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::metrics_utils::{
     get_or_create_local_table_stat, trigger_local_table_stat, trigger_sst_stat,
 };
+use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
 use crate::hummock::{
     commit_multi_var, commit_multi_var_with_provided_txn, start_measure_real_process_timer,
@@ -155,6 +156,8 @@ impl HummockManager {
             batch_commit_for_new_cg,
         } = commit_info;
         let mut versioning_guard = self.versioning.write().await;
+        let mut compaction_group_manager_guard = self.compaction_group_manager.write().await;
+        let compaction_group_config = compaction_group_manager_guard.default_compaction_config();
         let _timer = start_measure_real_process_timer!(self, "commit_epoch");
         // Prevent commit new epochs if this flag is set
         if versioning_guard.disable_commit_epochs {
@@ -185,6 +188,8 @@ impl HummockManager {
             self.env.notification_manager(),
             &self.metrics,
         );
+        let mut compaction_group_manager =
+            compaction_group_manager_guard.start_compaction_groups_txn();
 
         let state_table_info = version.latest_version().state_table_info.clone();
 
@@ -223,6 +228,13 @@ impl HummockManager {
             } in batch_commit_for_new_cg
             {
                 let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
+                compaction_group_manager.insert(
+                    new_compaction_group_id,
+                    CompactionGroup {
+                        group_id: new_compaction_group_id,
+                        compaction_config: compaction_group_config.clone(),
+                    },
+                );
 
                 new_id_count += epoch_to_ssts.values().map(|ssts| ssts.len()).sum::<usize>();
 
@@ -240,12 +252,7 @@ impl HummockManager {
             Some((
                 batch_commit_info,
                 start_sst_id,
-                (*self
-                    .compaction_group_manager
-                    .read()
-                    .await
-                    .default_compaction_config())
-                .clone(),
+                (*compaction_group_config).clone(),
             ))
         } else {
             None
@@ -343,12 +350,22 @@ impl HummockManager {
                     &versioning.last_time_travel_snapshot_sst_ids,
                 )
                 .await?;
-            commit_multi_var_with_provided_txn!(txn, version, version_stats)?;
+            commit_multi_var_with_provided_txn!(
+                txn,
+                version,
+                version_stats,
+                compaction_group_manager
+            )?;
             if let Some(version_snapshot_sst_ids) = version_snapshot_sst_ids {
                 versioning.last_time_travel_snapshot_sst_ids = version_snapshot_sst_ids;
             }
         } else {
-            commit_multi_var!(self.meta_store_ref(), version, version_stats)?;
+            commit_multi_var!(
+                self.meta_store_ref(),
+                version,
+                version_stats,
+                compaction_group_manager
+            )?;
         }
 
         let snapshot = HummockSnapshot {
@@ -369,6 +386,7 @@ impl HummockManager {
         }
 
         drop(versioning_guard);
+        drop(compaction_group_manager_guard);
         tracing::trace!("new committed epoch {}", epoch);
 
         // Don't trigger compactions if we enable deterministic compaction
