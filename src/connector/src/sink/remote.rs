@@ -73,7 +73,7 @@ macro_rules! def_remote_sink {
     () => {
         def_remote_sink! {
             { ElasticSearch, ElasticSearchSink, "elasticsearch" }
-            { Opensearch, OpensearchSink, "opensearch"}
+            { Opensearch, OpenSearchSink, "opensearch"}
             { Cassandra, CassandraSink, "cassandra" }
             { Jdbc, JdbcSink, "jdbc", |desc| {
                 desc.sink_type.is_append_only()
