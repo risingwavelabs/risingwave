@@ -630,6 +630,7 @@ message SystemParams {
   optional bool enable_tracing = 15;
   optional bool use_new_object_prefix_strategy = 16;
   optional string license_key = 17;
+  optional uint64 time_travel_retention_ms = 18;
 }
 
 message GetSystemParamsRequest {}

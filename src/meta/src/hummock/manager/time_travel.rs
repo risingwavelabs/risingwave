@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -53,10 +54,16 @@ impl HummockManager {
         }
     }
 
+    pub(crate) async fn time_travel_enabled(&self) -> bool {
+        self.env
+            .system_params_reader()
+            .await
+            .time_travel_retention_ms()
+            > 0
+            && self.sql_store().is_some()
+    }
+
     pub(crate) async fn init_time_travel_state(&self) -> Result<()> {
-        if self.env.opts.enable_hummock_time_travel && self.sql_store().is_none() {
-            return Err(require_sql_meta_store_err());
-        }
         let Some(sql_store) = self.sql_store() else {
             return Ok(());
         };
@@ -503,6 +510,6 @@ fn should_ignore_group(root_group_id: CompactionGroupId) -> bool {
     root_group_id == StaticCompactionGroupId::StateDefault as CompactionGroupId
 }
 
-pub(crate) fn require_sql_meta_store_err() -> Error {
-    Error::TimeTravel(anyhow!("time travel requires SQL meta store"))
+pub fn require_sql_meta_store_err() -> Error {
+    Error::TimeTravel(anyhow!("require SQL meta store"))
 }
