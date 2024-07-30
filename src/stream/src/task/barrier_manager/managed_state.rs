@@ -483,20 +483,22 @@ impl ManagedBarrierState {
                 )
             });
 
-        for actor_id in &actor_ids_to_collect {
+        graph_state.transform_to_issued(barrier, actor_ids_to_collect.clone(), table_ids);
+
+        // Note: it's important to issue barrier to actor after issuing to graph to ensure that
+        // we call `start_epoch` on the graph before the actors receive the barrier
+        for actor_id in actor_ids_to_collect {
             self.actor_states
-                .entry(*actor_id)
+                .entry(actor_id)
                 .or_insert_with(InflightActorState::not_started)
                 .issue_barrier(
                     partial_graph_id,
                     barrier,
                     actor_to_stop
-                        .map(|actors| actors.contains(actor_id))
+                        .map(|actors| actors.contains(&actor_id))
                         .unwrap_or(false),
                 );
         }
-
-        graph_state.transform_to_issued(barrier, actor_ids_to_collect, table_ids);
     }
 
     pub(super) fn next_completed_epoch(
