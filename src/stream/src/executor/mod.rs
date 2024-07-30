@@ -103,6 +103,8 @@ mod watermark;
 mod watermark_filter;
 mod wrapper;
 
+mod approx_percentile;
+
 #[cfg(test)]
 mod integration_tests;
 pub mod test_utils;
