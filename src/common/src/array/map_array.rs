@@ -261,6 +261,7 @@ impl MapValue {
 /// XXX: perhaps we can make it `MapRef<'a, 'b>(ListRef<'a>, ListRef<'b>);`.
 /// Then we can build a map ref from 2 list refs without copying the data.
 /// Currently it's impossible.
+/// <https://github.com/risingwavelabs/risingwave/issues/17863>
 #[derive(Copy, Clone, Eq)]
 pub struct MapRef<'a>(pub(crate) ListRef<'a>);
 
