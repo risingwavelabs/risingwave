@@ -21,7 +21,7 @@ use risingwave_pb::data::{PbArray, PbArrayType};
 
 use super::{
     Array, ArrayBuilder, ArrayImpl, ArrayResult, DatumRef, ListArray, ListArrayBuilder, ListRef,
-    ListValue, MapType, ScalarRefImpl, StructArray,
+    ListValue, MapType, ScalarRef, ScalarRefImpl, StructArray,
 };
 use crate::bitmap::Bitmap;
 use crate::types::{DataType, Scalar, ToText};
@@ -158,7 +158,7 @@ impl MapArray {
 
 /// Refer to [`MapArray`] for the invariants of a map value.
 #[derive(Clone, Eq, EstimateSize)]
-pub struct MapValue(pub(crate) ListValue);
+pub struct MapValue(ListValue);
 
 mod cmp {
     use super::*;
@@ -279,6 +279,27 @@ impl<'a> MapRef<'a> {
                 .expect("the struct in map should have exactly 2 fields");
             (k.expect("map key should not be null"), v)
         })
+    }
+}
+
+impl Scalar for MapValue {
+    type ScalarRefType<'a> = MapRef<'a>;
+
+    fn as_scalar_ref(&self) -> MapRef<'_> {
+        MapRef(self.0.as_scalar_ref())
+    }
+}
+
+impl<'a> ScalarRef<'a> for MapRef<'a> {
+    type ScalarType = MapValue;
+
+    fn to_owned_scalar(&self) -> MapValue {
+        MapValue(self.0.to_owned_scalar())
+    }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, _state: &mut H) {
+        // FIXME: this is not ok.
+        unreachable!("map is not hashable. Such usage should be banned in frontend.")
     }
 }
 

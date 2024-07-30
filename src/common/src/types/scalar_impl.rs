@@ -91,14 +91,6 @@ impl Scalar for ListValue {
     }
 }
 
-impl Scalar for MapValue {
-    type ScalarRefType<'a> = MapRef<'a>;
-
-    fn as_scalar_ref(&self) -> MapRef<'_> {
-        MapRef(self.0.as_scalar_ref())
-    }
-}
-
 /// Implement `ScalarRef` for `Box<str>`.
 /// `Box<str>` could be converted to `&str`.
 impl<'a> ScalarRef<'a> for &'a str {
@@ -321,19 +313,6 @@ impl<'a> ScalarRef<'a> for ListRef<'a> {
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
         self.hash_scalar_inner(state)
-    }
-}
-
-impl<'a> ScalarRef<'a> for MapRef<'a> {
-    type ScalarType = MapValue;
-
-    fn to_owned_scalar(&self) -> MapValue {
-        MapValue(self.0.to_owned_scalar())
-    }
-
-    fn hash_scalar<H: std::hash::Hasher>(&self, _state: &mut H) {
-        // FIXME: this is not ok.
-        unreachable!("map is not hashable. Such usage should be banned in frontend.")
     }
 }
 
