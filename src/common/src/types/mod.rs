@@ -102,8 +102,13 @@ pub type F32 = ordered_float::OrderedFloat<f32>;
 pub type F64 = ordered_float::OrderedFloat<f64>;
 
 /// The set of datatypes that are supported in RisingWave.
-// `EnumDiscriminants` will generate a `DataTypeName` enum with the same variants,
-// but without data fields.
+///
+/// # Trait implementations
+///
+/// - `EnumDiscriminants` generates [`DataTypeName`] enum with the same variants,
+///   but without data fields.
+/// - `FromStr` is only used internally for tests.
+///   The generated implementation isn't efficient, and doesn't handle whitespaces, etc.
 #[derive(
     Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumDiscriminants, FromStr,
 )]
@@ -169,12 +174,12 @@ pub enum DataType {
     #[display("rw_int256")]
     #[from_str(regex = "(?i)^rw_int256$")]
     Int256,
-    // FIXME: what is the syntax for map?
-    #[display("map{0}")]
-    #[from_str(regex = "(?i)^map(?P<0>.+)$")]
+    #[display("{0}")]
+    #[from_str(regex = "(?i)^(?P<0>.+)$")]
     Map(MapType),
 }
 
+// For DataType::List
 impl std::str::FromStr for Box<DataType> {
     type Err = BoxedError;
 

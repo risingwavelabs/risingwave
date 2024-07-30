@@ -14,7 +14,7 @@
 
 use std::fmt::Formatter;
 
-use anyhow::*;
+use anyhow::Context;
 
 use super::*;
 
@@ -32,8 +32,13 @@ impl MapType {
     /// # Panics
     /// Panics if the key type is not valid for a map.
     pub fn from_kv(key: DataType, value: DataType) -> Self {
-        Self::assert_key_type_valid(&key);
+        Self::check_key_type_valid(&key).unwrap();
         Self(Box::new((key, value)))
+    }
+
+    pub fn try_from_kv(key: DataType, value: DataType) -> Result<Self, anyhow::Error> {
+        Self::check_key_type_valid(&key)?;
+        Ok(Self(Box::new((key, value))))
     }
 
     /// # Panics
@@ -52,8 +57,10 @@ impl MapType {
         Self::from_kv(k.1.clone(), v.1.clone())
     }
 
+    /// # Panics
+    /// Panics if the key type is not valid for a map.
     pub fn struct_type_for_map(key_type: DataType, value_type: DataType) -> StructType {
-        MapType::assert_key_type_valid(&key_type);
+        MapType::check_key_type_valid(&key_type).unwrap();
         StructType::new(vec![("key", key_type), ("value", value_type)])
     }
 
@@ -81,8 +88,8 @@ impl MapType {
     ///
     /// Note that this isn't definitive.
     /// Just be conservative at the beginning, but not too restrictive (like only allowing strings).
-    pub fn assert_key_type_valid(data_type: &DataType) {
-        let valid = match data_type {
+    pub fn check_key_type_valid(data_type: &DataType) -> anyhow::Result<()> {
+        let ok = match data_type {
             DataType::Int16 | DataType::Int32 | DataType::Int64 => true,
             DataType::Varchar => true,
             DataType::Boolean
@@ -102,20 +109,33 @@ impl MapType {
             | DataType::Int256
             | DataType::Map(_) => false,
         };
-        assert!(valid, "invalid map key type: {data_type}");
+        if !ok {
+            Err(anyhow::anyhow!("invalid map key type: {data_type}"))
+        } else {
+            Ok(())
+        }
     }
 }
 
 impl FromStr for MapType {
     type Err = anyhow::Error;
 
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        todo!("support this when support create table with map type")
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if !(s.starts_with("map(") && s.ends_with(')')) {
+            return Err(anyhow::anyhow!("expect map(...,...)"));
+        };
+        if let Some((key, value)) = s[4..s.len() - 1].split(',').collect_tuple() {
+            let key = key.parse().context("failed to parse map key type")?;
+            let value = value.parse().context("failed to parse map value type")?;
+            MapType::try_from_kv(key, value)
+        } else {
+            Err(anyhow::anyhow!("expect map(...,...)"))
+        }
     }
 }
 
 impl std::fmt::Display for MapType {
-    fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
-        todo!("support this when support create table with map type")
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "map({},{})", self.key(), self.value())
     }
 }

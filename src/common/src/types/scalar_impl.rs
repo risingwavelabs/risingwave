@@ -332,6 +332,7 @@ impl<'a> ScalarRef<'a> for MapRef<'a> {
     }
 
     fn hash_scalar<H: std::hash::Hasher>(&self, _state: &mut H) {
+        // FIXME: this is not ok.
         unreachable!("map is not hashable. Such usage should be banned in frontend.")
     }
 }
