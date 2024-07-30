@@ -7,7 +7,7 @@ ALTER SYSTEM SET license_key TO '';
 statement ok
 CREATE TABLE t (k INT);
 
-query error
+statement error
 CREATE SINK dynamodb_sink
 FROM
   t
@@ -24,18 +24,19 @@ WITH
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: Scheduler error
-  2: feature TimeTravel is only available for tier Paid and above, while the current tier is Free
+  1: Sink error
+  2: feature DynamoDbSink is only available for tier Paid and above, while the current tier is Free
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
-query error
-CREATE SINK snowflake_sink 
-FROM t 
+
+statement error
+CREATE SINK snowflake_sink
+FROM t
 WITH (
     connector = 'snowflake',
     type = 'append-only',
-    force_append_only = 'true'
+    force_append_only = 'true',
     s3.bucket_name = 'xx',
     s3.credentials.access = 'xx',
     s3.credentials.secret = 'xx',
@@ -46,30 +47,93 @@ WITH (
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: Scheduler error
-  2: feature TimeTravel is only available for tier Paid and above, while the current tier is Free
+  1: Sink error
+  2: feature SnowflakeSink is only available for tier Paid and above, while the current tier is Free
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
-query error
-CREATE SINK opensearch_sink 
-FROM t 
+
+statement error
+CREATE SINK opensearch_sink
+FROM t
 WITH (
     connector = 'opensearch',
     url = 'xx',
     username = 'xx',
     password = 'xx',
 );
+----
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: Scheduler error
-  2: feature TimeTravel is only available for tier Paid and above, while the current tier is Free
+  1: Sink error
+  2: feature OpenSearchSink is only available for tier Paid and above, while the current tier is Free
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
+
 statement ok
 ALTER SYSTEM SET license_key TO DEFAULT;
+
+statement ok
+flush;
+
+statement error
+CREATE SINK dynamodb_sink
+FROM
+  t
+WITH
+(
+  connector = 'dynamodb',
+  table = 'xx',
+  primary_key = 'xx',
+  region = 'xx',
+  access_key = 'xx',
+  secret_key = 'xx'
+);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Sink error
+  2: Sink primary key column not found: xx. Please use ',' as the delimiter for different primary key columns.
+
+
+statement ok
+CREATE SINK snowflake_sink
+FROM t
+WITH (
+    connector = 'snowflake',
+    type = 'append-only',
+    force_append_only = 'true',
+    s3.bucket_name = 'xx',
+    s3.credentials.access = 'xx',
+    s3.credentials.secret = 'xx',
+    s3.region_name = 'xx',
+    s3.path = 'xx',
+);
+
+
+statement error
+CREATE SINK opensearch_sink
+FROM t
+WITH (
+    connector = 'opensearch',
+    url = 'xx',
+    username = 'xx',
+    password = 'xx',
+);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service failed: Internal error
+  2: failed to validate sink
+  3: Java exception was thrown
+
+
+statement ok
+DROP SINK snowflake_sink;
 
 statement ok
 DROP TABLE t;
