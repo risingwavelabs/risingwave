@@ -42,6 +42,9 @@ impl DockerServiceConfig for SchemaRegistryConfig {
             panic!("More than one Kafka is not supported yet");
         }
         let kafka = &kafka[0];
+        if kafka.user_managed {
+            panic!("user-managed Kafka with docker Schema Registry is not supported yet. Please make them both or neither user-managed.");
+        }
         vec![
             ("SCHEMA_REGISTRY_HOST_NAME".to_owned(), self.address.clone()),
             (

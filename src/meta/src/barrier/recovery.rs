@@ -33,7 +33,7 @@ use tokio::time::Instant;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, warn, Instrument};
 
-use super::TracedEpoch;
+use super::{CheckpointControl, TracedEpoch};
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::InflightActorInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
@@ -122,14 +122,14 @@ impl GlobalBarrierManagerContext {
         Ok(())
     }
 
-    async fn recover_background_mv_progress(&self) -> MetaResult<()> {
+    async fn recover_background_mv_progress(&self) -> MetaResult<CreateMviewProgressTracker> {
         match &self.metadata_manager {
             MetadataManager::V1(_) => self.recover_background_mv_progress_v1().await,
             MetadataManager::V2(_) => self.recover_background_mv_progress_v2().await,
         }
     }
 
-    async fn recover_background_mv_progress_v1(&self) -> MetaResult<()> {
+    async fn recover_background_mv_progress_v1(&self) -> MetaResult<CreateMviewProgressTracker> {
         let mgr = self.metadata_manager.as_v1_ref();
         let mviews = mgr.catalog_manager.list_creating_background_mvs().await;
 
@@ -155,14 +155,14 @@ impl GlobalBarrierManagerContext {
 
         let version_stats = self.hummock_manager.get_version_stats().await;
         // If failed, enter recovery mode.
-        {
-            *self.tracker.lock() =
-                CreateMviewProgressTracker::recover_v1(version_stats, table_mview_map, mgr.clone());
-        }
-        Ok(())
+        Ok(CreateMviewProgressTracker::recover_v1(
+            version_stats,
+            table_mview_map,
+            mgr.clone(),
+        ))
     }
 
-    async fn recover_background_mv_progress_v2(&self) -> MetaResult<()> {
+    async fn recover_background_mv_progress_v2(&self) -> MetaResult<CreateMviewProgressTracker> {
         let mgr = self.metadata_manager.as_v2_ref();
         let mviews = mgr
             .catalog_controller
@@ -182,11 +182,12 @@ impl GlobalBarrierManagerContext {
 
         let version_stats = self.hummock_manager.get_version_stats().await;
         // If failed, enter recovery mode.
-        {
-            *self.tracker.lock() =
-                CreateMviewProgressTracker::recover_v2(mview_map, version_stats, mgr.clone());
-        }
-        Ok(())
+
+        Ok(CreateMviewProgressTracker::recover_v2(
+            mview_map,
+            version_stats,
+            mgr.clone(),
+        ))
     }
 
     /// Pre buffered drop and cancel command, return true if any.
@@ -265,7 +266,8 @@ impl GlobalBarrierManager {
 
                     // Mview progress needs to be recovered.
                     tracing::info!("recovering mview progress");
-                    self.context
+                    let tracker = self
+                        .context
                         .recover_background_mv_progress()
                         .await
                         .context("recover mview progress should not fail")?;
@@ -399,6 +401,7 @@ impl GlobalBarrierManager {
                         BarrierManagerState::new(new_epoch, info, command_ctx.next_paused_reason()),
                         active_streaming_nodes,
                         control_stream_manager,
+                        tracker,
                     )
                 };
                 if recovery_result.is_err() {
@@ -414,11 +417,17 @@ impl GlobalBarrierManager {
         recovery_timer.observe_duration();
         self.scheduled_barriers.mark_ready();
 
+        let create_mview_tracker: CreateMviewProgressTracker;
+
         (
             self.state,
             self.active_streaming_nodes,
             self.control_stream_manager,
+            create_mview_tracker,
         ) = new_state;
+
+        self.checkpoint_control =
+            CheckpointControl::new(self.context.clone(), create_mview_tracker).await;
 
         tracing::info!(
             epoch = self.state.in_flight_prev_epoch().value().0,

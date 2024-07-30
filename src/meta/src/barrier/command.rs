@@ -823,15 +823,19 @@ impl CommandContext {
             _ => self.current_paused_reason,
         }
     }
+}
 
+impl Command {
     /// For `CancelStreamingJob`, returns the table id of the target table.
     pub fn table_to_cancel(&self) -> Option<TableId> {
-        match &self.command {
+        match self {
             Command::CancelStreamingJob(table_fragments) => Some(table_fragments.table_id()),
             _ => None,
         }
     }
+}
 
+impl CommandContext {
     /// Clean up actors in CNs if needed, used by drop, cancel and reschedule commands.
     async fn clean_up(&self, actors: Vec<ActorId>) -> MetaResult<()> {
         self.barrier_manager_context
