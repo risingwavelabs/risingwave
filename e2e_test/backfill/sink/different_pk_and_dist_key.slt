@@ -18,7 +18,7 @@ statement ok
 create materialized view m1 as select t.v1, t.v2, t.v3 from t join t2 using(v1);
 
 statement ok
-set streaming_rate_limit = 1;
+set backfill_rate_limit = 1;
 
 statement ok
 set background_ddl = true;
