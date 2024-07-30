@@ -14,21 +14,24 @@
 
 pub mod enumerator;
 pub mod external;
+pub mod jni_source;
 pub mod source;
 pub mod split;
-use std::collections::HashMap;
+
+use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 
 pub use enumerator::*;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_pb::catalog::PbSource;
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::ExternalTableDesc;
 use simd_json::prelude::ArrayTrait;
 pub use source::*;
 
-use crate::source::{SourceProperties, SplitImpl, TryFromHashmap};
+use crate::error::ConnectorResult;
+use crate::source::{SourceProperties, SplitImpl, TryFromBTreeMap};
 use crate::{for_all_classified_sources, impl_cdc_source_type};
 
 pub const CDC_CONNECTOR_NAME_SUFFIX: &str = "-cdc";
@@ -37,12 +40,16 @@ pub const CDC_SNAPSHOT_BACKFILL: &str = "rw_cdc_backfill";
 pub const CDC_SHARING_MODE_KEY: &str = "rw.sharing.mode.enable";
 // User can set snapshot='false' to disable cdc backfill
 pub const CDC_BACKFILL_ENABLE_KEY: &str = "snapshot";
+pub const CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY: &str = "snapshot.interval";
+pub const CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY: &str = "snapshot.batch_size";
 // We enable transaction for shared cdc source by default
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
+pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
 
 pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
 pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;
 pub const CITUS_CDC_CONNECTOR: &str = Citus::CDC_CONNECTOR_NAME;
+pub const MONGODB_CDC_CONNECTOR: &str = Mongodb::CDC_CONNECTOR_NAME;
 
 pub trait CdcSourceTypeTrait: Send + Sync + Clone + 'static {
     const CDC_CONNECTOR_NAME: &'static str;
@@ -57,6 +64,7 @@ impl<'a> From<&'a str> for CdcSourceType {
             MYSQL_CDC_CONNECTOR => CdcSourceType::Mysql,
             POSTGRES_CDC_CONNECTOR => CdcSourceType::Postgres,
             CITUS_CDC_CONNECTOR => CdcSourceType::Citus,
+            MONGODB_CDC_CONNECTOR => CdcSourceType::Mongodb,
             _ => CdcSourceType::Unspecified,
         }
     }
@@ -68,6 +76,7 @@ impl CdcSourceType {
             CdcSourceType::Mysql => "MySQL",
             CdcSourceType::Postgres => "Postgres",
             CdcSourceType::Citus => "Citus",
+            CdcSourceType::Mongodb => "MongoDB",
             CdcSourceType::Unspecified => "Unspecified",
         }
     }
@@ -76,30 +85,50 @@ impl CdcSourceType {
 #[derive(Clone, Debug, Default)]
 pub struct CdcProperties<T: CdcSourceTypeTrait> {
     /// Properties specified in the WITH clause by user
-    pub properties: HashMap<String, String>,
+    pub properties: BTreeMap<String, String>,
 
     /// Schema of the source specified by users
     pub table_schema: TableSchema,
 
-    /// Whether the properties is shared by multiple tables
-    pub is_multi_table_shared: bool,
+    /// Whether it is created by a cdc source job
+    pub is_cdc_source_job: bool,
+
+    /// For validation purpose, mark if the table is a backfill cdc table
+    pub is_backfill_table: bool,
 
     pub _phantom: PhantomData<T>,
 }
 
-impl<T: CdcSourceTypeTrait> TryFromHashmap for CdcProperties<T> {
-    fn try_from_hashmap(
-        properties: HashMap<String, String>,
+pub fn table_schema_exclude_additional_columns(table_schema: &TableSchema) -> TableSchema {
+    TableSchema {
+        columns: table_schema
+            .columns
+            .iter()
+            .filter(|col| {
+                col.additional_column
+                    .as_ref()
+                    .is_some_and(|val| val.column_type.is_none())
+            })
+            .cloned()
+            .collect(),
+        pk_indices: table_schema.pk_indices.clone(),
+    }
+}
+
+impl<T: CdcSourceTypeTrait> TryFromBTreeMap for CdcProperties<T> {
+    fn try_from_btreemap(
+        properties: BTreeMap<String, String>,
         _deny_unknown_fields: bool,
-    ) -> anyhow::Result<Self> {
-        let is_multi_table_shared = properties
+    ) -> ConnectorResult<Self> {
+        let is_share_source: bool = properties
             .get(CDC_SHARING_MODE_KEY)
             .is_some_and(|v| v == "true");
         Ok(CdcProperties {
             properties,
             table_schema: Default::default(),
             // TODO(siyuan): use serde to deserialize input hashmap
-            is_multi_table_shared,
+            is_cdc_source_job: is_share_source,
+            is_backfill_table: false,
             _phantom: PhantomData,
         })
     }
@@ -107,7 +136,7 @@ impl<T: CdcSourceTypeTrait> TryFromHashmap for CdcProperties<T> {
 
 impl<T: CdcSourceTypeTrait> SourceProperties for CdcProperties<T>
 where
-    DebeziumCdcSplit<T>: TryFrom<SplitImpl, Error = anyhow::Error> + Into<SplitImpl>,
+    DebeziumCdcSplit<T>: TryFrom<SplitImpl, Error = crate::error::ConnectorError> + Into<SplitImpl>,
     DebeziumSplitEnumerator<T>: ListCdcSplits<CdcSourceType = T>,
 {
     type Split = DebeziumCdcSplit<T>;
@@ -134,29 +163,41 @@ where
                 .columns
                 .iter()
                 .flat_map(|col| &col.column_desc)
+                .filter(|col| {
+                    !matches!(
+                        col.generated_or_default_column,
+                        Some(GeneratedOrDefaultColumn::GeneratedColumn(_))
+                    )
+                })
                 .cloned()
                 .collect(),
             pk_indices,
         };
         self.table_schema = table_schema;
         if let Some(info) = source.info.as_ref() {
-            self.is_multi_table_shared = info.cdc_source_job;
+            self.is_cdc_source_job = info.is_shared();
         }
     }
 
     fn init_from_pb_cdc_table_desc(&mut self, table_desc: &ExternalTableDesc) {
-        let properties: HashMap<String, String> =
-            table_desc.connect_properties.clone().into_iter().collect();
-
         let table_schema = TableSchema {
-            columns: table_desc.columns.clone(),
+            columns: table_desc
+                .columns
+                .iter()
+                .filter(|col| {
+                    !matches!(
+                        col.generated_or_default_column,
+                        Some(GeneratedOrDefaultColumn::GeneratedColumn(_))
+                    )
+                })
+                .cloned()
+                .collect(),
             pk_indices: table_desc.stream_key.clone(),
         };
 
-        self.properties = properties;
         self.table_schema = table_schema;
-        // properties are not shared, so mark it as false
-        self.is_multi_table_shared = false;
+        self.is_cdc_source_job = false;
+        self.is_backfill_table = true;
     }
 }
 
@@ -170,17 +211,5 @@ impl<T: CdcSourceTypeTrait> crate::source::UnknownFields for CdcProperties<T> {
 impl<T: CdcSourceTypeTrait> CdcProperties<T> {
     pub fn get_source_type_pb(&self) -> SourceType {
         SourceType::from(T::source_type())
-    }
-
-    pub fn schema(&self) -> Schema {
-        Schema {
-            fields: self
-                .table_schema
-                .columns
-                .iter()
-                .map(ColumnDesc::from)
-                .map(Field::from)
-                .collect(),
-        }
     }
 }

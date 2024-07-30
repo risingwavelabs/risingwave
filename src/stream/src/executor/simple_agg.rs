@@ -12,26 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
-use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::Schema;
+use std::collections::HashMap;
+
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
-use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, AlwaysOutput, DistinctDeduplicater,
 };
-use super::*;
-use crate::common::table::state_table::StateTable;
-use crate::error::StreamResult;
 use crate::executor::aggregation::AggGroup;
-use crate::executor::error::StreamExecutorError;
-use crate::executor::{BoxedMessageStream, Message};
-use crate::task::AtomicU64Ref;
+use crate::executor::prelude::*;
 
 /// `SimpleAggExecutor` is the aggregation operator for streaming system.
 /// To create an aggregation operator, states and expressions should be passed along the
@@ -47,7 +40,7 @@ use crate::task::AtomicU64Ref;
 /// Therefore, we "automatically" implemented a window function inside
 /// `SimpleAggExecutor`.
 pub struct SimpleAggExecutor<S: StateStore> {
-    input: Box<dyn Executor>,
+    input: Executor,
     inner: ExecutorInner<S>,
 }
 
@@ -111,27 +104,15 @@ struct ExecutionVars<S: StateStore> {
     state_changed: bool,
 }
 
-impl<S: StateStore> Executor for SimpleAggExecutor<S> {
+impl<S: StateStore> Execute for SimpleAggExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.inner.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info.identity
     }
 }
 
 impl<S: StateStore> SimpleAggExecutor<S> {
     pub fn new(args: AggExecutorArgs<S, SimpleAggExecutorExtraArgs>) -> StreamResult<Self> {
-        let input_info = args.input.info();
+        let input_info = args.input.info().clone();
         Ok(Self {
             input: args.input,
             inner: ExecutorInner {
@@ -251,15 +232,12 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             table.init_epoch(barrier.epoch);
         });
 
-        let mut distinct_dedup = DistinctDeduplicater::new(
+        let distinct_dedup = DistinctDeduplicater::new(
             &this.agg_calls,
             this.watermark_epoch.clone(),
             &this.distinct_dedup_tables,
-            this.actor_ctx.clone(),
+            &this.actor_ctx,
         );
-        distinct_dedup.dedup_caches_mut().for_each(|cache| {
-            cache.update_epoch(barrier.epoch.curr);
-        });
 
         yield Message::Barrier(barrier);
 
@@ -297,9 +275,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                     {
                         yield Message::Chunk(chunk);
                     }
-                    vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
-                        cache.update_epoch(barrier.epoch.curr);
-                    });
                     yield Message::Barrier(barrier);
                 }
             }
@@ -313,13 +288,12 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::*;
-    use risingwave_expr::aggregate::AggCall;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::StateStore;
 
+    use super::*;
     use crate::executor::test_utils::agg_executor::new_boxed_simple_agg_executor;
     use crate::executor::test_utils::*;
-    use crate::executor::*;
 
     #[tokio::test]
     async fn test_simple_aggregation_in_memory() {
@@ -335,16 +309,17 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
-        tx.push_barrier(1, false);
-        tx.push_barrier(2, false);
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, vec![2]);
+        tx.push_barrier(test_epoch(1), false);
+        tx.push_barrier(test_epoch(2), false);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I   I    I
             + 100 200 1001
             +  10  14 1002
             +   4 300 1003",
         ));
-        tx.push_barrier(3, false);
+        tx.push_barrier(test_epoch(3), false);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I   I    I
             - 100 200 1001
@@ -352,7 +327,7 @@ mod tests {
             -   4 300 1003
             + 104 500 1004",
         ));
-        tx.push_barrier(4, false);
+        tx.push_barrier(test_epoch(4), false);
 
         let agg_calls = vec![
             AggCall::from_pretty("(count:int8)"),
@@ -364,7 +339,7 @@ mod tests {
         let simple_agg = new_boxed_simple_agg_executor(
             ActorContext::for_test(123),
             store,
-            Box::new(source),
+            source,
             false,
             agg_calls,
             0,

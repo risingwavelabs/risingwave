@@ -37,10 +37,23 @@ psql -h localhost -p 4566 -d dev -U root
 
 
 3. test source:
-```sh
-// connect to risingwave and manually execute the sql file create_source.sql
-psql -h localhost -p 4566 -d dev -U root
 
+Connect to risingwave and manually execute the following SQL.
+
+```sql
+CREATE TABLE
+  nats_source_table (id integer, name varchar)
+WITH
+  (
+    connector = 'nats',
+    server_url = 'nats-server:4222',
+    subject = 'subject1',
+    stream = 'my_stream',
+    connect_mode = 'plain'
+  ) FORMAT PLAIN ENCODE JSON;
+```
+
+```sh
 // publish data into nats
 nats pub subject2 --server=localhost:4222 --count=20 "{\"id\":{{Count}},\"name\":\"Alice{{Count}}\"}"
 

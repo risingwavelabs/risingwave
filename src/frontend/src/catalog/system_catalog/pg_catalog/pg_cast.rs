@@ -22,6 +22,7 @@ use crate::expr::cast_map_array;
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-cast.html`]
 #[derive(Fields)]
 struct PgCast {
+    #[primary_key]
     oid: i32,
     castsource: i32,
     casttarget: i32,
@@ -37,8 +38,8 @@ fn read_pg_cast(_: &SysCatalogReaderImpl) -> Vec<PgCast> {
         .enumerate()
         .map(|(idx, (src, target, ctx))| PgCast {
             oid: idx as i32,
-            castsource: DataType::from(*src).to_oid(),
-            casttarget: DataType::from(*target).to_oid(),
+            castsource: DataType::try_from(*src).unwrap().to_oid(),
+            casttarget: DataType::try_from(*target).unwrap().to_oid(),
             castcontext: ctx.to_string(),
         })
         .collect()

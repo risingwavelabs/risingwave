@@ -13,15 +13,13 @@
 // limitations under the License.
 
 pub mod manager;
+pub mod pb_compatible;
 pub mod report;
 
+use std::env;
 use std::time::SystemTime;
 
-use risingwave_pb::telemetry::{
-    ReportBase as PbTelemetryReportBase, SystemCpu as PbSystemCpu, SystemData as PbSystemData,
-    SystemMemory as PbSystemMemory, SystemOs as PbSystemOs,
-    TelemetryNodeType as PbTelemetryNodeType,
-};
+use risingwave_pb::telemetry::PbTelemetryClusterType;
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
 use thiserror_ext::AsReport;
@@ -29,9 +27,30 @@ use thiserror_ext::AsReport;
 use crate::util::env_var::env_var_is_true_or;
 use crate::util::resource_util::cpu::total_cpu_available;
 use crate::util::resource_util::memory::{system_memory_available_bytes, total_memory_used_bytes};
+use crate::RW_VERSION;
+
+pub const TELEMETRY_CLUSTER_TYPE: &str = "RW_TELEMETRY_TYPE";
+pub const TELEMETRY_CLUSTER_TYPE_HOSTED: &str = "hosted"; // hosted on RisingWave Cloud
+pub const TELEMETRY_CLUSTER_TYPE_KUBERNETES: &str = "kubernetes";
+pub const TELEMETRY_CLUSTER_TYPE_SINGLE_NODE: &str = "single-node";
+pub const TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE: &str = "docker-compose";
+
+pub fn telemetry_cluster_type_from_env_var() -> PbTelemetryClusterType {
+    let cluster_type = match env::var(TELEMETRY_CLUSTER_TYPE) {
+        Ok(cluster_type) => cluster_type,
+        Err(_) => return PbTelemetryClusterType::Unspecified,
+    };
+    match cluster_type.as_str() {
+        TELEMETRY_CLUSTER_TYPE_HOSTED => PbTelemetryClusterType::CloudHosted,
+        TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE => PbTelemetryClusterType::DockerCompose,
+        TELEMETRY_CLUSTER_TYPE_KUBERNETES => PbTelemetryClusterType::Kubernetes,
+        TELEMETRY_CLUSTER_TYPE_SINGLE_NODE => PbTelemetryClusterType::SingleNode,
+        _ => PbTelemetryClusterType::Unspecified,
+    }
+}
 
 /// Url of telemetry backend
-pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v1/report";
+pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v2/report";
 
 /// Telemetry reporting interval in seconds, 6 hours
 pub const TELEMETRY_REPORT_INTERVAL: u64 = 6 * 60 * 60;
@@ -56,31 +75,21 @@ pub enum TelemetryNodeType {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TelemetryReportBase {
-    /// tracking_id is persistent in etcd
+    /// `tracking_id` is persistent in etcd
     pub tracking_id: String,
-    /// session_id is reset every time node restarts
+    /// `session_id` is reset every time node restarts
     pub session_id: String,
-    /// system_data is hardware and os info
+    /// `system_data` is hardware and os info
     pub system_data: SystemData,
-    /// up_time is how long the node has been running
+    /// `up_time` is how long the node has been running
     pub up_time: u64,
-    /// time_stamp is when the report is created
+    /// `time_stamp` is when the report is created
     pub time_stamp: u64,
-    /// node_type is the node that creates the report
+    /// `node_type` is the node that creates the report
     pub node_type: TelemetryNodeType,
-}
-
-impl From<TelemetryReportBase> for PbTelemetryReportBase {
-    fn from(val: TelemetryReportBase) -> Self {
-        PbTelemetryReportBase {
-            tracking_id: val.tracking_id,
-            session_id: val.session_id,
-            system_data: Some(val.system_data.into()),
-            up_time: val.up_time,
-            report_time: val.time_stamp,
-            node_type: from_telemetry_node_type(val.node_type) as i32,
-        }
-    }
+    /// `is_test` is whether the report is from a test environment, default to be false
+    /// needed in CI for compatible tests with telemetry backend
+    pub is_test: bool,
 }
 
 pub trait TelemetryReport: Serialize {}
@@ -140,11 +149,11 @@ impl Default for SystemData {
 }
 
 /// Sends a `POST` request of the telemetry reporting to a URL.
-async fn post_telemetry_report(url: &str, report_body: String) -> Result<()> {
+pub async fn post_telemetry_report_pb(url: &str, report_body: Vec<u8>) -> Result<()> {
     let client = reqwest::Client::new();
     let res = client
         .post(url)
-        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header(reqwest::header::CONTENT_TYPE, "application/x-protobuf")
         .body(report_body)
         .send()
         .await
@@ -173,66 +182,52 @@ pub fn current_timestamp() -> u64 {
         .as_secs()
 }
 
-fn from_telemetry_node_type(t: TelemetryNodeType) -> PbTelemetryNodeType {
-    match t {
-        TelemetryNodeType::Meta => PbTelemetryNodeType::Meta,
-        TelemetryNodeType::Compute => PbTelemetryNodeType::Compute,
-        TelemetryNodeType::Frontend => PbTelemetryNodeType::Frontend,
-        TelemetryNodeType::Compactor => PbTelemetryNodeType::Compactor,
-    }
+pub fn report_scarf_enabled() -> bool {
+    telemetry_env_enabled()
+        && !matches!(
+            telemetry_cluster_type_from_env_var(),
+            PbTelemetryClusterType::CloudHosted
+        )
 }
 
-impl From<TelemetryNodeType> for PbTelemetryNodeType {
-    fn from(val: TelemetryNodeType) -> Self {
-        match val {
-            TelemetryNodeType::Meta => PbTelemetryNodeType::Meta,
-            TelemetryNodeType::Compute => PbTelemetryNodeType::Compute,
-            TelemetryNodeType::Frontend => PbTelemetryNodeType::Frontend,
-            TelemetryNodeType::Compactor => PbTelemetryNodeType::Compactor,
+// impl logic to report to Scarf service, containing RW version and deployment platform
+pub async fn report_to_scarf() {
+    let request_url = format!(
+        "https://risingwave.gateway.scarf.sh/telemetry/{}/{}",
+        RW_VERSION,
+        System::name().unwrap_or_default()
+    );
+    // keep trying every 1h until success
+    loop {
+        let res = reqwest::get(&request_url).await;
+        if let Ok(res) = res {
+            if res.status().is_success() {
+                break;
+            }
         }
-    }
-}
-
-impl From<Cpu> for PbSystemCpu {
-    fn from(val: Cpu) -> Self {
-        PbSystemCpu {
-            available: val.available,
-        }
-    }
-}
-
-impl From<Memory> for PbSystemMemory {
-    fn from(val: Memory) -> Self {
-        PbSystemMemory {
-            used: val.used as u64,
-            total: val.total as u64,
-        }
-    }
-}
-
-impl From<Os> for PbSystemOs {
-    fn from(val: Os) -> Self {
-        PbSystemOs {
-            name: val.name,
-            kernel_version: val.kernel_version,
-            version: val.version,
-        }
-    }
-}
-
-impl From<SystemData> for PbSystemData {
-    fn from(val: SystemData) -> Self {
-        PbSystemData {
-            memory: Some(val.memory.into()),
-            os: Some(val.os.into()),
-            cpu: Some(val.cpu.into()),
-        }
+        tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_enable_scarf() {
+        std::env::set_var(TELEMETRY_ENV_ENABLE, "true");
+
+        // setting env var to `Hosted` should disable scarf
+        std::env::set_var(TELEMETRY_CLUSTER_TYPE, TELEMETRY_CLUSTER_TYPE_HOSTED);
+        assert!(!report_scarf_enabled());
+
+        // setting env var to `DockerCompose` should enable scarf
+        std::env::set_var(
+            TELEMETRY_CLUSTER_TYPE,
+            TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE,
+        );
+        assert!(report_scarf_enabled());
+    }
 
     #[test]
     fn test_system_data_new() {

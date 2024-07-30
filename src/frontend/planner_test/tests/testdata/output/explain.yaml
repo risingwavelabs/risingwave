@@ -75,7 +75,8 @@
       },
       "parent_edges": {
         "0": []
-      }
+      },
+      "batch_parallelism": 0
     }
 - sql: |
     create table t1(v1 int);

@@ -20,7 +20,6 @@ use super::{BoxedRule, Rule};
 use crate::expr::{CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_visitor::{PlanCorrelatedIdFinder, PlanVisitor};
-use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
 /// This rule is for pattern: Apply->Project->Filter.

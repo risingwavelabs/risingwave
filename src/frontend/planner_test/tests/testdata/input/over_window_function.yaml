@@ -591,3 +591,53 @@
     from t;
   expected_outputs:
     - binder_error
+
+# Session frames
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        first_value(i) over (partition by bi order by i session with gap 10) as col1,
+        first_value(bi) over (partition by i order by bi session with gap 10) as col2,
+        first_value(i) over (partition by bi order by d session with gap 1.5) as col3,
+        first_value(i) over (partition by bi order by f session with gap 1.5) as col4,
+        -- first_value(i) over (partition by bi order by da session with gap '1 day') as col5, -- `date` not supported yet
+        -- first_value(i) over (partition by bi order by t session with gap '1 min') as col6, -- `time` not supported yet
+        first_value(i) over (partition by bi order by ts session with gap '1 day 1 hour') as col7,
+        first_value(i) over (partition by bi order by tstz session with gap '1 min') as col8
+    from t;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - stream_error # not supported yet
+    - batch_plan
+- sql: |
+    create table t (i int, bi bigint, ts timestamp, watermark for ts as ts - interval '1 minute') append only;
+    select
+        first_value(i) over (partition by bi order by ts session with gap '10 minutes') as window_start,
+        last_value(i) over (partition by bi order by ts session with gap '10 minutes') as window_end
+    from t;
+  expected_outputs:
+    - logical_plan
+    - eowc_stream_plan
+    - batch_plan
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by da session with gap '1 day') -- `date` not supported yet
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by t session with gap '1 min') -- `time` not supported yet
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by tstz session with gap '1 day 1 hour') -- `timestamptz` +/- 'x month x day' not supported yet
+    from t;
+  expected_outputs:
+    - binder_error

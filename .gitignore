@@ -34,6 +34,7 @@ go/bin/
 src/**/target
 src/**/target_tarpaulin
 target/
+target-bisector-*/
 src/proto/
 src/prost/src/*.rs
 src/prost/src/sim/*.rs
@@ -81,3 +82,10 @@ e2e_test/iceberg/spark-*-bin*
 
 **/*.sqlite
 **/*.sqlite-journal
+
+*.slt.temp
+
+.direnv/
+
+# mdbook
+book

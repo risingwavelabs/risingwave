@@ -20,6 +20,7 @@ use std::mem::size_of;
 
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{ListArrayData, PbArray, PbArrayType};
 use serde::{Deserialize, Serializer};
 use thiserror_ext::AsReport;
@@ -28,8 +29,7 @@ use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, BoolArray, PrimitiveArray,
     PrimitiveArrayItemType, RowRef, Utf8Array,
 };
-use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::estimate_size::EstimateSize;
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::row::Row;
 use crate::types::{
     hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, ScalarRefImpl,
@@ -237,6 +237,11 @@ impl ListArray {
             ArrayImpl::List(inner) => inner.flatten(),
             a => a.clone(),
         }
+    }
+
+    /// Return the inner array of the list array.
+    pub fn values(&self) -> &ArrayImpl {
+        &self.value
     }
 
     pub fn from_protobuf(array: &PbArray) -> ArrayResult<ArrayImpl> {
@@ -609,6 +614,24 @@ impl Ord for ListRef<'_> {
 impl Debug for ListRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
+    }
+}
+
+impl Row for ListRef<'_> {
+    fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        self.array.value_at(self.start as usize + index)
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        self.array.value_at_unchecked(self.start as usize + index)
+    }
+
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
+        (*self).iter()
     }
 }
 

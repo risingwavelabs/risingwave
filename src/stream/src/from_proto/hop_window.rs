@@ -27,16 +27,8 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         _store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
-        let ExecutorParams {
-            actor_context,
-            info,
-            input,
-            env,
-            ..
-        } = params;
-
-        let input = input.into_iter().next().unwrap();
+    ) -> StreamResult<Executor> {
+        let input = params.input.into_iter().next().unwrap();
         // TODO: reuse the schema derivation with frontend.
         let output_indices = node
             .get_output_indices()
@@ -59,11 +51,10 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
         let window_slide = node.get_window_slide()?.into();
         let window_size = node.get_window_size()?.into();
 
-        let chunk_size = env.config().developer.chunk_size;
+        let chunk_size = params.env.config().developer.chunk_size;
 
-        Ok(HopWindowExecutor::new(
-            actor_context,
-            info,
+        let exec = HopWindowExecutor::new(
+            params.actor_context,
             input,
             time_col,
             window_slide,
@@ -72,7 +63,7 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
             window_end_exprs,
             output_indices,
             chunk_size,
-        )
-        .boxed())
+        );
+        Ok((params.info, exec).into())
     }
 }

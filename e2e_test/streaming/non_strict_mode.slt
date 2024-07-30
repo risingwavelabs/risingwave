@@ -11,6 +11,9 @@ statement ok
 insert into t values (0),(1),(2),(NULL);
 
 statement ok
+flush;
+
+statement ok
 create materialized view mv_proj as select x, 10/x as v from t;
 
 statement ok
@@ -59,6 +62,9 @@ create table t(x varchar);
 
 statement ok
 insert into t values ('two'), ('4');
+
+statement ok
+flush;
 
 statement ok
 create materialized view mv_coalesce as select coalesce(x::int, 0) as v from t;

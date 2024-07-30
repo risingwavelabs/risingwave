@@ -31,20 +31,23 @@ use tokio_util::io;
 use tokio_util::io::ReaderStream;
 
 use crate::aws_utils::{default_conn_config, s3_client};
-use crate::common::AwsAuthProps;
-use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
+use crate::connector_common::AwsAuthProps;
+use crate::error::ConnectorResult;
+use crate::parser::ParserConfig;
 use crate::source::base::{SplitMetaData, SplitReader};
 use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::nd_streaming;
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::s3::S3Properties;
-use crate::source::{BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta};
+use crate::source::{
+    into_chunk_stream, BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta,
+};
 
-const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
 
 #[derive(Debug)]
 pub struct S3FileReader {
+    #[expect(dead_code)]
     split_offset: HashMap<String, u64>,
     bucket_name: String,
     s3_client: s3_client::Client,
@@ -54,17 +57,17 @@ pub struct S3FileReader {
 }
 
 impl S3FileReader {
-    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     pub async fn stream_read_object(
         client_for_s3: s3_client::Client,
         bucket_name: String,
         split: FsSplit,
         source_ctx: SourceContextRef,
     ) {
-        let actor_id = source_ctx.source_info.actor_id.to_string();
-        let fragment_id = source_ctx.source_info.fragment_id.to_string();
-        let source_id = source_ctx.source_info.source_id.to_string();
-        let source_name = source_ctx.source_info.source_name.to_string();
+        let actor_id = source_ctx.actor_id.to_string();
+        let fragment_id = source_ctx.fragment_id.to_string();
+        let source_id = source_ctx.source_id.to_string();
+        let source_name = source_ctx.source_name.to_string();
         let max_chunk_size = source_ctx.source_ctrl_opts.chunk_size;
         let split_id = split.id();
 
@@ -85,7 +88,9 @@ impl S3FileReader {
                 return Ok(());
             }
             Err(e) => {
-                return Err(anyhow!(e).context(format!("S3 GetObject from {bucket_name} error")));
+                return Err(anyhow!(e)
+                    .context(format!("S3 GetObject from {bucket_name} error"))
+                    .into());
             }
         };
 
@@ -119,7 +124,7 @@ impl S3FileReader {
                 source_ctx
                     .metrics
                     .partition_input_bytes
-                    .with_label_values(&[
+                    .with_guarded_label_values(&[
                         &actor_id,
                         &source_id,
                         &split_id,
@@ -136,7 +141,13 @@ impl S3FileReader {
             source_ctx
                 .metrics
                 .partition_input_bytes
-                .with_label_values(&[&actor_id, &source_id, &split_id, &source_name, &fragment_id])
+                .with_guarded_label_values(&[
+                    &actor_id,
+                    &source_id,
+                    &split_id,
+                    &source_name,
+                    &fragment_id,
+                ])
                 .inc_by(batch_size as u64);
             yield batch;
         }
@@ -180,7 +191,7 @@ impl SplitReader for S3FileReader {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let config = AwsAuthProps::from(&props);
 
         let sdk_config = config.build_config().await?;
@@ -201,50 +212,34 @@ impl SplitReader for S3FileReader {
     }
 
     fn into_stream(self) -> BoxChunkSourceStream {
-        self.into_chunk_stream()
+        self.into_stream_inner()
     }
 }
 
 impl S3FileReader {
-    #[try_stream(boxed, ok = StreamChunk, error = anyhow::Error)]
-    async fn into_chunk_stream(self) {
+    #[try_stream(boxed, ok = StreamChunk, error = crate::error::ConnectorError)]
+    async fn into_stream_inner(self) {
         for split in self.splits {
-            let actor_id = self.source_ctx.source_info.actor_id.to_string();
-            let fragment_id = self.source_ctx.source_info.fragment_id.to_string();
-            let source_id = self.source_ctx.source_info.source_id.to_string();
-            let source_name = self.source_ctx.source_info.source_name.to_string();
-            let source_ctx = self.source_ctx.clone();
-
-            let split_id = split.id();
-
             let data_stream = Self::stream_read_object(
                 self.s3_client.clone(),
                 self.bucket_name.clone(),
                 split,
                 self.source_ctx.clone(),
             );
-
-            let parser =
-                ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx).await?;
-            let msg_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config) {
-                parser.into_stream(nd_streaming::split_stream(data_stream))
+            let data_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config) {
+                nd_streaming::split_stream(data_stream)
             } else {
-                parser.into_stream(data_stream)
+                data_stream
             };
+
+            let msg_stream = into_chunk_stream(
+                data_stream,
+                self.parser_config.clone(),
+                self.source_ctx.clone(),
+            );
             #[for_await]
             for msg in msg_stream {
                 let msg = msg?;
-                self.source_ctx
-                    .metrics
-                    .partition_input_count
-                    .with_label_values(&[
-                        &actor_id,
-                        &source_id,
-                        &split_id,
-                        &source_name,
-                        &fragment_id,
-                    ])
-                    .inc_by(msg.cardinality() as u64);
                 yield msg;
             }
         }
@@ -261,9 +256,12 @@ mod tests {
         CommonParserConfig, CsvProperties, EncodingProperties, ProtocolProperties,
         SpecificParserConfig,
     };
+    use crate::source::filesystem::file_common::CompressionFormat;
     use crate::source::filesystem::s3::S3PropertiesCommon;
     use crate::source::filesystem::S3SplitEnumerator;
-    use crate::source::{SourceColumnDesc, SourceEnumeratorContext, SplitEnumerator};
+    use crate::source::{
+        SourceColumnDesc, SourceContext, SourceEnumeratorContext, SplitEnumerator,
+    };
 
     #[tokio::test]
     #[ignore]
@@ -275,10 +273,11 @@ mod tests {
             access: None,
             secret: None,
             endpoint_url: None,
+            compression_format: CompressionFormat::None,
         }
         .into();
         let mut enumerator =
-            S3SplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
+            S3SplitEnumerator::new(props.clone(), SourceEnumeratorContext::dummy().into())
                 .await
                 .unwrap();
         let splits = enumerator.list_splits().await.unwrap();
@@ -298,17 +297,16 @@ mod tests {
         let config = ParserConfig {
             common: CommonParserConfig { rw_columns: descs },
             specific: SpecificParserConfig {
-                key_encoding_config: None,
                 encoding_config: EncodingProperties::Csv(csv_config),
                 protocol_config: ProtocolProperties::Plain,
             },
         };
 
-        let reader = S3FileReader::new(props, splits, config, Default::default(), None)
+        let reader = S3FileReader::new(props, splits, config, SourceContext::dummy().into(), None)
             .await
             .unwrap();
 
-        let msg_stream = reader.into_chunk_stream();
+        let msg_stream = reader.into_stream_inner();
         #[for_await]
         for msg in msg_stream {
             println!("msg {:?}", msg);

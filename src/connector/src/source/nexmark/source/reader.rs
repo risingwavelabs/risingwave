@@ -22,11 +22,12 @@ use nexmark::event::EventType;
 use nexmark::EventGenerator;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common_estimate_size::EstimateSize;
 use tokio::time::Instant;
 
+use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
 use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::nexmark::source::combined_event::{
@@ -40,6 +41,7 @@ use crate::source::{
 #[derive(Debug)]
 pub struct NexmarkSplitReader {
     generator: EventGenerator,
+    #[expect(dead_code)]
     assigned_split: NexmarkSplit,
     event_num: u64,
     event_type: Option<EventType>,
@@ -64,7 +66,7 @@ impl SplitReader for NexmarkSplitReader {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         tracing::debug!("Splits for nexmark found! {:?}", splits);
         assert!(splits.len() == 1);
         // TODO: currently, assume there's only one split in one reader
@@ -106,10 +108,10 @@ impl SplitReader for NexmarkSplitReader {
     }
 
     fn into_stream(self) -> BoxChunkSourceStream {
-        let actor_id = self.source_ctx.source_info.actor_id.to_string();
-        let fragment_id = self.source_ctx.source_info.fragment_id.to_string();
-        let source_id = self.source_ctx.source_info.source_id.to_string();
-        let source_name = self.source_ctx.source_info.source_name.to_string();
+        let actor_id = self.source_ctx.actor_id.to_string();
+        let fragment_id = self.source_ctx.fragment_id.to_string();
+        let source_id = self.source_ctx.source_id.to_string();
+        let source_name = self.source_ctx.source_name.to_string();
         let split_id = self.split_id.clone();
         let metrics = self.source_ctx.metrics.clone();
 
@@ -120,7 +122,7 @@ impl SplitReader for NexmarkSplitReader {
                 .inspect_ok(move |chunk: &StreamChunk| {
                     metrics
                         .partition_input_count
-                        .with_label_values(&[
+                        .with_guarded_label_values(&[
                             &actor_id,
                             &source_id,
                             &split_id,
@@ -130,7 +132,7 @@ impl SplitReader for NexmarkSplitReader {
                         .inc_by(chunk.cardinality() as u64);
                     metrics
                         .partition_input_bytes
-                        .with_label_values(&[
+                        .with_guarded_label_values(&[
                             &actor_id,
                             &source_id,
                             &split_id,
@@ -163,7 +165,7 @@ impl NexmarkSplitReader {
         }
     }
 
-    #[try_stream(boxed, ok = StreamChunk, error = anyhow::Error)]
+    #[try_stream(boxed, ok = StreamChunk, error = crate::error::ConnectorError)]
     async fn into_native_stream(mut self) {
         let start_time = Instant::now();
         let start_offset = self.generator.global_offset();
@@ -209,11 +211,11 @@ impl NexmarkSplitReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::nexmark::{NexmarkProperties, NexmarkSplitEnumerator};
-    use crate::source::{SourceEnumeratorContext, SplitEnumerator};
+    use crate::source::nexmark::NexmarkSplitEnumerator;
+    use crate::source::{SourceContext, SourceEnumeratorContext, SplitEnumerator};
 
     #[tokio::test]
-    async fn test_nexmark_split_reader() -> anyhow::Result<()> {
+    async fn test_nexmark_split_reader() -> crate::error::ConnectorResult<()> {
         let props = NexmarkProperties {
             split_num: 2,
             min_event_gap_in_ns: 0,
@@ -223,7 +225,7 @@ mod tests {
         };
 
         let mut enumerator =
-            NexmarkSplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
+            NexmarkSplitEnumerator::new(props.clone(), SourceEnumeratorContext::dummy().into())
                 .await?;
         let list_splits_resp: Vec<_> = enumerator.list_splits().await?.into_iter().collect();
 
@@ -235,7 +237,7 @@ mod tests {
                 props.clone(),
                 state,
                 Default::default(),
-                Default::default(),
+                SourceContext::dummy().into(),
                 None,
             )
             .await?
@@ -247,7 +249,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_nexmark_event_num() -> anyhow::Result<()> {
+    async fn test_nexmark_event_num() -> crate::error::ConnectorResult<()> {
         let max_chunk_size = 32;
         let event_num = max_chunk_size * 128 + 1;
         let props = NexmarkProperties {
@@ -260,7 +262,7 @@ mod tests {
         };
 
         let mut enumerator =
-            NexmarkSplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
+            NexmarkSplitEnumerator::new(props.clone(), SourceEnumeratorContext::dummy().into())
                 .await?;
         let list_splits_resp: Vec<_> = enumerator.list_splits().await?.into_iter().collect();
 
@@ -270,7 +272,7 @@ mod tests {
                 props.clone(),
                 state,
                 Default::default(),
-                Default::default(),
+                SourceContext::dummy().into(),
                 None,
             )
             .await?

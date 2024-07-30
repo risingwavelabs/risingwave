@@ -16,7 +16,7 @@
  */
 
 import { primaryKeyColumn, Relations } from "../components/Relations"
-import { getInternalTables } from "./api/streaming"
+import { getInternalTables } from "../lib/api/streaming"
 
 export default function InternalTables() {
   return Relations("Internal Tables", getInternalTables, [primaryKeyColumn])

@@ -18,13 +18,14 @@ use std::future::Future;
 
 use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef};
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{CompactedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::DataType;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_storage::StateStore;
 
 use super::topn_cache_state::TopNCacheState;
 use super::{CacheKey, GroupKey, ManagedTopNState};
+use crate::consistency::{consistency_error, enable_strict_consistency};
 use crate::executor::error::StreamExecutorResult;
 
 const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
@@ -350,6 +351,12 @@ impl TopNCacheTrait for TopNCache<false> {
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) -> StreamExecutorResult<()> {
+        if !enable_strict_consistency() && self.table_row_count == Some(0) {
+            // If strict consistency is disabled, and we receive a `DELETE` but the row count is 0, we
+            // should not panic. Instead, we pretend that we don't know about the actually row count.
+            consistency_error!("table row count is 0, but we receive a DELETE operation");
+            self.table_row_count = None;
+        }
         if let Some(row_count) = self.table_row_count.as_mut() {
             *row_count -= 1;
         }
@@ -524,6 +531,11 @@ impl TopNCacheTrait for TopNCache<true> {
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) -> StreamExecutorResult<()> {
+        if !enable_strict_consistency() && self.table_row_count == Some(0) {
+            // If strict consistency is disabled, and we receive a `DELETE` but the row count is 0, we
+            // should not panic. Instead, we pretend that we don't know about the actually row count.
+            self.table_row_count = None;
+        }
         if let Some(row_count) = self.table_row_count.as_mut() {
             *row_count -= 1;
         }

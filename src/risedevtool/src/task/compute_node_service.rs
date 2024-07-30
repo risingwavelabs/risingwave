@@ -34,17 +34,11 @@ impl ComputeNodeService {
     fn compute_node(&self) -> Result<Command> {
         let prefix_bin = env::var("PREFIX_BIN")?;
 
-        if let Ok(x) = env::var("ENABLE_ALL_IN_ONE")
-            && x == "true"
-        {
-            Ok(Command::new(
-                Path::new(&prefix_bin)
-                    .join("risingwave")
-                    .join("compute-node"),
-            ))
-        } else {
-            Ok(Command::new(Path::new(&prefix_bin).join("compute-node")))
-        }
+        Ok(Command::new(
+            Path::new(&prefix_bin)
+                .join("risingwave")
+                .join("compute-node"),
+        ))
     }
 
     /// Apply command args according to config
@@ -61,9 +55,9 @@ impl ComputeNodeService {
             .arg("--async-stack-trace")
             .arg(&config.async_stack_trace)
             .arg("--parallelism")
-            .arg(&config.parallelism.to_string())
+            .arg(config.parallelism.to_string())
             .arg("--total-memory-bytes")
-            .arg(&config.total_memory_bytes.to_string())
+            .arg(config.total_memory_bytes.to_string())
             .arg("--role")
             .arg(&config.role);
 
@@ -86,10 +80,15 @@ impl Task for ComputeNodeService {
 
         let mut cmd = self.compute_node()?;
 
-        cmd.env("RUST_BACKTRACE", "1").env(
+        cmd.env(
             "TOKIO_CONSOLE_BIND",
             format!("127.0.0.1:{}", self.config.port + 1000),
         );
+
+        if crate::util::is_enable_backtrace() {
+            cmd.env("RUST_BACKTRACE", "1");
+        }
+
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
                 "RW_PROFILE_PATH",

@@ -257,9 +257,9 @@ impl ReplayWorker {
                     panic!("expect iter result, but got {:?}", res);
                 }
             }
-            Operation::Sync(epoch_id) => {
+            Operation::Sync(epoch_id, table_ids) => {
                 assert_eq!(storage_type, StorageType::Global);
-                let sync_result = replay.sync(epoch_id).await.unwrap();
+                let sync_result = replay.sync(epoch_id, table_ids).await.unwrap();
                 let res = res_rx.recv().await.expect("recv result failed");
                 if let OperationResult::Sync(expected) = res {
                     assert_eq!(TraceResult::Ok(sync_result), expected, "sync failed");
@@ -284,7 +284,7 @@ impl ReplayWorker {
             }
             Operation::NewLocalStorage(new_local_opts, id) => {
                 assert_ne!(storage_type, StorageType::Global);
-                local_storage_opts_map.insert(id, new_local_opts);
+                local_storage_opts_map.insert(id, new_local_opts.clone());
                 let local_storage = replay.new_local(new_local_opts).await;
                 local_storages.insert(storage_type, local_storage);
             }
@@ -530,13 +530,10 @@ mod tests {
 
     use bytes::Bytes;
     use mockall::predicate;
-    use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
     use crate::replay::{MockGlobalReplayInterface, MockLocalReplayInterface};
-    use crate::{
-        MockReplayIterStream, StorageType, TracedBytes, TracedNewLocalOptions, TracedReadOptions,
-    };
+    use crate::{MockReplayIterStream, TracedBytes, TracedReadOptions};
 
     #[tokio::test]
     async fn test_handle_record() {

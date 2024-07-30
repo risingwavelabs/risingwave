@@ -14,12 +14,13 @@
 
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     ActorId, ActorUpstreamActors, ConnectorSplits, ExprContext, FragmentId, VnodeBitmap, WorkerId,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum ActorStatus {
     #[sea_orm(string_value = "INACTIVE")]
@@ -47,7 +48,7 @@ impl From<ActorStatus> for PbActorState {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "actor")]
 pub struct Model {
     #[sea_orm(primary_key)]
@@ -55,7 +56,6 @@ pub struct Model {
     pub fragment_id: FragmentId,
     pub status: ActorStatus,
     pub splits: Option<ConnectorSplits>,
-    pub parallel_unit_id: i32,
     pub worker_id: WorkerId,
     pub upstream_actor_ids: ActorUpstreamActors,
     pub vnode_bitmap: Option<VnodeBitmap>,

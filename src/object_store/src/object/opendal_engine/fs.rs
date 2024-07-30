@@ -12,26 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use opendal::layers::RetryLayer;
+use std::sync::Arc;
+
+use opendal::layers::LoggingLayer;
 use opendal::services::Fs;
 use opendal::Operator;
+use risingwave_common::config::ObjectStoreConfig;
 
 use super::{EngineType, OpendalObjectStore};
+use crate::object::object_metrics::ObjectStoreMetrics;
+use crate::object::opendal_engine::ATOMIC_WRITE_DIR;
 use crate::object::ObjectResult;
+
 impl OpendalObjectStore {
     /// create opendal fs engine.
-    pub fn new_fs_engine(root: String) -> ObjectResult<Self> {
+    pub fn new_fs_engine(
+        root: String,
+        config: Arc<ObjectStoreConfig>,
+        metrics: Arc<ObjectStoreMetrics>,
+    ) -> ObjectResult<Self> {
         // Create fs backend builder.
         let mut builder = Fs::default();
-
         builder.root(&root);
+        if config.set_atomic_write_dir {
+            let atomic_write_dir = format!("{}/{}", root, ATOMIC_WRITE_DIR);
+            builder.atomic_write_dir(&atomic_write_dir);
+        }
 
         let op: Operator = Operator::new(builder)?
-            .layer(RetryLayer::default())
+            .layer(LoggingLayer::default())
             .finish();
         Ok(Self {
             op,
             engine_type: EngineType::Fs,
+            config,
+            metrics,
         })
     }
 }

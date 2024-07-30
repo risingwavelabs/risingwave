@@ -20,6 +20,7 @@ public enum SourceTypeE {
     MYSQL,
     POSTGRES,
     CITUS,
+    MONGODB,
     INVALID;
 
     public static SourceTypeE valueOf(ConnectorServiceProto.SourceType type) {
@@ -30,6 +31,8 @@ public enum SourceTypeE {
                 return SourceTypeE.POSTGRES;
             case CITUS:
                 return SourceTypeE.CITUS;
+            case MONGODB:
+                return SourceTypeE.MONGODB;
             default:
                 return SourceTypeE.INVALID;
         }

@@ -14,14 +14,10 @@
 
 use std::cmp;
 use std::ops::Deref;
-use std::sync::Arc;
 
 use futures::future::{try_join, try_join_all};
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
+use risingwave_common::types::DefaultOrd;
 use risingwave_common::{bail, row};
 use risingwave_expr::expr::{
     build_func_non_strict, ExpressionBoxExt, InputRefExpression, LiteralExpression,
@@ -32,15 +28,9 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableDistribution;
-use risingwave_storage::StateStore;
 
-use super::error::StreamExecutorError;
 use super::filter::FilterExecutor;
-use super::{
-    ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message, StreamExecutorResult,
-};
-use crate::common::table::state_table::StateTable;
-use crate::executor::{expect_first_barrier, Watermark};
+use crate::executor::prelude::*;
 use crate::task::ActorEvalErrorReport;
 
 /// The executor will generate a `Watermark` after each chunk.
@@ -48,60 +38,46 @@ use crate::task::ActorEvalErrorReport;
 /// filtered.
 pub struct WatermarkFilterExecutor<S: StateStore> {
     ctx: ActorContextRef,
-    info: ExecutorInfo,
 
-    input: BoxedExecutor,
+    input: Executor,
     /// The expression used to calculate the watermark value.
     watermark_expr: NonStrictExpression,
     /// The column we should generate watermark and filter on.
     event_time_col_idx: usize,
     table: StateTable<S>,
     global_watermark_table: StorageTable<S>,
+
+    eval_error_report: ActorEvalErrorReport,
 }
 
 impl<S: StateStore> WatermarkFilterExecutor<S> {
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
-        input: BoxedExecutor,
+        input: Executor,
         watermark_expr: NonStrictExpression,
         event_time_col_idx: usize,
         table: StateTable<S>,
         global_watermark_table: StorageTable<S>,
+        eval_error_report: ActorEvalErrorReport,
     ) -> Self {
         Self {
             ctx,
-            info,
             input,
             watermark_expr,
             event_time_col_idx,
             table,
             global_watermark_table,
+            eval_error_report,
         }
     }
 }
 
-impl<S: StateStore> Executor for WatermarkFilterExecutor<S> {
+impl<S: StateStore> Execute for WatermarkFilterExecutor<S> {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.execute_inner().boxed()
     }
-
-    fn schema(&self) -> &risingwave_common::catalog::Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
-    fn info(&self) -> ExecutorInfo {
-        self.info.clone()
-    }
 }
+const UPDATE_GLOBAL_WATERMARK_FREQUENCY_WHEN_IDLE: usize = 5;
 
 impl<S: StateStore> WatermarkFilterExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -111,15 +87,10 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             event_time_col_idx,
             watermark_expr,
             ctx,
-            info,
             mut table,
             mut global_watermark_table,
+            eval_error_report,
         } = *self;
-
-        let eval_error_report = ActorEvalErrorReport {
-            actor_context: ctx.clone(),
-            identity: info.identity.into(),
-        };
 
         let watermark_type = watermark_expr.return_type();
         assert_eq!(
@@ -129,13 +100,18 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         let mut input = input.execute();
 
         let first_barrier = expect_first_barrier(&mut input).await?;
+        let prev_epoch = first_barrier.epoch.prev;
         table.init_epoch(first_barrier.epoch);
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
 
         // Initiate and yield the first watermark.
-        let mut current_watermark =
-            Self::get_global_max_watermark(&table, &global_watermark_table).await?;
+        let mut current_watermark = Self::get_global_max_watermark(
+            &table,
+            &global_watermark_table,
+            HummockReadEpoch::Committed(prev_epoch),
+        )
+        .await?;
 
         let mut last_checkpoint_watermark = None;
 
@@ -149,7 +125,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
 
         // If the input is idle
         let mut idle_input = true;
-
+        let mut barrier_num_during_idle = 0;
         #[for_await]
         for msg in input {
             let msg = msg?;
@@ -238,6 +214,9 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     }
                 }
                 Message::Barrier(barrier) => {
+                    let prev_epoch = barrier.epoch.prev;
+                    let is_checkpoint = barrier.kind.is_checkpoint();
+                    let mut need_update_global_max_watermark = false;
                     // Update the vnode bitmap for state tables of all agg calls if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(ctx.id) {
                         let other_vnodes_bitmap = Arc::new(
@@ -250,16 +229,12 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
 
                         // Take the global max watermark when scaling happens.
                         if previous_vnode_bitmap != vnode_bitmap {
-                            current_watermark =
-                                Self::get_global_max_watermark(&table, &global_watermark_table)
-                                    .await?;
+                            need_update_global_max_watermark = true;
                         }
                     }
 
-                    if barrier.kind.is_checkpoint()
-                        && last_checkpoint_watermark != current_watermark
-                    {
-                        last_checkpoint_watermark = current_watermark.clone();
+                    if is_checkpoint && last_checkpoint_watermark != current_watermark {
+                        last_checkpoint_watermark.clone_from(&current_watermark);
                         // Persist the watermark when checkpoint arrives.
                         if let Some(watermark) = current_watermark.clone() {
                             for vnode in table.vnodes().clone().iter_vnodes() {
@@ -272,39 +247,59 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     }
 
                     table.commit(barrier.epoch).await?;
+                    yield Message::Barrier(barrier);
 
-                    if barrier.kind.is_checkpoint() {
+                    if need_update_global_max_watermark {
+                        current_watermark = Self::get_global_max_watermark(
+                            &table,
+                            &global_watermark_table,
+                            HummockReadEpoch::Committed(prev_epoch),
+                        )
+                        .await?;
+                    }
+
+                    if is_checkpoint {
                         if idle_input {
-                            // Align watermark
-                            let global_max_watermark =
-                                Self::get_global_max_watermark(&table, &global_watermark_table)
-                                    .await?;
+                            barrier_num_during_idle += 1;
 
-                            current_watermark = if let Some(global_max_watermark) =
-                                global_max_watermark.clone()
-                                && let Some(watermark) = current_watermark.clone()
+                            if barrier_num_during_idle
+                                == UPDATE_GLOBAL_WATERMARK_FREQUENCY_WHEN_IDLE
                             {
-                                Some(cmp::max_by(
-                                    watermark,
-                                    global_max_watermark,
-                                    DefaultOrd::default_cmp,
-                                ))
-                            } else {
-                                current_watermark.or(global_max_watermark)
-                            };
-                            if let Some(watermark) = current_watermark.clone() {
-                                yield Message::Watermark(Watermark::new(
-                                    event_time_col_idx,
-                                    watermark_type.clone(),
-                                    watermark,
-                                ));
+                                barrier_num_during_idle = 0;
+                                // Align watermark
+                                // NOTE(st1page): Should be `NoWait` because it could lead to a degradation of concurrent checkpoint situations, as it would require waiting for the previous epoch
+                                let global_max_watermark = Self::get_global_max_watermark(
+                                    &table,
+                                    &global_watermark_table,
+                                    HummockReadEpoch::NoWait(prev_epoch),
+                                )
+                                .await?;
+
+                                current_watermark = if let Some(global_max_watermark) =
+                                    global_max_watermark.clone()
+                                    && let Some(watermark) = current_watermark.clone()
+                                {
+                                    Some(cmp::max_by(
+                                        watermark,
+                                        global_max_watermark,
+                                        DefaultOrd::default_cmp,
+                                    ))
+                                } else {
+                                    current_watermark.or(global_max_watermark)
+                                };
+                                if let Some(watermark) = current_watermark.clone() {
+                                    yield Message::Watermark(Watermark::new(
+                                        event_time_col_idx,
+                                        watermark_type.clone(),
+                                        watermark,
+                                    ));
+                                }
                             }
                         } else {
                             idle_input = true;
+                            barrier_num_during_idle = 0;
                         }
                     }
-
-                    yield Message::Barrier(barrier);
                 }
             }
         }
@@ -331,8 +326,8 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
     async fn get_global_max_watermark(
         table: &StateTable<S>,
         global_watermark_table: &StorageTable<S>,
+        wait_epoch: HummockReadEpoch,
     ) -> StreamExecutorResult<Option<ScalarImpl>> {
-        let epoch = table.epoch();
         let handle_watermark_row = |watermark_row: Option<OwnedRow>| match watermark_row {
             Some(row) => {
                 if row.len() == 1 {
@@ -349,9 +344,8 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                 .iter_vnodes()
                 .map(|vnode| async move {
                     let pk = row::once(vnode.to_datum());
-                    let watermark_row: Option<OwnedRow> = global_watermark_table
-                        .get_row(pk, HummockReadEpoch::NoWait(epoch))
-                        .await?;
+                    let watermark_row: Option<OwnedRow> =
+                        global_watermark_table.get_row(pk, wait_epoch).await?;
                     handle_watermark_row(watermark_row)
                 });
         let local_watermark_iter_futures = table.vnodes().iter_vnodes().map(|vnode| async move {
@@ -379,21 +373,19 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableDesc};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableDesc};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::Date;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::Table;
     use risingwave_pb::common::ColumnOrder;
     use risingwave_pb::plan_common::PbColumnCatalog;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::TableDistribution;
 
     use super::*;
     use crate::executor::test_utils::expr::build_from_pretty;
     use crate::executor::test_utils::{MessageSender, MockSource};
-    use crate::executor::ActorContext;
 
     const WATERMARK_TYPE: DataType = DataType::Timestamp;
 
@@ -456,7 +448,7 @@ mod tests {
 
     async fn create_watermark_filter_executor(
         mem_state: MemoryStateStore,
-    ) -> (BoxedExecutor, MessageSender) {
+    ) -> (Box<dyn Execute>, MessageSender) {
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int16),        // pk
@@ -476,23 +468,29 @@ mod tests {
         )
         .await;
 
-        let (tx, source) = MockSource::channel(schema, vec![0]);
+        let (tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, vec![0]);
 
+        let ctx = ActorContext::for_test(123);
         let info = ExecutorInfo {
             schema: source.schema().clone(),
             pk_indices: source.pk_indices().to_vec(),
             identity: "WatermarkFilterExecutor".to_string(),
         };
+        let eval_error_report = ActorEvalErrorReport {
+            actor_context: ctx.clone(),
+            identity: info.identity.clone().into(),
+        };
 
         (
             WatermarkFilterExecutor::new(
-                ActorContext::for_test(123),
-                info,
-                source.boxed(),
+                ctx,
+                source,
                 watermark_expr,
                 1,
                 table,
                 storage_table,
+                eval_error_report,
             )
             .boxed(),
             tx,
@@ -526,7 +524,7 @@ mod tests {
         let mut executor = executor.execute();
 
         // push the init barrier
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
         executor.next().await.unwrap().unwrap();
 
         macro_rules! watermark {
@@ -556,7 +554,7 @@ mod tests {
         );
 
         // push the 2nd barrier
-        tx.push_barrier(2, false);
+        tx.push_barrier(test_epoch(2), false);
         executor.next().await.unwrap().unwrap();
 
         // push the 2nd chunk
@@ -579,7 +577,7 @@ mod tests {
         );
 
         // push the 3nd barrier
-        tx.push_barrier(3, false);
+        tx.push_barrier(test_epoch(3), false);
         executor.next().await.unwrap().unwrap();
 
         // Drop executor
@@ -590,7 +588,7 @@ mod tests {
         let mut executor = executor.execute();
 
         // push the 1st barrier after failover
-        tx.push_barrier(4, false);
+        tx.push_barrier(test_epoch(4), false);
         executor.next().await.unwrap().unwrap();
 
         // Init watermark after failover

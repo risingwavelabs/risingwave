@@ -19,6 +19,12 @@ import { theme } from "@chakra-ui/react"
 import * as d3 from "d3"
 import { useCallback, useEffect, useRef } from "react"
 import {
+  Relation,
+  relationIsStreamingJob,
+  relationType,
+  relationTypeTitleCase,
+} from "../lib/api/streaming"
+import {
   Enter,
   Position,
   RelationPoint,
@@ -26,12 +32,6 @@ import {
   flipLayoutRelation,
   generateRelationEdges,
 } from "../lib/layout"
-import {
-  Relation,
-  relationIsStreamingJob,
-  relationType,
-  relationTypeTitleCase,
-} from "../pages/api/streaming"
 import { CatalogModal, useCatalogModal } from "./CatalogModal"
 
 function boundBox(

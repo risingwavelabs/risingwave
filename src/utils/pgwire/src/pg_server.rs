@@ -12,20 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::future::Future;
-use std::io;
-use std::result::Result;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
+use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use parking_lot::Mutex;
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::Statement;
+use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
+use risingwave_sqlparser::ast::{RedactSqlOptionKeywordsRef, Statement};
+use serde::Deserialize;
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::error::PsqlResult;
+use crate::error::{PsqlError, PsqlResult};
 use crate::net::{AddressRef, Listener};
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_message::TransactionStatus;
@@ -55,6 +59,11 @@ pub trait SessionManager: Send + Sync + 'static {
     fn cancel_creating_jobs_in_session(&self, session_id: SessionId);
 
     fn end_session(&self, session: &Self::Session);
+
+    /// Run some cleanup tasks before the server shutdown.
+    fn shutdown(&self) -> impl Future<Output = ()> + Send {
+        async {}
+    }
 }
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
@@ -109,7 +118,7 @@ pub trait Session: Send + Sync {
 
     fn id(&self) -> SessionId;
 
-    fn set_config(&self, key: &str, value: String) -> Result<(), BoxedError>;
+    fn set_config(&self, key: &str, value: String) -> Result<String, BoxedError>;
 
     fn transaction_status(&self) -> TransactionStatus;
 
@@ -155,47 +164,156 @@ pub enum UserAuthenticator {
         encrypted_password: Vec<u8>,
         salt: [u8; 4],
     },
+    OAuth(HashMap<String, String>),
+}
+
+/// A JWK Set is a JSON object that represents a set of JWKs.
+/// The JSON object MUST have a "keys" member, with its value being an array of JWKs.
+/// See <https://www.rfc-editor.org/rfc/rfc7517.html#section-5> for more details.
+#[derive(Debug, Deserialize)]
+struct Jwks {
+    keys: Vec<Jwk>,
+}
+
+/// A JSON Web Key (JWK) is a JSON object that represents a cryptographic key.
+/// See <https://www.rfc-editor.org/rfc/rfc7517.html#section-4> for more details.
+#[derive(Debug, Deserialize)]
+struct Jwk {
+    kid: String, // Key ID
+    alg: String, // Algorithm
+    n: String,   // Modulus
+    e: String,   // Exponent
+}
+
+async fn validate_jwt(
+    jwt: &str,
+    jwks_url: &str,
+    issuer: &str,
+    metadata: &HashMap<String, String>,
+) -> Result<bool, BoxedError> {
+    let header = decode_header(jwt)?;
+    let jwks: Jwks = reqwest::get(jwks_url).await?.json().await?;
+
+    // 1. Retrieve the kid from the header to find the right JWK in the JWK Set.
+    let kid = header.kid.ok_or("kid not found in jwt header")?;
+    let jwk = jwks
+        .keys
+        .into_iter()
+        .find(|k| k.kid == kid)
+        .ok_or("kid not found in jwks")?;
+
+    // 2. Check if the algorithms are matched.
+    if Algorithm::from_str(&jwk.alg)? != header.alg {
+        return Err("alg in jwt header does not match with alg in jwk".into());
+    }
+
+    // 3. Decode the JWT and validate the claims.
+    let decoding_key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e)?;
+    let mut validation = Validation::new(header.alg);
+    validation.set_issuer(&[issuer]);
+    validation.set_required_spec_claims(&["exp", "iss"]);
+    let token_data = decode::<HashMap<String, serde_json::Value>>(jwt, &decoding_key, &validation)?;
+
+    // 4. Check if the metadata in the token matches.
+    if !metadata.iter().all(
+        |(k, v)| matches!(token_data.claims.get(k), Some(serde_json::Value::String(s)) if s == v),
+    ) {
+        return Err("metadata in jwt does not match with metadata declared with user".into());
+    }
+    Ok(true)
 }
 
 impl UserAuthenticator {
-    pub fn authenticate(&self, password: &[u8]) -> bool {
-        match self {
+    pub async fn authenticate(&self, password: &[u8]) -> PsqlResult<()> {
+        let success = match self {
             UserAuthenticator::None => true,
             UserAuthenticator::ClearText(text) => password == text,
             UserAuthenticator::Md5WithSalt {
                 encrypted_password, ..
             } => encrypted_password == password,
+            UserAuthenticator::OAuth(metadata) => {
+                let mut metadata = metadata.clone();
+                let jwks_url = metadata.remove("jwks_url").unwrap();
+                let issuer = metadata.remove("issuer").unwrap();
+                validate_jwt(
+                    &String::from_utf8_lossy(password),
+                    &jwks_url,
+                    &issuer,
+                    &metadata,
+                )
+                .await
+                .map_err(PsqlError::StartupError)?
+            }
+        };
+        if !success {
+            return Err(PsqlError::PasswordError);
         }
+        Ok(())
     }
 }
 
 /// Binds a Tcp or Unix listener at `addr`. Spawn a coroutine to serve every new connection.
+///
+/// Returns when the `shutdown` token is triggered.
 pub async fn pg_serve(
     addr: &str,
-    session_mgr: Arc<impl SessionManager>,
+    session_mgr: impl SessionManager,
     tls_config: Option<TlsConfig>,
-) -> io::Result<()> {
+    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+    shutdown: CancellationToken,
+) -> Result<(), BoxedError> {
     let listener = Listener::bind(addr).await?;
     tracing::info!(addr, "server started");
 
-    loop {
-        let conn_ret = listener.accept().await;
-        match conn_ret {
-            Ok((stream, peer_addr)) => {
-                tracing::info!(%peer_addr, "accept connection");
-                tokio::spawn(handle_connection(
-                    stream,
-                    session_mgr.clone(),
-                    tls_config.clone(),
-                    Arc::new(peer_addr),
-                ));
-            }
+    let acceptor_runtime = BackgroundShutdownRuntime::from({
+        let mut builder = tokio::runtime::Builder::new_multi_thread();
+        builder.worker_threads(1);
+        builder
+            .thread_name("rw-acceptor")
+            .enable_all()
+            .build()
+            .unwrap()
+    });
 
-            Err(e) => {
-                tracing::error!(error = %e.as_report(), "failed to accept connection",);
+    #[cfg(not(madsim))]
+    let worker_runtime = tokio::runtime::Handle::current();
+    #[cfg(madsim)]
+    let worker_runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
+
+    let session_mgr = Arc::new(session_mgr);
+    let session_mgr_clone = session_mgr.clone();
+    let f = async move {
+        loop {
+            let conn_ret = listener.accept().await;
+            match conn_ret {
+                Ok((stream, peer_addr)) => {
+                    tracing::info!(%peer_addr, "accept connection");
+                    worker_runtime.spawn(handle_connection(
+                        stream,
+                        session_mgr_clone.clone(),
+                        tls_config.clone(),
+                        Arc::new(peer_addr),
+                        redact_sql_option_keywords.clone(),
+                    ));
+                }
+
+                Err(e) => {
+                    tracing::error!(error = %e.as_report(), "failed to accept connection",);
+                }
             }
         }
-    }
+    };
+    acceptor_runtime.spawn(f);
+
+    // Wait for the shutdown signal.
+    shutdown.cancelled().await;
+
+    // Stop accepting new connections.
+    drop(acceptor_runtime);
+    // Shutdown session manager, typically close all existing sessions.
+    session_mgr.shutdown().await;
+
+    Ok(())
 }
 
 pub async fn handle_connection<S, SM>(
@@ -203,11 +321,18 @@ pub async fn handle_connection<S, SM>(
     session_mgr: Arc<SM>,
     tls_config: Option<TlsConfig>,
     peer_addr: AddressRef,
+    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
 ) where
     S: AsyncWrite + AsyncRead + Unpin,
     SM: SessionManager,
 {
-    let mut pg_proto = PgProtocol::new(stream, session_mgr, tls_config, peer_addr);
+    let mut pg_proto = PgProtocol::new(
+        stream,
+        session_mgr,
+        tls_config,
+        peer_addr,
+        redact_sql_option_keywords,
+    );
     loop {
         let msg = match pg_proto.read_message().await {
             Ok(msg) => msg,
@@ -234,6 +359,7 @@ mod tests {
     use futures::stream::BoxStream;
     use futures::StreamExt;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::tokio_util::sync::CancellationToken;
     use risingwave_sqlparser::ast::Statement;
     use tokio_postgres::NoTls;
 
@@ -359,8 +485,8 @@ mod tests {
             (0, 0)
         }
 
-        fn set_config(&self, _key: &str, _value: String) -> Result<(), BoxedError> {
-            Ok(())
+        fn set_config(&self, _key: &str, _value: String) -> Result<String, BoxedError> {
+            Ok("".to_string())
         }
 
         fn take_notices(self: Arc<Self>) -> Vec<String> {
@@ -389,8 +515,17 @@ mod tests {
         let bind_addr = bind_addr.into();
         let pg_config = pg_config.into();
 
-        let session_mgr = Arc::new(MockSessionManager {});
-        tokio::spawn(async move { pg_serve(&bind_addr, session_mgr, None).await });
+        let session_mgr = MockSessionManager {};
+        tokio::spawn(async move {
+            pg_serve(
+                &bind_addr,
+                session_mgr,
+                None,
+                None,
+                CancellationToken::new(), // dummy
+            )
+            .await
+        });
         // wait for server to start
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 

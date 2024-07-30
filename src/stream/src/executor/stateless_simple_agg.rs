@@ -12,44 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::array::Op;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{
     build_retractable, AggCall, AggregateState, BoxedAggregateFunction,
 };
 
 use super::aggregation::agg_call_filter_res;
-use super::error::StreamExecutorError;
-use super::*;
-use crate::error::StreamResult;
+use crate::executor::prelude::*;
 
 pub struct StatelessSimpleAggExecutor {
     _ctx: ActorContextRef,
-    pub(super) info: ExecutorInfo,
-    pub(super) input: Box<dyn Executor>,
+    pub(super) input: Executor,
+    pub(super) schema: Schema,
     pub(super) aggs: Vec<BoxedAggregateFunction>,
     pub(super) agg_calls: Vec<AggCall>,
 }
 
-impl Executor for StatelessSimpleAggExecutor {
+impl Execute for StatelessSimpleAggExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
@@ -73,13 +56,13 @@ impl StatelessSimpleAggExecutor {
         let StatelessSimpleAggExecutor {
             _ctx,
             input,
-            info,
+            schema,
             aggs,
             agg_calls,
         } = self;
         let input = input.execute();
         let mut is_dirty = false;
-        let mut states = aggs.iter().map(|agg| agg.create_state()).collect_vec();
+        let mut states: Vec<_> = aggs.iter().map(|agg| agg.create_state()).try_collect()?;
 
         #[for_await]
         for msg in input {
@@ -94,14 +77,14 @@ impl StatelessSimpleAggExecutor {
                     if is_dirty {
                         is_dirty = false;
 
-                        let mut builders = info.schema.create_array_builders(1);
+                        let mut builders = schema.create_array_builders(1);
                         for ((agg, state), builder) in aggs
                             .iter()
                             .zip_eq_fast(states.iter_mut())
                             .zip_eq_fast(builders.iter_mut())
                         {
                             let data = agg.get_result(state).await?;
-                            *state = agg.create_state();
+                            *state = agg.create_state()?;
                             trace!("append: {:?}", data);
                             builder.append(data);
                         }
@@ -124,15 +107,15 @@ impl StatelessSimpleAggExecutor {
 impl StatelessSimpleAggExecutor {
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
-        input: Box<dyn Executor>,
+        input: Executor,
+        schema: Schema,
         agg_calls: Vec<AggCall>,
     ) -> StreamResult<Self> {
         let aggs = agg_calls.iter().map(build_retractable).try_collect()?;
         Ok(StatelessSimpleAggExecutor {
             _ctx: ctx,
-            info,
             input,
+            schema,
             aggs,
             agg_calls,
         })
@@ -142,42 +125,30 @@ impl StatelessSimpleAggExecutor {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::schema_test_utils;
+    use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::executor::test_utils::agg_executor::generate_agg_schema;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{Executor, StatelessSimpleAggExecutor};
 
     #[tokio::test]
     async fn test_no_chunk() {
         let schema = schema_test_utils::ii();
-        let (mut tx, source) = MockSource::channel(schema, vec![2]);
-        tx.push_barrier(1, false);
-        tx.push_barrier(2, false);
-        tx.push_barrier(3, false);
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, vec![2]);
+        tx.push_barrier(test_epoch(1), false);
+        tx.push_barrier(test_epoch(2), false);
+        tx.push_barrier(test_epoch(3), false);
 
         let agg_calls = vec![AggCall::from_pretty("(count:int8)")];
         let schema = generate_agg_schema(&source, &agg_calls, None);
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![],
-            identity: "StatelessSimpleAggExecutor".to_string(),
-        };
 
-        let simple_agg = Box::new(
-            StatelessSimpleAggExecutor::new(
-                ActorContext::for_test(123),
-                info,
-                Box::new(source),
-                agg_calls,
-            )
-            .unwrap(),
-        );
-        let mut simple_agg = simple_agg.execute();
+        let simple_agg =
+            StatelessSimpleAggExecutor::new(ActorContext::for_test(123), source, schema, agg_calls)
+                .unwrap();
+        let mut simple_agg = simple_agg.boxed().execute();
 
         assert_matches!(
             simple_agg.next().await.unwrap().unwrap(),
@@ -196,15 +167,16 @@ mod tests {
     #[tokio::test]
     async fn test_local_simple_agg() {
         let schema = schema_test_utils::iii();
-        let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk\
-        tx.push_barrier(1, false);
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, vec![2]);
+        tx.push_barrier(test_epoch(1), false);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I   I    I
             + 100 200 1001
             +  10  14 1002
             +   4 300 1003",
         ));
-        tx.push_barrier(2, false);
+        tx.push_barrier(test_epoch(2), false);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I   I    I
             - 100 200 1001
@@ -212,7 +184,7 @@ mod tests {
             -   4 300 1003
             + 104 500 1004",
         ));
-        tx.push_barrier(3, false);
+        tx.push_barrier(test_epoch(3), false);
 
         let agg_calls = vec![
             AggCall::from_pretty("(count:int8)"),
@@ -220,22 +192,11 @@ mod tests {
             AggCall::from_pretty("(sum:int8 $1:int8)"),
         ];
         let schema = generate_agg_schema(&source, &agg_calls, None);
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![],
-            identity: "StatelessSimpleAggExecutor".to_string(),
-        };
 
-        let simple_agg = Box::new(
-            StatelessSimpleAggExecutor::new(
-                ActorContext::for_test(123),
-                info,
-                Box::new(source),
-                agg_calls,
-            )
-            .unwrap(),
-        );
-        let mut simple_agg = simple_agg.execute();
+        let simple_agg =
+            StatelessSimpleAggExecutor::new(ActorContext::for_test(123), source, schema, agg_calls)
+                .unwrap();
+        let mut simple_agg = simple_agg.boxed().execute();
 
         // Consume the init barrier
         simple_agg.next().await.unwrap().unwrap();

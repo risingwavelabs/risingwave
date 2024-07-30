@@ -19,7 +19,7 @@ use parking_lot::{MappedMutexGuard, Mutex, MutexGuard, RwLock};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::ActorInfo;
-use risingwave_rpc_client::ComputeClientPool;
+use risingwave_rpc_client::ComputeClientPoolRef;
 
 use crate::error::StreamResult;
 use crate::executor::exchange::permit::{self, Receiver, Sender};
@@ -28,6 +28,7 @@ mod barrier_manager;
 mod env;
 mod stream_manager;
 
+pub(crate) use barrier_manager::SubscribeMutationItem;
 pub use barrier_manager::*;
 pub use env::*;
 pub use stream_manager::*;
@@ -40,6 +41,11 @@ pub type UpDownActorIds = (ActorId, ActorId);
 pub type UpDownFragmentIds = (FragmentId, FragmentId);
 
 /// Stores the information which may be modified from the data plane.
+///
+/// The data structure is created in `LocalBarrierWorker` and is shared by actors created
+/// between two recoveries. In every recovery, the `LocalBarrierWorker` will create a new instance of
+/// `SharedContext`, and the original one becomes stale. The new one is shared by actors created after
+/// recovery.
 pub struct SharedContext {
     /// Stores the senders and receivers for later `Processor`'s usage.
     ///
@@ -52,9 +58,9 @@ pub struct SharedContext {
     /// There are three cases when we need local channels to pass around messages:
     /// 1. pass `Message` between two local actors
     /// 2. The RPC client at the downstream actor forwards received `Message` to one channel in
-    /// `ReceiverExecutor` or `MergerExecutor`.
+    ///    `ReceiverExecutor` or `MergerExecutor`.
     /// 3. The RPC `Output` at the upstream actor forwards received `Message` to
-    /// `ExchangeServiceImpl`.
+    ///    `ExchangeServiceImpl`.
     ///
     /// The channel serves as a buffer because `ExchangeServiceImpl`
     /// is on the server-side and we will also introduce backpressure.
@@ -70,12 +76,14 @@ pub struct SharedContext {
     /// between two actors/actors.
     pub(crate) addr: HostAddr,
 
-    /// The pool of compute clients.
+    /// Compute client pool for streaming gRPC exchange.
     // TODO: currently the client pool won't be cleared. Should remove compute clients when
     // disconnected.
-    pub(crate) compute_client_pool: ComputeClientPool,
+    pub(crate) compute_client_pool: ComputeClientPoolRef,
 
     pub(crate) config: StreamingConfig,
+
+    pub(super) local_barrier_manager: LocalBarrierManager,
 }
 
 impl std::fmt::Debug for SharedContext {
@@ -87,25 +95,28 @@ impl std::fmt::Debug for SharedContext {
 }
 
 impl SharedContext {
-    pub fn new(addr: HostAddr, config: &StreamingConfig) -> Self {
+    pub fn new(env: &StreamEnvironment, local_barrier_manager: LocalBarrierManager) -> Self {
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
-            addr,
-            compute_client_pool: ComputeClientPool::default(),
-            config: config.clone(),
+            addr: env.server_address().clone(),
+            config: env.config().as_ref().to_owned(),
+            compute_client_pool: env.client_pool(),
+            local_barrier_manager,
         }
     }
 
     #[cfg(test)]
     pub fn for_test() -> Self {
+        use std::sync::Arc;
+
         use risingwave_common::config::StreamingDeveloperConfig;
+        use risingwave_rpc_client::ComputeClientPool;
 
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr: LOCAL_TEST_ADDR.clone(),
-            compute_client_pool: ComputeClientPool::default(),
             config: StreamingConfig {
                 developer: StreamingDeveloperConfig {
                     exchange_initial_permits: permit::for_test::INITIAL_PERMITS,
@@ -115,6 +126,8 @@ impl SharedContext {
                 },
                 ..Default::default()
             },
+            compute_client_pool: Arc::new(ComputeClientPool::for_test()),
+            local_barrier_manager: LocalBarrierManager::for_test(),
         }
     }
 
@@ -148,10 +161,6 @@ impl SharedContext {
             .1
             .take()
             .ok_or_else(|| anyhow!("receiver for {ids:?} has already been taken").into())
-    }
-
-    pub fn clear_channels(&self) {
-        self.channel_map.lock().clear()
     }
 
     pub fn get_actor_info(&self, actor_id: &ActorId) -> StreamResult<ActorInfo> {

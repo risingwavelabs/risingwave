@@ -16,7 +16,7 @@
  */
 
 import { Relations } from "../components/Relations"
-import { getViews } from "./api/streaming"
+import { getViews } from "../lib/api/streaming"
 
 export default function Views() {
   return Relations("Views", getViews, [])

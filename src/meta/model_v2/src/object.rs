@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::{DatabaseId, ObjectId, SchemaId, UserId};
 
-#[derive(Clone, Debug, PartialEq, Eq, Copy, EnumIter, DeriveActiveEnum)]
+#[derive(Clone, Debug, PartialEq, Eq, Copy, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum ObjectType {
     #[sea_orm(string_value = "DATABASE")]
@@ -37,6 +38,10 @@ pub enum ObjectType {
     Function,
     #[sea_orm(string_value = "CONNECTION")]
     Connection,
+    #[sea_orm(string_value = "SUBSCRIPTION")]
+    Subscription,
+    #[sea_orm(string_value = "SECRET")]
+    Secret,
 }
 
 impl ObjectType {
@@ -51,11 +56,13 @@ impl ObjectType {
             ObjectType::Index => "index",
             ObjectType::Function => "function",
             ObjectType::Connection => "connection",
+            ObjectType::Subscription => "subscription",
+            ObjectType::Secret => "secret",
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "object")]
 pub struct Model {
     #[sea_orm(primary_key)]
@@ -98,10 +105,20 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     SelfRef1,
+    #[sea_orm(
+        belongs_to = "super::database::Entity",
+        from = "Column::DatabaseId",
+        to = "super::database::Column::DatabaseId",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    Database2,
     #[sea_orm(has_many = "super::schema::Entity")]
     Schema,
     #[sea_orm(has_many = "super::sink::Entity")]
     Sink,
+    #[sea_orm(has_many = "super::subscription::Entity")]
+    Subscription,
     #[sea_orm(has_many = "super::source::Entity")]
     Source,
     #[sea_orm(has_many = "super::table::Entity")]
@@ -161,6 +178,12 @@ impl Related<super::schema::Entity> for Entity {
 impl Related<super::sink::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Sink.def()
+    }
+}
+
+impl Related<super::subscription::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Subscription.def()
     }
 }
 

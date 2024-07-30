@@ -32,7 +32,7 @@ import {
   Relation,
   relationIsStreamingJob,
   relationTypeTitleCase,
-} from "../pages/api/streaming"
+} from "../lib/api/streaming"
 import { ReactJson } from "./Relations"
 
 export function useCatalogModal(relationList: Relation[] | undefined) {

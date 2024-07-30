@@ -29,6 +29,7 @@ use risingwave_common::metrics::LabelGuardedIntGaugeVec;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::register_guarded_int_gauge_vec_with_registry;
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
+use risingwave_meta_model_v2::WorkerId;
 use risingwave_object_store::object::object_metrics::{
     ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
 };
@@ -47,17 +48,17 @@ use crate::rpc::ElectionClientRef;
 
 #[derive(Clone)]
 pub struct MetaMetrics {
-    /// ********************************** Meta ************************************
+    // ********************************** Meta ************************************
     /// The number of workers in the cluster.
     pub worker_num: IntGaugeVec,
     /// The roles of all meta nodes in the cluster.
     pub meta_type: IntGaugeVec,
 
-    /// ********************************** gRPC ************************************
+    // ********************************** gRPC ************************************
     /// gRPC latency of meta services
     pub grpc_latency: HistogramVec,
 
-    /// ********************************** Barrier ************************************
+    // ********************************** Barrier ************************************
     /// The duration from barrier injection to commit
     /// It is the sum of inflight-latency, sync-latency and wait-commit-latency
     pub barrier_latency: Histogram,
@@ -70,15 +71,17 @@ pub struct MetaMetrics {
     pub all_barrier_nums: IntGauge,
     /// The number of in-flight barriers
     pub in_flight_barrier_nums: IntGauge,
+    /// The timestamp (UNIX epoch seconds) of the last committed barrier's epoch time.
+    pub last_committed_barrier_time: IntGauge,
 
-    /// ********************************** Recovery ************************************
+    // ********************************** Recovery ************************************
     pub recovery_failure_cnt: IntCounter,
     pub recovery_latency: Histogram,
 
-    /// ********************************** Hummock ************************************
+    // ********************************** Hummock ************************************
     /// Max committed epoch
     pub max_committed_epoch: IntGauge,
-    /// The smallest epoch that has not been GCed.
+    /// The smallest epoch that has not been `GCed`.
     pub safe_epoch: IntGauge,
     /// The smallest epoch that is being pinned.
     pub min_pinned_epoch: IntGauge,
@@ -150,6 +153,7 @@ pub struct MetaMetrics {
     pub l0_compact_level_count: HistogramVec,
     pub compact_task_size: HistogramVec,
     pub compact_task_file_count: HistogramVec,
+    pub compact_task_batch_count: HistogramVec,
     pub move_state_table_count: IntCounterVec,
     pub state_table_count: IntGaugeVec,
     pub branched_sst_count: IntGaugeVec,
@@ -157,16 +161,16 @@ pub struct MetaMetrics {
     pub compaction_event_consumed_latency: Histogram,
     pub compaction_event_loop_iteration_latency: Histogram,
 
-    /// ********************************** Object Store ************************************
+    // ********************************** Object Store ************************************
     // Object store related metrics (for backup/restore and version checkpoint)
     pub object_store_metric: Arc<ObjectStoreMetrics>,
 
-    /// ********************************** Source ************************************
+    // ********************************** Source ************************************
     /// supervisor for which source is still up.
     pub source_is_up: LabelGuardedIntGaugeVec<2>,
     pub source_enumerator_metrics: Arc<SourceEnumeratorMetrics>,
 
-    /// ********************************** Fragment ************************************
+    // ********************************** Fragment ************************************
     /// A dummpy gauge metrics with its label to be the mapping from actor id to fragment id
     pub actor_info: IntGaugeVec,
     /// A dummpy gauge metrics with its label to be the mapping from table id to actor id
@@ -222,6 +226,12 @@ impl MetaMetrics {
         let in_flight_barrier_nums = register_int_gauge_with_registry!(
             "in_flight_barrier_nums",
             "num of of in_flight_barrier",
+            registry
+        )
+        .unwrap();
+        let last_committed_barrier_time = register_int_gauge_with_registry!(
+            "last_committed_barrier_time",
+            "The timestamp (UNIX epoch seconds) of the last committed barrier's epoch time.",
             registry
         )
         .unwrap();
@@ -440,7 +450,7 @@ impl MetaMetrics {
         let hummock_manager_lock_time = register_histogram_vec_with_registry!(
             "hummock_manager_lock_time",
             "latency for hummock manager to acquire the rwlock",
-            &["method", "lock_name", "lock_type"],
+            &["lock_name", "lock_type"],
             registry
         )
         .unwrap();
@@ -571,6 +581,14 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
+        let opts = histogram_opts!(
+            "storage_compact_task_batch_count",
+            "count of compact task batch",
+            exponential_buckets(1.0, 2.0, 8).unwrap()
+        );
+        let compact_task_batch_count =
+            register_histogram_vec_with_registry!(opts, &["type"], registry).unwrap();
+
         let table_write_throughput = register_int_counter_vec_with_registry!(
             "storage_commit_write_throughput",
             "The number of compactions from one level to another level that have been skipped.",
@@ -626,6 +644,7 @@ impl MetaMetrics {
             barrier_send_latency,
             all_barrier_nums,
             in_flight_barrier_nums,
+            last_committed_barrier_time,
             recovery_failure_cnt,
             recovery_latency,
 
@@ -676,6 +695,7 @@ impl MetaMetrics {
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
+            compact_task_batch_count,
             table_write_throughput,
             move_state_table_count,
             state_table_count,
@@ -698,7 +718,7 @@ impl Default for MetaMetrics {
 
 pub fn start_worker_info_monitor(
     metadata_manager: MetadataManager,
-    election_client: Option<ElectionClientRef>,
+    election_client: ElectionClientRef,
     interval: Duration,
     meta_metrics: Arc<MetaMetrics>,
 ) -> (JoinHandle<()>, Sender<()>) {
@@ -725,15 +745,17 @@ pub fn start_worker_info_monitor(
                 }
             };
 
+            // Reset metrics to clean the stale labels e.g. invalid lease ids
+            meta_metrics.worker_num.reset();
+            meta_metrics.meta_type.reset();
+
             for (worker_type, worker_num) in node_map {
                 meta_metrics
                     .worker_num
                     .with_label_values(&[(worker_type.as_str_name())])
                     .set(worker_num as i64);
             }
-            if let Some(client) = &election_client
-                && let Ok(meta_members) = client.get_members().await
-            {
+            if let Ok(meta_members) = election_client.get_members().await {
                 meta_metrics
                     .worker_num
                     .with_label_values(&[WorkerType::Meta.as_str_name()])
@@ -797,17 +819,14 @@ pub async fn refresh_fragment_info_metrics_v2(
         }
     };
 
-    let pu_addr_mapping: HashMap<u32, String> = worker_nodes
+    let worker_addr_mapping: HashMap<WorkerId, String> = worker_nodes
         .into_iter()
-        .flat_map(|worker_node| {
+        .map(|worker_node| {
             let addr = match worker_node.host {
                 Some(host) => format!("{}:{}", host.host, host.port),
                 None => "".to_owned(),
             };
-            worker_node
-                .parallel_units
-                .into_iter()
-                .map(move |pu| (pu.id, addr.clone()))
+            (worker_node.id as WorkerId, addr)
         })
         .collect();
     let table_compaction_group_id_mapping = hummock_manager
@@ -824,7 +843,7 @@ pub async fn refresh_fragment_info_metrics_v2(
         let fragment_id_str = actor_location.fragment_id.to_string();
         // Report a dummy gauge metrics with (fragment id, actor id, node
         // address) as its label
-        if let Some(address) = pu_addr_mapping.get(&(actor_location.parallel_unit_id as u32)) {
+        if let Some(address) = worker_addr_mapping.get(&actor_location.worker_id) {
             meta_metrics
                 .actor_info
                 .with_label_values(&[&actor_id_str, &fragment_id_str, address])
@@ -947,17 +966,11 @@ pub fn start_fragment_info_monitor(
                         if let Some(actor_status) =
                             table_fragments.actor_status.get(&actor.actor_id)
                         {
-                            if let Some(pu) = &actor_status.parallel_unit {
-                                if let Some(address) = workers.get(&pu.worker_node_id) {
-                                    meta_metrics
-                                        .actor_info
-                                        .with_label_values(&[
-                                            &actor_id_str,
-                                            &fragment_id_str,
-                                            address,
-                                        ])
-                                        .set(1);
-                                }
+                            if let Some(address) = workers.get(&actor_status.worker_id()) {
+                                meta_metrics
+                                    .actor_info
+                                    .with_label_values(&[&actor_id_str, &fragment_id_str, address])
+                                    .set(1);
                             }
                         }
 

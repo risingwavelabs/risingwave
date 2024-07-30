@@ -21,6 +21,7 @@ use opendal::Operator;
 
 use super::opendal_enumerator::OpendalEnumerator;
 use super::OpendalSource;
+use crate::error::ConnectorResult;
 use crate::source::filesystem::s3::enumerator::get_prefix;
 use crate::source::filesystem::s3::S3PropertiesCommon;
 
@@ -29,7 +30,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
     pub fn new_s3_source(
         s3_properties: S3PropertiesCommon,
         assume_role: Option<String>,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         // Create s3 builder.
         let mut builder = S3::default();
         builder.bucket(&s3_properties.bucket_name);
@@ -57,8 +58,6 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             );
         }
 
-        builder.enable_virtual_host_style();
-
         if let Some(assume_role) = assume_role {
             builder.role_arn(&assume_role);
         }
@@ -72,7 +71,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         } else {
             (None, None)
         };
-
+        let compression_format = s3_properties.compression_format;
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
@@ -83,6 +82,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             prefix,
             matcher,
             marker: PhantomData,
+            compression_format,
         })
     }
 }

@@ -20,7 +20,7 @@ import {
   Relations,
   streamingJobColumns,
 } from "../components/Relations"
-import { getSinks } from "./api/streaming"
+import { getSinks } from "../lib/api/streaming"
 
 export default function Sinks() {
   return Relations("Sinks", getSinks, [

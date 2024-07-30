@@ -65,8 +65,8 @@ message TableFragments {
       // Running normally
       RUNNING = 2;
     }
-    // Current on which parallel unit
-    common.ParallelUnit parallel_unit = 1;
+    // Current on which worker
+    common.ActorLocation location = 1;
     // Current state
     ActorState state = 2;
   }
@@ -81,9 +81,13 @@ message TableFragments {
     uint32 fragment_type_mask = 2;
     FragmentDistributionType distribution_type = 3;
     repeated stream_plan.StreamActor actors = 4;
+
+    // NOTE: vnode_mapping is deprecated, we will generate the vnode_mapping by actors' bitmaps
     // Vnode mapping (which should be set in upstream dispatcher) of the fragment.
     // This field is always set to `Some`. For singleton, the parallel unit for all vnodes will be the same.
-    common.ParallelUnitMapping vnode_mapping = 5;
+    reserved 5;
+    reserved "vnode_mapping";
+
     repeated uint32 state_table_ids = 6;
     // Note that this can be derived backwards from the upstream actors of the Actor held by the Fragment,
     // but in some scenarios (e.g. Scaling) it will lead to a lot of duplicate code,
@@ -99,16 +103,23 @@ message TableFragments {
 
   stream_plan.StreamContext ctx = 6;
   TableParallelism parallelism = 7;
+
+  // Actors of a materialize view, sink, or table can only be scheduled on nodes with matching node_label.
+  string node_label = 8;
+
+  // If this is a materialized view: True if backfill is done, else false.
+  // If this is a regular table: Always true.
+  bool backfill_done = 9;
 }
 
-/// Parallel unit mapping with fragment id, used for notification.
-message FragmentParallelUnitMapping {
+/// Worker slot mapping with fragment id, used for notification.
+message FragmentWorkerSlotMapping {
   uint32 fragment_id = 1;
-  common.ParallelUnitMapping mapping = 2;
+  common.WorkerSlotMapping mapping = 2;
 }
 
-message FragmentParallelUnitMappings {
-  repeated FragmentParallelUnitMapping mappings = 1;
+message FragmentWorkerSlotMappings {
+  repeated FragmentWorkerSlotMapping mappings = 1;
 }
 
 // TODO: remove this when dashboard refactored.
@@ -118,8 +129,13 @@ message ActorLocation {
 }
 
 message MigrationPlan {
+  // NOTE: parallel_unit_migration_plan is deprecated, using worker_slot_migration_plan instead
   // map<parallel_unit_id, parallel_unit>, the plan indicates that the actors will be migrated from old parallel unit to the new one.
-  map<uint32, common.ParallelUnit> parallel_unit_migration_plan = 1;
+  reserved 1;
+  reserved "parallel_unit_migration_plan";
+
+  // map<src_worker_slot_id, dst_worker_slot_id>, the plan indicates that the actors will be migrated from old worker_slot to the new one.
+  map<uint64, uint64> worker_slot_migration_plan = 2;
 }
 
 message FlushRequest {
@@ -234,16 +250,29 @@ message ListActorStatesResponse {
   message ActorState {
     uint32 actor_id = 1;
     uint32 fragment_id = 2;
-    uint32 parallel_unit_id = 3;
+    reserved 3;
+    reserved "parallel_unit_id";
     TableFragments.ActorStatus.ActorState state = 4;
+    uint32 worker_id = 5;
   }
   repeated ActorState states = 1;
+}
+
+message ListObjectDependenciesRequest {}
+
+message ListObjectDependenciesResponse {
+  message ObjectDependencies {
+    uint32 object_id = 1;
+    uint32 referenced_object_id = 2;
+  }
+  repeated ObjectDependencies dependencies = 1;
 }
 
 enum ThrottleTarget {
   THROTTLE_TARGET_UNSPECIFIED = 0;
   SOURCE = 1;
   MV = 2;
+  TABLE_WITH_SOURCE = 3;
 }
 
 message ApplyThrottleRequest {
@@ -256,6 +285,10 @@ message ApplyThrottleResponse {
   common.Status status = 1;
 }
 
+message RecoverRequest {}
+
+message RecoverResponse {}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
@@ -265,7 +298,9 @@ service StreamManagerService {
   rpc ListTableFragmentStates(ListTableFragmentStatesRequest) returns (ListTableFragmentStatesResponse);
   rpc ListFragmentDistribution(ListFragmentDistributionRequest) returns (ListFragmentDistributionResponse);
   rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
+  rpc ListObjectDependencies(ListObjectDependenciesRequest) returns (ListObjectDependenciesResponse);
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
+  rpc Recover(RecoverRequest) returns (RecoverResponse);
 }
 
 // Below for cluster service.
@@ -289,6 +324,7 @@ message AddWorkerNodeResponse {
   reserved "system_params";
   common.Status status = 1;
   optional uint32 node_id = 2;
+  string cluster_id = 4;
 }
 
 message ActivateWorkerNodeRequest {
@@ -335,12 +371,26 @@ message ListAllNodesResponse {
   repeated common.WorkerNode nodes = 2;
 }
 
+message GetClusterRecoveryStatusRequest {}
+
+enum RecoveryStatus {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_STARTING = 1;
+  STATUS_RECOVERING = 2;
+  STATUS_RUNNING = 3;
+}
+
+message GetClusterRecoveryStatusResponse {
+  RecoveryStatus status = 1;
+}
+
 service ClusterService {
   rpc AddWorkerNode(AddWorkerNodeRequest) returns (AddWorkerNodeResponse);
   rpc ActivateWorkerNode(ActivateWorkerNodeRequest) returns (ActivateWorkerNodeResponse);
   rpc DeleteWorkerNode(DeleteWorkerNodeRequest) returns (DeleteWorkerNodeResponse);
   rpc UpdateWorkerNodeSchedulability(UpdateWorkerNodeSchedulabilityRequest) returns (UpdateWorkerNodeSchedulabilityResponse);
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
+  rpc GetClusterRecoveryStatus(GetClusterRecoveryStatusRequest) returns (GetClusterRecoveryStatusResponse);
 }
 
 enum SubscribeType {
@@ -361,8 +411,10 @@ message SubscribeRequest {
 message MetaSnapshot {
   message SnapshotVersion {
     uint64 catalog_version = 1;
-    uint64 parallel_unit_mapping_version = 2;
+    reserved 2;
+    reserved "parallel_unit_mapping_version";
     uint64 worker_node_version = 3;
+    uint64 streaming_worker_slot_mapping_version = 4;
   }
   repeated catalog.Database databases = 1;
   repeated catalog.Schema schemas = 2;
@@ -373,16 +425,23 @@ message MetaSnapshot {
   repeated catalog.View views = 7;
   repeated catalog.Function functions = 15;
   repeated catalog.Connection connections = 17;
+  repeated catalog.Subscription subscriptions = 19;
   repeated user.UserInfo users = 8;
-  // for streaming
-  repeated FragmentParallelUnitMapping parallel_unit_mappings = 9;
+  reserved 9;
+  reserved "parallel_unit_mappings";
+  GetSessionParamsResponse session_params = 20;
+  repeated catalog.Secret secrets = 23;
   repeated common.WorkerNode nodes = 10;
   hummock.HummockSnapshot hummock_snapshot = 11;
   hummock.HummockVersion hummock_version = 12;
   backup_service.MetaBackupManifestId meta_backup_manifest_id = 14;
   hummock.WriteLimits hummock_write_limits = 16;
-  // for serving
-  repeated FragmentParallelUnitMapping serving_parallel_unit_mappings = 18;
+  reserved 18;
+  reserved "serving_parallel_unit_mappings";
+
+  // for streaming
+  repeated FragmentWorkerSlotMapping streaming_worker_slot_mappings = 21;
+  repeated FragmentWorkerSlotMapping serving_worker_slot_mappings = 22;
 
   SnapshotVersion version = 13;
 }
@@ -394,12 +453,15 @@ message Relation {
     catalog.Sink sink = 3;
     catalog.Index index = 4;
     catalog.View view = 5;
+    catalog.Subscription subscription = 6;
   }
 }
 
 message RelationGroup {
   repeated Relation relations = 1;
 }
+
+message Recovery {}
 
 message SubscribeResponse {
   enum Operation {
@@ -411,14 +473,16 @@ message SubscribeResponse {
   }
   common.Status status = 1;
   Operation operation = 2;
+
+  // Catalog version
   uint64 version = 3;
+
   oneof info {
     catalog.Database database = 4;
     catalog.Schema schema = 5;
     catalog.Function function = 6;
     user.UserInfo user = 11;
-    // for streaming
-    FragmentParallelUnitMapping parallel_unit_mapping = 12;
+    SetSessionParamRequest session_param = 26;
     common.WorkerNode node = 13;
     hummock.HummockSnapshot hummock_snapshot = 14;
     hummock.HummockVersionDeltas hummock_version_deltas = 15;
@@ -428,9 +492,16 @@ message SubscribeResponse {
     hummock.WriteLimits hummock_write_limits = 20;
     RelationGroup relation_group = 21;
     catalog.Connection connection = 22;
-    FragmentParallelUnitMappings serving_parallel_unit_mappings = 23;
     hummock.HummockVersionStats hummock_stats = 24;
+    Recovery recovery = 25;
+    FragmentWorkerSlotMapping streaming_worker_slot_mapping = 27;
+    FragmentWorkerSlotMappings serving_worker_slot_mappings = 28;
+    catalog.Secret secret = 29;
   }
+  reserved 12;
+  reserved "parallel_unit_mapping";
+  reserved 23;
+  reserved "serving_parallel_unit_mappings";
 }
 
 service NotificationService {
@@ -447,16 +518,19 @@ message GetClusterInfoResponse {
   uint64 revision = 5;
 }
 
-message Reschedule {
-  repeated uint32 added_parallel_units = 1;
-  repeated uint32 removed_parallel_units = 2;
+// For each fragment that needs to be rescheduled, there will be a WorkerReschedule,
+// indicating on which workers the actors of this fragment need to be changed and by how many.
+message WorkerReschedule {
+  // worker_id -> actor_diff
+  map<uint32, int32> worker_actor_diff = 1;
 }
 
 message RescheduleRequest {
-  // reschedule plan for each fragment
-  map<uint32, Reschedule> reschedules = 1;
+  reserved "reschedules";
+  reserved 1;
   uint64 revision = 2;
   bool resolve_no_shuffle_upstream = 3;
+  map<uint32, WorkerReschedule> worker_reschedules = 4;
 }
 
 message RescheduleResponse {
@@ -484,40 +558,37 @@ message TableParallelism {
   }
 }
 
-message GetReschedulePlanRequest {
-  uint64 revision = 1;
+// Changes a streaming job in place by overwriting its node_label.
+// This may cause the re-scheduling of the streaming job actors.
+message UpdateStreamingJobNodeLabelsRequest {
+  // Id of the materialized view, table, or sink which we want to update
+  uint32 id = 1;
 
-  message WorkerChanges {
-    repeated uint32 include_worker_ids = 1;
-    repeated uint32 exclude_worker_ids = 2;
-    optional uint32 target_parallelism = 3;
-    optional uint32 target_parallelism_per_worker = 4;
-  }
-
-  message StableResizePolicy {
-    map<uint32, WorkerChanges> fragment_worker_changes = 1;
-  }
-
-  oneof policy {
-    // The StableResizePolicy will generate a stable ReschedulePlan, without altering the distribution on WorkerId that's not involved.
-    // Note that this "Stable" doesn't refer to the "determinacy" of the algorithm.
-    // Multiple repeated calls may yield different ReschedulePlan results.
-    StableResizePolicy stable_resize_policy = 2;
-  }
+  // replace the node_label of the streaming job with a given id with below value
+  string node_label = 2;
 }
 
-message GetReschedulePlanResponse {
-  uint64 revision = 1;
-  // reschedule plan for each fragment
-  map<uint32, Reschedule> reschedules = 2;
-  // todo, refactor needed
-  bool success = 3;
+// We do not need to add an explicit status field here, we can just use the RPC status
+message UpdateStreamingJobNodeLabelsResponse {}
+
+message GetServerlessStreamingJobsStatusRequest {}
+
+// Descriptions of MVs and sinks
+message GetServerlessStreamingJobsStatusResponse {
+  message Status {
+    uint32 table_id = 1;
+    string node_label = 2;
+    bool backfill_done = 3;
+  }
+
+  repeated Status streaming_job_statuses = 1;
 }
 
 service ScaleService {
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
-  rpc GetReschedulePlan(GetReschedulePlanRequest) returns (GetReschedulePlanResponse);
+  rpc UpdateStreamingJobNodeLabels(UpdateStreamingJobNodeLabelsRequest) returns (UpdateStreamingJobNodeLabelsResponse);
+  rpc GetServerlessStreamingJobsStatus(GetServerlessStreamingJobsStatusRequest) returns (GetServerlessStreamingJobsStatusResponse);
 }
 
 message MembersRequest {}
@@ -555,8 +626,10 @@ message SystemParams {
   optional uint32 parallel_compact_size_mb = 11;
   optional uint32 max_concurrent_creating_streaming_jobs = 12;
   optional bool pause_on_next_bootstrap = 13;
-  optional string wasm_storage_url = 14;
+  optional string wasm_storage_url = 14 [deprecated = true];
   optional bool enable_tracing = 15;
+  optional bool use_new_object_prefix_strategy = 16;
+  optional string license_key = 17;
 }
 
 message GetSystemParamsRequest {}
@@ -580,11 +653,35 @@ service SystemParamsService {
   rpc SetSystemParam(SetSystemParamRequest) returns (SetSystemParamResponse);
 }
 
+message GetSessionParamsRequest {}
+
+message GetSessionParamsResponse {
+  string params = 1;
+}
+
+message SetSessionParamRequest {
+  string param = 1;
+  // None means set to default value.
+  optional string value = 2;
+}
+
+message SetSessionParamResponse {
+  string param = 1;
+}
+
+// Used for alter system wide default parameters
+service SessionParamService {
+  rpc GetSessionParams(GetSessionParamsRequest) returns (GetSessionParamsResponse);
+  rpc SetSessionParam(SetSessionParamRequest) returns (SetSessionParamResponse);
+}
+
 message GetServingVnodeMappingsRequest {}
 
 message GetServingVnodeMappingsResponse {
-  repeated FragmentParallelUnitMapping mappings = 1;
+  reserved 1;
+  reserved "mappings";
   map<uint32, uint32> fragment_to_table = 2;
+  repeated FragmentWorkerSlotMapping worker_slot_mappings = 3;
 }
 
 service ServingService {

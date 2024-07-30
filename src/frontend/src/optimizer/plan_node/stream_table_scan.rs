@@ -31,10 +31,10 @@ use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, ExprVisitor, FunctionCall};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
-use crate::optimizer::property::{Distribution, DistributionDisplay};
+use crate::optimizer::property::{Distribution, DistributionDisplay, MonotonicityMap};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::{Explain, TableCatalog};
+use crate::TableCatalog;
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to stream scan + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -42,14 +42,14 @@ use crate::{Explain, TableCatalog};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTableScan {
     pub base: PlanBase<Stream>,
-    core: generic::Scan,
+    core: generic::TableScan,
     batch_plan_id: PlanNodeId,
     stream_scan_type: StreamScanType,
 }
 
 impl StreamTableScan {
     pub fn new_with_stream_scan_type(
-        core: generic::Scan,
+        core: generic::TableScan,
         stream_scan_type: StreamScanType,
     ) -> Self {
         let batch_plan_id = core.ctx.next_plan_node_id();
@@ -74,6 +74,7 @@ impl StreamTableScan {
             core.append_only(),
             false,
             core.watermark_columns(),
+            MonotonicityMap::new(),
         );
         Self {
             base,
@@ -87,7 +88,7 @@ impl StreamTableScan {
         &self.core.table_name
     }
 
-    pub fn core(&self) -> &generic::Scan {
+    pub fn core(&self) -> &generic::TableScan {
         &self.core
     }
 
@@ -115,7 +116,7 @@ impl StreamTableScan {
         self.stream_scan_type
     }
 
-    // TODO: Add note to reviewer about safety, because of `generic::Scan` limitation.
+    // TODO: Add note to reviewer about safety, because of `generic::TableScan` limitation.
     fn get_upstream_state_table(&self) -> &TableCatalog {
         self.core.table_catalog.as_ref()
     }
@@ -147,6 +148,7 @@ impl StreamTableScan {
     ///        | 1002 | Int64(1) | t                   | 10          |
     ///        | 1003 | Int64(1) | t                   | 10          |
     ///        | 1003 | Int64(1) | t                   | 10          |
+    ///
     /// Eventually we should track progress per vnode, to support scaling with both mview and
     /// the corresponding `no_shuffle_backfill`.
     /// However this is not high priority, since we are working on supporting arrangement backfill,
@@ -155,7 +157,6 @@ impl StreamTableScan {
         &self,
         state: &mut BuildFragmentGraphState,
     ) -> TableCatalog {
-        let _properties = self.ctx().with_options().internal_table_subset();
         let mut catalog_builder = TableCatalogBuilder::default();
         let upstream_schema = &self.core.get_table_columns();
 
@@ -171,16 +172,10 @@ impl StreamTableScan {
         }
 
         // `backfill_finished` column
-        catalog_builder.add_column(&Field::with_name(
-            DataType::Boolean,
-            format!("{}_backfill_finished", self.table_name()),
-        ));
+        catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
 
         // `row_count` column
-        catalog_builder.add_column(&Field::with_name(
-            DataType::Int64,
-            format!("{}_row_count", self.table_name()),
-        ));
+        catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
 
         // Reuse the state store pk (vnode) as the vnode as well.
         catalog_builder.set_vnode_col_idx(0);
@@ -205,9 +200,20 @@ impl Distill for StreamTableScan {
         vec.push(("columns", self.core.columns_pretty(verbose)));
 
         if verbose {
-            let pk = IndicesDisplay {
+            vec.push(("stream_scan_type", Pretty::debug(&self.stream_scan_type)));
+            let stream_key = IndicesDisplay {
                 indices: self.stream_key().unwrap_or_default(),
                 schema: self.base.schema(),
+            };
+            vec.push(("stream_key", stream_key.distill()));
+            let pk = IndicesDisplay {
+                indices: &self
+                    .core
+                    .primary_key()
+                    .iter()
+                    .map(|x| x.column_index)
+                    .collect_vec(),
+                schema: &self.core.table_catalog.column_schema(),
             };
             vec.push(("pk", pk.distill()));
             let dist = Pretty::display(&DistributionDisplay {
@@ -236,12 +242,7 @@ impl StreamTableScan {
 
         let stream_key = self
             .stream_key()
-            .unwrap_or_else(|| {
-                panic!(
-                    "should always have a stream key in the stream plan but not, sub plan: {}",
-                    PlanRef::from(self.clone()).explain_to_string()
-                )
-            })
+            .unwrap_or(&[])
             .iter()
             .map(|x| *x as u32)
             .collect_vec();
@@ -319,7 +320,7 @@ impl StreamTableScan {
             table_desc: Some(self.core.table_desc.try_to_protobuf()?),
             state_table: Some(catalog),
             arrangement_table,
-            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+            rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
             ..Default::default()
         });
 

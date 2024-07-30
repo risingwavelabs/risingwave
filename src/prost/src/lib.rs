@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// for derived code of `Message`
 #![expect(clippy::all)]
 #![expect(clippy::doc_markdown)]
-#![allow(non_snake_case)] // for derived code of `Message`
 #![feature(lint_reasons)]
 
 use std::str::FromStr;
@@ -56,7 +56,7 @@ pub mod batch_plan;
 #[cfg_attr(madsim, path = "sim/task_service.rs")]
 pub mod task_service;
 #[rustfmt::skip]
-#[cfg_attr(madsim, path="sim/connector_service.rs")]
+#[cfg_attr(madsim, path = "sim/connector_service.rs")]
 pub mod connector_service;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/stream_plan.rs")]
@@ -91,6 +91,10 @@ pub mod health;
 #[rustfmt::skip]
 #[path = "sim/telemetry.rs"]
 pub mod telemetry;
+
+#[rustfmt::skip]
+#[path = "sim/secret.rs"]
+pub mod secret;
 #[rustfmt::skip]
 #[path = "connector_service.serde.rs"]
 pub mod connector_service_serde;
@@ -158,6 +162,10 @@ pub mod java_binding_serde;
 #[path = "telemetry.serde.rs"]
 pub mod telemetry_serde;
 
+#[rustfmt::skip]
+#[path = "secret.serde.rs"]
+pub mod secret_serde;
+
 #[derive(Clone, PartialEq, Eq, Debug, Error)]
 #[error("field `{0}` not found")]
 pub struct PbFieldNotFound(pub &'static str);
@@ -169,6 +177,14 @@ impl From<PbFieldNotFound> for tonic::Status {
 }
 
 impl FromStr for crate::expr::table_function::PbType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::from_str_name(&s.to_uppercase()).ok_or(())
+    }
+}
+
+impl FromStr for crate::expr::agg_call::PbType {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -193,6 +209,90 @@ impl stream_plan::MaterializeNode {
             .iter()
             .map(|c| c.get_column_desc().unwrap().column_id)
             .collect()
+    }
+}
+
+// Encapsulating the use of parallelism.
+impl common::WorkerNode {
+    pub fn parallelism(&self) -> usize {
+        self.parallelism as usize
+    }
+}
+
+impl stream_plan::SourceNode {
+    pub fn column_ids(&self) -> Option<Vec<i32>> {
+        Some(
+            self.source_inner
+                .as_ref()?
+                .columns
+                .iter()
+                .map(|c| c.get_column_desc().unwrap().column_id)
+                .collect(),
+        )
+    }
+}
+
+impl meta::table_fragments::ActorStatus {
+    pub fn worker_id(&self) -> u32 {
+        self.location
+            .as_ref()
+            .expect("actor location should be exist")
+            .worker_node_id
+    }
+}
+
+impl common::ActorLocation {
+    pub fn from_worker(worker_node_id: u32) -> Option<Self> {
+        Some(Self { worker_node_id })
+    }
+}
+
+impl stream_plan::StreamNode {
+    /// Find the external stream source info inside the stream node, if any.
+    ///
+    /// Returns `source_id`.
+    pub fn find_stream_source(&self) -> Option<u32> {
+        if let Some(crate::stream_plan::stream_node::NodeBody::Source(source)) =
+            self.node_body.as_ref()
+        {
+            if let Some(inner) = &source.source_inner {
+                return Some(inner.source_id);
+            }
+        }
+
+        for child in &self.input {
+            if let Some(source) = child.find_stream_source() {
+                return Some(source);
+            }
+        }
+
+        None
+    }
+
+    /// Find the external stream source info inside the stream node, if any.
+    ///
+    /// Returns `source_id`.
+    pub fn find_source_backfill(&self) -> Option<u32> {
+        if let Some(crate::stream_plan::stream_node::NodeBody::SourceBackfill(source)) =
+            self.node_body.as_ref()
+        {
+            return Some(source.upstream_source_id);
+        }
+
+        for child in &self.input {
+            if let Some(source) = child.find_source_backfill() {
+                return Some(source);
+            }
+        }
+
+        None
+    }
+}
+
+impl catalog::StreamSourceInfo {
+    /// Refer to [`Self::cdc_source_job`] for details.
+    pub fn is_shared(&self) -> bool {
+        self.cdc_source_job
     }
 }
 

@@ -19,12 +19,12 @@ use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::types::Datum;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_expr::aggregate::{AggCall, AggKind, BoxedAggregateFunction};
+use risingwave_common_estimate_size::EstimateSize;
+use risingwave_expr::aggregate::{AggCall, AggKind, BoxedAggregateFunction, PbAggKind};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
@@ -125,16 +125,18 @@ impl MaterializedInputState {
         let cache_key_serializer = OrderedRowSerde::new(cache_key_data_types, order_types);
 
         let cache: Box<dyn AggStateCache + Send + Sync> = match agg_call.kind {
-            AggKind::Min | AggKind::Max | AggKind::FirstValue | AggKind::LastValue => {
-                Box::new(GenericAggStateCache::new(
-                    TopNStateCache::new(extreme_cache_size),
-                    agg_call.args.arg_types(),
-                ))
-            }
-            AggKind::StringAgg
-            | AggKind::ArrayAgg
-            | AggKind::JsonbAgg
-            | AggKind::JsonbObjectAgg => Box::new(GenericAggStateCache::new(
+            AggKind::Builtin(
+                PbAggKind::Min | PbAggKind::Max | PbAggKind::FirstValue | PbAggKind::LastValue,
+            ) => Box::new(GenericAggStateCache::new(
+                TopNStateCache::new(extreme_cache_size),
+                agg_call.args.arg_types(),
+            )),
+            AggKind::Builtin(
+                PbAggKind::StringAgg
+                | PbAggKind::ArrayAgg
+                | PbAggKind::JsonbAgg
+                | PbAggKind::JsonbObjectAgg,
+            ) => Box::new(GenericAggStateCache::new(
                 OrderedStateCache::new(),
                 agg_call.args.arg_types(),
             )),
@@ -145,7 +147,9 @@ impl MaterializedInputState {
         };
         let output_first_value = matches!(
             agg_call.kind,
-            AggKind::Min | AggKind::Max | AggKind::FirstValue | AggKind::LastValue
+            AggKind::Builtin(
+                PbAggKind::Min | PbAggKind::Max | PbAggKind::FirstValue | PbAggKind::LastValue
+            )
         );
 
         Ok(Self {
@@ -224,7 +228,7 @@ impl MaterializedInputState {
         } else {
             const CHUNK_SIZE: usize = 1024;
             let chunks = self.cache.output_batches(CHUNK_SIZE).collect_vec();
-            let mut state = func.create_state();
+            let mut state = func.create_state()?;
             for chunk in chunks {
                 func.update(&mut state, &chunk).await?;
             }
@@ -239,32 +243,34 @@ fn generate_order_columns_before_version_issue_13465(
     pk_indices: &PkIndices,
     arg_col_indices: &[usize],
 ) -> (Vec<usize>, Vec<OrderType>) {
-    let (mut order_col_indices, mut order_types) =
-        if matches!(agg_call.kind, AggKind::Min | AggKind::Max) {
-            // `min`/`max` need not to order by any other columns, but have to
-            // order by the agg value implicitly.
-            let order_type = if agg_call.kind == AggKind::Min {
-                OrderType::ascending()
-            } else {
-                OrderType::descending()
-            };
-            (vec![arg_col_indices[0]], vec![order_type])
+    let (mut order_col_indices, mut order_types) = if matches!(
+        agg_call.kind,
+        AggKind::Builtin(PbAggKind::Min | PbAggKind::Max)
+    ) {
+        // `min`/`max` need not to order by any other columns, but have to
+        // order by the agg value implicitly.
+        let order_type = if matches!(agg_call.kind, AggKind::Builtin(PbAggKind::Min)) {
+            OrderType::ascending()
         } else {
-            agg_call
-                .column_orders
-                .iter()
-                .map(|p| {
-                    (
-                        p.column_index,
-                        if agg_call.kind == AggKind::LastValue {
-                            p.order_type.reverse()
-                        } else {
-                            p.order_type
-                        },
-                    )
-                })
-                .unzip()
+            OrderType::descending()
         };
+        (vec![arg_col_indices[0]], vec![order_type])
+    } else {
+        agg_call
+            .column_orders
+            .iter()
+            .map(|p| {
+                (
+                    p.column_index,
+                    if matches!(agg_call.kind, AggKind::Builtin(PbAggKind::LastValue)) {
+                        p.order_type.reverse()
+                    } else {
+                        p.order_type
+                    },
+                )
+            })
+            .unzip()
+    };
 
     if agg_call.distinct {
         // If distinct, we need to materialize input with the distinct keys
@@ -296,7 +302,7 @@ mod tests {
     use risingwave_common::row::OwnedRow;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, ListValue};
-    use risingwave_common::util::epoch::EpochPair;
+    use risingwave_common::util::epoch::{test_epoch, EpochPair};
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_expr::aggregate::{build_append_only, AggCall};
     use risingwave_pb::stream_plan::PbAggNodeVersion;
@@ -385,7 +391,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
         table.init_epoch(epoch);
 
         {
@@ -401,7 +407,7 @@ mod tests {
 
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -419,7 +425,7 @@ mod tests {
 
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -485,7 +491,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
         table.init_epoch(epoch);
 
         {
@@ -501,7 +507,7 @@ mod tests {
 
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -519,7 +525,7 @@ mod tests {
 
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -582,7 +588,7 @@ mod tests {
         )
         .await;
 
-        let mut epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
         table_1.init_epoch(epoch);
         table_2.init_epoch(epoch);
 
@@ -645,7 +651,7 @@ mod tests {
             state_1.apply_chunk(&chunk_1)?;
             state_2.apply_chunk(&chunk_2)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table_1.commit(epoch).await.unwrap();
             table_2.commit(epoch).await.unwrap();
 
@@ -704,7 +710,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
         table.init_epoch(epoch);
 
         {
@@ -719,7 +725,7 @@ mod tests {
 
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -737,7 +743,7 @@ mod tests {
 
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -787,7 +793,7 @@ mod tests {
         )
         .await;
 
-        let mut epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
         table.init_epoch(epoch);
 
         let order_columns = vec![
@@ -834,7 +840,7 @@ mod tests {
             let chunk = create_chunk(&pretty_lines.join("\n"), &mut table, &mapping);
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -861,7 +867,7 @@ mod tests {
             let chunk = create_chunk(&pretty_lines.join("\n"), &mut table, &mapping);
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -909,7 +915,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
         table.init_epoch(epoch);
 
         {
@@ -923,7 +929,7 @@ mod tests {
             );
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -943,7 +949,7 @@ mod tests {
             );
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -965,7 +971,7 @@ mod tests {
             );
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -1022,7 +1028,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
         table.init_epoch(epoch);
 
         {
@@ -1037,7 +1043,7 @@ mod tests {
             );
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -1054,7 +1060,7 @@ mod tests {
             );
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -1107,7 +1113,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
         table.init_epoch(epoch);
         {
             let chunk = create_chunk(
@@ -1121,7 +1127,7 @@ mod tests {
             );
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -1138,7 +1144,7 @@ mod tests {
             );
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;

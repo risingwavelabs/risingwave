@@ -15,14 +15,14 @@
 use futures_async_stream::try_stream;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{Array, DataChunk};
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::Schema;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::{repeat_n, RowExt};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::expr::{
     build_from_prost as expr_build_from_prost, BoxedExpression, Expression,
 };
@@ -52,7 +52,7 @@ pub struct NestedLoopJoinExecutor {
     /// Actual output schema
     schema: Schema,
     /// We may only need certain columns.
-    /// output_indices are the indices of the columns that we needed.
+    /// `output_indices` are the indices of the columns that we needed.
     output_indices: Vec<usize>,
     /// Left child executor
     left_child: BoxedExecutor,
@@ -98,7 +98,9 @@ impl NestedLoopJoinExecutor {
             for chunk in self.left_child.execute() {
                 let c = chunk?;
                 trace!("Estimated chunk size is {:?}", c.estimated_heap_size());
-                self.mem_context.add(c.estimated_heap_size() as i64);
+                if !self.mem_context.add(c.estimated_heap_size() as i64) {
+                    Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
+                }
                 ret.push(c);
             }
             ret
@@ -527,8 +529,6 @@ mod tests {
     const CHUNK_SIZE: usize = 1024;
 
     struct TestFixture {
-        left_types: Vec<DataType>,
-        right_types: Vec<DataType>,
         join_type: JoinType,
     }
 
@@ -549,11 +549,7 @@ mod tests {
     /// ```
     impl TestFixture {
         fn with_join_type(join_type: JoinType) -> Self {
-            Self {
-                left_types: vec![DataType::Int32, DataType::Float32],
-                right_types: vec![DataType::Int32, DataType::Float64],
-                join_type,
-            }
+            Self { join_type }
         }
 
         fn create_left_executor(&self) -> BoxedExecutor {

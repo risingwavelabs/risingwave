@@ -31,7 +31,7 @@ use risingwave_storage::hummock::vacuum::Vacuum;
 
 #[tokio::test]
 async fn test_vacuum() {
-    let sstable_store = mock_sstable_store();
+    let sstable_store = mock_sstable_store().await;
     // Put some SSTs to object store
     let object_ids = (1..10).collect_vec();
     let mut sstables = vec![];
@@ -70,7 +70,7 @@ async fn test_vacuum() {
 async fn test_full_scan() {
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
-    let sstable_store = mock_sstable_store();
+    let sstable_store = mock_sstable_store().await;
     let _mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref,
         worker_node.id,
@@ -92,6 +92,7 @@ async fn test_full_scan() {
 
     let task = FullScanTask {
         sst_retention_time_sec: 10000,
+        prefix: None,
     };
     let (scan_result, _, _) = Vacuum::full_scan_inner(task, object_metadata_iter.clone())
         .await
@@ -100,6 +101,7 @@ async fn test_full_scan() {
 
     let task = FullScanTask {
         sst_retention_time_sec: 6000,
+        prefix: None,
     };
     let (scan_result, _, _) = Vacuum::full_scan_inner(task, object_metadata_iter.clone())
         .await
@@ -108,6 +110,7 @@ async fn test_full_scan() {
 
     let task = FullScanTask {
         sst_retention_time_sec: 2000,
+        prefix: None,
     };
     let (scan_result, _, _) = Vacuum::full_scan_inner(task, object_metadata_iter)
         .await

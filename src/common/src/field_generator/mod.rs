@@ -18,6 +18,7 @@ mod varchar;
 
 use std::time::Duration;
 
+// TODO(error-handling): use a new error type
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, FixedOffset};
 pub use numeric::*;

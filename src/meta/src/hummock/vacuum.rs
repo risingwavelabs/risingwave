@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::VacuumTask;
@@ -34,7 +35,7 @@ pub struct VacuumManager {
     env: MetaSrvEnv,
     hummock_manager: HummockManagerRef,
     backup_manager: BackupManagerRef,
-    /// Use the CompactorManager to dispatch VacuumTask.
+    /// Use the `CompactorManager` to dispatch `VacuumTask`.
     compactor_manager: CompactorManagerRef,
     /// SST object ids which have been dispatched to vacuum nodes but are not replied yet.
     pending_object_ids: parking_lot::RwLock<HashSet<HummockSstableObjectId>>,
@@ -76,6 +77,16 @@ impl VacuumManager {
                 break;
             }
         }
+        if self.env.opts.enable_hummock_time_travel {
+            let current_epoch_time = Epoch::now().physical_time();
+            let epoch_watermark = Epoch::from_physical_time(
+                current_epoch_time.saturating_sub(self.env.opts.hummock_time_travel_retention_ms),
+            )
+            .0;
+            self.hummock_manager
+                .truncate_time_travel_metadata(epoch_watermark)
+                .await?;
+        }
         Ok(total_deleted)
     }
 
@@ -95,7 +106,7 @@ impl VacuumManager {
                 pending_object_ids
             } else {
                 // 2. If no pending SST objects, then fetch new ones.
-                let mut objects_to_delete = self.hummock_manager.get_objects_to_delete().await;
+                let mut objects_to_delete = self.hummock_manager.get_objects_to_delete();
                 self.filter_out_pinned_ssts(&mut objects_to_delete).await?;
                 if objects_to_delete.is_empty() {
                     return Ok(vec![]);
@@ -165,6 +176,9 @@ impl VacuumManager {
         &self,
         objects_to_delete: &mut Vec<HummockSstableObjectId>,
     ) -> MetaResult<()> {
+        if objects_to_delete.is_empty() {
+            return Ok(());
+        }
         let reject = self.backup_manager.list_pinned_ssts();
         // Ack these SSTs immediately, because they tend to be pinned for long time.
         // They will be GCed during full GC when they are no longer pinned.
@@ -228,40 +242,29 @@ mod tests {
             backup_manager,
             compactor_manager.clone(),
         ));
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
-        assert_eq!(
-            VacuumManager::vacuum_object(&vacuum).await.unwrap().len(),
-            0
-        );
+        assert_eq!(vacuum.vacuum_metadata().await.unwrap(), 0);
+        assert_eq!(vacuum.vacuum_object().await.unwrap().len(), 0);
         hummock_manager.pin_version(context_id).await.unwrap();
         let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
+        assert_eq!(vacuum.vacuum_metadata().await.unwrap(), 0);
         hummock_manager.create_version_checkpoint(1).await.unwrap();
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 6);
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
+        assert_eq!(vacuum.vacuum_metadata().await.unwrap(), 6);
+        assert_eq!(vacuum.vacuum_metadata().await.unwrap(), 0);
 
-        assert!(hummock_manager.get_objects_to_delete().await.is_empty());
+        assert!(hummock_manager.get_objects_to_delete().is_empty());
         hummock_manager
             .unpin_version_before(context_id, HummockVersionId::MAX)
             .await
             .unwrap();
-        assert!(!hummock_manager.get_objects_to_delete().await.is_empty());
+        hummock_manager.create_version_checkpoint(0).await.unwrap();
+        assert!(!hummock_manager.get_objects_to_delete().is_empty());
         // No SST deletion is scheduled because no available worker.
-        assert_eq!(
-            VacuumManager::vacuum_object(&vacuum).await.unwrap().len(),
-            0
-        );
+        assert_eq!(vacuum.vacuum_object().await.unwrap().len(), 0);
         let _receiver = compactor_manager.add_compactor(context_id);
         // SST deletion is scheduled.
-        assert_eq!(
-            VacuumManager::vacuum_object(&vacuum).await.unwrap().len(),
-            3
-        );
+        assert_eq!(vacuum.vacuum_object().await.unwrap().len(), 3);
         // The deletion is not acked yet.
-        assert_eq!(
-            VacuumManager::vacuum_object(&vacuum).await.unwrap().len(),
-            3
-        );
+        assert_eq!(vacuum.vacuum_object().await.unwrap().len(), 3);
         // The vacuum task is reported.
         vacuum
             .report_vacuum_task(VacuumTask {
@@ -269,15 +272,12 @@ mod tests {
                     .first()
                     .unwrap()
                     .iter()
-                    .map(|s| s.get_object_id())
+                    .map(|s| s.object_id)
                     .collect_vec(),
             })
             .await
             .unwrap();
         // No objects_to_delete.
-        assert_eq!(
-            VacuumManager::vacuum_object(&vacuum).await.unwrap().len(),
-            0
-        );
+        assert_eq!(vacuum.vacuum_object().await.unwrap().len(), 0);
     }
 }

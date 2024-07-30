@@ -1,7 +1,7 @@
 import sys
 import subprocess
 
-relations = ['hot_hashtags']
+relations = ['hot_hashtags', 'tidb_sink_datatypes']
 
 failed_cases = []
 for rel in relations:

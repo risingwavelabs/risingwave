@@ -15,10 +15,14 @@
 use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
-use more_asserts::assert_gt;
+use more_asserts::{assert_gt, assert_lt};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
-use super::{HummockResult, HummockValue};
+use super::{
+    HummockResult, HummockValue, SstableIteratorReadOptions, SstableIteratorType, SstableStoreRef,
+};
 
 mod forward_concat;
 pub use forward_concat::*;
@@ -37,22 +41,31 @@ mod merge_inner;
 pub use forward_user::*;
 pub use merge_inner::MergeIterator;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::EpochWithGap;
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
 
+pub mod change_log;
 mod concat_delete_range_iterator;
 mod delete_range_iterator;
 mod skip_watermark;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
+
 pub use delete_range_iterator::{
     DeleteRangeIterator, ForwardMergeRangeIterator, RangeIteratorTyped,
 };
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::EpochWithGap;
 pub use skip_watermark::*;
 
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::monitor::StoreLocalStatistic;
+
+#[derive(Default)]
+pub struct ValueMeta {
+    pub object_id: Option<u64>,
+    pub block_id: Option<u64>,
+}
 
 /// `HummockIterator` defines the interface of all iterators, including `SstableIterator`,
 /// `MergeIterator`, `UserIterator` and `ConcatIterator`.
@@ -60,7 +73,7 @@ use crate::monitor::StoreLocalStatistic;
 /// After creating the iterator instance,
 /// - if you want to iterate from the beginning, you need to then call its `rewind` method.
 /// - if you want to iterate from some specific position, you need to then call its `seek` method.
-pub trait HummockIterator: Send + Sync {
+pub trait HummockIterator: Send {
     type Direction: HummockIteratorDirection;
     /// Moves a valid iterator to the next key.
     ///
@@ -125,6 +138,9 @@ pub trait HummockIterator: Send + Sync {
 
     /// take local statistic info from iterator to report metrics.
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic);
+
+    /// Returns value meta.
+    fn value_meta(&self) -> ValueMeta;
 }
 
 /// This is a placeholder trait used in `HummockIteratorUnion`
@@ -160,6 +176,10 @@ impl<D: HummockIteratorDirection> HummockIterator for PhantomHummockIterator<D> 
     }
 
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
+
+    fn value_meta(&self) -> ValueMeta {
+        unreachable!()
+    }
 }
 
 /// The `HummockIteratorUnion` acts like a wrapper over multiple types of `HummockIterator`, so that
@@ -259,6 +279,15 @@ impl<
             Fourth(iter) => iter.collect_local_statistic(stats),
         }
     }
+
+    fn value_meta(&self) -> ValueMeta {
+        match self {
+            First(iter) => iter.value_meta(),
+            Second(iter) => iter.value_meta(),
+            Third(iter) => iter.value_meta(),
+            Fourth(iter) => iter.value_meta(),
+        }
+    }
 }
 
 impl<I: HummockIterator> HummockIterator for Box<I> {
@@ -291,6 +320,10 @@ impl<I: HummockIterator> HummockIterator for Box<I> {
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         (*self).deref().collect_local_statistic(stats);
     }
+
+    fn value_meta(&self) -> ValueMeta {
+        (*self).deref().value_meta()
+    }
 }
 
 pub enum RustIteratorOfBuilder<'a, B: RustIteratorBuilder> {
@@ -311,6 +344,7 @@ impl<'a, B: RustIteratorBuilder> Iterator for RustIteratorOfBuilder<'a, B> {
 
 pub trait RustIteratorBuilder: Send + Sync + 'static {
     type Iterable: Send + Sync;
+    type Direction: HummockIteratorDirection;
     type RewindIter<'a>: Iterator<Item = (TableKey<&'a [u8]>, HummockValue<&'a [u8]>)>
         + Send
         + Sync
@@ -345,10 +379,86 @@ impl<'a, B: RustIteratorBuilder> FromRustIterator<'a, B> {
             table_id,
         }
     }
+
+    async fn seek_inner<'b>(&'b mut self, key: FullKey<&'b [u8]>) -> HummockResult<()> {
+        match self.table_id.cmp(&key.user_key.table_id) {
+            std::cmp::Ordering::Less => {
+                self.iter = None;
+                return Ok(());
+            }
+            std::cmp::Ordering::Greater => {
+                return self.rewind().await;
+            }
+            _ => {}
+        }
+        let mut iter = B::seek(self.inner, key.user_key.table_key);
+        match iter.next() {
+            Some((first_key, first_value)) => {
+                if first_key.eq(&key.user_key.table_key) && self.epoch > key.epoch_with_gap {
+                    // The semantic of `seek_fn` will ensure that `first_key` >= table_key of `key`.
+                    // At the beginning we have checked that `self.table_id` >= table_id of `key`.
+                    match iter.next() {
+                        Some((next_key, next_value)) => {
+                            assert_gt!(next_key, first_key);
+                            self.iter =
+                                Some((RustIteratorOfBuilder::Seek(iter), next_key, next_value));
+                        }
+                        None => {
+                            self.iter = None;
+                        }
+                    }
+                } else {
+                    self.iter = Some((RustIteratorOfBuilder::Seek(iter), first_key, first_value));
+                }
+            }
+            None => {
+                self.iter = None;
+            }
+        }
+        Ok(())
+    }
+
+    async fn rev_seek_inner<'b>(&'b mut self, key: FullKey<&'b [u8]>) -> HummockResult<()> {
+        match self.table_id.cmp(&key.user_key.table_id) {
+            std::cmp::Ordering::Less => {
+                return self.rewind().await;
+            }
+            std::cmp::Ordering::Greater => {
+                self.iter = None;
+                return Ok(());
+            }
+            _ => {}
+        }
+        let mut iter = B::seek(self.inner, key.user_key.table_key);
+        match iter.next() {
+            Some((first_key, first_value)) => {
+                if first_key.eq(&key.user_key.table_key) && self.epoch < key.epoch_with_gap {
+                    // The semantic of `seek_fn` will ensure that `first_key` <= table_key of `key`.
+                    // At the beginning we have checked that `self.table_id` <= table_id of `key`.
+                    match iter.next() {
+                        Some((next_key, next_value)) => {
+                            assert_lt!(next_key, first_key);
+                            self.iter =
+                                Some((RustIteratorOfBuilder::Seek(iter), next_key, next_value));
+                        }
+                        None => {
+                            self.iter = None;
+                        }
+                    }
+                } else {
+                    self.iter = Some((RustIteratorOfBuilder::Seek(iter), first_key, first_value));
+                }
+            }
+            None => {
+                self.iter = None;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
-    type Direction = Forward;
+    type Direction = B::Direction;
 
     async fn next(&mut self) -> HummockResult<()> {
         let (iter, key, value) = self.iter.as_mut().expect("should be valid");
@@ -392,53 +502,17 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
     }
 
     async fn seek<'b>(&'b mut self, key: FullKey<&'b [u8]>) -> HummockResult<()> {
-        if self.table_id < key.user_key.table_id {
-            // returns None when the range of self.table_id must not include the given key
-            self.iter = None;
-            return Ok(());
+        match Self::Direction::direction() {
+            DirectionEnum::Forward => self.seek_inner(key).await,
+            DirectionEnum::Backward => self.rev_seek_inner(key).await,
         }
-        if self.table_id > key.user_key.table_id {
-            return self.rewind().await;
-        }
-        let mut iter = B::seek(self.inner, key.user_key.table_key);
-        match iter.next() {
-            Some((first_key, first_value)) => {
-                let first_full_key = FullKey {
-                    epoch_with_gap: self.epoch,
-                    user_key: UserKey {
-                        table_id: self.table_id,
-                        table_key: first_key,
-                    },
-                };
-                if first_full_key < key {
-                    // The semantic of `seek_fn` will ensure that `first_key` >= table_key of `key`.
-                    // At the beginning we have checked that `self.table_id` >= table_id of `key`.
-                    // Therefore, when `first_full_key` < `key`, the only possibility is that
-                    // `first_key` == table_key of `key`, and `self.table_id` == table_id of `key`,
-                    // the `self.epoch` < epoch of `key`.
-                    assert_eq!(first_key, key.user_key.table_key);
-                    match iter.next() {
-                        Some((next_key, next_value)) => {
-                            assert_gt!(next_key, first_key);
-                            self.iter =
-                                Some((RustIteratorOfBuilder::Seek(iter), next_key, next_value));
-                        }
-                        None => {
-                            self.iter = None;
-                        }
-                    }
-                } else {
-                    self.iter = Some((RustIteratorOfBuilder::Seek(iter), first_key, first_value));
-                }
-            }
-            None => {
-                self.iter = None;
-            }
-        }
-        Ok(())
     }
 
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
+
+    fn value_meta(&self) -> ValueMeta {
+        ValueMeta::default()
+    }
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -465,4 +539,18 @@ impl HummockIteratorDirection for Backward {
     fn direction() -> DirectionEnum {
         DirectionEnum::Backward
     }
+}
+
+pub trait IteratorFactory {
+    type Direction: HummockIteratorDirection;
+    type SstableIteratorType: SstableIteratorType<Direction = Self::Direction>;
+    fn add_batch_iter(&mut self, batch: SharedBufferBatch);
+    fn add_staging_sst_iter(&mut self, sst: Self::SstableIteratorType);
+    fn add_overlapping_sst_iter(&mut self, iter: Self::SstableIteratorType);
+    fn add_concat_sst_iter(
+        &mut self,
+        tables: Vec<SstableInfo>,
+        sstable_store: SstableStoreRef,
+        read_options: Arc<SstableIteratorReadOptions>,
+    );
 }

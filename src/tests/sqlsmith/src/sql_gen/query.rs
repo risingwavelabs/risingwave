@@ -130,11 +130,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_with_inner(&mut self) -> (With, Vec<Table>) {
         let alias = self.gen_table_alias_with_prefix("with");
         let (query, query_schema) = self.gen_local_query();
-        let from = None;
         let cte = Cte {
             alias: alias.clone(),
-            query,
-            from,
+            cte_inner: risingwave_sqlparser::ast::CteInner::Query(query),
         };
 
         let with_tables = vec![Table::new(alias.name.real_value(), query_schema)];
@@ -264,7 +262,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         match self.rng.gen_range(0..=9) {
             0..=8 => {
                 let group_by_cols = self.gen_random_bound_columns();
-                self.bound_columns = group_by_cols.clone();
+                self.bound_columns.clone_from(&group_by_cols);
                 group_by_cols
                     .into_iter()
                     .map(|c| Expr::Identifier(Ident::new_unchecked(c.name)))

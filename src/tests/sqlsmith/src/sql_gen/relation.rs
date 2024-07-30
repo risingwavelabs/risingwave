@@ -67,7 +67,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 name: alias.as_str().into(),
                 columns: vec![],
             }),
-            for_system_time_as_of_proctime: false,
+            as_of: None,
         };
         table.name = alias; // Rename the table.
         (table_factor, table)

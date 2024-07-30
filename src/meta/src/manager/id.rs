@@ -15,7 +15,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use risingwave_common::catalog::{NON_RESERVED_SYS_CATALOG_ID, NON_RESERVED_USER_ID};
+use risingwave_common::catalog::NON_RESERVED_USER_ID;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use thiserror_ext::AsReport;
 use tokio::sync::RwLock;
@@ -128,7 +128,6 @@ pub mod IdCategory {
     pub const Actor: IdCategoryType = 6;
     pub const Backup: IdCategoryType = 7;
     pub const HummockSstableId: IdCategoryType = 8;
-    pub const ParallelUnit: IdCategoryType = 9;
     pub const _Source: IdCategoryType = 10;
     pub const HummockCompactionTask: IdCategoryType = 11;
     pub const User: IdCategoryType = 12;
@@ -137,6 +136,8 @@ pub mod IdCategory {
     pub const CompactionGroup: IdCategoryType = 15;
     pub const Function: IdCategoryType = 16;
     pub const Connection: IdCategoryType = 17;
+
+    pub const Secret: IdCategoryType = 18;
 }
 
 pub type IdGeneratorManagerRef = Arc<IdGeneratorManager>;
@@ -157,9 +158,9 @@ pub struct IdGeneratorManager {
     backup: Arc<StoredIdGenerator>,
     hummock_ss_table_id: Arc<StoredIdGenerator>,
     hummock_compaction_task: Arc<StoredIdGenerator>,
-    parallel_unit: Arc<StoredIdGenerator>,
     compaction_group: Arc<StoredIdGenerator>,
     connection: Arc<StoredIdGenerator>,
+    secret: Arc<StoredIdGenerator>,
 }
 
 impl IdGeneratorManager {
@@ -169,14 +170,7 @@ impl IdGeneratorManager {
             test: Arc::new(StoredIdGenerator::new(meta_store.clone(), "test", None).await),
             database: Arc::new(StoredIdGenerator::new(meta_store.clone(), "database", None).await),
             schema: Arc::new(StoredIdGenerator::new(meta_store.clone(), "schema", None).await),
-            table: Arc::new(
-                StoredIdGenerator::new(
-                    meta_store.clone(),
-                    "table",
-                    Some(NON_RESERVED_SYS_CATALOG_ID as u64),
-                )
-                .await,
-            ),
+            table: Arc::new(StoredIdGenerator::new(meta_store.clone(), "table", Some(1)).await),
             function: Arc::new(StoredIdGenerator::new(meta_store.clone(), "function", None).await),
             worker: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "worker", Some(META_NODE_ID as u64 + 1))
@@ -202,9 +196,6 @@ impl IdGeneratorManager {
                 StoredIdGenerator::new(meta_store.clone(), "hummock_compaction_task", Some(1))
                     .await,
             ),
-            parallel_unit: Arc::new(
-                StoredIdGenerator::new(meta_store.clone(), "parallel_unit", None).await,
-            ),
             compaction_group: Arc::new(
                 StoredIdGenerator::new(
                     meta_store.clone(),
@@ -216,6 +207,7 @@ impl IdGeneratorManager {
             connection: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "connection", None).await,
             ),
+            secret: Arc::new(StoredIdGenerator::new(meta_store.clone(), "secret", None).await),
         }
     }
 
@@ -233,10 +225,10 @@ impl IdGeneratorManager {
             IdCategory::Backup => &self.backup,
             IdCategory::Worker => &self.worker,
             IdCategory::HummockSstableId => &self.hummock_ss_table_id,
-            IdCategory::ParallelUnit => &self.parallel_unit,
             IdCategory::HummockCompactionTask => &self.hummock_compaction_task,
             IdCategory::CompactionGroup => &self.compaction_group,
             IdCategory::Connection => &self.connection,
+            IdCategory::Secret => &self.secret,
             _ => unreachable!(),
         }
     }

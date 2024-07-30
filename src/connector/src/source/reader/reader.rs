@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -24,18 +23,20 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::ColumnId;
 use rw_futures_util::select_all;
+use thiserror_ext::AsReport as _;
 
-use crate::dispatch_source_prop;
+use crate::error::ConnectorResult;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use crate::source::filesystem::opendal_source::{
     OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
 };
-use crate::source::filesystem::FsPageItem;
+use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{
     create_split_reader, BoxChunkSourceStream, BoxTryStream, Column, ConnectorProperties,
-    ConnectorState, SourceColumnDesc, SourceContext, SplitReader,
+    ConnectorState, SourceColumnDesc, SourceContext, SplitReader, WaitCheckpointTask,
 };
+use crate::{dispatch_source_prop, WithOptionsSecResolved};
 
 #[derive(Clone, Debug)]
 pub struct SourceReader {
@@ -47,11 +48,11 @@ pub struct SourceReader {
 
 impl SourceReader {
     pub fn new(
-        properties: HashMap<String, String>,
+        properties: WithOptionsSecResolved,
         columns: Vec<SourceColumnDesc>,
         connector_message_buffer_size: usize,
         parser_config: SpecificParserConfig,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let config = ConnectorProperties::extract(properties, false)?;
 
         Ok(Self {
@@ -65,7 +66,7 @@ impl SourceReader {
     fn get_target_columns(
         &self,
         column_ids: Vec<ColumnId>,
-    ) -> anyhow::Result<Vec<SourceColumnDesc>> {
+    ) -> ConnectorResult<Vec<SourceColumnDesc>> {
         column_ids
             .iter()
             .map(|id| {
@@ -78,9 +79,10 @@ impl SourceReader {
                     .cloned()
             })
             .try_collect()
+            .map_err(Into::into)
     }
 
-    pub fn get_source_list(&self) -> anyhow::Result<BoxTryStream<FsPageItem>> {
+    pub fn get_source_list(&self) -> ConnectorResult<BoxTryStream<FsPageItem>> {
         let config = self.config.clone();
         match config {
             ConnectorProperties::Gcs(prop) => {
@@ -102,12 +104,27 @@ impl SourceReader {
         }
     }
 
-    pub async fn to_stream(
+    /// Refer to `WaitCheckpointWorker` for more details.
+    pub async fn create_wait_checkpoint_task(&self) -> ConnectorResult<Option<WaitCheckpointTask>> {
+        Ok(match &self.config {
+            ConnectorProperties::PostgresCdc(_prop) => {
+                Some(WaitCheckpointTask::CommitCdcOffset(None))
+            }
+            ConnectorProperties::GooglePubsub(prop) => Some(WaitCheckpointTask::AckPubsubMessage(
+                prop.subscription_client().await?,
+                vec![],
+            )),
+            _ => None,
+        })
+    }
+
+    /// Build `SplitReader`s and then `BoxChunkSourceStream` from the given `ConnectorState` (`SplitImpl`s).
+    pub async fn build_stream(
         &self,
         state: ConnectorState,
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
-    ) -> anyhow::Result<BoxChunkSourceStream> {
+    ) -> ConnectorResult<BoxChunkSourceStream> {
         let Some(splits) = state else {
             return Ok(pending().boxed());
         };
@@ -146,9 +163,8 @@ impl SourceReader {
                 vec![reader]
             } else {
                 let to_reader_splits = splits.into_iter().map(|split| vec![split]);
-
                 try_join_all(to_reader_splits.into_iter().map(|splits| {
-                    tracing::debug!(?splits, ?prop, "spawning connector split reader");
+                    tracing::debug!(?splits, "spawning connector split reader");
                     let props = prop.clone();
                     let data_gen_columns = data_gen_columns.clone();
                     let parser_config = parser_config.clone();
@@ -165,7 +181,7 @@ impl SourceReader {
     }
 }
 
-#[try_stream(boxed, ok = FsPageItem, error = anyhow::Error)]
+#[try_stream(boxed, ok = FsPageItem, error = crate::error::ConnectorError)]
 async fn build_opendal_fs_list_stream<Src: OpendalSource>(lister: OpendalEnumerator<Src>) {
     let matcher = lister.get_matcher();
     let mut object_metadata_iter = lister.list().await?;
@@ -185,7 +201,34 @@ async fn build_opendal_fs_list_stream<Src: OpendalSource>(lister: OpendalEnumera
                 }
             }
             Err(err) => {
-                tracing::error!("list object fail, err {}", err);
+                tracing::error!(error = %err.as_report(), "list object fail");
+                return Err(err);
+            }
+        }
+    }
+}
+
+#[try_stream(boxed, ok = OpendalFsSplit<Src>,  error = crate::error::ConnectorError)]
+pub async fn build_opendal_fs_list_for_batch<Src: OpendalSource>(lister: OpendalEnumerator<Src>) {
+    let matcher = lister.get_matcher();
+    let mut object_metadata_iter = lister.list().await?;
+
+    while let Some(list_res) = object_metadata_iter.next().await {
+        match list_res {
+            Ok(res) => {
+                if matcher
+                    .as_ref()
+                    .map(|m| m.matches(&res.name))
+                    .unwrap_or(true)
+                {
+                    let split = OpendalFsSplit::new(res.name, 0, res.size as usize);
+                    yield split
+                } else {
+                    continue;
+                }
+            }
+            Err(err) => {
+                tracing::error!(error = %err.as_report(), "list object fail");
                 return Err(err);
             }
         }

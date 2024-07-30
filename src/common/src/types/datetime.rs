@@ -17,19 +17,22 @@
 use std::error::Error;
 use std::fmt::Display;
 use std::hash::Hash;
-use std::io::Write;
+use std::io::{Cursor, Write};
 use std::str::FromStr;
 
-use bytes::{Bytes, BytesMut};
-use chrono::{Datelike, Days, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday};
-use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
+use anyhow::Context;
+use byteorder::{BigEndian, ReadBytesExt};
+use bytes::BytesMut;
+use chrono::{
+    DateTime, Datelike, Days, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday,
+};
+use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
+use risingwave_common_estimate_size::ZeroHeapSize;
 use thiserror::Error;
 
-use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::{CheckedAdd, DataType, Interval};
 use crate::array::{ArrayError, ArrayResult};
-use crate::estimate_size::ZeroHeapSize;
 
 /// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
 /// Minus this magic number to store the number of days since 1970-01-01.
@@ -88,6 +91,20 @@ impl ToSql for Date {
     }
 }
 
+impl<'a> FromSql<'a> for Date {
+    fn from_sql(
+        ty: &Type,
+        raw: &'a [u8],
+    ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let instant = NaiveDate::from_sql(ty, raw)?;
+        Ok(Self::from(instant))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::DATE)
+    }
+}
+
 impl ToSql for Time {
     accepts!(TIME);
 
@@ -105,6 +122,20 @@ impl ToSql for Time {
     }
 }
 
+impl<'a> FromSql<'a> for Time {
+    fn from_sql(
+        ty: &Type,
+        raw: &'a [u8],
+    ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let instant = NaiveTime::from_sql(ty, raw)?;
+        Ok(Self::from(instant))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::TIME)
+    }
+}
+
 impl ToSql for Timestamp {
     accepts!(TIMESTAMP);
 
@@ -119,6 +150,20 @@ impl ToSql for Timestamp {
         Self: Sized,
     {
         self.0.to_sql(ty, out)
+    }
+}
+
+impl<'a> FromSql<'a> for Timestamp {
+    fn from_sql(
+        ty: &Type,
+        raw: &'a [u8],
+    ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let instant = NaiveDateTime::from_sql(ty, raw)?;
+        Ok(Self::from(instant))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::TIMESTAMP)
     }
 }
 
@@ -328,17 +373,15 @@ impl ToText for Date {
     /// ```
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
         let (ce, year) = self.0.year_ce();
-        if ce {
-            write!(f, "{}", self.0)
-        } else {
-            write!(
-                f,
-                "{:04}-{:02}-{:02} BC",
-                year,
-                self.0.month(),
-                self.0.day()
-            )
-        }
+        let suffix = if ce { "" } else { " BC" };
+        write!(
+            f,
+            "{:04}-{:02}-{:02}{}",
+            year,
+            self.0.month(),
+            self.0.day(),
+            suffix
+        )
     }
 
     fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
@@ -364,7 +407,17 @@ impl ToText for Time {
 
 impl ToText for Timestamp {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        let (ce, year) = self.0.year_ce();
+        let suffix = if ce { "" } else { " BC" };
+        write!(
+            f,
+            "{:04}-{:02}-{:02} {}{}",
+            year,
+            self.0.month(),
+            self.0.day(),
+            self.0.time(),
+            suffix
+        )
     }
 
     fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
@@ -375,47 +428,8 @@ impl ToText for Timestamp {
     }
 }
 
-impl ToBinary for Date {
-    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
-        match ty {
-            super::DataType::Date => {
-                let mut output = BytesMut::new();
-                self.0.to_sql(&Type::ANY, &mut output).unwrap();
-                Ok(Some(output.freeze()))
-            }
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl ToBinary for Time {
-    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
-        match ty {
-            super::DataType::Time => {
-                let mut output = BytesMut::new();
-                self.0.to_sql(&Type::ANY, &mut output).unwrap();
-                Ok(Some(output.freeze()))
-            }
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl ToBinary for Timestamp {
-    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
-        match ty {
-            super::DataType::Timestamp => {
-                let mut output = BytesMut::new();
-                self.0.to_sql(&Type::ANY, &mut output).unwrap();
-                Ok(Some(output.freeze()))
-            }
-            _ => unreachable!(),
-        }
-    }
-}
-
 impl Date {
-    pub fn with_days(days: i32) -> Result<Self> {
+    pub fn with_days_since_ce(days: i32) -> Result<Self> {
         Ok(Date::new(
             NaiveDate::from_num_days_from_ce_opt(days)
                 .ok_or_else(|| InvalidParamsError::date(days))?,
@@ -438,6 +452,14 @@ impl Date {
             .num_days_from_ce()
     }
 
+    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<Date> {
+        let days = cur
+            .read_i32::<BigEndian>()
+            .context("failed to read i32 from Date buffer")?;
+
+        Ok(Date::with_days_since_ce(days)?)
+    }
+
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output
             .write(&(self.0.num_days_from_ce()).to_be_bytes())
@@ -449,7 +471,7 @@ impl Date {
     }
 
     pub fn from_num_days_from_ce_uncheck(days: i32) -> Self {
-        Self::with_days(days).unwrap()
+        Self::with_days_since_ce(days).unwrap()
     }
 
     pub fn and_hms_uncheck(self, hour: u32, min: u32, sec: u32) -> Timestamp {
@@ -470,6 +492,14 @@ impl Time {
             NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
                 .ok_or_else(|| InvalidParamsError::time(secs, nano))?,
         ))
+    }
+
+    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<Time> {
+        let nano = cur
+            .read_u64::<BigEndian>()
+            .context("failed to read u64 from Time buffer")?;
+
+        Ok(Time::with_nano(nano)?)
     }
 
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
@@ -520,20 +550,29 @@ impl Time {
 impl Timestamp {
     pub fn with_secs_nsecs(secs: i64, nsecs: u32) -> Result<Self> {
         Ok(Timestamp::new({
-            NaiveDateTime::from_timestamp_opt(secs, nsecs)
+            DateTime::from_timestamp(secs, nsecs)
+                .map(|t| t.naive_utc())
                 .ok_or_else(|| InvalidParamsError::datetime(secs, nsecs))?
         }))
+    }
+
+    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<Timestamp> {
+        let micros = cur
+            .read_i64::<BigEndian>()
+            .context("failed to read i64 from Timestamp buffer")?;
+
+        Ok(Timestamp::with_micros(micros)?)
     }
 
     /// Although `Timestamp` takes 12 bytes, we drop 4 bytes in protobuf encoding.
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output
-            .write(&(self.0.timestamp_micros()).to_be_bytes())
+            .write(&(self.0.and_utc().timestamp_micros()).to_be_bytes())
             .map_err(Into::into)
     }
 
     pub fn get_timestamp_nanos(&self) -> i64 {
-        self.0.timestamp_nanos_opt().unwrap()
+        self.0.and_utc().timestamp_nanos_opt().unwrap()
     }
 
     pub fn with_millis(timestamp_millis: i64) -> Result<Self> {
@@ -549,7 +588,7 @@ impl Timestamp {
     }
 
     pub fn from_timestamp_uncheck(secs: i64, nsecs: u32) -> Self {
-        Self::new(NaiveDateTime::from_timestamp_opt(secs, nsecs).unwrap())
+        Self::new(DateTime::from_timestamp(secs, nsecs).unwrap().naive_utc())
     }
 
     /// Truncate the timestamp to the precision of microseconds.
@@ -829,10 +868,10 @@ mod tests {
             Timestamp::from_str("2022-08-03 10:34:02").unwrap()
         );
         let ts = Timestamp::from_str("0001-11-15 07:35:40.999999").unwrap();
-        assert_eq!(ts.0.timestamp_micros(), -62108094259000001);
+        assert_eq!(ts.0.and_utc().timestamp_micros(), -62108094259000001);
 
         let ts = Timestamp::from_str("1969-12-31 23:59:59.999999").unwrap();
-        assert_eq!(ts.0.timestamp_micros(), -1);
+        assert_eq!(ts.0.and_utc().timestamp_micros(), -1);
 
         // invalid datetime
         Date::from_str("1999-01-08AA").unwrap_err();

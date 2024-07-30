@@ -58,16 +58,17 @@ use crate::util::chunk_coalesce::DataChunkBuilder;
 /// }
 /// ```
 pub trait Fields {
+    /// The primary key of the table.
+    ///
+    /// - `None` if the primary key is not applicable.
+    /// - `Some(&[])` if the primary key is empty, i.e., there'll be at most one row in the table.
+    const PRIMARY_KEY: Option<&'static [usize]>;
+
     /// Return the schema of the struct.
     fn fields() -> Vec<(&'static str, DataType)>;
 
     /// Convert the struct to an `OwnedRow`.
     fn into_owned_row(self) -> OwnedRow;
-
-    /// The primary key of the table.
-    fn primary_key() -> &'static [usize] {
-        &[]
-    }
 
     /// Create a [`DataChunkBuilder`](crate::util::chunk_coalesce::DataChunkBuilder) with the schema of the struct.
     fn data_chunk_builder(capacity: usize) -> DataChunkBuilder {

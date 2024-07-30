@@ -17,26 +17,28 @@ use std::sync::Arc;
 use anyhow::Context;
 use itertools::Itertools;
 use prost_reflect::{
-    Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor,
-    ReflectMessage, Value,
+    Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, FileDescriptor, Kind,
+    MessageDescriptor, ReflectMessage, Value,
 };
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::types::{DataType, Datum, Decimal, JsonbVal, ScalarImpl, F32, F64};
+use risingwave_common::types::{
+    DataType, Datum, DatumCow, Decimal, JsonbRef, JsonbVal, ScalarImpl, ScalarRefImpl, ToDatumRef,
+    ToOwnedDatum, F32, F64,
+};
 use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
 use thiserror::Error;
 use thiserror_ext::{AsReport, Macro};
 
-use super::schema_resolver::*;
+use crate::error::ConnectorResult;
 use crate::parser::unified::protobuf::ProtobufAccess;
 use crate::parser::unified::{
     bail_uncategorized, uncategorized, AccessError, AccessImpl, AccessResult,
 };
 use crate::parser::util::bytes_from_url;
 use crate::parser::{AccessBuilder, EncodingProperties};
-use crate::schema::schema_registry::{
-    extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
-};
+use crate::schema::schema_registry::{extract_schema_id, handle_sr_list, Client, WireFormatError};
+use crate::schema::SchemaLoader;
 
 #[derive(Debug)]
 pub struct ProtobufAccessBuilder {
@@ -47,7 +49,7 @@ pub struct ProtobufAccessBuilder {
 
 impl AccessBuilder for ProtobufAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> anyhow::Result<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
         let payload = if self.confluent_wire_type {
             resolve_pb_header(&payload)?
         } else {
@@ -65,7 +67,7 @@ impl AccessBuilder for ProtobufAccessBuilder {
 }
 
 impl ProtobufAccessBuilder {
-    pub fn new(config: ProtobufParserConfig) -> anyhow::Result<Self> {
+    pub fn new(config: ProtobufParserConfig) -> ConnectorResult<Self> {
         let ProtobufParserConfig {
             confluent_wire_type,
             message_descriptor,
@@ -89,7 +91,7 @@ pub struct ProtobufParserConfig {
 }
 
 impl ProtobufParserConfig {
-    pub async fn new(encoding_properties: EncodingProperties) -> anyhow::Result<Self> {
+    pub async fn new(encoding_properties: EncodingProperties) -> ConnectorResult<Self> {
         let protobuf_config = try_match_expand!(encoding_properties, EncodingProperties::Protobuf)?;
         let location = &protobuf_config.row_schema_location;
         let message_name = &protobuf_config.message_name;
@@ -99,24 +101,26 @@ impl ProtobufParserConfig {
             // https://docs.confluent.io/platform/7.5/control-center/topics/schema.html#c3-schemas-best-practices-key-value-pairs
             bail!("protobuf key is not supported");
         }
-        let schema_bytes = if protobuf_config.use_schema_registry {
-            let schema_value = get_subject_by_strategy(
-                &protobuf_config.name_strategy,
-                protobuf_config.topic.as_str(),
-                Some(message_name.as_ref()),
-                false,
-            )?;
-            tracing::debug!("infer value subject {schema_value}");
-
+        let pool = if protobuf_config.use_schema_registry {
             let client = Client::new(url, &protobuf_config.client_config)?;
-            compile_file_descriptor_from_schema_registry(schema_value.as_str(), &client).await?
+            let loader = SchemaLoader {
+                client,
+                name_strategy: protobuf_config.name_strategy,
+                topic: protobuf_config.topic,
+                key_record_name: None,
+                val_record_name: Some(message_name.clone()),
+            };
+            let (_schema_id, root_file_descriptor) = loader
+                .load_val_schema::<FileDescriptor>()
+                .await
+                .context("load schema failed")?;
+            root_file_descriptor.parent_pool().clone()
         } else {
             let url = url.first().unwrap();
-            bytes_from_url(url, protobuf_config.aws_auth_props.as_ref()).await?
+            let schema_bytes = bytes_from_url(url, protobuf_config.aws_auth_props.as_ref()).await?;
+            DescriptorPool::decode(schema_bytes.as_slice())
+                .with_context(|| format!("cannot build descriptor pool from schema `{location}`"))?
         };
-
-        let pool = DescriptorPool::decode(schema_bytes.as_slice())
-            .with_context(|| format!("cannot build descriptor pool from schema `{}`", location))?;
 
         let message_descriptor = pool.get_message_by_name(message_name).with_context(|| {
             format!(
@@ -133,7 +137,7 @@ impl ProtobufParserConfig {
     }
 
     /// Maps the protobuf schema to relational schema.
-    pub fn map_to_columns(&self) -> anyhow::Result<Vec<ColumnDesc>> {
+    pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
         let mut columns = Vec::with_capacity(self.message_descriptor.fields().len());
         let mut index = 0;
         let mut parse_trace: Vec<String> = vec![];
@@ -153,8 +157,9 @@ impl ProtobufParserConfig {
         field_descriptor: &FieldDescriptor,
         index: &mut i32,
         parse_trace: &mut Vec<String>,
-    ) -> anyhow::Result<ColumnDesc> {
-        let field_type = protobuf_type_mapping(field_descriptor, parse_trace)?;
+    ) -> ConnectorResult<ColumnDesc> {
+        let field_type = protobuf_type_mapping(field_descriptor, parse_trace)
+            .context("failed to map protobuf type")?;
         if let Kind::Message(m) = field_descriptor.kind() {
             let field_descs = if let DataType::List { .. } = field_type {
                 vec![]
@@ -172,6 +177,7 @@ impl ProtobufParserConfig {
                 type_name: m.full_name().to_string(),
                 generated_or_default_column: None,
                 description: None,
+                additional_column_type: 0, // deprecated
                 additional_column: Some(AdditionalColumn { column_type: None }),
                 version: ColumnDescVersion::Pr13707 as i32,
             })
@@ -341,14 +347,20 @@ fn recursive_parse_json(
     serde_json::Value::Object(ret)
 }
 
-pub fn from_protobuf_value(
+pub fn from_protobuf_value<'a>(
     field_desc: &FieldDescriptor,
-    value: &Value,
+    value: &'a Value,
     descriptor_pool: &Arc<DescriptorPool>,
-) -> AccessResult {
+) -> AccessResult<DatumCow<'a>> {
     let kind = field_desc.kind();
 
-    let v = match value {
+    macro_rules! borrowed {
+        ($v:expr) => {
+            return Ok(DatumCow::Borrowed(Some($v.into())))
+        };
+    }
+
+    let v: ScalarImpl = match value {
         Value::Bool(v) => ScalarImpl::Bool(*v),
         Value::I32(i) => ScalarImpl::Int32(*i),
         Value::U32(i) => ScalarImpl::Int64(*i as i64),
@@ -356,7 +368,7 @@ pub fn from_protobuf_value(
         Value::U64(i) => ScalarImpl::Decimal(Decimal::from(*i)),
         Value::F32(f) => ScalarImpl::Float32(F32::from(*f)),
         Value::F64(f) => ScalarImpl::Float64(F64::from(*f)),
-        Value::String(s) => ScalarImpl::Utf8(s.as_str().into()),
+        Value::String(s) => borrowed!(s.as_str()),
         Value::EnumNumber(idx) => {
             let enum_desc = kind.as_enum().ok_or_else(|| AccessError::TypeError {
                 expected: "enum".to_owned(),
@@ -372,9 +384,7 @@ pub fn from_protobuf_value(
             if dyn_msg.descriptor().full_name() == "google.protobuf.Any" {
                 // If the fields are not presented, default value is an empty string
                 if !dyn_msg.has_field_by_name("type_url") || !dyn_msg.has_field_by_name("value") {
-                    return Ok(Some(ScalarImpl::Jsonb(JsonbVal::from(
-                        serde_json::json! {""},
-                    ))));
+                    borrowed!(JsonbRef::empty_string());
                 }
 
                 // Sanity check
@@ -388,9 +398,8 @@ pub fn from_protobuf_value(
 
                 let payload_field_desc = dyn_msg.descriptor().get_field_by_name("value").unwrap();
 
-                let Some(ScalarImpl::Bytea(payload)) =
-                    from_protobuf_value(&payload_field_desc, &payload, descriptor_pool)?
-                else {
+                let payload = from_protobuf_value(&payload_field_desc, &payload, descriptor_pool)?;
+                let Some(ScalarRefImpl::Bytea(payload)) = payload.to_datum_ref() else {
                     bail_uncategorized!("expected bytes for dynamic message payload");
                 };
 
@@ -410,12 +419,13 @@ pub fn from_protobuf_value(
                 let full_name = msg_desc.clone().full_name().to_string();
 
                 // Decode the payload based on the `msg_desc`
-                let decoded_value = DynamicMessage::decode(msg_desc, payload.as_ref()).unwrap();
+                let decoded_value = DynamicMessage::decode(msg_desc, payload).unwrap();
                 let decoded_value = from_protobuf_value(
                     field_desc,
                     &Value::Message(decoded_value),
                     descriptor_pool,
                 )?
+                .to_owned_datum()
                 .unwrap();
 
                 // Extract the struct value
@@ -444,7 +454,9 @@ pub fn from_protobuf_value(
                     }
                     // use default value if dyn_msg doesn't has this field
                     let value = dyn_msg.get_field(&field_desc);
-                    rw_values.push(from_protobuf_value(&field_desc, &value, descriptor_pool)?);
+                    rw_values.push(
+                        from_protobuf_value(&field_desc, &value, descriptor_pool)?.to_owned_datum(),
+                    );
                 }
                 ScalarImpl::Struct(StructValue::new(rw_values))
             }
@@ -458,14 +470,14 @@ pub fn from_protobuf_value(
             }
             ScalarImpl::List(ListValue::new(builder.finish()))
         }
-        Value::Bytes(value) => ScalarImpl::Bytea(value.to_vec().into_boxed_slice()),
+        Value::Bytes(value) => borrowed!(&**value),
         _ => {
             return Err(AccessError::UnsupportedType {
                 ty: format!("{kind:?}"),
             });
         }
     };
-    Ok(Some(v))
+    Ok(Some(v).into())
 }
 
 /// Maps protobuf type to RW type.
@@ -521,32 +533,66 @@ fn protobuf_type_mapping(
     Ok(t)
 }
 
+/// A port from the implementation of confluent's Varint Zig-zag deserialization.
+/// See `ReadVarint` in <https://github.com/apache/kafka/blob/trunk/clients/src/main/java/org/apache/kafka/common/utils/ByteUtils.java>
+fn decode_varint_zigzag(buffer: &[u8]) -> ConnectorResult<(i32, usize)> {
+    // We expect the decoded number to be 4 bytes.
+    let mut value = 0u32;
+    let mut shift = 0;
+    let mut len = 0usize;
+
+    for &byte in buffer {
+        len += 1;
+        // The Varint encoding is limited to 5 bytes.
+        if len > 5 {
+            break;
+        }
+        // The byte is cast to u32 to avoid shifting overflow.
+        let byte_ext = byte as u32;
+        // In Varint encoding, the lowest 7 bits are used to represent number,
+        // while the highest zero bit indicates the end of the number with Varint encoding.
+        value |= (byte_ext & 0x7F) << shift;
+        if byte_ext & 0x80 == 0 {
+            return Ok((((value >> 1) as i32) ^ -((value & 1) as i32), len));
+        }
+
+        shift += 7;
+    }
+
+    Err(WireFormatError::ParseMessageIndexes.into())
+}
+
 /// Reference: <https://docs.confluent.io/platform/current/schema-registry/fundamentals/serdes-develop/index.html#wire-format>
 /// Wire format for Confluent pb header is:
 /// | 0          | 1-4        | 5-x             | x+1-end
 /// | magic-byte | schema-id  | message-indexes | protobuf-payload
-pub(crate) fn resolve_pb_header(payload: &[u8]) -> anyhow::Result<&[u8]> {
+pub(crate) fn resolve_pb_header(payload: &[u8]) -> ConnectorResult<&[u8]> {
     // there's a message index array at the front of payload
     // if it is the first message in proto def, the array is just and `0`
-    // TODO: support parsing more complex index array
     let (_, remained) = extract_schema_id(payload)?;
     // The message indexes are encoded as int using variable-length zig-zag encoding,
     // prefixed by the length of the array.
     // Note that if the first byte is 0, it is equivalent to (1, 0) as an optimization.
     match remained.first() {
         Some(0) => Ok(&remained[1..]),
-        Some(i) => Ok(&remained[(*i as usize)..]),
+        Some(_) => {
+            let (index_len, mut offset) = decode_varint_zigzag(remained)?;
+            for _ in 0..index_len {
+                offset += decode_varint_zigzag(&remained[offset..])?.1;
+            }
+            Ok(&remained[offset..])
+        }
         None => bail!("The proto payload is empty"),
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
     use std::path::PathBuf;
 
     use prost::Message;
-    use risingwave_common::types::{DataType, ListValue, StructType};
+    use risingwave_common::types::StructType;
+    use risingwave_connector_codec::decoder::AccessExt;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::data::data_type::PbTypeName;
     use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
@@ -555,7 +601,6 @@ mod test {
     use super::*;
     use crate::parser::protobuf::recursive::all_types::{EnumType, ExampleOneof, NestedMessage};
     use crate::parser::protobuf::recursive::AllTypes;
-    use crate::parser::unified::Access;
     use crate::parser::SpecificParserConfig;
 
     fn schema_dir() -> String {
@@ -575,7 +620,7 @@ mod test {
     static PRE_GEN_PROTO_DATA: &[u8] = b"\x08\x7b\x12\x0c\x74\x65\x73\x74\x20\x61\x64\x64\x72\x65\x73\x73\x1a\x09\x74\x65\x73\x74\x20\x63\x69\x74\x79\x20\xc8\x03\x2d\x19\x04\x9e\x3f\x32\x0a\x32\x30\x32\x31\x2d\x30\x31\x2d\x30\x31";
 
     #[tokio::test]
-    async fn test_simple_schema() -> anyhow::Result<()> {
+    async fn test_simple_schema() -> crate::error::ConnectorResult<()> {
         let location = schema_dir() + "/simple-schema";
         println!("location: {}", location);
         let message_name = "test.TestRecord";
@@ -587,7 +632,7 @@ mod test {
             row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(&info, &HashMap::new())?;
+        let parser_config = SpecificParserConfig::new(&info, &Default::default())?;
         let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
         let value = DynamicMessage::decode(conf.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
@@ -620,7 +665,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_complex_schema() -> anyhow::Result<()> {
+    async fn test_complex_schema() -> crate::error::ConnectorResult<()> {
         let location = schema_dir() + "/complex-schema";
         let message_name = "test.User";
 
@@ -632,7 +677,7 @@ mod test {
             row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(&info, &HashMap::new())?;
+        let parser_config = SpecificParserConfig::new(&info, &Default::default())?;
         let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
         let columns = conf.map_to_columns().unwrap();
 
@@ -681,7 +726,7 @@ mod test {
             row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(&info, &HashMap::new()).unwrap();
+        let parser_config = SpecificParserConfig::new(&info, &Default::default()).unwrap();
         let conf = ProtobufParserConfig::new(parser_config.encoding_config)
             .await
             .unwrap();
@@ -709,7 +754,7 @@ mod test {
             row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(&info, &HashMap::new()).unwrap();
+        let parser_config = SpecificParserConfig::new(&info, &Default::default()).unwrap();
 
         ProtobufParserConfig::new(parser_config.encoding_config)
             .await
@@ -859,7 +904,8 @@ mod test {
     }
 
     fn pb_eq(a: &ProtobufAccess, field_name: &str, value: ScalarImpl) {
-        let d = a.access(&[field_name], None).unwrap().unwrap();
+        let dummy_type = DataType::Varchar;
+        let d = a.access_owned(&[field_name], &dummy_type).unwrap().unwrap();
         assert_eq!(d, value, "field: {} value: {:?}", field_name, d);
     }
 
@@ -912,7 +958,7 @@ mod test {
     static ANY_GEN_PROTO_DATA: &[u8] = b"\x08\xb9\x60\x12\x32\x0a\x24\x74\x79\x70\x65\x2e\x67\x6f\x6f\x67\x6c\x65\x61\x70\x69\x73\x2e\x63\x6f\x6d\x2f\x74\x65\x73\x74\x2e\x53\x74\x72\x69\x6e\x67\x56\x61\x6c\x75\x65\x12\x0a\x0a\x08\x4a\x6f\x68\x6e\x20\x44\x6f\x65";
 
     #[tokio::test]
-    async fn test_any_schema() -> anyhow::Result<()> {
+    async fn test_any_schema() -> crate::error::ConnectorResult<()> {
         let conf = create_recursive_pb_parser_config("/any-schema.pb", "test.TestAny").await;
 
         println!("Current conf: {:#?}", conf);
@@ -928,7 +974,9 @@ mod test {
         let field = value.fields().next().unwrap().0;
 
         if let Some(ret) =
-            from_protobuf_value(&field, &Value::Message(value), &conf.descriptor_pool).unwrap()
+            from_protobuf_value(&field, &Value::Message(value), &conf.descriptor_pool)
+                .unwrap()
+                .to_owned_datum()
         {
             println!("Decoded Value for ANY_GEN_PROTO_DATA: {:#?}", ret);
             println!("---------------------------");
@@ -973,7 +1021,7 @@ mod test {
     static ANY_GEN_PROTO_DATA_1: &[u8] = b"\x08\xb9\x60\x12\x2b\x0a\x23\x74\x79\x70\x65\x2e\x67\x6f\x6f\x67\x6c\x65\x61\x70\x69\x73\x2e\x63\x6f\x6d\x2f\x74\x65\x73\x74\x2e\x49\x6e\x74\x33\x32\x56\x61\x6c\x75\x65\x12\x04\x08\xd2\xfe\x06";
 
     #[tokio::test]
-    async fn test_any_schema_1() -> anyhow::Result<()> {
+    async fn test_any_schema_1() -> crate::error::ConnectorResult<()> {
         let conf = create_recursive_pb_parser_config("/any-schema.pb", "test.TestAny").await;
 
         println!("Current conf: {:#?}", conf);
@@ -989,7 +1037,9 @@ mod test {
         let field = value.fields().next().unwrap().0;
 
         if let Some(ret) =
-            from_protobuf_value(&field, &Value::Message(value), &conf.descriptor_pool).unwrap()
+            from_protobuf_value(&field, &Value::Message(value), &conf.descriptor_pool)
+                .unwrap()
+                .to_owned_datum()
         {
             println!("Decoded Value for ANY_GEN_PROTO_DATA: {:#?}", ret);
             println!("---------------------------");
@@ -1042,7 +1092,7 @@ mod test {
     static ANY_RECURSIVE_GEN_PROTO_DATA: &[u8] = b"\x08\xb9\x60\x12\x84\x01\x0a\x21\x74\x79\x70\x65\x2e\x67\x6f\x6f\x67\x6c\x65\x61\x70\x69\x73\x2e\x63\x6f\x6d\x2f\x74\x65\x73\x74\x2e\x41\x6e\x79\x56\x61\x6c\x75\x65\x12\x5f\x0a\x30\x0a\x24\x74\x79\x70\x65\x2e\x67\x6f\x6f\x67\x6c\x65\x61\x70\x69\x73\x2e\x63\x6f\x6d\x2f\x74\x65\x73\x74\x2e\x53\x74\x72\x69\x6e\x67\x56\x61\x6c\x75\x65\x12\x08\x0a\x06\x31\x31\x34\x35\x31\x34\x12\x2b\x0a\x23\x74\x79\x70\x65\x2e\x67\x6f\x6f\x67\x6c\x65\x61\x70\x69\x73\x2e\x63\x6f\x6d\x2f\x74\x65\x73\x74\x2e\x49\x6e\x74\x33\x32\x56\x61\x6c\x75\x65\x12\x04\x08\xd2\xfe\x06";
 
     #[tokio::test]
-    async fn test_any_recursive() -> anyhow::Result<()> {
+    async fn test_any_recursive() -> crate::error::ConnectorResult<()> {
         let conf = create_recursive_pb_parser_config("/any-schema.pb", "test.TestAny").await;
 
         println!("Current conf: {:#?}", conf);
@@ -1061,7 +1111,9 @@ mod test {
         let field = value.fields().next().unwrap().0;
 
         if let Some(ret) =
-            from_protobuf_value(&field, &Value::Message(value), &conf.descriptor_pool).unwrap()
+            from_protobuf_value(&field, &Value::Message(value), &conf.descriptor_pool)
+                .unwrap()
+                .to_owned_datum()
         {
             println!("Decoded Value for ANY_RECURSIVE_GEN_PROTO_DATA: {:#?}", ret);
             println!("---------------------------");
@@ -1102,5 +1154,55 @@ mod test {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn test_decode_varint_zigzag() {
+        // 1. Positive number
+        let buffer = vec![0x02];
+        let (value, len) = decode_varint_zigzag(&buffer).unwrap();
+        assert_eq!(value, 1);
+        assert_eq!(len, 1);
+
+        // 2. Negative number
+        let buffer = vec![0x01];
+        let (value, len) = decode_varint_zigzag(&buffer).unwrap();
+        assert_eq!(value, -1);
+        assert_eq!(len, 1);
+
+        // 3. Larger positive number
+        let buffer = vec![0x9E, 0x03];
+        let (value, len) = decode_varint_zigzag(&buffer).unwrap();
+        assert_eq!(value, 207);
+        assert_eq!(len, 2);
+
+        // 4. Larger negative number
+        let buffer = vec![0xBF, 0x07];
+        let (value, len) = decode_varint_zigzag(&buffer).unwrap();
+        assert_eq!(value, -480);
+        assert_eq!(len, 2);
+
+        // 5. Maximum positive number
+        let buffer = vec![0xFE, 0xFF, 0xFF, 0xFF, 0x0F];
+        let (value, len) = decode_varint_zigzag(&buffer).unwrap();
+        assert_eq!(value, i32::MAX);
+        assert_eq!(len, 5);
+
+        // 6. Maximum negative number
+        let buffer = vec![0xFF, 0xFF, 0xFF, 0xFF, 0x0F];
+        let (value, len) = decode_varint_zigzag(&buffer).unwrap();
+        assert_eq!(value, i32::MIN);
+        assert_eq!(len, 5);
+
+        // 7. More than 32 bits
+        let buffer = vec![0xFF, 0xFF, 0xFF, 0xFF, 0x7F];
+        let (value, len) = decode_varint_zigzag(&buffer).unwrap();
+        assert_eq!(value, i32::MIN);
+        assert_eq!(len, 5);
+
+        // 8. Invalid input (more than 5 bytes)
+        let buffer = vec![0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+        let result = decode_varint_zigzag(&buffer);
+        assert!(result.is_err());
     }
 }

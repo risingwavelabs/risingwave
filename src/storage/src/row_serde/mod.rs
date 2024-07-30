@@ -30,14 +30,18 @@ pub fn find_columns_by_ids(
     table_columns: &[ColumnDesc],
     column_ids: &[ColumnId],
 ) -> (Vec<ColumnDesc>, Vec<usize>) {
-    let mut table_columns = table_columns
+    if column_ids.is_empty() {
+        // shortcut
+        return (vec![], vec![]);
+    }
+    let id_to_columns = table_columns
         .iter()
         .enumerate()
         .map(|(index, c)| (c.column_id, (c.clone(), index)))
         .collect::<HashMap<_, _>>();
     column_ids
         .iter()
-        .map(|id| table_columns.remove(id).unwrap())
+        .map(|id| id_to_columns.get(id).expect("column id not found").clone())
         .unzip()
 }
 

@@ -22,7 +22,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::KeyComparator;
-use {lz4, zstd};
+use serde::{Deserialize, Serialize};
 
 use super::utils::{bytes_diff_below_max_key_length, xxhash64_verify, CompressionAlgorithm};
 use crate::hummock::sstable::utils;
@@ -35,7 +35,7 @@ pub const DEFAULT_RESTART_INTERVAL: usize = 16;
 pub const DEFAULT_ENTRY_SIZE: usize = 24; // table_id(u64) + primary_key(u64) + epoch(u64)
 
 #[allow(non_camel_case_types)]
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LenType {
     u8 = 1,
     u16 = 2,
@@ -125,7 +125,7 @@ impl LenType {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RestartPoint {
     pub offset: u32,
     pub key_len_type: LenType,
@@ -143,7 +143,7 @@ impl RestartPoint {
 pub struct Block {
     /// Uncompressed entries data, with restart encoded restart points info.
     data: Bytes,
-    /// Uncompressed entried data length.
+    /// Uncompressed entries data length.
     data_len: usize,
 
     /// Table id of this block.
@@ -174,6 +174,26 @@ impl Debug for Block {
             .field("table_id", &self.table_id)
             .field("restart_points", &self.restart_points)
             .finish()
+    }
+}
+
+impl Serialize for Block {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serde_bytes::serialize(&self.data[..], serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Block {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let data: Vec<u8> = serde_bytes::deserialize(deserializer)?;
+        let data = Bytes::from(data);
+        Ok(Block::decode_from_raw(data))
     }
 }
 
@@ -215,20 +235,20 @@ impl Block {
                 let mut decoder = lz4::Decoder::new(compressed_data.reader())
                     .map_err(HummockError::decode_error)?;
                 let mut decoded = Vec::with_capacity(uncompressed_capacity);
-                decoder
+                let read_size = decoder
                     .read_to_end(&mut decoded)
                     .map_err(HummockError::decode_error)?;
-                debug_assert_eq!(decoded.capacity(), uncompressed_capacity);
+                assert_eq!(read_size, uncompressed_capacity);
                 Bytes::from(decoded)
             }
             CompressionAlgorithm::Zstd => {
                 let mut decoder = zstd::Decoder::new(compressed_data.reader())
                     .map_err(HummockError::decode_error)?;
                 let mut decoded = Vec::with_capacity(uncompressed_capacity);
-                decoder
+                let read_size = decoder
                     .read_to_end(&mut decoded)
                     .map_err(HummockError::decode_error)?;
-                debug_assert_eq!(decoded.capacity(), uncompressed_capacity);
+                assert_eq!(read_size, uncompressed_capacity);
                 Bytes::from(decoded)
             }
         };
@@ -445,6 +465,8 @@ impl Default for BlockBuilderOptions {
 pub struct BlockBuilder {
     /// Write buffer.
     buf: BytesMut,
+    /// Compress buffer
+    compress_buf: BytesMut,
     /// Entry interval between restart points.
     restart_count: usize,
     /// Restart points.
@@ -465,8 +487,9 @@ pub struct BlockBuilder {
 impl BlockBuilder {
     pub fn new(options: BlockBuilderOptions) -> Self {
         Self {
-            // add more space to avoid re-allocate space.
-            buf: BytesMut::with_capacity(options.capacity + 256),
+            // add more space to avoid re-allocate space. (for restart_points and restart_points_type_index)
+            buf: BytesMut::with_capacity(Self::buf_reserve_size(&options)),
+            compress_buf: BytesMut::default(),
             restart_count: options.restart_interval,
             restart_points: Vec::with_capacity(
                 options.capacity / DEFAULT_ENTRY_SIZE / options.restart_interval + 1,
@@ -664,22 +687,35 @@ impl BlockBuilder {
         );
 
         self.buf.put_u32_le(self.table_id.unwrap());
-        if self.compression_algorithm != CompressionAlgorithm::None {
-            self.buf = Self::compress(&self.buf[..], self.compression_algorithm);
-        }
+        let result_buf = if self.compression_algorithm != CompressionAlgorithm::None {
+            self.compress_buf.clear();
+            self.compress_buf = Self::compress(
+                &self.buf[..],
+                self.compression_algorithm,
+                std::mem::take(&mut self.compress_buf),
+            );
 
-        self.compression_algorithm.encode(&mut self.buf);
-        let checksum = xxhash64_checksum(&self.buf);
-        self.buf.put_u64_le(checksum);
+            &mut self.compress_buf
+        } else {
+            &mut self.buf
+        };
+
+        self.compression_algorithm.encode(result_buf);
+        let checksum = xxhash64_checksum(result_buf);
+        result_buf.put_u64_le(checksum);
         assert!(
-            self.buf.len() < (u32::MAX) as usize,
+            result_buf.len() < (u32::MAX) as usize,
             "buf_len {} entry_count {} table {:?}",
-            self.buf.len(),
+            result_buf.len(),
             self.entry_count,
             self.table_id
         );
 
-        self.buf.as_ref()
+        if self.compression_algorithm != CompressionAlgorithm::None {
+            self.compress_buf.as_ref()
+        } else {
+            self.buf.as_ref()
+        }
     }
 
     pub fn compress_block(
@@ -693,21 +729,29 @@ impl BlockBuilder {
         let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 9..buf.len() - 8])?;
         let compressed_data = &buf[..buf.len() - 9];
         assert_eq!(compression, CompressionAlgorithm::None);
-        let mut writer = Self::compress(compressed_data, target_compression);
+        let mut compress_writer = Self::compress(
+            compressed_data,
+            target_compression,
+            BytesMut::with_capacity(buf.len()),
+        );
 
-        target_compression.encode(&mut writer);
-        let checksum = xxhash64_checksum(&writer);
-        writer.put_u64_le(checksum);
-        Ok(writer.freeze())
+        target_compression.encode(&mut compress_writer);
+        let checksum = xxhash64_checksum(&compress_writer);
+        compress_writer.put_u64_le(checksum);
+        Ok(compress_writer.freeze())
     }
 
-    pub fn compress(buf: &[u8], compression_algorithm: CompressionAlgorithm) -> BytesMut {
+    pub fn compress(
+        buf: &[u8],
+        compression_algorithm: CompressionAlgorithm,
+        compress_writer: BytesMut,
+    ) -> BytesMut {
         match compression_algorithm {
             CompressionAlgorithm::None => unreachable!(),
             CompressionAlgorithm::Lz4 => {
                 let mut encoder = lz4::EncoderBuilder::new()
                     .level(4)
-                    .build(BytesMut::with_capacity(buf.len()).writer())
+                    .build(compress_writer.writer())
                     .map_err(HummockError::encode_error)
                     .unwrap();
                 encoder
@@ -719,10 +763,9 @@ impl BlockBuilder {
                 writer.into_inner()
             }
             CompressionAlgorithm::Zstd => {
-                let mut encoder =
-                    zstd::Encoder::new(BytesMut::with_capacity(buf.len()).writer(), 4)
-                        .map_err(HummockError::encode_error)
-                        .unwrap();
+                let mut encoder = zstd::Encoder::new(compress_writer.writer(), 4)
+                    .map_err(HummockError::encode_error)
+                    .unwrap();
                 encoder
                     .write_all(buf)
                     .map_err(HummockError::encode_error)
@@ -762,12 +805,17 @@ impl BlockBuilder {
     pub fn table_id(&self) -> Option<u32> {
         self.table_id
     }
+
+    fn buf_reserve_size(option: &BlockBuilderOptions) -> usize {
+        option.capacity + 1024 + 256
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::TableId;
-    use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN};
+
+    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_hummock_sdk::key::MAX_KEY_LEN;
 
     use super::*;
     use crate::hummock::{BlockHolder, BlockIterator};
@@ -776,10 +824,10 @@ mod tests {
     fn test_block_enc_dec() {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
-        builder.add_for_test(construct_full_key_struct(0, b"k1", 1), b"v01");
-        builder.add_for_test(construct_full_key_struct(0, b"k2", 2), b"v02");
-        builder.add_for_test(construct_full_key_struct(0, b"k3", 3), b"v03");
-        builder.add_for_test(construct_full_key_struct(0, b"k4", 4), b"v04");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k1", 1), b"v01");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k2", 2), b"v02");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k3", 3), b"v03");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k4", 4), b"v04");
         let capacity = builder.uncompressed_block_size();
         assert_eq!(capacity, builder.approximate_len() - 9);
         let buf = builder.build().to_vec();
@@ -788,22 +836,22 @@ mod tests {
 
         bi.seek_to_first();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k1", 1), bi.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k1", 1), bi.key());
         assert_eq!(b"v01", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k2", 2), bi.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k2", 2), bi.key());
         assert_eq!(b"v02", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k3", 3), bi.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k3", 3), bi.key());
         assert_eq!(b"v03", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k4", 4), bi.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k4", 4), bi.key());
         assert_eq!(b"v04", bi.value());
 
         bi.next();
@@ -822,10 +870,10 @@ mod tests {
             ..Default::default()
         };
         let mut builder = BlockBuilder::new(options);
-        builder.add_for_test(construct_full_key_struct(0, b"k1", 1), b"v01");
-        builder.add_for_test(construct_full_key_struct(0, b"k2", 2), b"v02");
-        builder.add_for_test(construct_full_key_struct(0, b"k3", 3), b"v03");
-        builder.add_for_test(construct_full_key_struct(0, b"k4", 4), b"v04");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k1", 1), b"v01");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k2", 2), b"v02");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k3", 3), b"v03");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k4", 4), b"v04");
         let capacity = builder.uncompressed_block_size();
         assert_eq!(capacity, builder.approximate_len() - 9);
         let buf = builder.build().to_vec();
@@ -834,34 +882,34 @@ mod tests {
 
         bi.seek_to_first();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k1", 1), bi.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k1", 1), bi.key());
         assert_eq!(b"v01", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k2", 2), bi.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k2", 2), bi.key());
         assert_eq!(b"v02", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k3", 3), bi.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k3", 3), bi.key());
         assert_eq!(b"v03", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k4", 4), bi.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k4", 4), bi.key());
         assert_eq!(b"v04", bi.value());
 
         bi.next();
         assert!(!bi.is_valid());
     }
 
-    pub fn construct_full_key_struct(
+    pub fn construct_full_key_struct_for_test(
         table_id: u32,
         table_key: &[u8],
         epoch: u64,
     ) -> FullKey<&[u8]> {
-        FullKey::for_test(TableId::new(table_id), table_key, epoch)
+        FullKey::for_test(TableId::new(table_id), table_key, test_epoch(epoch))
     }
 
     #[test]
@@ -872,9 +920,9 @@ mod tests {
         let large_key = vec![b'b'; MAX_KEY_LEN];
         let xlarge_key = vec![b'c'; MAX_KEY_LEN + 500];
 
-        builder.add_for_test(construct_full_key_struct(0, &medium_key, 1), b"v1");
-        builder.add_for_test(construct_full_key_struct(0, &large_key, 2), b"v2");
-        builder.add_for_test(construct_full_key_struct(0, &xlarge_key, 3), b"v3");
+        builder.add_for_test(construct_full_key_struct_for_test(0, &medium_key, 1), b"v1");
+        builder.add_for_test(construct_full_key_struct_for_test(0, &large_key, 2), b"v2");
+        builder.add_for_test(construct_full_key_struct_for_test(0, &xlarge_key, 3), b"v3");
         let capacity = builder.uncompressed_block_size();
         assert_eq!(capacity, builder.approximate_len() - 9);
         let buf = builder.build().to_vec();
@@ -883,17 +931,26 @@ mod tests {
 
         bi.seek_to_first();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, &medium_key, 1), bi.key());
+        assert_eq!(
+            construct_full_key_struct_for_test(0, &medium_key, 1),
+            bi.key()
+        );
         assert_eq!(b"v1", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, &large_key, 2), bi.key());
+        assert_eq!(
+            construct_full_key_struct_for_test(0, &large_key, 2),
+            bi.key()
+        );
         assert_eq!(b"v2", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, &xlarge_key, 3), bi.key());
+        assert_eq!(
+            construct_full_key_struct_for_test(0, &xlarge_key, 3),
+            bi.key()
+        );
         assert_eq!(b"v3", bi.value());
 
         bi.next();
@@ -913,15 +970,18 @@ mod tests {
                 if index < 50 {
                     let mut medium_key = vec![b'A'; MAX_KEY_LEN - 500];
                     medium_key.push(index);
-                    builder.add_for_test(construct_full_key_struct(0, &medium_key, 1), b"v1");
+                    builder
+                        .add_for_test(construct_full_key_struct_for_test(0, &medium_key, 1), b"v1");
                 } else if index < 80 {
                     let mut large_key = vec![b'B'; MAX_KEY_LEN];
                     large_key.push(index);
-                    builder.add_for_test(construct_full_key_struct(0, &large_key, 2), b"v2");
+                    builder
+                        .add_for_test(construct_full_key_struct_for_test(0, &large_key, 2), b"v2");
                 } else {
                     let mut xlarge_key = vec![b'C'; MAX_KEY_LEN + 500];
                     xlarge_key.push(index);
-                    builder.add_for_test(construct_full_key_struct(0, &xlarge_key, 3), b"v3");
+                    builder
+                        .add_for_test(construct_full_key_struct_for_test(0, &xlarge_key, 3), b"v3");
                 }
             }
 
@@ -937,15 +997,24 @@ mod tests {
                 if index < 50 {
                     let mut medium_key = vec![b'A'; MAX_KEY_LEN - 500];
                     medium_key.push(index);
-                    assert_eq!(construct_full_key_struct(0, &medium_key, 1), bi.key());
+                    assert_eq!(
+                        construct_full_key_struct_for_test(0, &medium_key, 1),
+                        bi.key()
+                    );
                 } else if index < 80 {
                     let mut large_key = vec![b'B'; MAX_KEY_LEN];
                     large_key.push(index);
-                    assert_eq!(construct_full_key_struct(0, &large_key, 2), bi.key());
+                    assert_eq!(
+                        construct_full_key_struct_for_test(0, &large_key, 2),
+                        bi.key()
+                    );
                 } else {
                     let mut xlarge_key = vec![b'C'; MAX_KEY_LEN + 500];
                     xlarge_key.push(index);
-                    assert_eq!(construct_full_key_struct(0, &xlarge_key, 3), bi.key());
+                    assert_eq!(
+                        construct_full_key_struct_for_test(0, &xlarge_key, 3),
+                        bi.key()
+                    );
                 }
                 bi.next();
             }
@@ -953,5 +1022,36 @@ mod tests {
             assert!(!bi.is_valid());
             builder.clear();
         }
+    }
+
+    #[test]
+    fn test_block_serde() {
+        fn assmut_serde<'de, T: Serialize + Deserialize<'de>>() {}
+
+        assmut_serde::<Block>();
+        assmut_serde::<Box<Block>>();
+
+        let options = BlockBuilderOptions::default();
+        let mut builder = BlockBuilder::new(options);
+        for i in 0..100 {
+            builder.add_for_test(
+                construct_full_key_struct_for_test(0, format!("k{i:8}").as_bytes(), i),
+                format!("v{i:8}").as_bytes(),
+            );
+        }
+
+        let capacity = builder.uncompressed_block_size();
+        assert_eq!(capacity, builder.approximate_len() - 9);
+        let buf = builder.build().to_vec();
+
+        let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
+
+        let buffer = bincode::serialize(&block).unwrap();
+        let blk: Block = bincode::deserialize(&buffer).unwrap();
+
+        assert_eq!(block.data, blk.data);
+        assert_eq!(block.data_len, blk.data_len);
+        assert_eq!(block.table_id, blk.table_id,);
+        assert_eq!(block.restart_points, blk.restart_points);
     }
 }

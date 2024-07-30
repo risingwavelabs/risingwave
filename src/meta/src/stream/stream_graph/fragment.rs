@@ -38,8 +38,8 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanType,
 };
 
-use crate::manager::{DdlType, MetaSrvEnv, StreamingJob};
-use crate::model::FragmentId;
+use crate::manager::{DdlType, IdGenManagerImpl, MetaSrvEnv, StreamingJob, WorkerId};
+use crate::model::{ActorId, FragmentId};
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
 use crate::MetaResult;
@@ -54,7 +54,8 @@ pub(super) struct BuildingFragment {
     /// The ID of the job if it contains the streaming job node.
     table_id: Option<u32>,
 
-    /// The required columns of each upstream table.
+    /// The required column IDs of each upstream table.
+    /// Will be converted to indices when building the edge connected to the upstream.
     ///
     /// For shared CDC table on source, its `vec![]`, since the upstream source's output schema is fixed.
     upstream_table_columns: HashMap<TableId, Vec<i32>>,
@@ -177,6 +178,15 @@ impl BuildingFragment {
                     stream_scan.upstream_column_ids.clone(),
                 ),
                 NodeBody::CdcFilter(cdc_filter) => (cdc_filter.upstream_source_id.into(), vec![]),
+                NodeBody::SourceBackfill(backfill) => (
+                    backfill.upstream_source_id.into(),
+                    // FIXME: only pass required columns instead of all columns here
+                    backfill
+                        .columns
+                        .iter()
+                        .map(|c| c.column_desc.as_ref().unwrap().column_id)
+                        .collect(),
+                ),
                 _ => return,
             };
             table_columns
@@ -187,7 +197,7 @@ impl BuildingFragment {
         assert_eq!(
             table_columns.len(),
             fragment.upstream_table_ids.len(),
-            "fragment type: {}",
+            "fragment type: {:b}",
             fragment.fragment_type_mask
         );
 
@@ -301,8 +311,8 @@ pub struct StreamFragmentGraph {
     dependent_table_ids: HashSet<TableId>,
 
     /// The default parallelism of the job, specified by the `STREAMING_PARALLELISM` session
-    /// variable. If not specified, all active parallel units will be used.
-    default_parallelism: Option<NonZeroUsize>,
+    /// variable. If not specified, all active worker slots will be used.
+    specified_parallelism: Option<NonZeroUsize>,
 }
 
 impl StreamFragmentGraph {
@@ -313,18 +323,15 @@ impl StreamFragmentGraph {
         proto: StreamFragmentGraphProto,
         job: &StreamingJob,
     ) -> MetaResult<Self> {
-        let (fragment_id_gen, table_id_gen) = if let Some(sql_id_gen) = env.sql_id_gen_manager_ref()
-        {
-            (
-                GlobalFragmentIdGen::new_v2(&sql_id_gen, proto.fragments.len() as u64),
-                GlobalTableIdGen::new_v2(&sql_id_gen, proto.table_ids_cnt as u64),
-            )
-        } else {
-            (
-                GlobalFragmentIdGen::new(env.id_gen_manager(), proto.fragments.len() as u64)
-                    .await?,
-                GlobalTableIdGen::new(env.id_gen_manager(), proto.table_ids_cnt as u64).await?,
-            )
+        let (fragment_id_gen, table_id_gen) = match env.id_gen_manager() {
+            IdGenManagerImpl::Kv(mgr) => (
+                GlobalFragmentIdGen::new(mgr, proto.fragments.len() as u64).await?,
+                GlobalTableIdGen::new(mgr, proto.table_ids_cnt as u64).await?,
+            ),
+            IdGenManagerImpl::Sql(mgr) => (
+                GlobalFragmentIdGen::new_v2(mgr, proto.fragments.len() as u64),
+                GlobalTableIdGen::new_v2(mgr, proto.table_ids_cnt as u64),
+            ),
         };
 
         // Create nodes.
@@ -375,7 +382,7 @@ impl StreamFragmentGraph {
             .map(TableId::from)
             .collect();
 
-        let default_parallelism = if let Some(Parallelism { parallelism }) = proto.parallelism {
+        let specified_parallelism = if let Some(Parallelism { parallelism }) = proto.parallelism {
             Some(NonZeroUsize::new(parallelism as usize).context("parallelism should not be 0")?)
         } else {
             None
@@ -386,7 +393,7 @@ impl StreamFragmentGraph {
             downstreams,
             upstreams,
             dependent_table_ids,
-            default_parallelism,
+            specified_parallelism,
         })
     }
 
@@ -481,9 +488,9 @@ impl StreamFragmentGraph {
         &self.dependent_table_ids
     }
 
-    /// Get the default parallelism of the job.
-    pub fn default_parallelism(&self) -> Option<NonZeroUsize> {
-        self.default_parallelism
+    /// Get the parallelism of the job, if specified by the user.
+    pub fn specified_parallelism(&self) -> Option<NonZeroUsize> {
+        self.specified_parallelism
     }
 
     /// Get downstreams of a fragment.
@@ -532,6 +539,9 @@ pub struct CompleteStreamFragmentGraph {
     /// The required information of existing fragments.
     existing_fragments: HashMap<GlobalFragmentId, Fragment>,
 
+    /// The location of the actors in the existing fragments.
+    existing_actor_location: HashMap<ActorId, WorkerId>,
+
     /// Extra edges between existing fragments and the building fragments.
     extra_downstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
 
@@ -543,11 +553,13 @@ pub struct FragmentGraphUpstreamContext {
     /// Root fragment is the root of upstream stream graph, which can be a
     /// mview fragment or source fragment for cdc source job
     upstream_root_fragments: HashMap<TableId, Fragment>,
+    upstream_actor_location: HashMap<ActorId, WorkerId>,
 }
 
 pub struct FragmentGraphDownstreamContext {
     original_table_fragment_id: FragmentId,
     downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
+    downstream_actor_location: HashMap<ActorId, WorkerId>,
 }
 
 impl CompleteStreamFragmentGraph {
@@ -558,6 +570,7 @@ impl CompleteStreamFragmentGraph {
         Self {
             building_graph: graph,
             existing_fragments: Default::default(),
+            existing_actor_location: Default::default(),
             extra_downstreams: Default::default(),
             extra_upstreams: Default::default(),
         }
@@ -568,12 +581,14 @@ impl CompleteStreamFragmentGraph {
     pub fn with_upstreams(
         graph: StreamFragmentGraph,
         upstream_root_fragments: HashMap<TableId, Fragment>,
+        existing_actor_location: HashMap<ActorId, u32>,
         ddl_type: DdlType,
     ) -> MetaResult<Self> {
         Self::build_helper(
             graph,
             Some(FragmentGraphUpstreamContext {
                 upstream_root_fragments,
+                upstream_actor_location: existing_actor_location,
             }),
             None,
             ddl_type,
@@ -586,6 +601,7 @@ impl CompleteStreamFragmentGraph {
         graph: StreamFragmentGraph,
         original_table_fragment_id: FragmentId,
         downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
+        existing_actor_location: HashMap<ActorId, u32>,
         ddl_type: DdlType,
     ) -> MetaResult<Self> {
         Self::build_helper(
@@ -594,6 +610,32 @@ impl CompleteStreamFragmentGraph {
             Some(FragmentGraphDownstreamContext {
                 original_table_fragment_id,
                 downstream_fragments,
+                downstream_actor_location: existing_actor_location,
+            }),
+            ddl_type,
+        )
+    }
+
+    /// For replacing an existing table based on shared cdc source
+    pub fn with_upstreams_and_downstreams(
+        graph: StreamFragmentGraph,
+        upstream_root_fragments: HashMap<TableId, Fragment>,
+        upstream_actor_location: HashMap<ActorId, u32>,
+        original_table_fragment_id: FragmentId,
+        downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
+        downstream_actor_location: HashMap<ActorId, u32>,
+        ddl_type: DdlType,
+    ) -> MetaResult<Self> {
+        Self::build_helper(
+            graph,
+            Some(FragmentGraphUpstreamContext {
+                upstream_root_fragments,
+                upstream_actor_location,
+            }),
+            Some(FragmentGraphDownstreamContext {
+                original_table_fragment_id,
+                downstream_fragments,
+                downstream_actor_location,
             }),
             ddl_type,
         )
@@ -610,8 +652,11 @@ impl CompleteStreamFragmentGraph {
         let mut extra_upstreams = HashMap::new();
         let mut existing_fragments = HashMap::new();
 
+        let mut existing_actor_location = HashMap::new();
+
         if let Some(FragmentGraphUpstreamContext {
             upstream_root_fragments,
+            upstream_actor_location,
         }) = upstream_ctx
         {
             for (&id, fragment) in &mut graph.fragments {
@@ -655,50 +700,100 @@ impl CompleteStreamFragmentGraph {
                             (source_job_id, edge)
                         }
                         DdlType::MaterializedView | DdlType::Sink | DdlType::Index => {
-                            // handle MV on MV
+                            // handle MV on MV/Source
 
                             // Build the extra edges between the upstream `Materialize` and the downstream `StreamScan`
                             // of the new materialized view.
-                            let mview_fragment = upstream_root_fragments
+                            let upstream_fragment = upstream_root_fragments
                                 .get(&upstream_table_id)
                                 .context("upstream materialized view fragment not found")?;
-                            let mview_id = GlobalFragmentId::new(mview_fragment.fragment_id);
+                            let upstream_root_fragment_id =
+                                GlobalFragmentId::new(upstream_fragment.fragment_id);
 
-                            // Resolve the required output columns from the upstream materialized view.
-                            let (dist_key_indices, output_indices) = {
-                                let nodes = mview_fragment.actors[0].get_nodes().unwrap();
-                                let mview_node =
-                                    nodes.get_node_body().unwrap().as_materialize().unwrap();
-                                let all_column_ids = mview_node.column_ids();
-                                let dist_key_indices = mview_node.dist_key_indices();
-                                let output_indices = output_columns
-                                    .iter()
-                                    .map(|c| {
-                                        all_column_ids
-                                            .iter()
-                                            .position(|&id| id == *c)
-                                            .map(|i| i as u32)
-                                    })
-                                    .collect::<Option<Vec<_>>>()
-                                    .context(
-                                        "column not found in the upstream materialized view",
-                                    )?;
-                                (dist_key_indices, output_indices)
-                            };
-                            let dispatch_strategy = mv_on_mv_dispatch_strategy(
-                                uses_arrangement_backfill,
-                                dist_key_indices,
-                                output_indices,
-                            );
-                            let edge = StreamFragmentEdge {
-                                id: EdgeId::UpstreamExternal {
-                                    upstream_table_id,
-                                    downstream_fragment_id: id,
-                                },
-                                dispatch_strategy,
-                            };
+                            if upstream_fragment.fragment_type_mask & FragmentTypeFlag::Mview as u32
+                                != 0
+                            {
+                                // Resolve the required output columns from the upstream materialized view.
+                                let (dist_key_indices, output_indices) = {
+                                    let nodes = upstream_fragment.actors[0].get_nodes().unwrap();
+                                    let mview_node =
+                                        nodes.get_node_body().unwrap().as_materialize().unwrap();
+                                    let all_column_ids = mview_node.column_ids();
+                                    let dist_key_indices = mview_node.dist_key_indices();
+                                    let output_indices = output_columns
+                                        .iter()
+                                        .map(|c| {
+                                            all_column_ids
+                                                .iter()
+                                                .position(|&id| id == *c)
+                                                .map(|i| i as u32)
+                                        })
+                                        .collect::<Option<Vec<_>>>()
+                                        .context(
+                                            "column not found in the upstream materialized view",
+                                        )?;
+                                    (dist_key_indices, output_indices)
+                                };
+                                let dispatch_strategy = mv_on_mv_dispatch_strategy(
+                                    uses_arrangement_backfill,
+                                    dist_key_indices,
+                                    output_indices,
+                                );
+                                let edge = StreamFragmentEdge {
+                                    id: EdgeId::UpstreamExternal {
+                                        upstream_table_id,
+                                        downstream_fragment_id: id,
+                                    },
+                                    dispatch_strategy,
+                                };
 
-                            (mview_id, edge)
+                                (upstream_root_fragment_id, edge)
+                            } else if upstream_fragment.fragment_type_mask
+                                & FragmentTypeFlag::Source as u32
+                                != 0
+                            {
+                                let source_fragment = upstream_root_fragments
+                                    .get(&upstream_table_id)
+                                    .context("upstream source fragment not found")?;
+                                let source_job_id =
+                                    GlobalFragmentId::new(source_fragment.fragment_id);
+
+                                let output_indices = {
+                                    let nodes = upstream_fragment.actors[0].get_nodes().unwrap();
+                                    let source_node =
+                                        nodes.get_node_body().unwrap().as_source().unwrap();
+
+                                    let all_column_ids = source_node.column_ids().unwrap();
+                                    output_columns
+                                        .iter()
+                                        .map(|c| {
+                                            all_column_ids
+                                                .iter()
+                                                .position(|&id| id == *c)
+                                                .map(|i| i as u32)
+                                        })
+                                        .collect::<Option<Vec<_>>>()
+                                        .context("column not found in the upstream source node")?
+                                };
+
+                                let edge = StreamFragmentEdge {
+                                    id: EdgeId::UpstreamExternal {
+                                        upstream_table_id,
+                                        downstream_fragment_id: id,
+                                    },
+                                    // We always use `NoShuffle` for the exchange between the upstream
+                                    // `Source` and the downstream `StreamScan` of the new MV.
+                                    dispatch_strategy: DispatchStrategy {
+                                        r#type: DispatcherType::NoShuffle as _,
+                                        dist_key_indices: vec![], // not used for `NoShuffle`
+                                        output_indices,
+                                    },
+                                };
+
+                                (source_job_id, edge)
+                            } else {
+                                bail!("the upstream fragment should be a MView or Source, got fragment type: {:b}", upstream_fragment.fragment_type_mask)
+                            }
                         }
                         DdlType::Source | DdlType::Table(_) => {
                             bail!("the streaming job shouldn't have an upstream fragment, ddl_type: {:?}", ddl_type)
@@ -724,11 +819,14 @@ impl CompleteStreamFragmentGraph {
                     .into_values()
                     .map(|f| (GlobalFragmentId::new(f.fragment_id), f)),
             );
+
+            existing_actor_location.extend(upstream_actor_location);
         }
 
         if let Some(FragmentGraphDownstreamContext {
             original_table_fragment_id,
             downstream_fragments,
+            downstream_actor_location,
         }) = downstream_ctx
         {
             let original_table_fragment_id = GlobalFragmentId::new(original_table_fragment_id);
@@ -764,11 +862,14 @@ impl CompleteStreamFragmentGraph {
                     .into_iter()
                     .map(|(_, f)| (GlobalFragmentId::new(f.fragment_id), f)),
             );
+
+            existing_actor_location.extend(downstream_actor_location);
         }
 
         Ok(Self {
             building_graph: graph,
             existing_fragments,
+            existing_actor_location,
             extra_downstreams,
             extra_upstreams,
         })
@@ -829,7 +930,12 @@ impl CompleteStreamFragmentGraph {
     pub(super) fn existing_distribution(&self) -> HashMap<GlobalFragmentId, Distribution> {
         self.existing_fragments
             .iter()
-            .map(|(&id, f)| (id, Distribution::from_fragment(f)))
+            .map(|(&id, f)| {
+                (
+                    id,
+                    Distribution::from_fragment(f, &self.existing_actor_location),
+                )
+            })
             .collect()
     }
 
@@ -916,7 +1022,6 @@ impl CompleteStreamFragmentGraph {
             fragment_type_mask: inner.fragment_type_mask,
             distribution_type,
             actors,
-            vnode_mapping: Some(distribution.into_mapping().to_protobuf()),
             state_table_ids,
             upstream_fragment_ids,
         }

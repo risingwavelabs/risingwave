@@ -28,7 +28,6 @@ use crate::tokenizer::Token;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterDatabaseOperation {
     ChangeOwner { new_owner_name: Ident },
     RenameDatabase { database_name: ObjectName },
@@ -36,7 +35,6 @@ pub enum AlterDatabaseOperation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSchemaOperation {
     ChangeOwner { new_owner_name: Ident },
     RenameSchema { schema_name: ObjectName },
@@ -49,9 +47,13 @@ pub enum AlterTableOperation {
     /// `ADD <table_constraint>`
     AddConstraint(TableConstraint),
     /// `ADD [ COLUMN ] <column_def>`
-    AddColumn { column_def: ColumnDef },
+    AddColumn {
+        column_def: ColumnDef,
+    },
     /// TODO: implement `DROP CONSTRAINT <name>`
-    DropConstraint { name: Ident },
+    DropConstraint {
+        name: Ident,
+    },
     /// `DROP [ COLUMN ] [ IF EXISTS ] <column_name> [ CASCADE ]`
     DropColumn {
         column_name: Ident,
@@ -64,7 +66,9 @@ pub enum AlterTableOperation {
         new_column_name: Ident,
     },
     /// `RENAME TO <table_name>`
-    RenameTable { table_name: ObjectName },
+    RenameTable {
+        table_name: ObjectName,
+    },
     // CHANGE [ COLUMN ] <old_name> <new_name> <data_type> [ <options> ]
     ChangeColumn {
         old_name: Ident,
@@ -75,26 +79,37 @@ pub enum AlterTableOperation {
     /// `RENAME CONSTRAINT <old_constraint_name> TO <new_constraint_name>`
     ///
     /// Note: this is a PostgreSQL-specific operation.
-    RenameConstraint { old_name: Ident, new_name: Ident },
+    RenameConstraint {
+        old_name: Ident,
+        new_name: Ident,
+    },
     /// `ALTER [ COLUMN ]`
     AlterColumn {
         column_name: Ident,
         op: AlterColumnOperation,
     },
     /// `OWNER TO <owner_name>`
-    ChangeOwner { new_owner_name: Ident },
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
     /// `SET SCHEMA <schema_name>`
-    SetSchema { new_schema_name: ObjectName },
+    SetSchema {
+        new_schema_name: ObjectName,
+    },
     /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
     SetParallelism {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    RefreshSchema,
+    /// `SET SOURCE_RATE_LIMIT TO <rate_limit>`
+    SetSourceRateLimit {
+        rate_limit: i32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterIndexOperation {
     RenameIndex {
         index_name: ObjectName,
@@ -108,7 +123,6 @@ pub enum AlterIndexOperation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterViewOperation {
     RenameView {
         view_name: ObjectName,
@@ -124,11 +138,14 @@ pub enum AlterViewOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET BACKFILL_RATE_LIMIT TO <rate_limit>`
+    SetBackfillRateLimit {
+        rate_limit: i32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSinkOperation {
     RenameSink {
         sink_name: ObjectName,
@@ -148,25 +165,32 @@ pub enum AlterSinkOperation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterSubscriptionOperation {
+    RenameSubscription { subscription_name: ObjectName },
+    ChangeOwner { new_owner_name: Ident },
+    SetSchema { new_schema_name: ObjectName },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterSourceOperation {
     RenameSource { source_name: ObjectName },
     AddColumn { column_def: ColumnDef },
     ChangeOwner { new_owner_name: Ident },
     SetSchema { new_schema_name: ObjectName },
     FormatEncode { connector_schema: ConnectorSchema },
+    RefreshSchema,
+    SetSourceRateLimit { rate_limit: i32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterFunctionOperation {
     SetSchema { new_schema_name: ObjectName },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterConnectionOperation {
     SetSchema { new_schema_name: ObjectName },
 }
@@ -263,6 +287,12 @@ impl fmt::Display for AlterTableOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterTableOperation::RefreshSchema => {
+                write!(f, "REFRESH SCHEMA")
+            }
+            AlterTableOperation::SetSourceRateLimit { rate_limit } => {
+                write!(f, "SET SOURCE_RATE_LIMIT TO {}", rate_limit)
+            }
         }
     }
 }
@@ -311,6 +341,9 @@ impl fmt::Display for AlterViewOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterViewOperation::SetBackfillRateLimit { rate_limit } => {
+                write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
+            }
         }
     }
 }
@@ -342,6 +375,22 @@ impl fmt::Display for AlterSinkOperation {
     }
 }
 
+impl fmt::Display for AlterSubscriptionOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterSubscriptionOperation::RenameSubscription { subscription_name } => {
+                write!(f, "RENAME TO {subscription_name}")
+            }
+            AlterSubscriptionOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {}", new_owner_name)
+            }
+            AlterSubscriptionOperation::SetSchema { new_schema_name } => {
+                write!(f, "SET SCHEMA {}", new_schema_name)
+            }
+        }
+    }
+}
+
 impl fmt::Display for AlterSourceOperation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -359,6 +408,12 @@ impl fmt::Display for AlterSourceOperation {
             }
             AlterSourceOperation::FormatEncode { connector_schema } => {
                 write!(f, "{connector_schema}")
+            }
+            AlterSourceOperation::RefreshSchema => {
+                write!(f, "REFRESH SCHEMA")
+            }
+            AlterSourceOperation::SetSourceRateLimit { rate_limit } => {
+                write!(f, "SET SOURCE_RATE_LIMIT TO {}", rate_limit)
             }
         }
     }

@@ -97,6 +97,7 @@ message ExprNode {
     TRANSLATE = 216;
     COALESCE = 217;
     CONCAT_WS = 218;
+    CONCAT_WS_VARIADIC = 285;
     ABS = 219;
     SPLIT_PART = 220;
     CEIL = 221;
@@ -106,6 +107,8 @@ message ExprNode {
     CHAR_LENGTH = 225;
     REPEAT = 226;
     CONCAT_OP = 227;
+    CONCAT = 286;
+    CONCAT_VARIADIC = 287;
     // BOOL_OUT is different from CAST-bool-to-varchar in PostgreSQL.
     BOOL_OUT = 228;
     OCTET_LENGTH = 229;
@@ -151,6 +154,7 @@ message ExprNode {
     ACOSH = 265;
     ATANH = 266;
     SINH = 267;
+    ACOSD = 268;
     // skips 268,269,270 so that acosd, atand, atan2d are close to others
     TRUNC = 271;
     LN = 272;
@@ -182,12 +186,17 @@ message ExprNode {
     LEFT = 317;
     RIGHT = 318;
     FORMAT = 319;
+    FORMAT_VARIADIC = 326;
     PGWIRE_SEND = 320;
     PGWIRE_RECV = 321;
     CONVERT_FROM = 322;
     CONVERT_TO = 323;
     DECRYPT = 324;
     ENCRYPT = 325;
+    INET_ATON = 328;
+    INET_NTOA = 329;
+    QUOTE_LITERAL = 330;
+    QUOTE_NULLABLE = 331;
 
     // Unary operators
     NEG = 401;
@@ -232,9 +241,11 @@ message ExprNode {
     // jsonb ->> int, jsonb ->> text that returns text
     JSONB_ACCESS_STR = 601;
     // jsonb #> text[] -> jsonb
-    JSONB_EXTRACT_PATH = 613;
+    JSONB_EXTRACT_PATH = 627;
+    JSONB_EXTRACT_PATH_VARIADIC = 613;
     // jsonb #>> text[] -> text
-    JSONB_EXTRACT_PATH_TEXT = 614;
+    JSONB_EXTRACT_PATH_TEXT = 628;
+    JSONB_EXTRACT_PATH_TEXT_VARIADIC = 614;
     JSONB_TYPEOF = 602;
     JSONB_ARRAY_LENGTH = 603;
     IS_JSON = 604;
@@ -261,16 +272,22 @@ message ExprNode {
     JSONB_STRIP_NULLS = 616;
     TO_JSONB = 617;
     JSONB_BUILD_ARRAY = 618;
+    JSONB_BUILD_ARRAY_VARIADIC = 625;
     JSONB_BUILD_OBJECT = 619;
+    JSONB_BUILD_OBJECT_VARIADIC = 626;
     JSONB_PATH_EXISTS = 620;
     JSONB_PATH_MATCH = 621;
     JSONB_PATH_QUERY_ARRAY = 622;
     JSONB_PATH_QUERY_FIRST = 623;
+    JSONB_POPULATE_RECORD = 629;
+    JSONB_TO_RECORD = 630;
+    JSONB_SET = 631;
 
     // Non-pure functions below (> 1000)
     // ------------------------
     // Internal functions
     VNODE = 1101;
+    TEST_PAID_TIER = 1102;
     // Non-deterministic functions
     PROCTIME = 2023;
     PG_SLEEP = 2024;
@@ -286,6 +303,13 @@ message ExprNode {
     PG_GET_USERBYID = 2403;
     PG_INDEXES_SIZE = 2404;
     PG_RELATION_SIZE = 2405;
+    PG_GET_SERIAL_SEQUENCE = 2406;
+    PG_INDEX_COLUMN_HAS_PROPERTY = 2410;
+    HAS_TABLE_PRIVILEGE = 2407;
+    HAS_ANY_COLUMN_PRIVILEGE = 2408;
+    HAS_SCHEMA_PRIVILEGE = 2409;
+    PG_IS_IN_RECOVERY = 2411;
+    RW_RECOVERY_STATUS = 2412;
 
     // EXTERNAL
     ICEBERG_TRANSFORM = 2201;
@@ -312,6 +336,7 @@ message TableFunction {
     GENERATE_SUBSCRIPTS = 5;
     // buf:lint:ignore ENUM_VALUE_UPPER_SNAKE_CASE
     _PG_EXPANDARRAY = 6;
+    PG_GET_KEYWORDS = 18;
     // Jsonb functions
     JSONB_ARRAY_ELEMENTS = 10;
     JSONB_ARRAY_ELEMENTS_TEXT = 11;
@@ -319,14 +344,18 @@ message TableFunction {
     JSONB_EACH_TEXT = 13;
     JSONB_OBJECT_KEYS = 14;
     JSONB_PATH_QUERY = 15;
+    JSONB_POPULATE_RECORDSET = 16;
+    JSONB_TO_RECORDSET = 17;
+    // file scan
+    FILE_SCAN = 19;
     // User defined table function
-    UDTF = 100;
+    USER_DEFINED = 100;
   }
   Type function_type = 1;
   repeated expr.ExprNode args = 2;
   data.DataType return_type = 3;
-  // optional. only used when the type is UDTF.
-  UserDefinedTableFunction udtf = 4;
+  // optional. only used when the type is USER_DEFINED.
+  UserDefinedFunctionMetadata udf = 4;
 }
 
 // Reference to an upstream column, containing its index and data type.
@@ -408,6 +437,12 @@ message AggCall {
     LAST_VALUE = 25;
     GROUPING = 26;
     INTERNAL_LAST_SEEN_VALUE = 27;
+    APPROX_PERCENTILE = 28;
+
+    // user defined aggregate function
+    USER_DEFINED = 100;
+    // wraps a scalar function that takes a list as input as an aggregate function.
+    WRAP_SCALAR = 101;
   }
   Type type = 1;
   repeated InputRef args = 2;
@@ -416,6 +451,10 @@ message AggCall {
   repeated common.ColumnOrder order_by = 5;
   ExprNode filter = 6;
   repeated Constant direct_args = 7;
+  // optional. only used when the type is USER_DEFINED.
+  UserDefinedFunctionMetadata udf = 8;
+  // optional. only used when the type is WRAP_SCALAR.
+  ExprNode scalar = 9;
 }
 
 message WindowFrame {
@@ -426,6 +465,7 @@ message WindowFrame {
 
     TYPE_ROWS = 5;
     TYPE_RANGE = 10;
+    TYPE_SESSION = 15;
   }
   enum BoundType {
     BOUND_TYPE_UNSPECIFIED = 0;
@@ -471,6 +511,13 @@ message WindowFrame {
     BoundType type = 1;
     optional data.Datum offset = 3;
   }
+  message SessionFrameBounds {
+    data.Datum gap = 1;
+
+    data.DataType order_data_type = 10;
+    common.OrderType order_type = 15;
+    data.DataType gap_data_type = 20;
+  }
 
   Type type = 1;
 
@@ -482,6 +529,7 @@ message WindowFrame {
   oneof bounds {
     RowsFrameBounds rows = 10;
     RangeFrameBounds range = 15;
+    SessionFrameBounds session = 20;
   }
 }
 
@@ -508,7 +556,7 @@ message WindowFunction {
 }
 
 // Note: due to historic reasons, UserDefinedFunction is a oneof variant parallel to FunctionCall,
-// while UserDefinedTableFunction is embedded as a field in TableFunction.
+// while UserDefinedFunctionMetadata is embedded as a field in TableFunction and AggCall.
 
 message UserDefinedFunction {
   repeated ExprNode children = 1;
@@ -516,24 +564,34 @@ message UserDefinedFunction {
   repeated string arg_names = 8;
   repeated data.DataType arg_types = 3;
   string language = 4;
-  // For external UDF: the link to the external function service.
-  // For WASM UDF: the link to the wasm binary file.
+  // The link to the external function service.
   optional string link = 5;
-  // An unique identifier for the function.
-  // For external UDF, it's the name of the function in the external function service.
-  // For WASM UDF, it's the name of the function in the wasm binary file.
-  // For JavaScript UDF, it's the name of the function.
+  // An unique identifier to the function.
+  // - If `link` is not empty, the name of the function in the external function service.
+  // - If `language` is `rust` or `wasm`, the name of the function in the wasm binary file.
+  // - If `language` is `javascript`, the name of the function.
   optional string identifier = 6;
-  // For JavaScript UDF, it's the body of the function.
+  // - If `language` is `javascript`, the source code of the function.
   optional string body = 7;
+  // - If `language` is `rust` or `wasm`, the zstd-compressed wasm binary.
+  optional bytes compressed_binary = 10;
+  bool always_retry_on_network_error = 9;
+  // The runtime used when javascript is used as the language. Could be "quickjs" or "deno".
+  optional string runtime = 11;
+  // The function type, which is used to execute the function. Could be "sync", "async", "generator" or "async_generator"
+  optional string function_type = 12;
 }
 
-// Additional information for user defined table functions.
-message UserDefinedTableFunction {
+// Additional information for user defined table/aggregate functions.
+message UserDefinedFunctionMetadata {
   repeated string arg_names = 8;
   repeated data.DataType arg_types = 3;
+  data.DataType return_type = 13;
   string language = 4;
   optional string link = 5;
   optional string identifier = 6;
   optional string body = 7;
+  optional bytes compressed_binary = 10;
+  optional string runtime = 11;
+  optional string function_type = 12;
 }

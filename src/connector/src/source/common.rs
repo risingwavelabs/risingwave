@@ -16,27 +16,25 @@ use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
-use crate::source::{SourceContextRef, SourceMessage, SplitReader};
+use crate::source::{SourceContextRef, SourceMessage};
 
-pub(crate) trait CommonSplitReader: SplitReader + 'static {
-    fn into_data_stream(self) -> impl Stream<Item = anyhow::Result<Vec<SourceMessage>>> + Send;
-}
-
-#[try_stream(boxed, ok = StreamChunk, error = anyhow::Error)]
+/// Utility function to convert [`SourceMessage`] stream (got from specific connector's [`SplitReader`](super::SplitReader))
+/// into [`StreamChunk`] stream (by invoking [`ByteStreamSourceParserImpl`](crate::parser::ByteStreamSourceParserImpl)).
+#[try_stream(boxed, ok = StreamChunk, error = ConnectorError)]
 pub(crate) async fn into_chunk_stream(
-    reader: impl CommonSplitReader,
+    data_stream: impl Stream<Item = ConnectorResult<Vec<SourceMessage>>> + Send + 'static,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
 ) {
-    let actor_id = source_ctx.source_info.actor_id.to_string();
-    let fragment_id = source_ctx.source_info.fragment_id.to_string();
-    let source_id = source_ctx.source_info.source_id.to_string();
-    let source_name = source_ctx.source_info.source_name.to_string();
+    let actor_id = source_ctx.actor_id.to_string();
+    let fragment_id = source_ctx.fragment_id.to_string();
+    let source_id = source_ctx.source_id.to_string();
+    let source_name = source_ctx.source_name.to_string();
     let metrics = source_ctx.metrics.clone();
 
-    let data_stream = reader.into_data_stream();
-
+    // add metrics to the data stream
     let data_stream = data_stream
         .inspect_ok(move |data_batch| {
             let mut by_split_id = std::collections::HashMap::new();
@@ -51,7 +49,7 @@ pub(crate) async fn into_chunk_stream(
             for (split_id, msgs) in by_split_id {
                 metrics
                     .partition_input_count
-                    .with_label_values(&[
+                    .with_guarded_label_values(&[
                         &actor_id,
                         &source_id,
                         split_id,
@@ -67,7 +65,7 @@ pub(crate) async fn into_chunk_stream(
 
                 metrics
                     .partition_input_bytes
-                    .with_label_values(&[
+                    .with_guarded_label_values(&[
                         &actor_id,
                         &source_id,
                         split_id,

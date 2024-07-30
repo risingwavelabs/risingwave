@@ -81,7 +81,7 @@ impl<K: HashKey> HashKeyBenchCase<K> {
         // please reference the `bench_vec_deser` and `bench_deser` method for benchmarking partial
         // `col_idxes`
         let col_idxes = (0..input_chunk.columns().len()).collect_vec();
-        let keys = HashKey::build(&col_idxes, &input_chunk).unwrap();
+        let keys = HashKey::build_many(&col_idxes, &input_chunk);
         Self {
             id,
             input_chunk,
@@ -94,7 +94,7 @@ impl<K: HashKey> HashKeyBenchCase<K> {
     pub fn bench_vec_ser(&self, c: &mut Criterion) {
         let vectorize_serialize_id = "vec ser ".to_string() + &self.id;
         c.bench_function(&vectorize_serialize_id, |b| {
-            b.iter(|| K::build(&self.col_idxes, &self.input_chunk).unwrap())
+            b.iter(|| K::build_many(&self.col_idxes, &self.input_chunk))
         });
     }
 

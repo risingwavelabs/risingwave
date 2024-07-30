@@ -4,20 +4,34 @@ selet 1;
 db error: ERROR: Failed to run the query
 
 Caused by:
-  sql parser error: Expected an SQL statement, found: selet at line:1, column:6
-Near "selet"
+  sql parser error: expected statement, found: selet
+LINE 1: selet 1;
+        ^
 
 
 statement error
-create function int_42() returns int as int_42 using link 'localhost:8815';
+create function int_42() returns int as int_42 using link '555.0.0.1:8815';
 ----
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: failed to connect to UDF service
-  2: transport error
-  3: error trying to connect
-  4: invalid URL, scheme is missing
+  1: failed to parse address: http://555.0.0.1:8815
+  2: invalid IPv4 address
+
+
+statement error
+create function int_42() returns int as int_42 using link '55.55.55.55:5555';
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: failed to check UDF signature
+  2: failed to send requests to UDF service
+  3: status: Unavailable, message: "error trying to connect: tcp connect error: deadline has elapsed", details: [], metadata: MetadataMap { headers: {} }
+  4: transport error
+  5: error trying to connect
+  6: tcp connect error
+  7: deadline has elapsed
 
 
 statement error
@@ -27,7 +41,7 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: gRPC request to meta service failed: Internal error
-  2: SystemParams error: unrecognized system param "not_exist_key"
+  2: SystemParams error: unrecognized system parameter "not_exist_key"
 
 
 query error
@@ -47,7 +61,8 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: Division by zero
+  2: error while evaluating expression `general_div('1', '0')`
+  3: Division by zero
 
 
 query error
@@ -57,7 +72,8 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: Division by zero
+  2: error while evaluating expression `general_div('1', '0')`
+  3: Division by zero
 
 
 statement error
@@ -68,16 +84,4 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: Failed to get/set session config
   2: Invalid value `maybe` for `rw_implicit_flush`
-  3: provided string was not `true` or `false`
-
-
-statement error
-set transaction_isolation to 'read committed';
-----
-db error: ERROR: Failed to run the query
-
-Caused by these errors (recent errors listed first):
-  1: Failed to get/set session config
-  2: Invalid value `read committed` for `transaction_isolation`
-  3: Feature is not yet implemented: isolation level
-Tracking issue: https://github.com/risingwavelabs/risingwave/issues/10736
+  3: Invalid bool

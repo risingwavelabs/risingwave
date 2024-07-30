@@ -32,7 +32,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(CompactionTask::Task)
-                            .json_binary()
+                            .blob(BlobSize::Long)
                             .not_null(),
                     )
                     .col(
@@ -54,7 +54,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(CompactionConfig::Config).json_binary())
+                    .col(ColumnDef::new(CompactionConfig::Config).blob(BlobSize::Long))
                     .to_owned(),
             )
             .await?;
@@ -69,7 +69,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(CompactionStatus::Status).json_binary())
+                    .col(ColumnDef::new(CompactionStatus::Status).blob(BlobSize::Long))
                     .to_owned(),
             )
             .await?;
@@ -142,7 +142,7 @@ impl MigrationTrait for Migration {
                             .boolean()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(HummockVersionDelta::FullVersionDelta).json_binary())
+                    .col(ColumnDef::new(HummockVersionDelta::FullVersionDelta).blob(BlobSize::Long))
                     .to_owned(),
             )
             .await?;

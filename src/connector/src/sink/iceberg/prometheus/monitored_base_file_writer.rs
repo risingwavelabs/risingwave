@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use arrow_array::RecordBatch;
-use arrow_schema::SchemaRef;
+use arrow_array_iceberg::RecordBatch;
+use arrow_schema_iceberg::SchemaRef;
 use icelake::io_v2::{
     BaseFileWriter, BaseFileWriterBuilder, BaseFileWriterMetrics, CurrentFileStatus, FileWriter,
     FileWriterBuilder,
@@ -25,13 +25,13 @@ use risingwave_common::metrics::LabelGuardedIntGauge;
 pub struct MonitoredBaseFileWriterBuilder<B: FileWriterBuilder> {
     inner: BaseFileWriterBuilder<B>,
     // metrics
-    unflush_data_file: LabelGuardedIntGauge<2>,
+    unflush_data_file: LabelGuardedIntGauge<3>,
 }
 
 impl<B: FileWriterBuilder> MonitoredBaseFileWriterBuilder<B> {
     pub fn new(
         inner: BaseFileWriterBuilder<B>,
-        unflush_data_file: LabelGuardedIntGauge<2>,
+        unflush_data_file: LabelGuardedIntGauge<3>,
     ) -> Self {
         Self {
             inner,
@@ -59,7 +59,7 @@ pub struct MonitoredBaseFileWriter<B: FileWriterBuilder> {
     inner: BaseFileWriter<B>,
 
     // metrics
-    unflush_data_file: LabelGuardedIntGauge<2>,
+    unflush_data_file: LabelGuardedIntGauge<3>,
 
     cur_metrics: BaseFileWriterMetrics,
 }
@@ -81,7 +81,7 @@ impl<B: FileWriterBuilder> FileWriter for MonitoredBaseFileWriter<B> {
         Ok(())
     }
 
-    /// Complte the write and return the list of `DataFile` as result.
+    /// Complete the write and return the list of `DataFile` as result.
     async fn close(self) -> Result<Vec<Self::R>> {
         let res = self.inner.close().await?;
         let delta = (res.len() - self.cur_metrics.unflush_data_file) as i64;

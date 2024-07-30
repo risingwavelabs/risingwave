@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 use async_trait::async_trait;
 use regex::Regex;
-use risingwave_connector::dispatch_source_prop;
+use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::kafka::private_link::insert_privatelink_broker_rewrite_map;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
 };
+use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
 use risingwave_meta::manager::{ConnectionId, MetadataManager};
 use risingwave_pb::catalog::connection::Info::PrivateLinkService;
 use risingwave_pb::cloud_service::cloud_service_server::CloudService;
@@ -135,7 +136,7 @@ impl CloudService for CloudServiceImpl {
                 {
                     return Ok(new_rwc_validate_fail_response(
                         ErrorType::PrivatelinkResolveErr,
-                        e.to_string(),
+                        e.to_report_string(),
                     ));
                 }
             } else {
@@ -145,20 +146,23 @@ impl CloudService for CloudServiceImpl {
                 ));
             }
         }
+
+        // XXX: We can't use secret in cloud validate source.
+        let source_cfg = WithOptionsSecResolved::without_secrets(source_cfg);
+
         // try fetch kafka metadata, return error message on failure
-        let source_cfg: HashMap<String, String> = source_cfg.into_iter().collect();
         let props = ConnectorProperties::extract(source_cfg, false);
         if let Err(e) = props {
             return Ok(new_rwc_validate_fail_response(
                 ErrorType::KafkaInvalidProperties,
-                e.to_string(),
+                e.to_report_string(),
             ));
         };
 
         async fn new_enumerator<P: SourceProperties>(
             props: P,
-        ) -> Result<P::SplitEnumerator, anyhow::Error> {
-            P::SplitEnumerator::new(props, SourceEnumeratorContext::default().into()).await
+        ) -> ConnectorResult<P::SplitEnumerator> {
+            P::SplitEnumerator::new(props, SourceEnumeratorContext::dummy().into()).await
         }
 
         dispatch_source_prop!(props.unwrap(), props, {
@@ -166,15 +170,15 @@ impl CloudService for CloudServiceImpl {
             if let Err(e) = enumerator {
                 return Ok(new_rwc_validate_fail_response(
                     ErrorType::KafkaInvalidProperties,
-                    e.to_string(),
+                    e.to_report_string(),
                 ));
             }
             if let Err(e) = enumerator.unwrap().list_splits().await {
-                let error_message = e.to_string();
+                let error_message = e.to_report_string();
                 if error_message.contains("BrokerTransportFailure") {
                     return Ok(new_rwc_validate_fail_response(
                         ErrorType::KafkaBrokerUnreachable,
-                        e.to_string(),
+                        e.to_report_string(),
                     ));
                 }
                 static TOPIC_NOT_FOUND: LazyLock<Regex> =
@@ -182,12 +186,12 @@ impl CloudService for CloudServiceImpl {
                 if TOPIC_NOT_FOUND.is_match(error_message.as_str()) {
                     return Ok(new_rwc_validate_fail_response(
                         ErrorType::KafkaTopicNotFound,
-                        e.to_string(),
+                        e.to_report_string(),
                     ));
                 }
                 return Ok(new_rwc_validate_fail_response(
                     ErrorType::KafkaOther,
-                    e.to_string(),
+                    e.to_report_string(),
                 ));
             }
         });

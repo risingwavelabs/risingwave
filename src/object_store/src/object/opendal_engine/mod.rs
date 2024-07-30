@@ -17,9 +17,6 @@ pub use opendal_object_store::*;
 
 #[cfg(feature = "hdfs-backend")]
 pub mod hdfs;
-#[cfg(feature = "hdfs-backend")]
-pub use hdfs::*;
-
 pub mod webhdfs;
 
 pub mod gcs;
@@ -31,3 +28,6 @@ pub mod opendal_s3;
 pub mod oss;
 
 pub mod fs;
+
+// To make sure the the operation is consistent, we should specially set `atomic_write_dir` for fs, hdfs and webhdfs services.
+const ATOMIC_WRITE_DIR: &str = "atomic_write_dir/";

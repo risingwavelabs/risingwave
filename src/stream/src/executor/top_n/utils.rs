@@ -13,26 +13,18 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::sync::Arc;
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
-use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
+use risingwave_common::array::Op;
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::CacheKey;
-use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
-use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndicesRef, Watermark,
-};
+use crate::executor::prelude::*;
 
 pub trait TopNExecutorBase: Send + 'static {
     /// Apply the chunk to the dirty state and get the diffs.
@@ -50,8 +42,6 @@ pub trait TopNExecutorBase: Send + 'static {
     /// Flush the buffered chunk to the storage backend.
     fn try_flush_data(&mut self) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 
-    fn info(&self) -> &ExecutorInfo;
-
     /// Update the vnode bitmap for the state table and manipulate the cache if necessary, only used
     /// by Group Top-N since it's distributed.
     fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) {
@@ -59,7 +49,6 @@ pub trait TopNExecutorBase: Send + 'static {
     }
 
     fn evict(&mut self) {}
-    fn update_epoch(&mut self, _epoch: u64) {}
 
     fn init(&mut self, epoch: EpochPair) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 
@@ -72,33 +61,17 @@ pub trait TopNExecutorBase: Send + 'static {
 
 /// The struct wraps a [`TopNExecutorBase`]
 pub struct TopNExecutorWrapper<E> {
-    pub(super) input: BoxedExecutor,
+    pub(super) input: Executor,
     pub(super) ctx: ActorContextRef,
     pub(super) inner: E,
 }
 
-impl<E> Executor for TopNExecutorWrapper<E>
+impl<E> Execute for TopNExecutorWrapper<E>
 where
     E: TopNExecutorBase,
 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.top_n_executor_execute().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.inner.info().schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.info().pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info().identity
-    }
-
-    fn info(&self) -> ExecutorInfo {
-        self.inner.info().clone()
     }
 }
 
@@ -140,7 +113,6 @@ where
                         self.inner.update_vnode_bitmap(vnode_bitmap);
                     }
 
-                    self.inner.update_epoch(barrier.epoch.curr);
                     yield Message::Barrier(barrier)
                 }
             };

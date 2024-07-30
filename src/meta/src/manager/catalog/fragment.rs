@@ -12,27 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
-use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_cont};
+use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::util::stream_graph_visitor::{
+    visit_stream_node, visit_stream_node_cont, visit_stream_node_cont_mut,
+};
+use risingwave_common::util::worker_util::WorkerNodeId;
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model_v2::SourceId;
+use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
+use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
-use risingwave_pb::meta::FragmentParallelUnitMapping;
+use risingwave_pb::meta::FragmentWorkerSlotMapping;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, FragmentTypeFlag, StreamActor, StreamNode,
 };
+use risingwave_pb::stream_service::BuildActorInfo;
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::barrier::Reschedule;
@@ -40,10 +46,10 @@ use crate::manager::cluster::WorkerId;
 use crate::manager::{commit_meta, commit_meta_with_trx, LocalNotification, MetaSrvEnv};
 use crate::model::{
     ActorId, BTreeMapTransaction, FragmentId, MetadataModel, MigrationPlan, TableFragments,
-    TableParallelism, ValTransaction,
+    TableParallelism,
 };
 use crate::storage::Transaction;
-use crate::stream::{SplitAssignment, TableRevision};
+use crate::stream::{to_build_actor_info, SplitAssignment, TableRevision};
 use crate::{MetaError, MetaResult};
 
 pub struct FragmentManagerCore {
@@ -55,19 +61,77 @@ impl FragmentManagerCore {
     /// List all fragment vnode mapping info that not in `State::Initial`.
     pub fn all_running_fragment_mappings(
         &self,
-    ) -> impl Iterator<Item = FragmentParallelUnitMapping> + '_ {
-        self.table_fragments
+    ) -> impl Iterator<Item = FragmentWorkerSlotMapping> + '_ {
+        let mut result = vec![];
+
+        for table_fragment in self
+            .table_fragments
             .values()
             .filter(|tf| tf.state() != State::Initial)
-            .flat_map(|table_fragments| {
-                table_fragments.fragments.values().map(|fragment| {
-                    let parallel_unit_mapping = fragment.vnode_mapping.clone().unwrap();
-                    FragmentParallelUnitMapping {
+        {
+            result.extend(Self::extract_fragment_mapping(table_fragment).into_iter());
+        }
+
+        result.into_iter()
+    }
+
+    fn extract_fragment_mapping(table_fragment: &TableFragments) -> Vec<FragmentWorkerSlotMapping> {
+        let mut result = Vec::with_capacity(table_fragment.fragments.len());
+        for fragment in table_fragment.fragments.values() {
+            match fragment.get_distribution_type().unwrap() {
+                FragmentDistributionType::Unspecified => unreachable!(),
+                FragmentDistributionType::Single => {
+                    let actor = fragment
+                        .get_actors()
+                        .iter()
+                        .exactly_one()
+                        .expect("single actor");
+                    let status = table_fragment.actor_status.get(&actor.actor_id).unwrap();
+                    let worker_id = status.worker_id();
+                    result.push(FragmentWorkerSlotMapping {
                         fragment_id: fragment.fragment_id,
-                        mapping: Some(parallel_unit_mapping),
+                        mapping: Some(
+                            WorkerSlotMapping::new_single(WorkerSlotId::new(worker_id, 0))
+                                .to_protobuf(),
+                        ),
+                    });
+                }
+                FragmentDistributionType::Hash => {
+                    let mut actor_bitmaps = HashMap::new();
+                    let mut actor_to_workers = HashMap::new();
+
+                    for actor in &fragment.actors {
+                        let status = table_fragment.actor_status.get(&actor.actor_id).unwrap();
+
+                        match status.state() {
+                            ActorState::Unspecified => unreachable!(),
+                            // skip inactive actors
+                            ActorState::Inactive => continue,
+                            ActorState::Running => {}
+                        }
+
+                        let worker_id = status.worker_id();
+                        actor_bitmaps.insert(
+                            actor.actor_id as ActorId,
+                            Bitmap::from(actor.vnode_bitmap.as_ref().unwrap()),
+                        );
+
+                        actor_to_workers.insert(actor.actor_id, worker_id);
                     }
-                })
-            })
+
+                    let actor_mapping = ActorMapping::from_bitmaps(&actor_bitmaps);
+
+                    let mapping = actor_mapping.to_worker_slot(&actor_to_workers);
+
+                    result.push(FragmentWorkerSlotMapping {
+                        fragment_id: fragment.fragment_id,
+                        mapping: Some(mapping.to_protobuf()),
+                    });
+                }
+            }
+        }
+
+        result
     }
 
     fn running_fragment_parallelisms(
@@ -84,16 +148,13 @@ impl FragmentManagerCore {
                     {
                         return None;
                     }
-                    let parallelism = match fragment.vnode_mapping.as_ref() {
-                        None => {
-                            tracing::warn!(
-                                "vnode mapping for fragment {} not found",
-                                fragment.fragment_id
-                            );
-                            1
-                        }
-                        Some(m) => ParallelUnitMapping::from_protobuf(m).iter_unique().count(),
+
+                    let parallelism = match fragment.get_distribution_type().unwrap() {
+                        FragmentDistributionType::Unspecified => unreachable!(),
+                        FragmentDistributionType::Single => 1,
+                        FragmentDistributionType::Hash => fragment.get_actors().len(),
                     };
+
                     Some((fragment.fragment_id, parallelism))
                 })
             })
@@ -112,19 +173,28 @@ pub struct FragmentManager {
     core: RwLock<FragmentManagerCore>,
 }
 
-pub struct ActorInfos {
-    /// node_id => actor_ids
-    pub actor_maps: HashMap<WorkerId, Vec<ActorId>>,
+#[derive(Clone)]
+pub struct InflightFragmentInfo {
+    pub actors: HashMap<ActorId, WorkerNodeId>,
+    pub state_table_ids: HashSet<TableId>,
+    pub is_injectable: bool,
+}
 
-    /// all reachable barrier inject actors
-    pub barrier_inject_actor_maps: HashMap<WorkerId, Vec<ActorId>>,
+pub struct ActorInfos {
+    pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
+}
+
+impl ActorInfos {
+    pub fn new(fragment_infos: HashMap<FragmentId, InflightFragmentInfo>) -> Self {
+        Self { fragment_infos }
+    }
 }
 
 pub type FragmentManagerRef = Arc<FragmentManager>;
 
 impl FragmentManager {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let table_fragments = TableFragments::list(env.meta_store_checked()).await?;
+        let table_fragments = TableFragments::list(env.meta_store().as_kv()).await?;
 
         // `expr_context` of `StreamActor` is introduced in 1.6.0.
         // To ensure compatibility, we fill it for table fragments that were created with older versions.
@@ -133,7 +203,7 @@ impl FragmentManager {
             .map(|tf| (tf.table_id(), tf.fill_expr_context()))
             .collect();
 
-        let table_revision = TableRevision::get(env.meta_store_checked()).await?;
+        let table_revision = TableRevision::get(env.meta_store().as_kv()).await?;
 
         Ok(Self {
             env,
@@ -189,20 +259,10 @@ impl FragmentManager {
     }
 
     async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
-        // Notify all fragment mapping to frontend nodes
-        for fragment in table_fragment.fragments.values() {
-            let mapping = fragment
-                .vnode_mapping
-                .clone()
-                .expect("no data distribution found");
-            let fragment_mapping = FragmentParallelUnitMapping {
-                fragment_id: fragment.fragment_id,
-                mapping: Some(mapping),
-            };
-
+        for mapping in FragmentManagerCore::extract_fragment_mapping(table_fragment) {
             self.env
                 .notification_manager()
-                .notify_frontend(operation, Info::ParallelUnitMapping(fragment_mapping))
+                .notify_frontend(operation, Info::StreamingWorkerSlotMapping(mapping))
                 .await;
         }
 
@@ -439,8 +499,8 @@ impl FragmentManager {
                                 if m.upstream_fragment_id == merge_update.upstream_fragment_id {
                                     m.upstream_fragment_id =
                                         merge_update.new_upstream_fragment_id.unwrap();
-                                    m.upstream_actor_id =
-                                        merge_update.added_upstream_actor_id.clone();
+                                    m.upstream_actor_id
+                                        .clone_from(&merge_update.added_upstream_actor_id);
                                 }
                                 upstream_actor_ids.extend(m.upstream_actor_id.clone());
                             }
@@ -547,7 +607,10 @@ impl FragmentManager {
     /// tables.
     /// If table fragments already deleted, this should just be noop,
     /// the delete function (`table_fragments.remove`) will not return an error.
-    pub async fn drop_table_fragments_vec(&self, table_ids: &HashSet<TableId>) -> MetaResult<()> {
+    pub async fn drop_table_fragments_vec(
+        &self,
+        table_ids: &HashSet<TableId>,
+    ) -> MetaResult<Vec<u32>> {
         let mut guard = self.core.write().await;
         let current_revision = guard.table_revision;
 
@@ -557,9 +620,10 @@ impl FragmentManager {
             .filter_map(|table_id| map.get(table_id).cloned())
             .collect_vec();
 
-        let mut dirty_sink_into_table_upstream_fragment_id = HashSet::new();
         let mut table_fragments = BTreeMapTransaction::new(map);
+        let mut table_ids_to_unregister_from_hummock = vec![];
         for table_fragment in &to_delete_table_fragments {
+            table_ids_to_unregister_from_hummock.extend(table_fragment.all_table_ids());
             table_fragments.remove(table_fragment.table_id());
             let to_remove_actor_ids: HashSet<_> = table_fragment.actor_ids().into_iter().collect();
             let dependent_table_ids = table_fragment.dependent_table_ids();
@@ -590,32 +654,14 @@ impl FragmentManager {
                         })
                     });
             }
-
-            if let Some(sink_fragment) = table_fragment.sink_fragment() {
-                let dispatchers = sink_fragment
-                    .get_actors()
-                    .iter()
-                    .map(|actor| actor.get_dispatcher())
-                    .collect_vec();
-
-                if !dispatchers.is_empty() {
-                    dirty_sink_into_table_upstream_fragment_id.insert(sink_fragment.fragment_id);
-                }
-            }
         }
 
-        if !dirty_sink_into_table_upstream_fragment_id.is_empty() {
-            let to_delete_table_ids: HashSet<_> = to_delete_table_fragments
-                .iter()
-                .map(|table| table.table_id())
-                .collect();
+        let to_delete_table_ids: HashSet<_> = to_delete_table_fragments
+            .iter()
+            .map(|table| table.table_id())
+            .collect();
 
-            Self::clean_dirty_table_sink_downstreams(
-                dirty_sink_into_table_upstream_fragment_id,
-                to_delete_table_ids,
-                &mut table_fragments,
-            )?;
-        }
+        Self::clean_dirty_table_sink_downstreams(to_delete_table_ids, &mut table_fragments)?;
 
         if table_ids.is_empty() {
             commit_meta!(self, table_fragments)?;
@@ -634,43 +680,50 @@ impl FragmentManager {
             }
         }
 
-        Ok(())
+        Ok(table_ids_to_unregister_from_hummock)
     }
 
     // When dropping sink into a table, there could be an unexpected meta reboot. At this time, the sink’s catalog might have been deleted,
     // but the union branch that attaches the downstream table to the sink fragment may still exist.
     // This could lead to issues. Therefore, we need to find the sink fragment’s downstream, then locate its union node and delete the dirty merge.
     fn clean_dirty_table_sink_downstreams(
-        dirty_sink_into_table_upstream_fragment_id: HashSet<u32>,
         to_delete_table_ids: HashSet<TableId>,
         table_fragments: &mut BTreeMapTransaction<'_, TableId, TableFragments>,
     ) -> MetaResult<()> {
         tracing::info!("cleaning dirty downstream merge nodes for table sink");
 
-        let mut dirty_downstream_table_ids = HashMap::new();
-        for (table_id, table_fragment) in table_fragments.tree_mut() {
+        let mut all_fragment_ids = HashSet::new();
+
+        for (table_id, table_fragment) in table_fragments.tree_ref() {
             if to_delete_table_ids.contains(table_id) {
                 continue;
             }
 
-            for fragment in table_fragment.fragments.values_mut() {
+            all_fragment_ids.extend(table_fragment.fragment_ids());
+        }
+
+        let mut dirty_downstream_table_ids = HashMap::new();
+
+        for (table_id, table_fragment) in table_fragments.tree_ref() {
+            if to_delete_table_ids.contains(table_id) {
+                continue;
+            }
+
+            for fragment in table_fragment.fragments.values() {
                 if fragment
                     .get_upstream_fragment_ids()
                     .iter()
-                    .all(|upstream_fragment_id| {
-                        !dirty_sink_into_table_upstream_fragment_id.contains(upstream_fragment_id)
-                    })
+                    .all(|upstream_fragment_id| all_fragment_ids.contains(upstream_fragment_id))
                 {
                     continue;
                 }
 
-                for actor in &mut fragment.actors {
-                    visit_stream_node_cont(actor.nodes.as_mut().unwrap(), |node| {
+                for actor in &fragment.actors {
+                    visit_stream_node_cont(actor.nodes.as_ref().unwrap(), |node| {
                         if let Some(NodeBody::Union(_)) = node.node_body {
-                            for input in &mut node.input {
-                                if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body
-                                    && dirty_sink_into_table_upstream_fragment_id
-                                        .contains(&merge_node.upstream_fragment_id)
+                            for input in &node.input {
+                                if let Some(NodeBody::Merge(merge_node)) = &input.node_body
+                                    && !all_fragment_ids.contains(&merge_node.upstream_fragment_id)
                                 {
                                     dirty_downstream_table_ids
                                         .insert(*table_id, fragment.fragment_id);
@@ -681,12 +734,6 @@ impl FragmentManager {
                         true
                     })
                 }
-
-                fragment
-                    .upstream_fragment_ids
-                    .retain(|upstream_fragment_id| {
-                        !dirty_sink_into_table_upstream_fragment_id.contains(upstream_fragment_id)
-                    });
             }
         }
 
@@ -700,13 +747,16 @@ impl FragmentManager {
                 .get_mut(&fragment_id)
                 .with_context(|| format!("fragment not exist: id={}", fragment_id))?;
 
+            fragment
+                .upstream_fragment_ids
+                .retain(|upstream_fragment_id| all_fragment_ids.contains(upstream_fragment_id));
+
             for actor in &mut fragment.actors {
-                visit_stream_node_cont(actor.nodes.as_mut().unwrap(), |node| {
+                visit_stream_node_cont_mut(actor.nodes.as_mut().unwrap(), |node| {
                     if let Some(NodeBody::Union(_)) = node.node_body {
                         node.input.retain_mut(|input| {
                             if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body
-                                && dirty_sink_into_table_upstream_fragment_id
-                                    .contains(&merge_node.upstream_fragment_id)
+                                && !all_fragment_ids.contains(&merge_node.upstream_fragment_id)
                             {
                                 false
                             } else {
@@ -724,39 +774,39 @@ impl FragmentManager {
     /// Used in [`crate::barrier::GlobalBarrierManager`], load all running actor that need to be sent or
     /// collected
     pub async fn load_all_actors(&self) -> ActorInfos {
-        let mut actor_maps = HashMap::new();
-        let mut barrier_inject_actor_maps = HashMap::new();
+        let mut fragment_infos = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
-            for (worker_id, actor_states) in fragments.worker_actor_states() {
-                for (actor_id, actor_state) in actor_states {
-                    if actor_state == ActorState::Running {
-                        actor_maps
-                            .entry(worker_id)
-                            .or_insert_with(Vec::new)
-                            .push(actor_id);
-                    }
-                }
-            }
-
-            let barrier_inject_actors = fragments.worker_barrier_inject_actor_states();
-            for (worker_id, actor_states) in barrier_inject_actors {
-                for (actor_id, actor_state) in actor_states {
-                    if actor_state == ActorState::Running {
-                        barrier_inject_actor_maps
-                            .entry(worker_id)
-                            .or_insert_with(Vec::new)
-                            .push(actor_id);
-                    }
-                }
+            for fragment in fragments.fragments.values() {
+                let info = InflightFragmentInfo {
+                    actors: fragment
+                        .actors
+                        .iter()
+                        .filter_map(|actor| {
+                            let status = fragments
+                                .actor_status
+                                .get(&actor.actor_id)
+                                .expect("should exist");
+                            if status.state == ActorState::Running as i32 {
+                                Some((actor.actor_id, status.worker_id()))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect(),
+                    state_table_ids: fragment
+                        .state_table_ids
+                        .iter()
+                        .map(|table_id| TableId::new(*table_id))
+                        .collect(),
+                    is_injectable: TableFragments::is_injectable(fragment.fragment_type_mask),
+                };
+                assert!(fragment_infos.insert(fragment.fragment_id, info,).is_none());
             }
         }
 
-        ActorInfos {
-            actor_maps,
-            barrier_inject_actor_maps,
-        }
+        ActorInfos::new(fragment_infos)
     }
 
     async fn migrate_fragment_actors_inner(
@@ -772,14 +822,43 @@ impl FragmentManager {
             .get_mut(table_id)
             .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
 
-        for status in table_fragment.actor_status.values_mut() {
-            if let Some(pu) = &status.parallel_unit
-                && migration_plan.parallel_unit_plan.contains_key(&pu.id)
-            {
-                status.parallel_unit = Some(migration_plan.parallel_unit_plan[&pu.id].clone());
+        let mut worker_fragment_map = HashMap::new();
+        for fragment in table_fragment.fragments() {
+            for actor in fragment.get_actors() {
+                let worker = table_fragment
+                    .actor_status
+                    .get(&actor.actor_id)
+                    .unwrap()
+                    .worker_id();
+
+                let fragment_ref = worker_fragment_map.entry(worker).or_insert(HashMap::new());
+                fragment_ref
+                    .entry(fragment.fragment_id)
+                    .or_insert(BTreeSet::new())
+                    .insert(actor.actor_id);
             }
         }
-        table_fragment.update_vnode_mapping(&migration_plan.parallel_unit_plan);
+
+        let mut rebuilt_actor_to_worker_slots = HashMap::new();
+
+        for (worker, fragment_map) in worker_fragment_map {
+            for (_, actors) in fragment_map {
+                for (idx, actor) in actors.into_iter().enumerate() {
+                    rebuilt_actor_to_worker_slots.insert(actor, WorkerSlotId::new(worker, idx));
+                }
+            }
+        }
+
+        for (actor, location) in rebuilt_actor_to_worker_slots {
+            if let Some(target) = migration_plan.worker_slot_plan.get(&location) {
+                let status = table_fragment
+                    .actor_status
+                    .get_mut(&actor)
+                    .expect("should exist");
+                status.location = PbActorLocation::from_worker(target.worker_id());
+            }
+        }
+
         let table_fragment = table_fragment.clone();
         let next_revision = current_revision.next();
 
@@ -797,6 +876,12 @@ impl FragmentManager {
     /// Used in [`crate::barrier::GlobalBarrierManager`]
     /// migrate actors and update fragments one by one according to the migration plan.
     pub async fn migrate_fragment_actors(&self, migration_plan: &MigrationPlan) -> MetaResult<()> {
+        let expired_workers: HashSet<_> = migration_plan
+            .worker_slot_plan
+            .keys()
+            .map(|w| w.worker_id())
+            .collect();
+
         let to_migrate_table_fragments = self
             .core
             .read()
@@ -805,9 +890,7 @@ impl FragmentManager {
             .values()
             .filter(|tf| {
                 for status in tf.actor_status.values() {
-                    if let Some(pu) = &status.parallel_unit
-                        && migration_plan.parallel_unit_plan.contains_key(&pu.id)
-                    {
+                    if expired_workers.contains(&status.worker_id()) {
                         return true;
                     }
                 }
@@ -824,38 +907,76 @@ impl FragmentManager {
         Ok(())
     }
 
-    pub async fn all_worker_parallel_units(&self) -> HashMap<WorkerId, HashSet<ParallelUnitId>> {
-        let mut all_worker_parallel_units = HashMap::new();
+    pub async fn all_worker_slots(&self) -> HashMap<WorkerId, HashSet<WorkerSlotId>> {
+        let mut all_worker_slots = HashMap::new();
         let map = &self.core.read().await.table_fragments;
+
+        let mut worker_fragment_map = HashMap::new();
+
         for table_fragment in map.values() {
-            table_fragment.worker_parallel_units().into_iter().for_each(
-                |(worker_id, parallel_units)| {
-                    all_worker_parallel_units
-                        .entry(worker_id)
-                        .or_insert_with(HashSet::new)
-                        .extend(parallel_units);
-                },
+            for fragment in table_fragment.fragments() {
+                for actor in fragment.get_actors() {
+                    let worker = table_fragment
+                        .actor_status
+                        .get(&actor.actor_id)
+                        .unwrap()
+                        .worker_id();
+
+                    let fragment_ref = worker_fragment_map.entry(worker).or_insert(HashMap::new());
+                    *fragment_ref.entry(fragment.fragment_id).or_insert(0) += 1;
+                }
+            }
+        }
+
+        for (worker, fragment_map) in worker_fragment_map {
+            let max_fragment = fragment_map.values().copied().max().unwrap();
+
+            all_worker_slots.insert(
+                worker,
+                (0..max_fragment)
+                    .map(|idx| WorkerSlotId::new(worker, idx as _))
+                    .collect(),
             );
         }
 
-        all_worker_parallel_units
+        all_worker_slots
     }
 
     pub async fn all_node_actors(
         &self,
         include_inactive: bool,
-    ) -> HashMap<WorkerId, Vec<StreamActor>> {
+        subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
+    ) -> HashMap<WorkerId, Vec<BuildActorInfo>> {
         let mut actor_maps = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
+            let table_id = fragments.table_id();
             for (node_id, actors) in fragments.worker_actors(include_inactive) {
                 let node_actors = actor_maps.entry(node_id).or_insert_with(Vec::new);
-                node_actors.extend(actors);
+                node_actors.extend(
+                    actors
+                        .into_iter()
+                        .map(|actor| to_build_actor_info(actor, subscriptions, table_id)),
+                );
             }
         }
 
         actor_maps
+    }
+
+    pub async fn node_actor_count(&self) -> HashMap<WorkerId, usize> {
+        let mut actor_count = HashMap::new();
+
+        let map = &self.core.read().await.table_fragments;
+        for fragments in map.values() {
+            for actor_status in fragments.actor_status.values() {
+                let e = actor_count.entry(actor_status.worker_id()).or_insert(0);
+                *e += 1;
+            }
+        }
+
+        actor_count
     }
 
     // edit the `rate_limit` of the `Source` node in given `source_id`'s fragments
@@ -931,15 +1052,24 @@ impl FragmentManager {
         let mut fragment_to_apply = HashMap::new();
 
         for fragment in fragment.fragments.values_mut() {
-            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::StreamScan as u32) != 0 {
+            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::StreamScan as u32) != 0
+                || (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0
+            {
                 let mut actor_to_apply = Vec::new();
                 for actor in &mut fragment.actors {
                     if let Some(node) = actor.nodes.as_mut() {
-                        visit_stream_node(node, |node_body| {
-                            if let NodeBody::StreamScan(ref mut node) = node_body {
+                        visit_stream_node(node, |node_body| match node_body {
+                            NodeBody::StreamScan(ref mut node) => {
                                 node.rate_limit = rate_limit;
                                 actor_to_apply.push(actor.actor_id);
                             }
+                            NodeBody::Source(ref mut node) => {
+                                if let Some(ref mut node_inner) = node.source_inner {
+                                    node_inner.rate_limit = rate_limit;
+                                    actor_to_apply.push(actor.actor_id);
+                                }
+                            }
+                            _ => {}
                         })
                     };
                 }
@@ -1000,6 +1130,30 @@ impl FragmentManager {
                     .filter(|a| table_fragment.actor_status[a].state == ActorState::Running as i32)
                     .collect();
                 return Ok(running_actor_ids);
+            }
+        }
+
+        bail!("fragment not found: {}", fragment_id)
+    }
+
+    /// Get the actor ids, and each actor's upstream actor ids of the fragment with `fragment_id` with `Running` status.
+    pub async fn get_running_actors_and_upstream_of_fragment(
+        &self,
+        fragment_id: FragmentId,
+    ) -> MetaResult<HashSet<(ActorId, Vec<ActorId>)>> {
+        let map = &self.core.read().await.table_fragments;
+
+        for table_fragment in map.values() {
+            if let Some(fragment) = table_fragment.fragments.get(&fragment_id) {
+                let running_actors = fragment
+                    .actors
+                    .iter()
+                    .filter(|a| {
+                        table_fragment.actor_status[&a.actor_id].state == ActorState::Running as i32
+                    })
+                    .map(|a| (a.actor_id, a.upstream_actor_id.clone()))
+                    .collect();
+                return Ok(running_actors);
             }
         }
 
@@ -1186,12 +1340,12 @@ impl FragmentManager {
                 }
 
                 // update fragment's vnode mapping
-                let mut actor_to_parallel_unit = HashMap::with_capacity(fragment.actors.len());
+                let mut actor_to_worker = HashMap::with_capacity(fragment.actors.len());
                 let mut actor_to_vnode_bitmap = HashMap::with_capacity(fragment.actors.len());
                 for actor in &fragment.actors {
                     let actor_status = &actor_status[&actor.actor_id];
-                    let parallel_unit_id = actor_status.parallel_unit.as_ref().unwrap().id;
-                    actor_to_parallel_unit.insert(actor.actor_id, parallel_unit_id);
+                    let worker_id = actor_status.worker_id();
+                    actor_to_worker.insert(actor.actor_id, worker_id);
 
                     if let Some(vnode_bitmap) = &actor.vnode_bitmap {
                         let bitmap = Bitmap::from(vnode_bitmap);
@@ -1199,28 +1353,28 @@ impl FragmentManager {
                     }
                 }
 
-                let vnode_mapping = if actor_to_vnode_bitmap.is_empty() {
+                let worker_slot_mapping = if actor_to_vnode_bitmap.is_empty() {
                     // If there's no `vnode_bitmap`, then the fragment must be a singleton fragment.
-                    // We directly use the single parallel unit to construct the mapping.
+                    // We directly use the single worker slot to construct the mapping.
                     // TODO: also fill `vnode_bitmap` for the actor of singleton fragment so that we
                     // don't need this branch.
-                    let parallel_unit = *actor_to_parallel_unit.values().exactly_one().unwrap();
-                    ParallelUnitMapping::new_single(parallel_unit)
+
+                    let worker_id = *actor_to_worker.values().exactly_one().unwrap();
+                    WorkerSlotMapping::new_single(WorkerSlotId::new(worker_id, 0))
                 } else {
-                    // Generate the parallel unit mapping from the fragment's actor bitmaps.
-                    assert_eq!(actor_to_vnode_bitmap.len(), actor_to_parallel_unit.len());
+                    // Generate the worker slot mapping from the fragment's actor bitmaps with actor locations.
+                    assert_eq!(actor_to_vnode_bitmap.len(), actor_to_worker.len());
                     ActorMapping::from_bitmaps(&actor_to_vnode_bitmap)
-                        .to_parallel_unit(&actor_to_parallel_unit)
+                        .to_worker_slot(&actor_to_worker)
                 }
                 .to_protobuf();
 
-                *fragment.vnode_mapping.as_mut().unwrap() = vnode_mapping.clone();
-
                 // Notify fragment mapping to frontend nodes.
-                let fragment_mapping = FragmentParallelUnitMapping {
+                let fragment_mapping = FragmentWorkerSlotMapping {
                     fragment_id: *fragment_id as FragmentId,
-                    mapping: Some(vnode_mapping),
+                    mapping: Some(worker_slot_mapping),
                 };
+
                 fragment_mapping_to_notify.push(fragment_mapping);
             }
 
@@ -1340,7 +1494,7 @@ impl FragmentManager {
         for mapping in fragment_mapping_to_notify {
             self.env
                 .notification_manager()
-                .notify_frontend(Operation::Update, Info::ParallelUnitMapping(mapping))
+                .notify_frontend(Operation::Update, Info::StreamingWorkerSlotMapping(mapping))
                 .await;
         }
 
@@ -1399,9 +1553,11 @@ impl FragmentManager {
     pub async fn get_upstream_root_fragments(
         &self,
         upstream_table_ids: &HashSet<TableId>,
-    ) -> MetaResult<HashMap<TableId, Fragment>> {
+    ) -> MetaResult<(HashMap<TableId, Fragment>, HashMap<ActorId, u32>)> {
         let map = &self.core.read().await.table_fragments;
         let mut fragments = HashMap::new();
+
+        let mut actor_locations = HashMap::new();
 
         for &table_id in upstream_table_ids {
             let table_fragments = map
@@ -1414,16 +1570,24 @@ impl FragmentManager {
                 // look for Source fragment if there's no MView fragment
                 fragments.insert(table_id, fragment);
             }
+
+            // todo: reduce memory usage
+            table_fragments
+                .actor_status
+                .iter()
+                .for_each(|(actor_id, status)| {
+                    actor_locations.insert(*actor_id, status.worker_id());
+                });
         }
 
-        Ok(fragments)
+        Ok((fragments, actor_locations))
     }
 
     /// Get the downstream `StreamTableScan` fragments of the specified MV.
     pub async fn get_downstream_fragments(
         &self,
         table_id: TableId,
-    ) -> MetaResult<Vec<(DispatchStrategy, Fragment)>> {
+    ) -> MetaResult<(Vec<(DispatchStrategy, Fragment)>, HashMap<ActorId, u32>)> {
         let map = &self.core.read().await.table_fragments;
 
         let table_fragments = map
@@ -1465,7 +1629,18 @@ impl FragmentManager {
 
         assert_eq!(downstream_dispatches.len(), fragments.len());
 
-        Ok(fragments)
+        let mut actor_locations = HashMap::new();
+
+        map.values().for_each(|table_fragments| {
+            table_fragments
+                .actor_status
+                .iter()
+                .for_each(|(actor_id, status)| {
+                    actor_locations.insert(*actor_id, status.worker_id());
+                });
+        });
+
+        Ok((fragments, actor_locations))
     }
 
     /// Get the `Materialize` fragment of the specified table.

@@ -18,11 +18,12 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::generic::{self, GenericPlanRef, PlanWindowFunction};
+use super::generic::{self, PlanWindowFunction};
 use super::stream::prelude::*;
 use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::property::MonotonicityMap;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
@@ -58,6 +59,8 @@ impl StreamEowcOverWindow {
             true,
             true,
             watermark_columns,
+            // we cannot derive monotonicity for any column for the same reason as watermark columns
+            MonotonicityMap::new(),
         );
         StreamEowcOverWindow { base, core }
     }

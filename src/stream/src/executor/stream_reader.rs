@@ -96,12 +96,14 @@ impl<const BIASED: bool, M: Send + 'static> StreamReaderWithPause<BIASED, M> {
     /// Pause the data stream.
     pub fn pause_stream(&mut self) {
         assert!(!self.paused, "already paused");
+        tracing::info!("data stream paused");
         self.paused = true;
     }
 
     /// Resume the data stream. Panic if the data stream is not paused.
     pub fn resume_stream(&mut self) {
         assert!(self.paused, "not paused");
+        tracing::info!("data stream resumed");
         self.paused = false;
     }
 }
@@ -132,11 +134,13 @@ mod tests {
     use futures::{pin_mut, FutureExt};
     use risingwave_common::array::StreamChunk;
     use risingwave_common::transaction::transaction_id::TxnId;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_dml::TableDmlHandle;
     use tokio::sync::mpsc;
 
     use super::*;
-    use crate::executor::{barrier_to_message_stream, Barrier, StreamExecutorError};
+    use crate::executor::source::barrier_to_message_stream;
+    use crate::executor::{Barrier, StreamExecutorError};
 
     const TEST_TRANSACTION_ID1: TxnId = 0;
     const TEST_TRANSACTION_ID2: TxnId = 1;
@@ -186,14 +190,18 @@ mod tests {
 
         assert_matches!(next!().unwrap(), Either::Right(_));
         // Write a barrier, and we should receive it.
-        barrier_tx.send(Barrier::new_test_barrier(1)).unwrap();
+        barrier_tx
+            .send(Barrier::new_test_barrier(test_epoch(1)))
+            .unwrap();
         assert_matches!(next!().unwrap(), Either::Left(_));
 
         // Pause the stream.
         stream.pause_stream();
 
         // Write a barrier.
-        barrier_tx.send(Barrier::new_test_barrier(2)).unwrap();
+        barrier_tx
+            .send(Barrier::new_test_barrier(test_epoch(2)))
+            .unwrap();
         // Then write a chunk.
         write_handle2.begin().unwrap();
         write_handle2

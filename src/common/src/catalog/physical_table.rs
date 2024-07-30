@@ -14,14 +14,13 @@
 
 use std::collections::HashMap;
 
-use anyhow::anyhow;
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::PbColumnOrder;
 use risingwave_pb::plan_common::StorageTableDesc;
 
 use super::{ColumnDesc, ColumnId, TableId};
+use crate::catalog::get_dist_key_in_pk_indices;
 use crate::util::sort_util::ColumnOrder;
 
 /// Includes necessary information for compute node to access data of the table.
@@ -99,22 +98,7 @@ impl TableDesc {
             .map(|i| i as u32);
 
         let dist_key_in_pk_indices = if vnode_col_idx_in_pk.is_none() {
-            dist_key_indices
-                .iter()
-                .map(|&di| {
-                    pk_indices
-                        .iter()
-                        .position(|&pi| di == pi)
-                        .ok_or_else(|| {
-                            anyhow!(
-                                "distribution key {:?} must be a subset of primary key {:?}",
-                                dist_key_indices,
-                                pk_indices
-                            )
-                        })
-                        .map(|d| d as u32)
-                })
-                .try_collect()?
+            get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices)?
         } else {
             Vec::new()
         };

@@ -16,9 +16,9 @@
  */
 
 import { max } from "lodash"
-import { Relation } from "../pages/api/streaming"
 import { TableFragments_Fragment } from "../proto/gen/meta"
 import { GraphNode } from "./algo"
+import { Relation } from "./api/streaming"
 
 export type Enter<Type> = Type extends d3.Selection<
   any,

@@ -12,34 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Formatter;
-use std::sync::Arc;
-
 use anyhow::anyhow;
 use either::Either;
-use futures::{StreamExt, TryStreamExt};
+use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
-use risingwave_common::catalog::Schema;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
-use risingwave_connector::source::SourceCtrlOpts;
-use risingwave_connector::ConnectorParams;
-use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use crate::executor::error::StreamExecutorError;
-use crate::executor::monitor::StreamingMetrics;
+use super::{barrier_to_message_stream, StreamSourceCore};
+use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::*;
 
 const CHUNK_SIZE: usize = 1024;
 
 #[allow(dead_code)]
 pub struct FsListExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// Streaming source for external
     stream_source_core: Option<StreamSourceCore<S>>,
@@ -53,34 +44,26 @@ pub struct FsListExecutor<S: StateStore> {
     /// System parameter reader to read barrier interval
     system_params: SystemParamsReaderRef,
 
-    // control options for connector level
-    source_ctrl_opts: SourceCtrlOpts,
-
-    // config for the connector node
-    connector_params: ConnectorParams,
+    /// Rate limit in rows/s.
+    rate_limit_rps: Option<u32>,
 }
 
 impl<S: StateStore> FsListExecutor<S> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        info: ExecutorInfo,
         stream_source_core: Option<StreamSourceCore<S>>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
-        source_ctrl_opts: SourceCtrlOpts,
-        connector_params: ConnectorParams,
+        rate_limit_rps: Option<u32>,
     ) -> Self {
         Self {
             actor_ctx,
-            info,
             stream_source_core,
             metrics,
             barrier_receiver: Some(barrier_receiver),
             system_params,
-            source_ctrl_opts,
-            connector_params,
+            rate_limit_rps,
         }
     }
 
@@ -99,21 +82,25 @@ impl<S: StateStore> FsListExecutor<S> {
         let chunked_stream = stream.chunks(CHUNK_SIZE).map(|chunk| {
             let rows = chunk
                 .into_iter()
-                .map(|item| {
-                    let page_item = item.unwrap();
-                    (
+                .map(|item| match item {
+                    Ok(page_item) => Ok((
                         Op::Insert,
                         OwnedRow::new(vec![
                             Some(ScalarImpl::Utf8(page_item.name.into_boxed_str())),
                             Some(ScalarImpl::Timestamptz(page_item.timestamp)),
                             Some(ScalarImpl::Int64(page_item.size)),
                         ]),
-                    )
+                    )),
+                    Err(e) => {
+                        tracing::error!(error = %e.as_report(), "Connector fail to list item");
+                        Err(e)
+                    }
                 })
                 .collect::<Vec<_>>();
 
+            let res: Vec<(Op, OwnedRow)> = rows.into_iter().flatten().collect();
             Ok(StreamChunk::from_rows(
-                &rows,
+                &res,
                 &[DataType::Varchar, DataType::Timestamptz, DataType::Int64],
             ))
         });
@@ -159,55 +146,52 @@ impl<S: StateStore> FsListExecutor<S> {
 
         yield Message::Barrier(barrier);
 
-        while let Some(msg) = stream.next().await {
-            match msg {
-                Err(e) => {
-                    tracing::warn!(error = %e.as_report(), "encountered an error, recovering");
-                    // todo: rebuild stream here
-                }
-                Ok(msg) => match msg {
-                    // Barrier arrives.
-                    Either::Left(msg) => match &msg {
-                        Message::Barrier(barrier) => {
-                            if let Some(mutation) = barrier.mutation.as_deref() {
-                                match mutation {
-                                    Mutation::Pause => stream.pause_stream(),
-                                    Mutation::Resume => stream.resume_stream(),
-                                    _ => (),
-                                }
-                            }
-
-                            // Propagate the barrier.
-                            yield msg;
-                        }
-                        // Only barrier can be received.
-                        _ => unreachable!(),
-                    },
-                    // Chunked FsPage arrives.
-                    Either::Right(chunk) => {
-                        yield Message::Chunk(chunk);
+        loop {
+            // a list file stream never ends, keep list to find if there is any new file.
+            while let Some(msg) = stream.next().await {
+                match msg {
+                    Err(e) => {
+                        tracing::warn!(error = %e.as_report(), "encountered an error, recovering");
+                        stream
+                            .replace_data_stream(self.build_chunked_paginate_stream(&source_desc)?);
                     }
-                },
+                    Ok(msg) => match msg {
+                        // Barrier arrives.
+                        Either::Left(msg) => match &msg {
+                            Message::Barrier(barrier) => {
+                                if let Some(mutation) = barrier.mutation.as_deref() {
+                                    match mutation {
+                                        Mutation::Pause => stream.pause_stream(),
+                                        Mutation::Resume => stream.resume_stream(),
+                                        _ => (),
+                                    }
+                                }
+
+                                // Propagate the barrier.
+                                yield msg;
+                            }
+                            // Only barrier can be received.
+                            _ => unreachable!(),
+                        },
+                        // Chunked FsPage arrives.
+                        Either::Right(chunk) => {
+                            yield Message::Chunk(chunk);
+                        }
+                    },
+                }
             }
+
+            stream.replace_data_stream(
+                self.build_chunked_paginate_stream(&source_desc)
+                    .map_err(StreamExecutorError::from)?,
+            );
         }
     }
 }
 
-impl<S: StateStore> Executor for FsListExecutor<S> {
+impl<S: StateStore> Execute for FsListExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
@@ -217,7 +201,6 @@ impl<S: StateStore> Debug for FsListExecutor<S> {
             f.debug_struct("FsListExecutor")
                 .field("source_id", &core.source_id)
                 .field("column_ids", &core.column_ids)
-                .field("pk_indices", &self.info.pk_indices)
                 .finish()
         } else {
             f.debug_struct("FsListExecutor").finish()

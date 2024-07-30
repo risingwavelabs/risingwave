@@ -36,7 +36,12 @@ impl ColIndexMapping {
     /// `(0..target_size)`. Each subscript is mapped to the corresponding element.
     pub fn new(map: Vec<Option<usize>>, target_size: usize) -> Self {
         if let Some(target_max) = map.iter().filter_map(|x| *x).max_by_key(|x| *x) {
-            assert!(target_max < target_size)
+            assert!(
+                target_max < target_size,
+                "target_max: {}, target_size: {}",
+                target_max,
+                target_size
+            );
         };
         Self { target_size, map }
     }

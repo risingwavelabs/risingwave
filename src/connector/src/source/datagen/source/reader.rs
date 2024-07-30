@@ -14,24 +14,26 @@
 
 use std::collections::HashMap;
 
-use anyhow::{Context, Result};
+use anyhow::Context;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt, TryStreamExt};
 use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use thiserror_ext::AsReport;
 
 use super::generator::DatagenEventGenerator;
+use crate::error::{ConnectorResult, ConnectorResult as Result};
 use crate::parser::{EncodingProperties, ParserConfig, ProtocolProperties};
 use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit, FieldDesc};
 use crate::source::{
-    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, DataType, SourceContextRef,
-    SourceMessage, SplitId, SplitMetaData, SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, DataType, SourceContextRef, SourceMessage,
+    SplitId, SplitMetaData, SplitReader,
 };
 
 pub struct DatagenSplitReader {
     generator: DatagenEventGenerator,
+    #[expect(dead_code)]
     assigned_split: DatagenSplit,
 
     split_id: SplitId,
@@ -148,10 +150,10 @@ impl SplitReader for DatagenSplitReader {
             &self.parser_config.specific.encoding_config,
         ) {
             (ProtocolProperties::Native, EncodingProperties::Native) => {
-                let actor_id = self.source_ctx.source_info.actor_id.to_string();
-                let fragment_id = self.source_ctx.source_info.fragment_id.to_string();
-                let source_id = self.source_ctx.source_info.source_id.to_string();
-                let source_name = self.source_ctx.source_info.source_name.to_string();
+                let actor_id = self.source_ctx.actor_id.to_string();
+                let fragment_id = self.source_ctx.fragment_id.to_string();
+                let source_id = self.source_ctx.source_id.to_string();
+                let source_name = self.source_ctx.source_name.to_string();
                 let split_id = self.split_id.to_string();
                 let metrics = self.source_ctx.metrics.clone();
                 spawn_data_generation_stream(
@@ -160,7 +162,7 @@ impl SplitReader for DatagenSplitReader {
                         .inspect_ok(move |stream_chunk| {
                             metrics
                                 .partition_input_count
-                                .with_label_values(&[
+                                .with_guarded_label_values(&[
                                     &actor_id,
                                     &source_id,
                                     &split_id,
@@ -176,14 +178,14 @@ impl SplitReader for DatagenSplitReader {
             _ => {
                 let parser_config = self.parser_config.clone();
                 let source_context = self.source_ctx.clone();
-                into_chunk_stream(self, parser_config, source_context)
+                into_chunk_stream(self.into_data_stream(), parser_config, source_context)
             }
         }
     }
 }
 
-impl CommonSplitReader for DatagenSplitReader {
-    fn into_data_stream(self) -> impl Stream<Item = Result<Vec<SourceMessage>, anyhow::Error>> {
+impl DatagenSplitReader {
+    fn into_data_stream(self) -> impl Stream<Item = ConnectorResult<Vec<SourceMessage>>> {
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;
         spawn_data_generation_stream(self.generator.into_msg_stream(), BUFFER_SIZE)
@@ -253,13 +255,15 @@ fn generator_from_data_type(
                     random_seed,
                 )
             }
+            .map_err(Into::into)
         }
         DataType::Varchar => {
             let length_key = format!("fields.{}.length", name);
             let length_value = fields_option_map
                 .get(&length_key)
                 .map(|s| s.parse::<usize>())
-                .transpose()?;
+                .transpose()
+                .context("failed to parse the length of varchar field")?;
             Ok(FieldGeneratorImpl::with_varchar(
                 &VarcharProperty::RandomFixedLength(length_value),
                 random_seed,
@@ -280,7 +284,7 @@ fn generator_from_data_type(
                     Ok((field_name.to_string(), gen))
                 })
                 .collect::<Result<_>>()?;
-            FieldGeneratorImpl::with_struct_fields(struct_fields)
+            FieldGeneratorImpl::with_struct_fields(struct_fields).map_err(Into::into)
         }
         DataType::List(datatype) => {
             let length_key = format!("fields.{}.length", name);
@@ -293,7 +297,7 @@ fn generator_from_data_type(
                 split_num,
                 offset,
             )?;
-            FieldGeneratorImpl::with_list(generator, length_value)
+            FieldGeneratorImpl::with_list(generator, length_value).map_err(Into::into)
         }
         _ => {
             let kind_key = format!("fields.{}.kind", name);
@@ -312,12 +316,14 @@ fn generator_from_data_type(
                     split_num,
                     offset,
                 )
+                .map_err(Into::into)
             } else {
                 let min_key = format!("fields.{}.min", name);
                 let max_key = format!("fields.{}.max", name);
                 let min_value = fields_option_map.get(&min_key).map(|s| s.to_string());
                 let max_value = fields_option_map.get(&max_key).map(|s| s.to_string());
                 FieldGeneratorImpl::with_number_random(data_type, min_value, max_value, random_seed)
+                    .map_err(Into::into)
             }
         }
     }
@@ -332,6 +338,7 @@ mod tests {
 
     use super::*;
     use crate::parser::SpecificParserConfig;
+    use crate::source::SourceContext;
 
     #[tokio::test]
     async fn test_generator() -> Result<()> {
@@ -392,13 +399,12 @@ mod tests {
             state,
             ParserConfig {
                 specific: SpecificParserConfig {
-                    key_encoding_config: None,
                     encoding_config: EncodingProperties::Native,
                     protocol_config: ProtocolProperties::Native,
                 },
                 ..Default::default()
             },
-            Default::default(),
+            SourceContext::dummy().into(),
             Some(mock_datum),
         )
         .await?
@@ -450,7 +456,6 @@ mod tests {
         };
         let parser_config = ParserConfig {
             specific: SpecificParserConfig {
-                key_encoding_config: None,
                 encoding_config: EncodingProperties::Native,
                 protocol_config: ProtocolProperties::Native,
             },
@@ -460,7 +465,7 @@ mod tests {
             properties.clone(),
             state,
             parser_config.clone(),
-            Default::default(),
+            SourceContext::dummy().into(),
             Some(mock_datum.clone()),
         )
         .await?
@@ -477,7 +482,7 @@ mod tests {
             properties,
             state,
             parser_config,
-            Default::default(),
+            SourceContext::dummy().into(),
             Some(mock_datum),
         )
         .await?

@@ -16,7 +16,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
@@ -36,7 +36,7 @@ pub struct ManagedTopNState<S: StateStore> {
     /// Relational table.
     state_table: StateTable<S>,
 
-    /// Used for serializing pk into CacheKey.
+    /// Used for serializing pk into `CacheKey`.
     cache_key_serde: CacheKeySerde,
 }
 
@@ -319,6 +319,7 @@ impl<S: StateStore> ManagedTopNState<S> {
 mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
     use super::*;
@@ -348,7 +349,7 @@ mod tests {
                 &[0, 1],
             )
             .await;
-            tb.init_epoch(EpochPair::new_test_epoch(1));
+            tb.init_epoch(EpochPair::new_test_epoch(test_epoch(1)));
             tb
         };
 
@@ -428,7 +429,7 @@ mod tests {
                 &[0, 1],
             )
             .await;
-            tb.init_epoch(EpochPair::new_test_epoch(1));
+            tb.init_epoch(EpochPair::new_test_epoch(test_epoch(1)));
             tb
         };
 
@@ -475,7 +476,7 @@ mod tests {
                 &[0, 1],
             )
             .await;
-            tb.init_epoch(EpochPair::new_test_epoch(1));
+            tb.init_epoch(EpochPair::new_test_epoch(test_epoch(1)));
             tb
         };
 

@@ -146,21 +146,21 @@ pub enum Operation {
     IterNext(RecordId),
 
     /// Sync operation of Hummock.
-    Sync(u64),
+    Sync(u64, Vec<u32>),
 
     /// Seal operation of Hummock.
     Seal(u64, bool),
 
-    /// MetaMessage operation of Hummock.
+    /// `MetaMessage` operation of Hummock.
     MetaMessage(Box<TracedSubResp>),
 
     /// Result operation of Hummock.
     Result(OperationResult),
 
-    /// NewLocalStorage operation of Hummock.
+    /// `NewLocalStorage` operation of Hummock.
     NewLocalStorage(TracedNewLocalOptions, LocalStorageId),
 
-    /// DropLocalStorage operation of Hummock.
+    /// `DropLocalStorage` operation of Hummock.
     DropLocalStorage,
 
     /// Init of a local storage

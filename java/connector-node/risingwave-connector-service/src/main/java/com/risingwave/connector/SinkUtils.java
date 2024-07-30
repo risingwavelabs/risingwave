@@ -40,6 +40,7 @@ public class SinkUtils {
             case "jdbc":
                 return new JDBCSinkFactory();
             case "elasticsearch":
+            case "opensearch":
                 return new EsSinkFactory();
             case "cassandra":
                 return new CassandraFactory();

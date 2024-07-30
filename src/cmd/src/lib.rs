@@ -23,10 +23,6 @@ use risingwave_rt::{init_risingwave_logger, main_okk, LoggerSettings};
 #[macro_export]
 macro_rules! main {
     ($component:ident) => {
-        #[cfg(enable_task_local_alloc)]
-        risingwave_common::enable_task_local_jemalloc!();
-
-        #[cfg(not(enable_task_local_alloc))]
         risingwave_common::enable_jemalloc!();
 
         #[cfg_attr(coverage, coverage(off))]
@@ -41,39 +37,27 @@ risingwave_expr_impl::enable!();
 
 // Entry point functions.
 
-pub fn compute(opts: ComputeNodeOpts) {
+pub fn compute(opts: ComputeNodeOpts) -> ! {
     init_risingwave_logger(LoggerSettings::from_opts(&opts));
-    main_okk(risingwave_compute::start(opts));
+    main_okk(|shutdown| risingwave_compute::start(opts, shutdown));
 }
 
-pub fn meta(opts: MetaNodeOpts) {
+pub fn meta(opts: MetaNodeOpts) -> ! {
     init_risingwave_logger(LoggerSettings::from_opts(&opts));
-    main_okk(risingwave_meta_node::start(opts));
+    main_okk(|shutdown| risingwave_meta_node::start(opts, shutdown));
 }
 
-pub fn frontend(opts: FrontendOpts) {
+pub fn frontend(opts: FrontendOpts) -> ! {
     init_risingwave_logger(LoggerSettings::from_opts(&opts));
-    main_okk(risingwave_frontend::start(opts));
+    main_okk(|shutdown| risingwave_frontend::start(opts, shutdown));
 }
 
-pub fn compactor(opts: CompactorOpts) {
+pub fn compactor(opts: CompactorOpts) -> ! {
     init_risingwave_logger(LoggerSettings::from_opts(&opts));
-    main_okk(risingwave_compactor::start(opts));
+    main_okk(|shutdown| risingwave_compactor::start(opts, shutdown));
 }
 
-pub fn ctl(opts: CtlOpts) {
+pub fn ctl(opts: CtlOpts) -> ! {
     init_risingwave_logger(LoggerSettings::new("ctl").stderr(true));
-
-    // Note: Use a simple current thread runtime for ctl.
-    // When there's a heavy workload, multiple thread runtime seems to respond slowly. May need
-    // further investigation.
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(risingwave_ctl::start(opts))
-        .inspect_err(|e| {
-            eprintln!("{:#?}", e);
-        })
-        .unwrap();
+    main_okk(|shutdown| risingwave_ctl::start(opts, shutdown));
 }

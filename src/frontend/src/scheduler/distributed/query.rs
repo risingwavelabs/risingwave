@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::default::Default;
 use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::sync::Arc;
@@ -23,8 +22,9 @@ use futures::executor::block_on;
 use petgraph::dot::{Config, Dot};
 use petgraph::Graph;
 use pgwire::pg_server::SessionId;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
-use risingwave_pb::batch_plan::{TaskId as TaskIdPb, TaskOutputId as TaskOutputIdPb};
+use risingwave_pb::batch_plan::{TaskId as PbTaskId, TaskOutputId as PbTaskOutputId};
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use thiserror_ext::AsReport;
@@ -40,7 +40,6 @@ use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
 use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
-use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::{ExecutionContextRef, ReadSnapshot, SchedulerError, SchedulerResult};
 
 /// Message sent to a `QueryRunner` to control its execution.
@@ -71,8 +70,10 @@ pub struct QueryExecution {
     query: Arc<Query>,
     state: RwLock<QueryState>,
     shutdown_tx: Sender<QueryMessage>,
-    /// Identified by process_id, secret_key. Query in the same session should have same key.
+    /// Identified by `process_id`, `secret_key`. Query in the same session should have same key.
     pub session_id: SessionId,
+    /// Permit to execute the query. Once query finishes execution, this is dropped.
+    pub permit: Option<tokio::sync::OwnedSemaphorePermit>,
 }
 
 struct QueryRunner {
@@ -94,7 +95,11 @@ struct QueryRunner {
 
 impl QueryExecution {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(query: Query, session_id: SessionId) -> Self {
+    pub fn new(
+        query: Query,
+        session_id: SessionId,
+        permit: Option<tokio::sync::OwnedSemaphorePermit>,
+    ) -> Self {
         let query = Arc::new(query);
         let (sender, receiver) = channel(100);
         let state = QueryState::Pending {
@@ -106,6 +111,7 @@ impl QueryExecution {
             state: RwLock::new(state),
             shutdown_tx: sender,
             session_id,
+            permit,
         }
     }
 
@@ -383,13 +389,13 @@ impl QueryRunner {
     /// of shutdown sender so that shutdown receiver won't be triggered.
     fn send_root_stage_info(&mut self, chunk_rx: Receiver<SchedulerResult<DataChunk>>) {
         let root_task_output_id = {
-            let root_task_id_prost = TaskIdPb {
+            let root_task_id_prost = PbTaskId {
                 query_id: self.query.query_id.clone().id,
                 stage_id: self.query.root_stage_id(),
                 task_id: ROOT_TASK_ID,
             };
 
-            TaskOutputIdPb {
+            PbTaskOutputId {
                 task_id: Some(root_task_id_prost),
                 output_id: ROOT_TASK_OUTPUT_ID,
             }
@@ -463,19 +469,23 @@ pub(crate) mod tests {
     use std::sync::{Arc, RwLock};
 
     use fixedbitset::FixedBitSet;
-    use risingwave_common::catalog::{
-        ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SUPER_USER_ID,
+    use risingwave_batch::worker_manager::worker_node_manager::{
+        WorkerNodeManager, WorkerNodeSelector,
     };
-    use risingwave_common::hash::ParallelUnitMapping;
+    use risingwave_common::catalog::{
+        ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, StreamJobStatus,
+        DEFAULT_SUPER_USER_ID,
+    };
+    use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
     use risingwave_common::types::DataType;
     use risingwave_pb::common::worker_node::Property;
-    use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
+    use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
     use risingwave_rpc_client::ComputeClientPool;
 
     use crate::catalog::catalog_service::CatalogReader;
     use crate::catalog::root_catalog::Catalog;
-    use crate::catalog::table_catalog::{CreateType, TableType};
+    use crate::catalog::table_catalog::TableType;
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
         generic, BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalScan, ToBatch,
@@ -484,7 +494,6 @@ pub(crate) mod tests {
     use crate::optimizer::{OptimizerContext, PlanRef};
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
-    use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeSelector};
     use crate::scheduler::{
         DistributedQueryMetrics, ExecutionContext, HummockSnapshotManager, QueryExecutionInfo,
         ReadSnapshot,
@@ -498,7 +507,7 @@ pub(crate) mod tests {
     async fn test_query_should_not_hang_with_empty_worker() {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
-        let compute_client_pool = Arc::new(ComputeClientPool::default());
+        let compute_client_pool = Arc::new(ComputeClientPool::for_test());
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
             MockFrontendMetaClient {},
         )));
@@ -507,7 +516,7 @@ pub(crate) mod tests {
         let query = create_query().await;
         let query_id = query.query_id().clone();
         let pinned_snapshot = hummock_snapshot_manager.acquire();
-        let query_execution = Arc::new(QueryExecution::new(query, (0, 0)));
+        let query_execution = Arc::new(QueryExecution::new(query, (0, 0), None));
         let query_execution_info = Arc::new(RwLock::new(QueryExecutionInfo::new_from_map(
             HashMap::from([(query_id, query_execution.clone())]),
         )));
@@ -543,6 +552,7 @@ pub(crate) mod tests {
             id: table_id,
             associated_source_id: None,
             name: "test".to_string(),
+            dependent_relations: vec![],
             columns: vec![
                 ColumnCatalog {
                     column_desc: ColumnDesc::new_atomic(DataType::Int32, "a", 0),
@@ -571,6 +581,7 @@ pub(crate) mod tests {
             value_indices: vec![0, 1, 2],
             definition: "".to_string(),
             conflict_behavior: ConflictBehavior::NoCheck,
+            version_column_index: None,
             read_prefix_len_hint: 0,
             version: None,
             watermark_columns: FixedBitSet::with_capacity(3),
@@ -579,6 +590,7 @@ pub(crate) mod tests {
             cleaned_by_watermark: false,
             created_at_epoch: None,
             initialized_at_epoch: None,
+            stream_job_status: StreamJobStatus::Creating,
             create_type: CreateType::Foreground,
             description: None,
             incoming_sinks: vec![],
@@ -590,7 +602,7 @@ pub(crate) mod tests {
             table_catalog.into(),
             vec![],
             ctx,
-            false,
+            None,
             Cardinality::unknown(),
         )
         .to_batch()
@@ -663,7 +675,7 @@ pub(crate) mod tests {
                 port: 5687,
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
-            parallel_units: generate_parallel_units(0, 0),
+            parallelism: 8,
             property: Some(Property {
                 is_unschedulable: false,
                 is_serving: true,
@@ -680,7 +692,7 @@ pub(crate) mod tests {
                 port: 5688,
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
-            parallel_units: generate_parallel_units(8, 1),
+            parallelism: 8,
             property: Some(Property {
                 is_unschedulable: false,
                 is_serving: true,
@@ -697,7 +709,7 @@ pub(crate) mod tests {
                 port: 5689,
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
-            parallel_units: generate_parallel_units(16, 2),
+            parallelism: 8,
             property: Some(Property {
                 is_unschedulable: false,
                 is_serving: true,
@@ -709,10 +721,12 @@ pub(crate) mod tests {
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
         let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
-        worker_node_manager
-            .insert_streaming_fragment_mapping(0, ParallelUnitMapping::new_single(0));
+        worker_node_manager.insert_streaming_fragment_mapping(
+            0,
+            WorkerSlotMapping::new_single(WorkerSlotId::new(0, 0)),
+        );
         worker_node_manager.set_serving_fragment_mapping(
-            vec![(0, ParallelUnitMapping::new_single(0))]
+            vec![(0, WorkerSlotMapping::new_single(WorkerSlotId::new(0, 0)))]
                 .into_iter()
                 .collect(),
         );
@@ -728,15 +742,5 @@ pub(crate) mod tests {
         )
         .unwrap();
         fragmenter.generate_complete_query().await.unwrap()
-    }
-
-    fn generate_parallel_units(start_id: u32, node_id: u32) -> Vec<ParallelUnit> {
-        let parallel_degree = 8;
-        (start_id..start_id + parallel_degree)
-            .map(|id| ParallelUnit {
-                id,
-                worker_node_id: node_id,
-            })
-            .collect()
     }
 }

@@ -19,9 +19,7 @@ use std::vec;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_pb::catalog::PbTable;
-use risingwave_pb::common::{
-    ParallelUnit, PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode,
-};
+use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::ddl_service::TableJobType;
@@ -74,6 +72,8 @@ fn make_sum_aggcall(idx: u32) -> AggCall {
         order_by: vec![],
         filter: None,
         direct_args: vec![],
+        udf: None,
+        scalar: None,
     }
 }
 
@@ -344,9 +344,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
                 make_inputref(0),
                 make_inputref(1),
             ],
-            watermark_input_cols: vec![],
-            watermark_output_cols: vec![],
-            nondecreasing_exprs: vec![],
+            ..Default::default()
         })),
         fields: vec![], // TODO: fill this later
         input: vec![simple_agg_node_1],
@@ -421,38 +419,25 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
 }
 
 fn make_cluster_info() -> StreamingClusterInfo {
-    let parallel_units = (0..8)
-        .map(|id| {
-            (
-                id,
-                ParallelUnit {
-                    id,
-                    worker_node_id: 0,
-                },
-            )
-        })
-        .collect();
-
     let worker_nodes = std::iter::once((
         0,
         WorkerNode {
             id: 0,
+            parallelism: 8,
             ..Default::default()
         },
     ))
     .collect();
-    let unschedulable_parallel_units = Default::default();
     StreamingClusterInfo {
         worker_nodes,
-        parallel_units,
-        unschedulable_parallel_units,
+        unschedulable_workers: Default::default(),
     }
 }
 
 #[tokio::test]
 #[cfg(not(madsim))]
 async fn test_graph_builder() -> MetaResult<()> {
-    let env = MetaSrvEnv::for_test().await;
+    let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
     let parallel_degree = 4;
     let job = StreamingJob::Table(None, make_materialize_table(888), TableJobType::General);
 
@@ -475,12 +460,18 @@ async fn test_graph_builder() -> MetaResult<()> {
 
     let table_fragments = TableFragments::for_test(TableId::default(), graph);
     let actors = table_fragments.actors();
-    let barrier_inject_actor_ids = table_fragments.barrier_inject_actor_ids();
+    let barrier_inject_actor_ids = table_fragments
+        .fragments
+        .values()
+        .filter(|fragment| TableFragments::is_injectable(fragment.fragment_type_mask))
+        .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
+        .sorted()
+        .collect_vec();
     let mview_actor_ids = table_fragments.mview_actor_ids();
 
     assert_eq!(actors.len(), 9);
-    assert_eq!(barrier_inject_actor_ids, vec![5, 6, 7, 8]);
-    assert_eq!(mview_actor_ids, vec![0]);
+    assert_eq!(barrier_inject_actor_ids, vec![6, 7, 8, 9]);
+    assert_eq!(mview_actor_ids, vec![1]);
     assert_eq!(internal_tables.len(), 3);
 
     let fragment_upstreams: HashMap<_, _> = table_fragments
@@ -489,31 +480,31 @@ async fn test_graph_builder() -> MetaResult<()> {
         .map(|(fragment_id, fragment)| (*fragment_id, fragment.upstream_fragment_ids.clone()))
         .collect();
 
-    assert_eq!(fragment_upstreams.get(&0).unwrap(), &vec![1]);
     assert_eq!(fragment_upstreams.get(&1).unwrap(), &vec![2]);
-    assert!(fragment_upstreams.get(&2).unwrap().is_empty());
+    assert_eq!(fragment_upstreams.get(&2).unwrap(), &vec![3]);
+    assert!(fragment_upstreams.get(&3).unwrap().is_empty());
 
     let mut expected_downstream = HashMap::new();
-    expected_downstream.insert(0, vec![]);
-    expected_downstream.insert(1, vec![0]);
-    expected_downstream.insert(2, vec![0]);
-    expected_downstream.insert(3, vec![0]);
-    expected_downstream.insert(4, vec![0]);
-    expected_downstream.insert(5, vec![1, 2, 3, 4]);
-    expected_downstream.insert(6, vec![1, 2, 3, 4]);
-    expected_downstream.insert(7, vec![1, 2, 3, 4]);
-    expected_downstream.insert(8, vec![1, 2, 3, 4]);
+    expected_downstream.insert(1, vec![]);
+    expected_downstream.insert(2, vec![1]);
+    expected_downstream.insert(3, vec![1]);
+    expected_downstream.insert(4, vec![1]);
+    expected_downstream.insert(5, vec![1]);
+    expected_downstream.insert(6, vec![2, 3, 4, 5]);
+    expected_downstream.insert(7, vec![2, 3, 4, 5]);
+    expected_downstream.insert(8, vec![2, 3, 4, 5]);
+    expected_downstream.insert(9, vec![2, 3, 4, 5]);
 
     let mut expected_upstream = HashMap::new();
-    expected_upstream.insert(0, vec![1, 2, 3, 4]);
-    expected_upstream.insert(1, vec![5, 6, 7, 8]);
-    expected_upstream.insert(2, vec![5, 6, 7, 8]);
-    expected_upstream.insert(3, vec![5, 6, 7, 8]);
-    expected_upstream.insert(4, vec![5, 6, 7, 8]);
-    expected_upstream.insert(5, vec![]);
+    expected_upstream.insert(1, vec![2, 3, 4, 5]);
+    expected_upstream.insert(2, vec![6, 7, 8, 9]);
+    expected_upstream.insert(3, vec![6, 7, 8, 9]);
+    expected_upstream.insert(4, vec![6, 7, 8, 9]);
+    expected_upstream.insert(5, vec![6, 7, 8, 9]);
     expected_upstream.insert(6, vec![]);
     expected_upstream.insert(7, vec![]);
     expected_upstream.insert(8, vec![]);
+    expected_upstream.insert(9, vec![]);
 
     for actor in actors {
         assert_eq!(

@@ -25,8 +25,10 @@ pub mod opendal_reader;
 
 use self::opendal_enumerator::OpendalEnumerator;
 use self::opendal_reader::OpendalReader;
-use super::s3::S3PropertiesCommon;
+use super::file_common::CompressionFormat;
+pub use super::s3::S3PropertiesCommon;
 use super::OpendalFsSplit;
+use crate::error::ConnectorResult;
 use crate::source::{SourceProperties, UnknownFields};
 
 pub const GCS_CONNECTOR: &str = "gcs";
@@ -52,6 +54,9 @@ pub struct GcsProperties {
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
+
+    #[serde(rename = "compression_format", default = "Default::default")]
+    pub compression_format: CompressionFormat,
 }
 
 impl UnknownFields for GcsProperties {
@@ -71,7 +76,7 @@ impl SourceProperties for GcsProperties {
 pub trait OpendalSource: Send + Sync + 'static + Clone + PartialEq {
     type Properties: SourceProperties + Send + Sync;
 
-    fn new_enumerator(properties: Self::Properties) -> anyhow::Result<OpendalEnumerator<Self>>;
+    fn new_enumerator(properties: Self::Properties) -> ConnectorResult<OpendalEnumerator<Self>>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,7 +85,7 @@ pub struct OpendalS3;
 impl OpendalSource for OpendalS3 {
     type Properties = OpendalS3Properties;
 
-    fn new_enumerator(properties: Self::Properties) -> anyhow::Result<OpendalEnumerator<Self>> {
+    fn new_enumerator(properties: Self::Properties) -> ConnectorResult<OpendalEnumerator<Self>> {
         OpendalEnumerator::new_s3_source(properties.s3_properties, properties.assume_role)
     }
 }
@@ -91,7 +96,7 @@ pub struct OpendalGcs;
 impl OpendalSource for OpendalGcs {
     type Properties = GcsProperties;
 
-    fn new_enumerator(properties: Self::Properties) -> anyhow::Result<OpendalEnumerator<Self>> {
+    fn new_enumerator(properties: Self::Properties) -> ConnectorResult<OpendalEnumerator<Self>> {
         OpendalEnumerator::new_gcs_source(properties)
     }
 }
@@ -102,7 +107,7 @@ pub struct OpendalPosixFs;
 impl OpendalSource for OpendalPosixFs {
     type Properties = PosixFsProperties;
 
-    fn new_enumerator(properties: Self::Properties) -> anyhow::Result<OpendalEnumerator<Self>> {
+    fn new_enumerator(properties: Self::Properties) -> ConnectorResult<OpendalEnumerator<Self>> {
         OpendalEnumerator::new_posix_fs_source(properties)
     }
 }
@@ -112,7 +117,7 @@ pub struct OpendalS3Properties {
     #[serde(flatten)]
     pub s3_properties: S3PropertiesCommon,
 
-    /// The following are only supported by s3_v2 (opendal) source.
+    /// The following are only supported by `s3_v2` (opendal) source.
     #[serde(rename = "s3.assume_role", default)]
     pub assume_role: Option<String>,
 
@@ -146,6 +151,8 @@ pub struct PosixFsProperties {
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
+    #[serde(rename = "compression_format", default = "Default::default")]
+    pub compression_format: CompressionFormat,
 }
 
 impl UnknownFields for PosixFsProperties {

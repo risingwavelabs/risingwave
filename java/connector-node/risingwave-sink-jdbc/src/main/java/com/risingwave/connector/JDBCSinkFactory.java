@@ -75,7 +75,11 @@ public class JDBCSinkFactory implements SinkFactory {
         } catch (SQLException e) {
             LOG.error("failed to connect to target database. jdbcUrl: {}", jdbcUrl, e);
             throw Status.INVALID_ARGUMENT
-                    .withDescription("failed to connect to target database: " + e.getSQLState())
+                    .withDescription(
+                            "failed to connect to target database: "
+                                    + e.getSQLState()
+                                    + ": "
+                                    + e.getMessage())
                     .asRuntimeException();
         }
 

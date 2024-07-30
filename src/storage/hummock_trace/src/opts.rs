@@ -13,10 +13,13 @@
 // limitations under the License.
 
 use bincode::{Decode, Encode};
+use foyer::CacheContext;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::common::PbBuffer;
 
 use crate::TracedBytes;
 
@@ -30,7 +33,6 @@ pub struct TracedPrefetchOptions {
 pub enum TracedCachePolicy {
     Disable,
     Fill(TracedCachePriority),
-    FileFileCache,
     NotFill,
 }
 
@@ -58,7 +60,25 @@ impl From<TracedCachePriority> for CachePriority {
     }
 }
 
-#[derive(Copy, Encode, Decode, PartialEq, Eq, Debug, Clone, Hash)]
+impl From<CacheContext> for TracedCachePriority {
+    fn from(value: CacheContext) -> Self {
+        match value {
+            CacheContext::Default => Self::High,
+            CacheContext::LowPriority => Self::Low,
+        }
+    }
+}
+
+impl From<TracedCachePriority> for CacheContext {
+    fn from(value: TracedCachePriority) -> Self {
+        match value {
+            TracedCachePriority::High => Self::Default,
+            TracedCachePriority::Low => Self::LowPriority,
+        }
+    }
+}
+
+#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub struct TracedTableId {
     pub table_id: u32,
 }
@@ -89,6 +109,7 @@ pub struct TracedReadOptions {
     pub retention_seconds: Option<u32>,
     pub table_id: TracedTableId,
     pub read_version_from_backup: bool,
+    pub read_version_from_time_travel: bool,
 }
 
 impl TracedReadOptions {
@@ -103,7 +124,8 @@ impl TracedReadOptions {
             cache_policy: TracedCachePolicy::Disable,
             retention_seconds: None,
             table_id: TracedTableId { table_id },
-            read_version_from_backup: true,
+            read_version_from_backup: false,
+            read_version_from_time_travel: false,
         }
     }
 }
@@ -114,7 +136,7 @@ pub struct TracedWriteOptions {
     pub table_id: TracedTableId,
 }
 
-#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone, Copy, Hash)]
+#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub struct TracedTableOption {
     pub retention_seconds: Option<u32>,
 }
@@ -135,23 +157,26 @@ impl From<TracedTableOption> for TableOption {
     }
 }
 
-#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone, Copy, Hash)]
+#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub enum TracedOpConsistencyLevel {
     Inconsistent,
     ConsistentOldValue,
 }
 
-#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone, Copy, Hash)]
+#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub struct TracedNewLocalOptions {
     pub table_id: TracedTableId,
     pub op_consistency_level: TracedOpConsistencyLevel,
     pub table_option: TracedTableOption,
     pub is_replicated: bool,
+    pub vnodes: TracedBitmap,
 }
 
 #[cfg(test)]
 impl TracedNewLocalOptions {
     pub(crate) fn for_test(table_id: u32) -> Self {
+        use risingwave_common::hash::VirtualNode;
+
         Self {
             table_id: TracedTableId { table_id },
             op_consistency_level: TracedOpConsistencyLevel::Inconsistent,
@@ -159,18 +184,20 @@ impl TracedNewLocalOptions {
                 retention_seconds: None,
             },
             is_replicated: false,
+            vnodes: TracedBitmap::from(Bitmap::ones(VirtualNode::COUNT)),
         }
     }
 }
 
 pub type TracedHummockEpoch = u64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Decode, Encode)]
+#[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub enum TracedHummockReadEpoch {
     Committed(TracedHummockEpoch),
     Current(TracedHummockEpoch),
     NoWait(TracedHummockEpoch),
     Backup(TracedHummockEpoch),
+    TimeTravel(TracedHummockEpoch),
 }
 
 impl From<HummockReadEpoch> for TracedHummockReadEpoch {
@@ -180,6 +207,7 @@ impl From<HummockReadEpoch> for TracedHummockReadEpoch {
             HummockReadEpoch::Current(epoch) => Self::Current(epoch),
             HummockReadEpoch::NoWait(epoch) => Self::NoWait(epoch),
             HummockReadEpoch::Backup(epoch) => Self::Backup(epoch),
+            HummockReadEpoch::TimeTravel(epoch) => Self::TimeTravel(epoch),
         }
     }
 }
@@ -191,11 +219,12 @@ impl From<TracedHummockReadEpoch> for HummockReadEpoch {
             TracedHummockReadEpoch::Current(epoch) => Self::Current(epoch),
             TracedHummockReadEpoch::NoWait(epoch) => Self::NoWait(epoch),
             TracedHummockReadEpoch::Backup(epoch) => Self::Backup(epoch),
+            TracedHummockReadEpoch::TimeTravel(epoch) => Self::TimeTravel(epoch),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Decode, Encode)]
+#[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub struct TracedEpochPair {
     pub curr: TracedHummockEpoch,
     pub prev: TracedHummockEpoch,
@@ -219,7 +248,7 @@ impl From<TracedEpochPair> for EpochPair {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Decode, Encode)]
+#[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub struct TracedInitOptions {
     pub epoch: TracedEpochPair,
 }
@@ -229,4 +258,30 @@ pub struct TracedSealCurrentEpochOptions {
     // The watermark is serialized into protobuf
     pub table_watermarks: Option<(bool, Vec<Vec<u8>>)>,
     pub switch_op_consistency_level: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
+pub struct TracedBitmap {
+    pub compression: i32,
+    pub body: Vec<u8>,
+}
+
+impl From<Bitmap> for TracedBitmap {
+    fn from(value: Bitmap) -> Self {
+        let pb = value.to_protobuf();
+        Self {
+            compression: pb.compression,
+            body: pb.body,
+        }
+    }
+}
+
+impl From<TracedBitmap> for Bitmap {
+    fn from(value: TracedBitmap) -> Self {
+        let pb = PbBuffer {
+            compression: value.compression,
+            body: value.body,
+        };
+        Bitmap::from(&pb)
+    }
 }

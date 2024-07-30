@@ -58,6 +58,10 @@ impl UserDefinedFunction {
             identifier: udf.identifier.clone(),
             body: udf.body.clone(),
             link: udf.link.clone(),
+            compressed_binary: udf.compressed_binary.clone(),
+            always_retry_on_network_error: udf.always_retry_on_network_error,
+            function_type: udf.function_type.clone(),
+            runtime: udf.runtime.clone(),
         };
 
         Ok(Self {
@@ -92,6 +96,10 @@ impl Expr for UserDefinedFunction {
                 identifier: self.catalog.identifier.clone(),
                 link: self.catalog.link.clone(),
                 body: self.catalog.body.clone(),
+                compressed_binary: self.catalog.compressed_binary.clone(),
+                always_retry_on_network_error: self.catalog.always_retry_on_network_error,
+                function_type: self.catalog.function_type.clone(),
+                runtime: self.catalog.runtime.clone(),
             })),
         }
     }

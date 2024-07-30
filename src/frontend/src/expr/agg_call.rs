@@ -21,13 +21,13 @@ use crate::utils::Condition;
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct AggCall {
-    agg_kind: AggKind,
-    return_type: DataType,
-    args: Vec<ExprImpl>,
-    distinct: bool,
-    order_by: OrderBy,
-    filter: Condition,
-    direct_args: Vec<Literal>,
+    pub agg_kind: AggKind,
+    pub return_type: DataType,
+    pub args: Vec<ExprImpl>,
+    pub distinct: bool,
+    pub order_by: OrderBy,
+    pub filter: Condition,
+    pub direct_args: Vec<Literal>,
 }
 
 impl std::fmt::Debug for AggCall {
@@ -38,6 +38,9 @@ impl std::fmt::Debug for AggCall {
                 .field("return_type", &self.return_type)
                 .field("args", &self.args)
                 .field("filter", &self.filter)
+                .field("distinct", &self.distinct)
+                .field("order_by", &self.order_by)
+                .field("direct_args", &self.direct_args)
                 .finish()
         } else {
             let mut builder = f.debug_tuple(&format!("{}", self.agg_kind));
@@ -60,7 +63,11 @@ impl AggCall {
         filter: Condition,
         direct_args: Vec<Literal>,
     ) -> Result<Self> {
-        let return_type = infer_type(agg_kind.into(), &mut args)?;
+        let return_type = match &agg_kind {
+            AggKind::Builtin(kind) => infer_type((*kind).into(), &mut args)?,
+            AggKind::UserDefined(udf) => udf.return_type.as_ref().unwrap().into(),
+            AggKind::WrapScalar(expr) => expr.return_type.as_ref().unwrap().into(),
+        };
         Ok(AggCall {
             agg_kind,
             return_type,
@@ -89,28 +96,8 @@ impl AggCall {
         })
     }
 
-    pub fn decompose(
-        self,
-    ) -> (
-        AggKind,
-        Vec<ExprImpl>,
-        bool,
-        OrderBy,
-        Condition,
-        Vec<Literal>,
-    ) {
-        (
-            self.agg_kind,
-            self.args,
-            self.distinct,
-            self.order_by,
-            self.filter,
-            self.direct_args,
-        )
-    }
-
     pub fn agg_kind(&self) -> AggKind {
-        self.agg_kind
+        self.agg_kind.clone()
     }
 
     /// Get a reference to the agg call's arguments.

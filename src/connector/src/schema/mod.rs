@@ -12,20 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::error::ConnectorError;
+
 pub mod avro;
+mod loader;
 pub mod protobuf;
 pub mod schema_registry;
+
+pub use loader::SchemaLoader;
 
 const MESSAGE_NAME_KEY: &str = "message";
 const KEY_MESSAGE_NAME_KEY: &str = "key.message";
 const SCHEMA_LOCATION_KEY: &str = "schema.location";
 const SCHEMA_REGISTRY_KEY: &str = "schema.registry";
 const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
+pub const AWS_GLUE_SCHEMA_ARN_KEY: &str = "aws.glue.schema_arn";
 
 #[derive(Debug, thiserror::Error, thiserror_ext::Macro)]
 #[error("Invalid option: {message}")]
 pub struct InvalidOptionError {
-    message: String,
+    pub message: String,
     // #[backtrace]
     // source: Option<risingwave_common::error::BoxedError>,
 }
@@ -46,6 +52,6 @@ pub enum SchemaFetchError {
     YetToMigrate(
         #[source]
         #[backtrace]
-        anyhow::Error,
+        ConnectorError,
     ),
 }

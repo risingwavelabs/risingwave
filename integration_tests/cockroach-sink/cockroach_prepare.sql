@@ -23,3 +23,28 @@ CREATE TABLE data_types (
     bytea_column BYTEA,
     array_column VARCHAR[]
 );
+
+CREATE TABLE cock_all_data_types (
+  id BIGINT PRIMARY KEY,
+  c_boolean BOOL,
+  c_smallint INT2,
+  c_integer INT4,
+  c_bigint INT,
+  c_decimal decimal,
+  c_real real,
+  c_double_precision double precision,
+  c_varchar STRING,
+  c_bytea BYTES,
+  c_date date,
+  c_time time,
+  c_timestamp timestamp,
+  c_timestamptz timestamptz,
+  c_interval interval,
+  c_jsonb jsonb,
+  c_smallint_array INT2[],
+  c_integer_array INT4[],
+  c_bigint_array INT[],
+  c_real_array real[],
+  c_double_precision_array double precision[],
+  c_varchar_array STRING[]
+);

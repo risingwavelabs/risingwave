@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_common::session_config::{ConfigMap, SearchPath};
+use risingwave_common::session_config::{SearchPath, SessionConfig};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_sqlparser::ast::{
@@ -29,6 +29,7 @@ use crate::error::Result;
 mod bind_context;
 mod bind_param;
 mod create;
+mod create_view;
 mod delete;
 mod expr;
 mod for_system;
@@ -43,14 +44,16 @@ mod update;
 mod values;
 
 pub use bind_context::{BindContext, Clause, LateralBindContext};
+pub use create_view::BoundCreateView;
 pub use delete::BoundDelete;
 pub use expr::{bind_data_type, bind_struct_field};
 pub use insert::BoundInsert;
 use pgwire::pg_server::{Session, SessionId};
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
-    BoundWindowTableFunction, Relation, ResolveQualifiedNameError, WindowTableFunctionKind,
+    BoundBackCteRef, BoundBaseTable, BoundJoin, BoundShare, BoundShareInput, BoundSource,
+    BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation,
+    ResolveQualifiedNameError, WindowTableFunctionKind,
 };
 pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::*;
@@ -107,7 +110,7 @@ pub struct Binder {
     /// and so on.
     next_share_id: ShareId,
 
-    session_config: Arc<RwLock<ConfigMap>>,
+    session_config: Arc<RwLock<SessionConfig>>,
 
     search_path: SearchPath,
     /// The type of binding statement.
@@ -260,17 +263,17 @@ impl UdfContext {
 /// following the rules:
 /// 1. At the beginning, it contains the user specified parameters type.
 /// 2. When the binder encounters a parameter, it will record it as unknown(call `record_new_param`)
-/// if it didn't exist in `ParameterTypes`.
+///    if it didn't exist in `ParameterTypes`.
 /// 3. When the binder encounters a cast on parameter, if it's a unknown type, the cast function
-/// will record the target type as infer type for that parameter(call `record_infer_type`). If the
-/// parameter has been inferred, the cast function will act as a normal cast.
+///    will record the target type as infer type for that parameter(call `record_infer_type`). If the
+///    parameter has been inferred, the cast function will act as a normal cast.
 /// 4. After bind finished:
 ///     (a) parameter not in `ParameterTypes` means that the user didn't specify it and it didn't
-/// occur in the query. `export` will return error if there is a kind of
-/// parameter. This rule is compatible with PostgreSQL
+///    occur in the query. `export` will return error if there is a kind of
+///    parameter. This rule is compatible with PostgreSQL
 ///     (b) parameter is None means that it's a unknown type. The user didn't specify it
-/// and we can't infer it in the query. We will treat it as VARCHAR type finally. This rule is
-/// compatible with PostgreSQL.
+///    and we can't infer it in the query. We will treat it as VARCHAR type finally. This rule is
+///    compatible with PostgreSQL.
 ///     (c) parameter is Some means that it's a known type.
 #[derive(Clone, Debug)]
 pub struct ParameterTypes(Arc<RwLock<HashMap<u64, Option<DataType>>>>);
@@ -422,7 +425,9 @@ impl Binder {
 
     fn push_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
-        self.context.cte_to_relation = new_context.cte_to_relation.clone();
+        self.context
+            .cte_to_relation
+            .clone_from(&new_context.cte_to_relation);
         let new_lateral_contexts = std::mem::take(&mut self.lateral_contexts);
         self.upper_subquery_contexts
             .push((new_context, new_lateral_contexts));
@@ -440,7 +445,9 @@ impl Binder {
 
     fn push_lateral_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
-        self.context.cte_to_relation = new_context.cte_to_relation.clone();
+        self.context
+            .cte_to_relation
+            .clone_from(&new_context.cte_to_relation);
         self.lateral_contexts.push(LateralBindContext {
             is_visible: false,
             context: new_context,
@@ -529,5 +536,494 @@ pub mod test_utils {
     #[cfg(test)]
     pub fn mock_binder_with_param_types(param_types: Vec<Option<DataType>>) -> Binder {
         Binder::new_with_param_types(&SessionImpl::mock(), param_types)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use expect_test::expect;
+
+    use super::test_utils::*;
+
+    #[tokio::test]
+    async fn test_rcte() {
+        let stmt = risingwave_sqlparser::parser::Parser::parse_sql(
+            "WITH RECURSIVE t1 AS (SELECT 1 AS a UNION ALL SELECT a + 1 FROM t1 WHERE a < 10) SELECT * FROM t1",
+        ).unwrap().into_iter().next().unwrap();
+        let mut binder = mock_binder();
+        let bound = binder.bind(stmt).unwrap();
+
+        let expected = expect![[r#"
+            Query(
+                BoundQuery {
+                    body: Select(
+                        BoundSelect {
+                            distinct: All,
+                            select_items: [
+                                InputRef(
+                                    InputRef {
+                                        index: 0,
+                                        data_type: Int32,
+                                    },
+                                ),
+                            ],
+                            aliases: [
+                                Some(
+                                    "a",
+                                ),
+                            ],
+                            from: Some(
+                                Share(
+                                    BoundShare {
+                                        share_id: 0,
+                                        input: Query(
+                                            Right(
+                                                RecursiveUnion {
+                                                    all: true,
+                                                    base: Select(
+                                                        BoundSelect {
+                                                            distinct: All,
+                                                            select_items: [
+                                                                Literal(
+                                                                    Literal {
+                                                                        data: Some(
+                                                                            Int32(
+                                                                                1,
+                                                                            ),
+                                                                        ),
+                                                                        data_type: Some(
+                                                                            Int32,
+                                                                        ),
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            aliases: [
+                                                                Some(
+                                                                    "a",
+                                                                ),
+                                                            ],
+                                                            from: None,
+                                                            where_clause: None,
+                                                            group_by: GroupKey(
+                                                                [],
+                                                            ),
+                                                            having: None,
+                                                            schema: Schema {
+                                                                fields: [
+                                                                    a:Int32,
+                                                                ],
+                                                            },
+                                                        },
+                                                    ),
+                                                    recursive: Select(
+                                                        BoundSelect {
+                                                            distinct: All,
+                                                            select_items: [
+                                                                FunctionCall(
+                                                                    FunctionCall {
+                                                                        func_type: Add,
+                                                                        return_type: Int32,
+                                                                        inputs: [
+                                                                            InputRef(
+                                                                                InputRef {
+                                                                                    index: 0,
+                                                                                    data_type: Int32,
+                                                                                },
+                                                                            ),
+                                                                            Literal(
+                                                                                Literal {
+                                                                                    data: Some(
+                                                                                        Int32(
+                                                                                            1,
+                                                                                        ),
+                                                                                    ),
+                                                                                    data_type: Some(
+                                                                                        Int32,
+                                                                                    ),
+                                                                                },
+                                                                            ),
+                                                                        ],
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            aliases: [
+                                                                None,
+                                                            ],
+                                                            from: Some(
+                                                                BackCteRef(
+                                                                    BoundBackCteRef {
+                                                                        share_id: 0,
+                                                                        base: Select(
+                                                                            BoundSelect {
+                                                                                distinct: All,
+                                                                                select_items: [
+                                                                                    Literal(
+                                                                                        Literal {
+                                                                                            data: Some(
+                                                                                                Int32(
+                                                                                                    1,
+                                                                                                ),
+                                                                                            ),
+                                                                                            data_type: Some(
+                                                                                                Int32,
+                                                                                            ),
+                                                                                        },
+                                                                                    ),
+                                                                                ],
+                                                                                aliases: [
+                                                                                    Some(
+                                                                                        "a",
+                                                                                    ),
+                                                                                ],
+                                                                                from: None,
+                                                                                where_clause: None,
+                                                                                group_by: GroupKey(
+                                                                                    [],
+                                                                                ),
+                                                                                having: None,
+                                                                                schema: Schema {
+                                                                                    fields: [
+                                                                                        a:Int32,
+                                                                                    ],
+                                                                                },
+                                                                            },
+                                                                        ),
+                                                                    },
+                                                                ),
+                                                            ),
+                                                            where_clause: Some(
+                                                                FunctionCall(
+                                                                    FunctionCall {
+                                                                        func_type: LessThan,
+                                                                        return_type: Boolean,
+                                                                        inputs: [
+                                                                            InputRef(
+                                                                                InputRef {
+                                                                                    index: 0,
+                                                                                    data_type: Int32,
+                                                                                },
+                                                                            ),
+                                                                            Literal(
+                                                                                Literal {
+                                                                                    data: Some(
+                                                                                        Int32(
+                                                                                            10,
+                                                                                        ),
+                                                                                    ),
+                                                                                    data_type: Some(
+                                                                                        Int32,
+                                                                                    ),
+                                                                                },
+                                                                            ),
+                                                                        ],
+                                                                    },
+                                                                ),
+                                                            ),
+                                                            group_by: GroupKey(
+                                                                [],
+                                                            ),
+                                                            having: None,
+                                                            schema: Schema {
+                                                                fields: [
+                                                                    ?column?:Int32,
+                                                                ],
+                                                            },
+                                                        },
+                                                    ),
+                                                    schema: Schema {
+                                                        fields: [
+                                                            a:Int32,
+                                                        ],
+                                                    },
+                                                },
+                                            ),
+                                        ),
+                                    },
+                                ),
+                            ),
+                            where_clause: None,
+                            group_by: GroupKey(
+                                [],
+                            ),
+                            having: None,
+                            schema: Schema {
+                                fields: [
+                                    a:Int32,
+                                ],
+                            },
+                        },
+                    ),
+                    order: [],
+                    limit: None,
+                    offset: None,
+                    with_ties: false,
+                    extra_order_exprs: [],
+                },
+            )"#]];
+
+        expected.assert_eq(&format!("{:#?}", bound));
+    }
+
+    #[tokio::test]
+    async fn test_bind_approx_percentile() {
+        let stmt = risingwave_sqlparser::parser::Parser::parse_sql(
+            "SELECT approx_percentile(0.5, 0.01) WITHIN GROUP (ORDER BY generate_series) FROM generate_series(1, 100)",
+        ).unwrap().into_iter().next().unwrap();
+        let parse_expected = expect![[r#"
+            Query(
+                Query {
+                    with: None,
+                    body: Select(
+                        Select {
+                            distinct: All,
+                            projection: [
+                                UnnamedExpr(
+                                    Function(
+                                        Function {
+                                            aggregate: false,
+                                            name: ObjectName(
+                                                [
+                                                    Ident {
+                                                        value: "approx_percentile",
+                                                        quote_style: None,
+                                                    },
+                                                ],
+                                            ),
+                                            args: [
+                                                Unnamed(
+                                                    Expr(
+                                                        Value(
+                                                            Number(
+                                                                "0.5",
+                                                            ),
+                                                        ),
+                                                    ),
+                                                ),
+                                                Unnamed(
+                                                    Expr(
+                                                        Value(
+                                                            Number(
+                                                                "0.01",
+                                                            ),
+                                                        ),
+                                                    ),
+                                                ),
+                                            ],
+                                            variadic: false,
+                                            over: None,
+                                            distinct: false,
+                                            order_by: [],
+                                            filter: None,
+                                            within_group: Some(
+                                                OrderByExpr {
+                                                    expr: Identifier(
+                                                        Ident {
+                                                            value: "generate_series",
+                                                            quote_style: None,
+                                                        },
+                                                    ),
+                                                    asc: None,
+                                                    nulls_first: None,
+                                                },
+                                            ),
+                                        },
+                                    ),
+                                ),
+                            ],
+                            from: [
+                                TableWithJoins {
+                                    relation: TableFunction {
+                                        name: ObjectName(
+                                            [
+                                                Ident {
+                                                    value: "generate_series",
+                                                    quote_style: None,
+                                                },
+                                            ],
+                                        ),
+                                        alias: None,
+                                        args: [
+                                            Unnamed(
+                                                Expr(
+                                                    Value(
+                                                        Number(
+                                                            "1",
+                                                        ),
+                                                    ),
+                                                ),
+                                            ),
+                                            Unnamed(
+                                                Expr(
+                                                    Value(
+                                                        Number(
+                                                            "100",
+                                                        ),
+                                                    ),
+                                                ),
+                                            ),
+                                        ],
+                                        with_ordinality: false,
+                                    },
+                                    joins: [],
+                                },
+                            ],
+                            lateral_views: [],
+                            selection: None,
+                            group_by: [],
+                            having: None,
+                        },
+                    ),
+                    order_by: [],
+                    limit: None,
+                    offset: None,
+                    fetch: None,
+                },
+            )"#]];
+        parse_expected.assert_eq(&format!("{:#?}", stmt));
+
+        let mut binder = mock_binder();
+        let bound = binder.bind(stmt).unwrap();
+
+        let expected = expect![[r#"
+            Query(
+                BoundQuery {
+                    body: Select(
+                        BoundSelect {
+                            distinct: All,
+                            select_items: [
+                                AggCall(
+                                    AggCall {
+                                        agg_kind: Builtin(
+                                            ApproxPercentile,
+                                        ),
+                                        return_type: Float64,
+                                        args: [
+                                            FunctionCall(
+                                                FunctionCall {
+                                                    func_type: Cast,
+                                                    return_type: Float64,
+                                                    inputs: [
+                                                        InputRef(
+                                                            InputRef {
+                                                                index: 0,
+                                                                data_type: Int32,
+                                                            },
+                                                        ),
+                                                    ],
+                                                },
+                                            ),
+                                        ],
+                                        filter: Condition {
+                                            conjunctions: [],
+                                        },
+                                        distinct: false,
+                                        order_by: OrderBy {
+                                            sort_exprs: [
+                                                OrderByExpr {
+                                                    expr: InputRef(
+                                                        InputRef {
+                                                            index: 0,
+                                                            data_type: Int32,
+                                                        },
+                                                    ),
+                                                    order_type: OrderType {
+                                                        direction: Ascending,
+                                                        nulls_are: Largest,
+                                                    },
+                                                },
+                                            ],
+                                        },
+                                        direct_args: [
+                                            Literal {
+                                                data: Some(
+                                                    Float64(
+                                                        OrderedFloat(
+                                                            0.5,
+                                                        ),
+                                                    ),
+                                                ),
+                                                data_type: Some(
+                                                    Float64,
+                                                ),
+                                            },
+                                            Literal {
+                                                data: Some(
+                                                    Float64(
+                                                        OrderedFloat(
+                                                            0.01,
+                                                        ),
+                                                    ),
+                                                ),
+                                                data_type: Some(
+                                                    Float64,
+                                                ),
+                                            },
+                                        ],
+                                    },
+                                ),
+                            ],
+                            aliases: [
+                                Some(
+                                    "approx_percentile",
+                                ),
+                            ],
+                            from: Some(
+                                TableFunction {
+                                    expr: TableFunction(
+                                        FunctionCall {
+                                            function_type: GenerateSeries,
+                                            return_type: Int32,
+                                            args: [
+                                                Literal(
+                                                    Literal {
+                                                        data: Some(
+                                                            Int32(
+                                                                1,
+                                                            ),
+                                                        ),
+                                                        data_type: Some(
+                                                            Int32,
+                                                        ),
+                                                    },
+                                                ),
+                                                Literal(
+                                                    Literal {
+                                                        data: Some(
+                                                            Int32(
+                                                                100,
+                                                            ),
+                                                        ),
+                                                        data_type: Some(
+                                                            Int32,
+                                                        ),
+                                                    },
+                                                ),
+                                            ],
+                                        },
+                                    ),
+                                    with_ordinality: false,
+                                },
+                            ),
+                            where_clause: None,
+                            group_by: GroupKey(
+                                [],
+                            ),
+                            having: None,
+                            schema: Schema {
+                                fields: [
+                                    approx_percentile:Float64,
+                                ],
+                            },
+                        },
+                    ),
+                    order: [],
+                    limit: None,
+                    offset: None,
+                    with_ties: false,
+                    extra_order_exprs: [],
+                },
+            )"#]];
+
+        expected.assert_eq(&format!("{:#?}", bound));
     }
 }

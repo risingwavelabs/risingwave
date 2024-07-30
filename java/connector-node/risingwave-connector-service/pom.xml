@@ -99,7 +99,6 @@
         <dependency>
             <groupId>com.risingwave</groupId>
             <artifactId>risingwave-sink-mock-flink-http-sink</artifactId>
-            <scope>provided</scope>
         </dependency>
     </dependencies>
 </project>

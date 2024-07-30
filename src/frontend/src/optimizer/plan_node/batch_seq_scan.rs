@@ -20,9 +20,10 @@ use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::RowSeqScanNode;
+use risingwave_sqlparser::ast::AsOf;
 
 use super::batch::prelude::*;
-use super::utils::{childless_record, Distill};
+use super::utils::{childless_record, to_pb_time_travel_as_of, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, ToDistributedBatch};
 use crate::catalog::ColumnId;
 use crate::error::Result;
@@ -36,14 +37,15 @@ use crate::scheduler::SchedulerResult;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSeqScan {
     pub base: PlanBase<Batch>,
-    core: generic::Scan,
+    core: generic::TableScan,
     scan_ranges: Vec<ScanRange>,
     limit: Option<u64>,
+    as_of: Option<AsOf>,
 }
 
 impl BatchSeqScan {
     fn new_inner(
-        core: generic::Scan,
+        core: generic::TableScan,
         dist: Distribution,
         scan_ranges: Vec<ScanRange>,
         limit: Option<u64>,
@@ -68,22 +70,24 @@ impl BatchSeqScan {
                 );
             })
         }
+        let as_of = core.as_of.clone();
 
         Self {
             base,
             core,
             scan_ranges,
             limit,
+            as_of,
         }
     }
 
-    pub fn new(core: generic::Scan, scan_ranges: Vec<ScanRange>, limit: Option<u64>) -> Self {
+    pub fn new(core: generic::TableScan, scan_ranges: Vec<ScanRange>, limit: Option<u64>) -> Self {
         // Use `Single` by default, will be updated later with `clone_with_dist`.
         Self::new_inner(core, Distribution::Single, scan_ranges, limit)
     }
 
     pub fn new_with_dist(
-        core: generic::Scan,
+        core: generic::TableScan,
         dist: Distribution,
         scan_ranges: Vec<ScanRange>,
         limit: Option<u64>,
@@ -123,7 +127,7 @@ impl BatchSeqScan {
 
     /// Get a reference to the batch seq scan's logical.
     #[must_use]
-    pub fn core(&self) -> &generic::Scan {
+    pub fn core(&self) -> &generic::TableScan {
         &self.core
     }
 
@@ -248,6 +252,7 @@ impl TryToBatchPb for BatchSeqScan {
             vnode_bitmap: None,
             ordered: !self.order().is_any(),
             limit: *self.limit(),
+            as_of: to_pb_time_travel_as_of(&self.as_of)?,
         }))
     }
 }

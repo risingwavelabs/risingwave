@@ -13,31 +13,34 @@
 // limitations under the License.
 
 use std::cmp::{Ordering, Reverse};
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BTreeMap, BinaryHeap};
 use std::fmt::Write;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use prometheus_http_query::response::Data::Vector;
 use risingwave_common::types::Timestamptz;
+use risingwave_common::util::StackTraceResponseExt;
+use risingwave_hummock_sdk::level::Level;
+use risingwave_meta_model_v2::table::TableType;
+use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::Level;
 use risingwave_pb::meta::event_log::Event;
 use risingwave_pb::meta::EventLog;
 use risingwave_pb::monitor_service::StackTraceResponse;
 use risingwave_rpc_client::ComputeClientPool;
 use serde_json::json;
+use thiserror_ext::AsReport;
 
 use crate::hummock::HummockManagerRef;
 use crate::manager::event_log::EventLogMangerRef;
-use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
+use crate::manager::{MetadataManager, MetadataManagerV2};
+use crate::MetaResult;
 
 pub type DiagnoseCommandRef = Arc<DiagnoseCommand>;
 
 pub struct DiagnoseCommand {
-    cluster_manager: ClusterManagerRef,
-    catalog_manager: CatalogManagerRef,
-    fragment_manager: FragmentManagerRef,
+    metadata_manager: MetadataManager,
     hummock_manger: HummockManagerRef,
     event_log_manager: EventLogMangerRef,
     prometheus_client: Option<prometheus_http_query::Client>,
@@ -46,18 +49,14 @@ pub struct DiagnoseCommand {
 
 impl DiagnoseCommand {
     pub fn new(
-        cluster_manager: ClusterManagerRef,
-        catalog_manager: CatalogManagerRef,
-        fragment_manager: FragmentManagerRef,
+        metadata_manager: MetadataManager,
         hummock_manger: HummockManagerRef,
         event_log_manager: EventLogMangerRef,
         prometheus_client: Option<prometheus_http_query::Client>,
         prometheus_selector: String,
     ) -> Self {
         Self {
-            cluster_manager,
-            catalog_manager,
-            fragment_manager,
+            metadata_manager,
             hummock_manger,
             event_log_manager,
             prometheus_client,
@@ -90,49 +89,68 @@ impl DiagnoseCommand {
 
     #[cfg_attr(coverage, coverage(off))]
     async fn write_catalog(&self, s: &mut String) {
+        match &self.metadata_manager {
+            MetadataManager::V1(_) => self.write_catalog_v1(s).await,
+            MetadataManager::V2(mgr) => {
+                self.write_catalog_v2(s).await;
+                let _ = self.write_table_definition(mgr, s).await.inspect_err(|e| {
+                    tracing::warn!(
+                        error = e.to_report_string(),
+                        "failed to display table definition"
+                    )
+                });
+            }
+        }
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn write_catalog_v1(&self, s: &mut String) {
+        let mgr = self.metadata_manager.as_v1_ref();
         let _ = writeln!(s, "number of fragment: {}", self.fragment_num().await);
         let _ = writeln!(s, "number of actor: {}", self.actor_num().await);
         let _ = writeln!(
             s,
             "number of source: {}",
-            self.catalog_manager.source_count().await
+            mgr.catalog_manager.source_count().await
         );
         let _ = writeln!(
             s,
             "number of table: {}",
-            self.catalog_manager.table_count().await
+            mgr.catalog_manager.table_count().await
         );
         let _ = writeln!(
             s,
             "number of materialized view: {}",
-            self.catalog_manager.materialized_view_count().await
+            mgr.catalog_manager.materialized_view_count().await
         );
         let _ = writeln!(
             s,
             "number of sink: {}",
-            self.catalog_manager.sink_count().await
+            mgr.catalog_manager.sink_count().await
         );
         let _ = writeln!(
             s,
             "number of index: {}",
-            self.catalog_manager.index_count().await
+            mgr.catalog_manager.index_count().await
         );
         let _ = writeln!(
             s,
             "number of function: {}",
-            self.catalog_manager.function_count().await
+            mgr.catalog_manager.function_count().await
         );
     }
 
     #[cfg_attr(coverage, coverage(off))]
     async fn fragment_num(&self) -> usize {
-        let core = self.fragment_manager.get_fragment_read_guard().await;
+        let mgr = self.metadata_manager.as_v1_ref();
+        let core = mgr.fragment_manager.get_fragment_read_guard().await;
         core.table_fragments().len()
     }
 
     #[cfg_attr(coverage, coverage(off))]
     async fn actor_num(&self) -> usize {
-        let core = self.fragment_manager.get_fragment_read_guard().await;
+        let mgr = self.metadata_manager.as_v1_ref();
+        let core = mgr.fragment_manager.get_fragment_read_guard().await;
         core.table_fragments()
             .values()
             .map(|t| t.actor_status.len())
@@ -140,25 +158,38 @@ impl DiagnoseCommand {
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn write_worker_nodes(&self, s: &mut String) {
-        let mut worker_actor_count: HashMap<u32, usize> = HashMap::new();
-        for f in self
-            .fragment_manager
-            .get_fragment_read_guard()
-            .await
-            .table_fragments()
-            .values()
-        {
-            for a in f.actor_status.values() {
-                if let Some(pu) = &a.parallel_unit {
-                    let e = worker_actor_count.entry(pu.worker_node_id).or_insert(0);
-                    *e += 1;
-                }
+    async fn write_catalog_v2(&self, s: &mut String) {
+        let mgr = self.metadata_manager.as_v2_ref();
+        let guard = mgr.catalog_controller.get_inner_read_guard().await;
+        let stat = match guard.stats().await {
+            Ok(stat) => stat,
+            Err(err) => {
+                tracing::warn!(error=?err.as_report(), "failed to get catalog stats");
+                return;
             }
-        }
+        };
+        let _ = writeln!(s, "number of fragment: {}", stat.streaming_job_num);
+        let _ = writeln!(s, "number of actor: {}", stat.actor_num);
+        let _ = writeln!(s, "number of source: {}", stat.source_num);
+        let _ = writeln!(s, "number of table: {}", stat.table_num);
+        let _ = writeln!(s, "number of materialized view: {}", stat.mview_num);
+        let _ = writeln!(s, "number of sink: {}", stat.sink_num);
+        let _ = writeln!(s, "number of index: {}", stat.index_num);
+        let _ = writeln!(s, "number of function: {}", stat.function_num);
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn write_worker_nodes(&self, s: &mut String) {
+        let Ok(worker_actor_count) = self.metadata_manager.worker_actor_count().await else {
+            tracing::warn!("failed to get worker actor count");
+            return;
+        };
 
         use comfy_table::{Row, Table};
-        let worker_nodes = self.cluster_manager.list_worker_node(None, None).await;
+        let Ok(worker_nodes) = self.metadata_manager.list_worker_node(None, None).await else {
+            tracing::warn!("failed to get worker nodes");
+            return;
+        };
         let mut table = Table::new();
         table.set_header({
             let mut row = Row::new();
@@ -194,7 +225,7 @@ impl DiagnoseCommand {
                 &mut row,
                 worker_node.get_state().ok().map(|s| s.as_str_name()),
             );
-            row.add_cell(worker_node.parallel_units.len().into());
+            row.add_cell(worker_node.parallelism().into());
             try_add_cell(
                 &mut row,
                 worker_node.property.as_ref().map(|p| p.is_streaming),
@@ -438,7 +469,6 @@ impl DiagnoseCommand {
 
         let top_k = 10;
         let mut top_tombstone_delete_sst = BinaryHeap::with_capacity(top_k);
-        let mut top_range_delete_sst = BinaryHeap::with_capacity(top_k);
         for compaction_group in version.levels.values() {
             let mut visit_level = |level: &Level| {
                 sst_num += level.table_infos.len();
@@ -454,15 +484,6 @@ impl DiagnoseCommand {
                         delete_ratio: tombstone_delete_ratio,
                     };
                     top_k_sstables(top_k, &mut top_tombstone_delete_sst, e);
-
-                    let range_delete_ratio =
-                        sst.range_tombstone_count * 10000 / sst.total_key_count;
-                    let e = SstableSort {
-                        compaction_group_id: compaction_group.group_id,
-                        sst_id: sst.sst_id,
-                        delete_ratio: range_delete_ratio,
-                    };
-                    top_k_sstables(top_k, &mut top_range_delete_sst, e);
                 }
             };
             let Some(ref l0) = compaction_group.l0 else {
@@ -502,8 +523,6 @@ impl DiagnoseCommand {
         let _ = writeln!(s, "top tombstone delete ratio");
         let _ = writeln!(s, "{}", format_table(top_tombstone_delete_sst));
         let _ = writeln!(s);
-        let _ = writeln!(s, "top range delete ratio");
-        let _ = writeln!(s, "{}", format_table(top_range_delete_sst));
 
         let _ = writeln!(s);
         self.write_storage_prometheus(s).await;
@@ -636,49 +655,135 @@ impl DiagnoseCommand {
     #[cfg_attr(coverage, coverage(off))]
     async fn write_await_tree(&self, s: &mut String) {
         // Most lines of code are copied from dashboard::handlers::dump_await_tree_all, because the latter cannot be called directly from here.
-        let worker_nodes = self
-            .cluster_manager
+        let Ok(worker_nodes) = self
+            .metadata_manager
             .list_worker_node(Some(WorkerType::ComputeNode), None)
-            .await;
+            .await
+        else {
+            tracing::warn!("failed to get worker nodes");
+            return;
+        };
 
-        let mut all = Default::default();
+        let mut all = StackTraceResponse::default();
 
-        fn merge(a: &mut StackTraceResponse, b: StackTraceResponse) {
-            a.actor_traces.extend(b.actor_traces);
-            a.rpc_traces.extend(b.rpc_traces);
-            a.compaction_task_traces.extend(b.compaction_task_traces);
-        }
-
-        let compute_clients = ComputeClientPool::default();
+        let compute_clients = ComputeClientPool::adhoc();
         for worker_node in &worker_nodes {
             if let Ok(client) = compute_clients.get(worker_node).await
                 && let Ok(result) = client.stack_trace().await
             {
-                merge(&mut all, result);
+                all.merge_other(result);
             }
         }
 
-        if !all.actor_traces.is_empty() {
-            let _ = writeln!(s, "--- Actor Traces ---");
-            for (actor_id, trace) in &all.actor_traces {
-                let _ = writeln!(s, ">> Actor {}", *actor_id);
-                let _ = writeln!(s, "{trace}");
+        write!(s, "{}", all.output()).unwrap();
+    }
+
+    async fn write_table_definition(
+        &self,
+        mgr: &MetadataManagerV2,
+        s: &mut String,
+    ) -> MetaResult<()> {
+        let sources = mgr
+            .catalog_controller
+            .list_sources()
+            .await?
+            .into_iter()
+            .map(|s| {
+                // The usage of secrets suggests that it's safe to display the definition.
+                let redact = if !s.get_secret_refs().is_empty() {
+                    false
+                } else {
+                    !s.get_info()
+                        .map(|i| !i.get_format_encode_secret_refs().is_empty())
+                        .unwrap_or(false)
+                };
+                (s.id, (s.name, s.schema_id, s.definition, redact))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let tables = mgr
+            .catalog_controller
+            .list_tables_by_type(TableType::Table)
+            .await?
+            .into_iter()
+            .map(|t| {
+                let redact =
+                    if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
+                        t.optional_associated_source_id
+                    {
+                        sources.get(&source_id).map(|s| s.3).unwrap_or(true)
+                    } else {
+                        false
+                    };
+                (t.id, (t.name, t.schema_id, t.definition, redact))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mvs = mgr
+            .catalog_controller
+            .list_tables_by_type(TableType::MaterializedView)
+            .await?
+            .into_iter()
+            .map(|t| (t.id, (t.name, t.schema_id, t.definition, false)))
+            .collect::<BTreeMap<_, _>>();
+        let indexes = mgr
+            .catalog_controller
+            .list_tables_by_type(TableType::Index)
+            .await?
+            .into_iter()
+            .map(|t| (t.id, (t.name, t.schema_id, t.definition, false)))
+            .collect::<BTreeMap<_, _>>();
+        let sinks = mgr
+            .catalog_controller
+            .list_sinks()
+            .await?
+            .into_iter()
+            .map(|s| {
+                // The usage of secrets suggests that it's safe to display the definition.
+                let redact = if !s.get_secret_refs().is_empty() {
+                    false
+                } else {
+                    !s.format_desc
+                        .map(|i| !i.get_secret_refs().is_empty())
+                        .unwrap_or(false)
+                };
+                (s.id, (s.name, s.schema_id, s.definition, redact))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let catalogs = [
+            ("SOURCE", sources),
+            ("TABLE", tables),
+            ("MATERIALIZED VIEW", mvs),
+            ("INDEX", indexes),
+            ("SINK", sinks),
+        ];
+        for (title, items) in catalogs {
+            use comfy_table::{Row, Table};
+            let mut table = Table::new();
+            table.set_header({
+                let mut row = Row::new();
+                row.add_cell("id".into());
+                row.add_cell("name".into());
+                row.add_cell("schema_id".into());
+                row.add_cell("definition".into());
+                row
+            });
+            for (id, (name, schema_id, definition, redact)) in items {
+                let mut row = Row::new();
+                let may_redact = if redact {
+                    "[REDACTED]".into()
+                } else {
+                    definition
+                };
+                row.add_cell(id.into());
+                row.add_cell(name.into());
+                row.add_cell(schema_id.into());
+                row.add_cell(may_redact.into());
+                table.add_row(row);
             }
+            let _ = writeln!(s);
+            let _ = writeln!(s, "{title}");
+            let _ = writeln!(s, "{table}");
         }
-        if !all.rpc_traces.is_empty() {
-            let _ = writeln!(s, "--- RPC Traces ---");
-            for (name, trace) in &all.rpc_traces {
-                let _ = writeln!(s, ">> RPC {name}");
-                let _ = writeln!(s, "{trace}");
-            }
-        }
-        if !all.compaction_task_traces.is_empty() {
-            let _ = writeln!(s, "--- Compactor Traces ---");
-            for (name, trace) in &all.compaction_task_traces {
-                let _ = writeln!(s, ">> Compaction Task {name}");
-                let _ = writeln!(s, "{trace}");
-            }
-        }
+        Ok(())
     }
 }
 

@@ -17,28 +17,35 @@ pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
+pub mod decouple_checkpoint_log_sink;
 pub mod deltalake;
 pub mod doris;
 pub mod doris_starrocks_connector;
+pub mod dynamodb;
 pub mod elasticsearch;
 pub mod encoder;
 pub mod formatter;
+pub mod google_pubsub;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
 pub mod log_store;
 pub mod mock_coordination_client;
+pub mod mongodb;
+pub mod mqtt;
 pub mod nats;
 pub mod pulsar;
 pub mod redis;
 pub mod remote;
+pub mod snowflake;
+pub mod sqlserver;
 pub mod starrocks;
 pub mod test_sink;
 pub mod trivial;
 pub mod utils;
 pub mod writer;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::future::Future;
 
 use ::clickhouse::error::Error as ClickHouseError;
@@ -46,11 +53,13 @@ use ::deltalake::DeltaTableError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
 };
+use risingwave_common::secret::{LocalSecretManager, SecretError};
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
@@ -61,11 +70,11 @@ pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
 use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
+use crate::error::ConnectorError;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
-use crate::ConnectorParams;
 
 const BOUNDED_CHANNEL_SIZE: usize = 16;
 #[macro_export]
@@ -80,15 +89,22 @@ macro_rules! for_all_sinks {
                 { Kinesis, $crate::sink::kinesis::KinesisSink },
                 { ClickHouse, $crate::sink::clickhouse::ClickHouseSink },
                 { Iceberg, $crate::sink::iceberg::IcebergSink },
+                { Mqtt, $crate::sink::mqtt::MqttSink },
+                { GooglePubSub, $crate::sink::google_pubsub::GooglePubSubSink },
                 { Nats, $crate::sink::nats::NatsSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
+                { Opensearch, $crate::sink::remote::OpensearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
+                { Snowflake, $crate::sink::snowflake::SnowflakeSink },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
+                { DynamoDb, $crate::sink::dynamodb::DynamoDbSink },
+                { Mongodb, $crate::sink::mongodb::MongodbSink },
+                { SqlServer, $crate::sink::sqlserver::SqlServerSink },
                 { Test, $crate::sink::test_sink::TestSink },
                 { Table, $crate::sink::trivial::TableSink }
             }
@@ -145,12 +161,19 @@ pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SinkParam {
     pub sink_id: SinkId,
-    pub properties: HashMap<String, String>,
+    pub sink_name: String,
+    pub properties: BTreeMap<String, String>,
     pub columns: Vec<ColumnDesc>,
     pub downstream_pk: Vec<usize>,
     pub sink_type: SinkType,
     pub format_desc: Option<SinkFormatDesc>,
     pub db_name: String,
+
+    /// - For `CREATE SINK ... FROM ...`, the name of the source table.
+    /// - For `CREATE SINK ... AS <query>`, the name of the sink itself.
+    ///
+    /// See also `gen_sink_plan`.
+    // TODO(eric): Why need these 2 fields (db_name and sink_from_name)?
     pub sink_from_name: String,
 }
 
@@ -170,6 +193,7 @@ impl SinkParam {
         };
         Self {
             sink_id: SinkId::from(pb_param.sink_id),
+            sink_name: pb_param.sink_name,
             properties: pb_param.properties,
             columns: table_schema.columns.iter().map(ColumnDesc::from).collect(),
             downstream_pk: table_schema
@@ -189,6 +213,7 @@ impl SinkParam {
     pub fn to_proto(&self) -> PbSinkParam {
         PbSinkParam {
             sink_id: self.sink_id.sink_id,
+            sink_name: self.sink_name.clone(),
             properties: self.properties.clone(),
             table_schema: Some(TableSchema {
                 columns: self.columns.iter().map(|col| col.to_protobuf()).collect(),
@@ -206,42 +231,61 @@ impl SinkParam {
             fields: self.columns.iter().map(Field::from).collect(),
         }
     }
-}
 
-impl From<SinkCatalog> for SinkParam {
-    fn from(sink_catalog: SinkCatalog) -> Self {
+    // `SinkParams` should only be used when there is a secret context.
+    // FIXME: Use a new type for `SinkFormatDesc` with properties contain filled secrets.
+    pub fn fill_secret_for_format_desc(
+        format_desc: Option<SinkFormatDesc>,
+    ) -> Result<Option<SinkFormatDesc>> {
+        match format_desc {
+            Some(mut format_desc) => {
+                format_desc.options = LocalSecretManager::global()
+                    .fill_secrets(format_desc.options, format_desc.secret_refs.clone())?;
+                Ok(Some(format_desc))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Try to convert a `SinkCatalog` to a `SinkParam` and fill the secrets to properties.
+    pub fn try_from_sink_catalog(sink_catalog: SinkCatalog) -> Result<Self> {
         let columns = sink_catalog
             .visible_columns()
             .map(|col| col.column_desc.clone())
             .collect();
-        Self {
+        let properties_with_secret = LocalSecretManager::global()
+            .fill_secrets(sink_catalog.properties, sink_catalog.secret_refs)?;
+        let format_desc_with_secret = Self::fill_secret_for_format_desc(sink_catalog.format_desc)?;
+        Ok(Self {
             sink_id: sink_catalog.id,
-            properties: sink_catalog.properties,
+            sink_name: sink_catalog.name,
+            properties: properties_with_secret,
             columns,
             downstream_pk: sink_catalog.downstream_pk,
             sink_type: sink_catalog.sink_type,
-            format_desc: sink_catalog.format_desc,
+            format_desc: format_desc_with_secret,
             db_name: sink_catalog.db_name,
             sink_from_name: sink_catalog.sink_from_name,
-        }
+        })
     }
 }
 
 #[derive(Clone)]
 pub struct SinkMetrics {
-    pub sink_commit_duration_metrics: LabelGuardedHistogram<3>,
-    pub connector_sink_rows_received: LabelGuardedIntCounter<2>,
-    pub log_store_first_write_epoch: LabelGuardedIntGauge<3>,
-    pub log_store_latest_write_epoch: LabelGuardedIntGauge<3>,
-    pub log_store_write_rows: LabelGuardedIntCounter<3>,
-    pub log_store_latest_read_epoch: LabelGuardedIntGauge<3>,
-    pub log_store_read_rows: LabelGuardedIntCounter<3>,
+    pub sink_commit_duration_metrics: LabelGuardedHistogram<4>,
+    pub connector_sink_rows_received: LabelGuardedIntCounter<3>,
+    pub log_store_first_write_epoch: LabelGuardedIntGauge<4>,
+    pub log_store_latest_write_epoch: LabelGuardedIntGauge<4>,
+    pub log_store_write_rows: LabelGuardedIntCounter<4>,
+    pub log_store_latest_read_epoch: LabelGuardedIntGauge<4>,
+    pub log_store_read_rows: LabelGuardedIntCounter<4>,
+    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
 
-    pub iceberg_write_qps: LabelGuardedIntCounter<2>,
-    pub iceberg_write_latency: LabelGuardedHistogram<2>,
-    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<2>,
-    pub iceberg_position_delete_cache_num: LabelGuardedIntGauge<2>,
-    pub iceberg_partition_num: LabelGuardedIntGauge<2>,
+    pub iceberg_write_qps: LabelGuardedIntCounter<3>,
+    pub iceberg_write_latency: LabelGuardedHistogram<3>,
+    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge<3>,
+    pub iceberg_position_delete_cache_num: LabelGuardedIntGauge<3>,
+    pub iceberg_partition_num: LabelGuardedIntGauge<3>,
 }
 
 impl SinkMetrics {
@@ -254,6 +298,8 @@ impl SinkMetrics {
             log_store_latest_read_epoch: LabelGuardedIntGauge::test_int_gauge(),
             log_store_write_rows: LabelGuardedIntCounter::test_int_counter(),
             log_store_read_rows: LabelGuardedIntCounter::test_int_counter(),
+            log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter::test_int_counter(
+            ),
             iceberg_write_qps: LabelGuardedIntCounter::test_int_counter(),
             iceberg_write_latency: LabelGuardedHistogram::test_histogram(),
             iceberg_rolling_unflushed_data_file: LabelGuardedIntGauge::test_int_gauge(),
@@ -265,7 +311,6 @@ impl SinkMetrics {
 
 #[derive(Clone)]
 pub struct SinkWriterParam {
-    pub connector_params: ConnectorParams,
     pub executor_id: u64,
     pub vnode_bitmap: Option<Bitmap>,
     pub meta_client: Option<SinkMetaClient>,
@@ -303,7 +348,6 @@ impl SinkMetaClient {
 impl SinkWriterParam {
     pub fn for_test() -> Self {
         SinkWriterParam {
-            connector_params: Default::default(),
             executor_id: Default::default(),
             vnode_bitmap: Default::default(),
             meta_client: Default::default(),
@@ -318,8 +362,12 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     type LogSinker: LogSinker;
     type Coordinator: SinkCommitCoordinator;
 
-    fn default_sink_decouple(_desc: &SinkDesc) -> bool {
-        false
+    /// `user_specified` is the value of `sink_decouple` config.
+    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Disable | SinkDecouple::Default => Ok(false),
+            SinkDecouple::Enable => Ok(true),
+        }
     }
 
     async fn validate(&self) -> Result<()>;
@@ -340,10 +388,7 @@ pub trait SinkLogReader: Send + Sized + 'static {
 
     /// Mark that all items emitted so far have been consumed and it is safe to truncate the log
     /// from the current offset.
-    fn truncate(
-        &mut self,
-        offset: TruncateOffset,
-    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()>;
 }
 
 impl<R: LogReader> SinkLogReader for R {
@@ -353,17 +398,14 @@ impl<R: LogReader> SinkLogReader for R {
         <Self as LogReader>::next_item(self)
     }
 
-    fn truncate(
-        &mut self,
-        offset: TruncateOffset,
-    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
         <Self as LogReader>::truncate(self, offset)
     }
 }
 
 #[async_trait]
 pub trait LogSinker: 'static {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<()>;
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!>;
 }
 
 #[async_trait]
@@ -419,6 +461,10 @@ impl SinkImpl {
 
     pub fn is_sink_into_table(&self) -> bool {
         matches!(self, SinkImpl::Table(_))
+    }
+
+    pub fn is_blackhole(&self) -> bool {
+        matches!(self, SinkImpl::BlackHole(_))
     }
 }
 
@@ -492,8 +538,20 @@ pub enum SinkError {
     ClickHouse(String),
     #[error("Redis error: {0}")]
     Redis(String),
+    #[error("Mqtt error: {0}")]
+    Mqtt(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Nats error: {0}")]
     Nats(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("Google Pub/Sub error: {0}")]
+    GooglePubSub(
         #[source]
         #[backtrace]
         anyhow::Error,
@@ -514,6 +572,12 @@ pub enum SinkError {
     ),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
+    #[error("Snowflake error: {0}")]
+    Snowflake(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Pulsar error: {0}")]
     Pulsar(
         #[source]
@@ -528,6 +592,36 @@ pub enum SinkError {
     ),
     #[error("BigQuery error: {0}")]
     BigQuery(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("DynamoDB error: {0}")]
+    DynamoDb(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("SQL Server error: {0}")]
+    SqlServer(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error(transparent)]
+    Connector(
+        #[from]
+        #[backtrace]
+        ConnectorError,
+    ),
+    #[error("Secret error: {0}")]
+    Secret(
+        #[from]
+        #[backtrace]
+        SecretError,
+    ),
+    #[error("Mongodb error: {0}")]
+    Mongodb(
         #[source]
         #[backtrace]
         anyhow::Error,
@@ -561,5 +655,11 @@ impl From<DeltaTableError> for SinkError {
 impl From<RedisError> for SinkError {
     fn from(value: RedisError) -> Self {
         SinkError::Redis(value.to_report_string())
+    }
+}
+
+impl From<tiberius::error::Error> for SinkError {
+    fn from(err: tiberius::error::Error) -> Self {
+        SinkError::SqlServer(anyhow!(err))
     }
 }

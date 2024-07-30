@@ -14,6 +14,7 @@
 
 package com.risingwave.connector.source.common;
 
+import com.mongodb.ConnectionString;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
 import java.io.IOException;
@@ -30,12 +31,8 @@ import org.slf4j.LoggerFactory;
 public class DbzConnectorConfig {
     private static final Logger LOG = LoggerFactory.getLogger(DbzConnectorConfig.class);
 
-    /* Debezium private configs */
-    public static final String WAIT_FOR_CONNECTOR_EXIT_BEFORE_INTERRUPT_MS =
-            "debezium.embedded.shutdown.pause.before.interrupt.ms";
-
-    public static final String WAIT_FOR_STREAMING_START_BEFORE_EXIT_SECS =
-            "cdc.source.wait.streaming.before.exit.seconds";
+    private static final String WAIT_FOR_STREAMING_START_TIMEOUT_SECS =
+            "cdc.source.wait.streaming.start.timeout";
 
     /* Common configs */
     public static final String HOST = "hostname";
@@ -50,6 +47,7 @@ public class DbzConnectorConfig {
 
     /* MySQL configs */
     public static final String MYSQL_SERVER_ID = "server.id";
+    public static final String MYSQL_SSL_MODE = "ssl.mode";
 
     /* Postgres configs */
     public static final String PG_SLOT_NAME = "slot.name";
@@ -61,11 +59,17 @@ public class DbzConnectorConfig {
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";
     private static final String POSTGRES_CONFIG_FILE = "postgres.properties";
+    private static final String MONGODB_CONFIG_FILE = "mongodb.properties";
 
     private static final String DBZ_PROPERTY_PREFIX = "debezium.";
 
     private static final String SNAPSHOT_MODE_KEY = "debezium.snapshot.mode";
     private static final String SNAPSHOT_MODE_BACKFILL = "rw_cdc_backfill";
+
+    public static class MongoDb {
+        public static final String MONGO_URL = "mongodb.url";
+        public static final String MONGO_COLLECTION_NAME = "collection.name";
+    }
 
     private static Map<String, String> extractDebeziumProperties(
             Map<String, String> userProperties) {
@@ -85,6 +89,7 @@ public class DbzConnectorConfig {
     private final SourceTypeE sourceType;
     private final Properties resolvedDbzProps;
     private final boolean isBackfillSource;
+    private final int waitStreamingStartTimeout;
 
     public long getSourceId() {
         return sourceId;
@@ -102,28 +107,35 @@ public class DbzConnectorConfig {
         return isBackfillSource;
     }
 
+    public int getWaitStreamingStartTimeout() {
+        return waitStreamingStartTimeout;
+    }
+
     public DbzConnectorConfig(
             SourceTypeE source,
             long sourceId,
             String startOffset,
             Map<String, String> userProps,
             boolean snapshotDone,
-            boolean isMultiTableShared) {
+            boolean isCdcSourceJob) {
 
         StringSubstitutor substitutor = new StringSubstitutor(userProps);
         var dbzProps = initiateDbConfig(DBZ_CONFIG_FILE, substitutor);
         var isCdcBackfill =
                 null != userProps.get(SNAPSHOT_MODE_KEY)
                         && userProps.get(SNAPSHOT_MODE_KEY).equals(SNAPSHOT_MODE_BACKFILL);
+        var waitStreamingStartTimeout =
+                Integer.parseInt(
+                        userProps.getOrDefault(WAIT_FOR_STREAMING_START_TIMEOUT_SECS, "30"));
 
         LOG.info(
-                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}, isMultiTableShared={}",
+                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}, isCdcSourceJob={}",
                 source,
                 sourceId,
                 startOffset,
                 snapshotDone,
                 isCdcBackfill,
-                isMultiTableShared);
+                isCdcSourceJob);
 
         if (source == SourceTypeE.MYSQL) {
             var mysqlProps = initiateDbConfig(MYSQL_CONFIG_FILE, substitutor);
@@ -134,21 +146,21 @@ public class DbzConnectorConfig {
                 // If cdc backfill enabled, the source only emit incremental changes, so we must
                 // rewind to the given offset and continue binlog reading from there
                 if (null != startOffset && !startOffset.isBlank()) {
-                    mysqlProps.setProperty("snapshot.mode", "schema_only_recovery");
+                    mysqlProps.setProperty("snapshot.mode", "recovery");
                     mysqlProps.setProperty(
                             ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
                 } else {
                     // read upstream table schemas and emit incremental changes only
-                    mysqlProps.setProperty("snapshot.mode", "schema_only");
+                    mysqlProps.setProperty("snapshot.mode", "no_data");
                 }
             } else {
                 // if snapshot phase is finished and offset is specified, we will continue binlog
                 // reading from the given offset
                 if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
-                    // 'snapshot.mode=schema_only_recovery' must be configured if binlog offset is
+                    // 'snapshot.mode=recovery' must be configured if binlog offset is
                     // specified. It only snapshots the schemas, not the data, and continue binlog
                     // reading from the specified offset
-                    mysqlProps.setProperty("snapshot.mode", "schema_only_recovery");
+                    mysqlProps.setProperty("snapshot.mode", "recovery");
                     mysqlProps.setProperty(
                             ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
                 }
@@ -168,7 +180,7 @@ public class DbzConnectorConfig {
             }
             if (isCdcBackfill) {
                 // skip the initial snapshot for cdc backfill
-                postgresProps.setProperty("snapshot.mode", "never");
+                postgresProps.setProperty("snapshot.mode", "no_data");
 
                 // if startOffset is specified, we should continue
                 // reading changes from the given offset
@@ -181,7 +193,7 @@ public class DbzConnectorConfig {
                 // if snapshot phase is finished and offset is specified, we will continue reading
                 // changes from the given offset
                 if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
-                    postgresProps.setProperty("snapshot.mode", "never");
+                    postgresProps.setProperty("snapshot.mode", "no_data");
                     postgresProps.setProperty(
                             ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
                 }
@@ -189,7 +201,7 @@ public class DbzConnectorConfig {
 
             dbzProps.putAll(postgresProps);
 
-            if (isMultiTableShared) {
+            if (isCdcSourceJob) {
                 // remove table filtering for the shared Postgres source, since we
                 // allow user to ingest tables in different schemas
                 LOG.info("Disable table filtering for the shared Postgres source");
@@ -212,11 +224,32 @@ public class DbzConnectorConfig {
             // if snapshot phase is finished and offset is specified, we will continue reading
             // changes from the given offset
             if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
-                postgresProps.setProperty("snapshot.mode", "never");
+                postgresProps.setProperty("snapshot.mode", "no_data");
                 postgresProps.setProperty(
                         ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
             }
             dbzProps.putAll(postgresProps);
+        } else if (source == SourceTypeE.MONGODB) {
+            var mongodbProps = initiateDbConfig(MONGODB_CONFIG_FILE, substitutor);
+
+            // if snapshot phase is finished and offset is specified, we will continue reading
+            // changes from the given offset
+            if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
+                mongodbProps.setProperty("snapshot.mode", "no_data");
+                mongodbProps.setProperty(
+                        ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+            }
+
+            var mongodbUrl = userProps.get(MongoDb.MONGO_URL);
+            var collection = userProps.get(MongoDb.MONGO_COLLECTION_NAME);
+            var connectionStr = new ConnectionString(mongodbUrl);
+            var connectorName =
+                    String.format(
+                            "MongoDB_%d:%s:%s", sourceId, connectionStr.getHosts(), collection);
+            mongodbProps.setProperty("name", connectorName);
+
+            dbzProps.putAll(mongodbProps);
+
         } else {
             throw new RuntimeException("unsupported source type: " + source);
         }
@@ -230,6 +263,7 @@ public class DbzConnectorConfig {
         this.sourceType = source;
         this.resolvedDbzProps = dbzProps;
         this.isBackfillSource = isCdcBackfill;
+        this.waitStreamingStartTimeout = waitStreamingStartTimeout;
     }
 
     private Properties initiateDbConfig(String fileName, StringSubstitutor substitutor) {

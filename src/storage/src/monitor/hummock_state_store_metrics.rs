@@ -17,8 +17,8 @@ use std::sync::{Arc, OnceLock};
 use prometheus::core::{AtomicU64, Collector, Desc, GenericCounter, GenericGauge};
 use prometheus::{
     exponential_buckets, histogram_opts, proto, register_histogram_vec_with_registry,
-    register_int_counter_vec_with_registry, register_int_gauge_with_registry, Gauge, IntGauge,
-    Opts, Registry,
+    register_histogram_with_registry, register_int_counter_vec_with_registry,
+    register_int_gauge_with_registry, Gauge, Histogram, HistogramVec, IntGauge, Opts, Registry,
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
@@ -74,12 +74,21 @@ pub struct HummockStateStoreMetrics {
 
     // uploading task
     pub uploader_uploading_task_size: GenericGauge<AtomicU64>,
+    pub uploader_uploading_task_count: IntGauge,
+    pub uploader_imm_size: GenericGauge<AtomicU64>,
+    pub uploader_upload_task_latency: Histogram,
+    pub uploader_syncing_epoch_count: IntGauge,
+    pub uploader_wait_poll_latency: Histogram,
 
     // memory
     pub mem_table_spill_counts: RelabeledCounterVec,
+    pub old_value_size: IntGauge,
 
     // block statistics
-    pub block_efficiency_histogram: RelabeledHistogramVec,
+    pub block_efficiency_histogram: Histogram,
+
+    pub event_handler_pending_event: IntGauge,
+    pub event_handler_latency: HistogramVec,
 }
 
 pub static GLOBAL_HUMMOCK_STATE_STORE_METRICS: OnceLock<HummockStateStoreMetrics> = OnceLock::new();
@@ -235,7 +244,7 @@ impl HummockStateStoreMetrics {
         let opts = histogram_opts!(
                 "state_store_write_batch_duration",
                 "Total time of batched write that have been issued to state store. With shared buffer on, this is the latency writing to the shared buffer",
-                time_buckets
+                time_buckets.clone()
             );
         let write_batch_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
@@ -309,6 +318,46 @@ impl HummockStateStoreMetrics {
             .register(Box::new(uploader_uploading_task_size.clone()))
             .unwrap();
 
+        let uploader_uploading_task_count = register_int_gauge_with_registry!(
+            "state_store_uploader_uploading_task_count",
+            "Total number of uploader uploading tasks",
+            registry
+        )
+        .unwrap();
+
+        let uploader_imm_size = GenericGauge::new(
+            "state_store_uploader_imm_size",
+            "Total size of imms tracked by uploader",
+        )
+        .unwrap();
+        registry
+            .register(Box::new(uploader_imm_size.clone()))
+            .unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_uploader_upload_task_latency",
+            "Latency of uploader uploading tasks",
+            time_buckets
+        );
+
+        let uploader_upload_task_latency =
+            register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_uploader_wait_poll_latency",
+            "Latency of upload uploading task being polled after finish",
+            exponential_buckets(0.001, 5.0, 7).unwrap(), // 1ms - 15s
+        );
+
+        let uploader_wait_poll_latency = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let uploader_syncing_epoch_count = register_int_gauge_with_registry!(
+            "state_store_uploader_syncing_epoch_count",
+            "Total number of syncing epoch",
+            registry
+        )
+        .unwrap();
+
         let read_req_bloom_filter_positive_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_read_req_bloom_filter_positive_counts",
             "Total number of read request with at least one SST bloom filter check returns positive",
@@ -366,18 +415,35 @@ impl HummockStateStoreMetrics {
             metric_level,
         );
 
+        let old_value_size = register_int_gauge_with_registry!(
+            "state_store_old_value_size",
+            "The size of old value",
+            registry
+        )
+        .unwrap();
+
         let opts = histogram_opts!(
             "block_efficiency_histogram",
             "Access ratio of in-memory block.",
             exponential_buckets(0.001, 2.0, 11).unwrap(),
         );
-        let block_efficiency_histogram =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let block_efficiency_histogram = RelabeledHistogramVec::with_metric_level(
-            MetricLevel::Info,
-            block_efficiency_histogram,
-            metric_level,
+        let block_efficiency_histogram = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let event_handler_pending_event = register_int_gauge_with_registry!(
+            "state_store_event_handler_pending_event",
+            "The number of sent but unhandled events",
+            registry,
+        )
+        .unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_event_handler_latency",
+            "Latency to handle event",
+            exponential_buckets(0.001, 5.0, 7).unwrap(), // 1ms - 15s
         );
+
+        let event_handler_latency =
+            register_histogram_vec_with_registry!(opts, &["event_type"], registry).unwrap();
 
         Self {
             bloom_filter_true_negative_counts,
@@ -403,9 +469,17 @@ impl HummockStateStoreMetrics {
             spill_task_size_from_sealed: spill_task_size.with_label_values(&["sealed"]),
             spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
             uploader_uploading_task_size,
+            uploader_uploading_task_count,
+            uploader_imm_size,
+            uploader_upload_task_latency,
+            uploader_syncing_epoch_count,
+            uploader_wait_poll_latency,
             mem_table_spill_counts,
+            old_value_size,
 
             block_efficiency_histogram,
+            event_handler_pending_event,
+            event_handler_latency,
         }
     }
 
@@ -418,6 +492,7 @@ pub trait MemoryCollector: Sync + Send {
     fn get_meta_memory_usage(&self) -> u64;
     fn get_data_memory_usage(&self) -> u64;
     fn get_uploading_memory_usage(&self) -> u64;
+    fn get_prefetch_memory_usage(&self) -> usize;
     fn get_meta_cache_memory_usage_ratio(&self) -> f64;
     fn get_block_cache_memory_usage_ratio(&self) -> f64;
     fn get_shared_buffer_usage_ratio(&self) -> f64;
@@ -430,6 +505,7 @@ struct StateStoreCollector {
     block_cache_size: IntGauge,
     meta_cache_size: IntGauge,
     uploading_memory_size: IntGauge,
+    prefetch_memory_size: IntGauge,
     meta_cache_usage_ratio: Gauge,
     block_cache_usage_ratio: Gauge,
     uploading_memory_usage_ratio: Gauge,
@@ -481,12 +557,20 @@ impl StateStoreCollector {
         .unwrap();
         descs.extend(uploading_memory_usage_ratio.desc().into_iter().cloned());
 
+        let prefetch_memory_size = IntGauge::with_opts(Opts::new(
+            "state_store_prefetch_memory_size",
+            "the size of prefetch memory usage",
+        ))
+        .unwrap();
+        descs.extend(prefetch_memory_size.desc().into_iter().cloned());
+
         Self {
             memory_collector,
             descs,
             block_cache_size,
             meta_cache_size,
             uploading_memory_size,
+            prefetch_memory_size,
             meta_cache_usage_ratio,
             block_cache_usage_ratio,
 
@@ -507,6 +591,8 @@ impl Collector for StateStoreCollector {
             .set(self.memory_collector.get_meta_memory_usage() as i64);
         self.uploading_memory_size
             .set(self.memory_collector.get_uploading_memory_usage() as i64);
+        self.prefetch_memory_size
+            .set(self.memory_collector.get_prefetch_memory_usage() as i64);
         self.meta_cache_usage_ratio
             .set(self.memory_collector.get_meta_cache_memory_usage_ratio());
         self.block_cache_usage_ratio

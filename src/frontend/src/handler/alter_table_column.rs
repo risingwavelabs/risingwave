@@ -17,8 +17,8 @@ use std::sync::Arc;
 use anyhow::Context;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::bail_not_implemented;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::{bail, bail_not_implemented};
 use risingwave_sqlparser::ast::{
     AlterTableOperation, ColumnOption, ConnectorSchema, Encode, ObjectName, Statement,
 };
@@ -30,9 +30,75 @@ use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{ErrorCode, Result};
+use crate::expr::ExprImpl;
 use crate::session::SessionImpl;
 use crate::{Binder, TableCatalog, WithOptions};
+
+pub async fn replace_table_with_definition(
+    session: &Arc<SessionImpl>,
+    table_name: ObjectName,
+    definition: Statement,
+    original_catalog: &Arc<TableCatalog>,
+    source_schema: Option<ConnectorSchema>,
+) -> Result<()> {
+    // Create handler args as if we're creating a new table with the altered definition.
+    let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
+    let col_id_gen = ColumnIdGenerator::new_alter(original_catalog);
+    let Statement::CreateTable {
+        columns,
+        constraints,
+        source_watermarks,
+        append_only,
+        on_conflict,
+        with_version_column,
+        wildcard_idx,
+        cdc_table_info,
+        ..
+    } = definition
+    else {
+        panic!("unexpected statement type: {:?}", definition);
+    };
+
+    let (graph, table, source, job_type) = generate_stream_graph_for_table(
+        session,
+        table_name,
+        original_catalog,
+        source_schema,
+        handler_args,
+        col_id_gen,
+        columns,
+        wildcard_idx,
+        constraints,
+        source_watermarks,
+        append_only,
+        on_conflict,
+        with_version_column,
+        cdc_table_info,
+    )
+    .await?;
+
+    // Calculate the mapping from the original columns to the new columns.
+    let col_index_mapping = ColIndexMapping::new(
+        original_catalog
+            .columns()
+            .iter()
+            .map(|old_c| {
+                table.columns.iter().position(|new_c| {
+                    new_c.get_column_desc().unwrap().column_id == old_c.column_id().get_id()
+                })
+            })
+            .collect(),
+        table.columns.len(),
+    );
+
+    let catalog_writer = session.catalog_writer()?;
+
+    catalog_writer
+        .replace_table(source, table, graph, col_index_mapping, job_type)
+        .await?;
+    Ok(())
+}
 
 /// Handle `ALTER TABLE [ADD|DROP] COLUMN` statements. The `operation` must be either `AddColumn` or
 /// `DropColumn`.
@@ -46,13 +112,6 @@ pub async fn handle_alter_table_column(
 
     if !original_catalog.incoming_sinks.is_empty() {
         bail_not_implemented!("alter table with incoming sinks");
-    }
-
-    // TODO(yuhao): alter table with generated columns.
-    if original_catalog.has_generated_column() {
-        return Err(RwError::from(ErrorCode::BindError(
-            "Alter a table with generated column has not been implemented.".to_string(),
-        )));
     }
 
     // Retrieve the original table definition and parse it to AST.
@@ -72,16 +131,32 @@ pub async fn handle_alter_table_column(
         .clone()
         .map(|source_schema| source_schema.into_v2_with_warning());
 
-    if let Some(source_schema) = &source_schema {
-        if schema_has_schema_registry(source_schema) {
-            bail_not_implemented!("Alter table with source having schema registry");
+    let fail_if_has_schema_registry = || {
+        if let Some(source_schema) = &source_schema
+            && schema_has_schema_registry(source_schema)
+        {
+            Err(ErrorCode::NotSupported(
+                "alter table with schema registry".to_string(),
+                "try `ALTER TABLE .. FORMAT .. ENCODE .. (...)` instead".to_string(),
+            ))
+        } else {
+            Ok(())
         }
+    };
+
+    if columns.is_empty() {
+        Err(ErrorCode::NotSupported(
+            "alter a table with empty column definitions".to_string(),
+            "Please recreate the table with column definitions.".to_string(),
+        ))?
     }
 
     match operation {
         AlterTableOperation::AddColumn {
             column_def: new_column,
         } => {
+            fail_if_has_schema_registry()?;
+
             // Duplicated names can actually be checked by `StreamMaterialize`. We do here for
             // better error reporting.
             let new_column_name = new_column.name.real_value();
@@ -104,7 +179,7 @@ pub async fn handle_alter_table_column(
                 ))?
             }
 
-            // Add the new column to the table definition.
+            // Add the new column to the table definition if it is not created by `create table (*)` syntax.
             columns.push(new_column);
         }
 
@@ -115,6 +190,28 @@ pub async fn handle_alter_table_column(
         } => {
             if cascade {
                 bail_not_implemented!(issue = 6903, "drop column cascade");
+            }
+
+            // Check if the column to drop is referenced by any generated columns.
+            for column in original_catalog.columns() {
+                if column_name.real_value() == column.name() && !column.is_generated() {
+                    fail_if_has_schema_registry()?;
+                }
+
+                if let Some(expr) = column.generated_expr() {
+                    let expr = ExprImpl::from_expr_proto(expr)?;
+                    let refs = expr.collect_input_refs(original_catalog.columns().len());
+                    for idx in refs.ones() {
+                        let refed_column = &original_catalog.columns()[idx];
+                        if refed_column.name() == column_name.real_value() {
+                            bail!(format!(
+                                "failed to drop column \"{}\" because it's referenced by a generated column \"{}\"",
+                                column_name,
+                                column.name()
+                            ))
+                        }
+                    }
+                }
             }
 
             // Locate the column by name and remove it.
@@ -143,57 +240,16 @@ pub async fn handle_alter_table_column(
         }
 
         _ => unreachable!(),
-    }
-
-    // Create handler args as if we're creating a new table with the altered definition.
-    let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
-    let col_id_gen = ColumnIdGenerator::new_alter(&original_catalog);
-    let Statement::CreateTable {
-        columns,
-        constraints,
-        source_watermarks,
-        append_only,
-        wildcard_idx,
-        ..
-    } = definition
-    else {
-        panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (graph, table, source) = generate_stream_graph_for_table(
+    replace_table_with_definition(
         &session,
         table_name,
+        definition,
         &original_catalog,
         source_schema,
-        handler_args,
-        col_id_gen,
-        columns,
-        wildcard_idx,
-        constraints,
-        source_watermarks,
-        append_only,
     )
     .await?;
-
-    // Calculate the mapping from the original columns to the new columns.
-    let col_index_mapping = ColIndexMapping::new(
-        original_catalog
-            .columns()
-            .iter()
-            .map(|old_c| {
-                table.columns.iter().position(|new_c| {
-                    new_c.get_column_desc().unwrap().column_id == old_c.column_id().get_id()
-                })
-            })
-            .collect(),
-        table.columns.len(),
-    );
-
-    let catalog_writer = session.catalog_writer()?;
-
-    catalog_writer
-        .replace_table(source, table, graph, col_index_mapping)
-        .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
 }
@@ -224,7 +280,7 @@ pub fn fetch_table_catalog_for_alter(
     let original_catalog = {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
-            reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
+            reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
 
         match table.table_type() {
             TableType::Table => {}
@@ -264,7 +320,7 @@ mod tests {
         let get_table = || {
             let catalog_reader = session.env().catalog_reader().read_guard();
             catalog_reader
-                .get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
+                .get_created_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
                 .unwrap()
                 .0
                 .clone()

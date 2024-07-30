@@ -12,12 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
-use futures::StreamExt;
-use risingwave_common::catalog::Schema;
-
-use super::*;
+use crate::executor::prelude::*;
 
 mod epoch_check;
 mod epoch_provide;
@@ -27,7 +22,7 @@ mod update_check;
 
 /// [`WrapperExecutor`] will do some sanity checks and logging for the wrapped executor.
 pub struct WrapperExecutor {
-    input: BoxedExecutor,
+    input: Executor,
 
     actor_ctx: ActorContextRef,
 
@@ -36,7 +31,7 @@ pub struct WrapperExecutor {
 
 impl WrapperExecutor {
     pub fn new(
-        input: BoxedExecutor,
+        input: Executor,
         actor_ctx: ActorContextRef,
         enable_executor_row_count: bool,
     ) -> Self {
@@ -67,7 +62,7 @@ impl WrapperExecutor {
         // -- Shared wrappers --
 
         // Await tree
-        let stream = trace::instrument_await_tree(info.clone(), actor_ctx.id, stream);
+        let stream = trace::instrument_await_tree(info.clone(), stream);
 
         // Schema check
         let stream = schema_check::schema_check(info.clone(), stream);
@@ -88,9 +83,9 @@ impl WrapperExecutor {
     }
 }
 
-impl Executor for WrapperExecutor {
+impl Execute for WrapperExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        let info = Arc::new(self.input.info());
+        let info = Arc::new(self.input.info().clone());
         Self::wrap(
             self.enable_executor_row_count,
             info,
@@ -101,7 +96,7 @@ impl Executor for WrapperExecutor {
     }
 
     fn execute_with_epoch(self: Box<Self>, epoch: u64) -> BoxedMessageStream {
-        let info = Arc::new(self.input.info());
+        let info = Arc::new(self.input.info().clone());
         Self::wrap(
             self.enable_executor_row_count,
             info,
@@ -109,17 +104,5 @@ impl Executor for WrapperExecutor {
             self.input.execute_with_epoch(epoch),
         )
         .boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        self.input.schema()
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        self.input.pk_indices()
-    }
-
-    fn identity(&self) -> &str {
-        self.input.identity()
     }
 }

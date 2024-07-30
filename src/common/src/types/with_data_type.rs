@@ -98,6 +98,7 @@ impl<'a> WithDataType for &'a str {
     }
 }
 
+impl_with_data_type!(char, DataType::Varchar);
 impl_with_data_type!(String, DataType::Varchar);
 impl_with_data_type!(Date, DataType::Date);
 impl_with_data_type!(Time, DataType::Time);

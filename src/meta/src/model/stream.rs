@@ -17,9 +17,9 @@ use std::ops::AddAssign;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::ParallelUnitId;
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_connector::source::SplitImpl;
-use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
+use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::table_parallelism::{
@@ -30,7 +30,7 @@ use risingwave_pb::meta::{PbTableFragments, PbTableParallelism};
 use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, PbFragmentTypeFlag, PbStreamContext, StreamActor, StreamNode, StreamSource,
+    FragmentTypeFlag, PbFragmentTypeFlag, PbStreamContext, StreamActor, StreamNode,
 };
 
 use super::{ActorId, FragmentId};
@@ -44,7 +44,7 @@ const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 /// The parallelism for a `TableFragments`.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum TableParallelism {
-    /// This is when the system decides the parallelism, based on the available parallel units.
+    /// This is when the system decides the parallelism, based on the available worker parallelisms.
     Adaptive,
     /// We set this when the `TableFragments` parallelism is changed.
     /// All fragments which are part of the `TableFragment` will have the same parallelism as this.
@@ -164,6 +164,8 @@ impl MetadataModel for TableFragments {
             actor_splits: build_actor_connector_splits(&self.actor_splits),
             ctx: Some(self.ctx.to_protobuf()),
             parallelism: Some(self.assigned_parallelism.into()),
+            node_label: "".to_string(),
+            backfill_done: true,
         }
     }
 
@@ -174,9 +176,11 @@ impl MetadataModel for TableFragments {
             parallelism: Some(Parallelism::Custom(PbCustomParallelism {})),
         };
 
+        let state = prost.state();
+
         Self {
             table_id: TableId::new(prost.table_id),
-            state: prost.state(),
+            state,
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
             actor_splits: build_actor_split_impls(&prost.actor_splits),
@@ -203,21 +207,21 @@ impl TableFragments {
     }
 
     /// Create a new `TableFragments` with state of `Initial`, with the status of actors set to
-    /// `Inactive` on the given parallel units.
+    /// `Inactive` on the given workers.
     pub fn new(
         table_id: TableId,
         fragments: BTreeMap<FragmentId, Fragment>,
-        actor_locations: &BTreeMap<ActorId, ParallelUnit>,
+        actor_locations: &BTreeMap<ActorId, WorkerSlotId>,
         ctx: StreamContext,
         table_parallelism: TableParallelism,
     ) -> Self {
         let actor_status = actor_locations
             .iter()
-            .map(|(&actor_id, parallel_unit)| {
+            .map(|(&actor_id, worker_slot_id)| {
                 (
                     actor_id,
                     ActorStatus {
-                        parallel_unit: Some(parallel_unit.clone()),
+                        location: PbActorLocation::from_worker(worker_slot_id.worker_id()),
                         state: ActorState::Inactive as i32,
                     },
                 )
@@ -239,8 +243,8 @@ impl TableFragments {
         self.fragments.keys().cloned()
     }
 
-    pub fn fragments(&self) -> Vec<&Fragment> {
-        self.fragments.values().collect_vec()
+    pub fn fragments(&self) -> impl Iterator<Item = &Fragment> {
+        self.fragments.values()
     }
 
     /// Returns the table id.
@@ -277,24 +281,6 @@ impl TableFragments {
     /// Set the state of the table fragments.
     pub fn set_state(&mut self, state: State) {
         self.state = state;
-    }
-
-    /// Returns mview fragment vnode mapping.
-    /// Note that: the sink fragment is also stored as `TableFragments`, it's possible that
-    /// there's no fragment with `FragmentTypeFlag::Mview` exists.
-    pub fn mview_vnode_mapping(&self) -> Option<(FragmentId, ParallelUnitMapping)> {
-        self.fragments
-            .values()
-            .find(|fragment| {
-                (fragment.get_fragment_type_mask() & FragmentTypeFlag::Mview as u32) != 0
-            })
-            .map(|fragment| {
-                (
-                    fragment.fragment_id,
-                    // vnode mapping is always `Some`, even for singletons.
-                    fragment.vnode_mapping.clone().unwrap(),
-                )
-            })
     }
 
     /// Update state of all actors
@@ -337,17 +323,12 @@ impl TableFragments {
     }
 
     /// Returns the actor ids with the given fragment type.
-    fn filter_actor_ids(&self, check_type: impl Fn(u32) -> bool) -> Vec<ActorId> {
+    pub fn filter_actor_ids(&self, check_type: impl Fn(u32) -> bool) -> Vec<ActorId> {
         self.fragments
             .values()
             .filter(|fragment| check_type(fragment.get_fragment_type_mask()))
             .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
             .collect()
-    }
-
-    /// Returns barrier inject actor ids.
-    pub fn barrier_inject_actor_ids(&self) -> Vec<ActorId> {
-        Self::filter_actor_ids(self, Self::is_injectable)
     }
 
     /// Check if the fragment type mask is injectable.
@@ -367,11 +348,23 @@ impl TableFragments {
         })
     }
 
-    /// Returns values actor ids.
-    pub fn values_actor_ids(&self) -> Vec<ActorId> {
-        Self::filter_actor_ids(self, |fragment_type_mask| {
-            (fragment_type_mask & FragmentTypeFlag::Values as u32) != 0
-        })
+    /// Returns actor ids that need to be tracked when creating MV.
+    pub fn tracking_progress_actor_ids(&self) -> Vec<ActorId> {
+        let mut actor_ids = vec![];
+        for fragment in self.fragments.values() {
+            if fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32 != 0 {
+                // Note: CDC table job contains a StreamScan fragment (StreamCdcScan node) and a CdcFilter fragment.
+                // We don't track any fragments' progress.
+                return vec![];
+            }
+            if (fragment.fragment_type_mask
+                & (FragmentTypeFlag::Values as u32 | FragmentTypeFlag::StreamScan as u32))
+                != 0
+            {
+                actor_ids.extend(fragment.actors.iter().map(|actor| actor.actor_id));
+            }
+        }
+        actor_ids
     }
 
     /// Returns the fragment with the `Mview` type flag.
@@ -411,23 +404,6 @@ impl TableFragments {
         .collect()
     }
 
-    /// Find the external stream source info inside the stream node, if any.
-    pub fn find_stream_source(stream_node: &StreamNode) -> Option<&StreamSource> {
-        if let Some(NodeBody::Source(source)) = stream_node.node_body.as_ref() {
-            if let Some(inner) = &source.source_inner {
-                return Some(inner);
-            }
-        }
-
-        for child in &stream_node.input {
-            if let Some(source) = Self::find_stream_source(child) {
-                return Some(source);
-            }
-        }
-
-        None
-    }
-
     /// Extract the fragments that include source executors that contains an external stream source,
     /// grouping by source id.
     pub fn stream_source_fragments(&self) -> HashMap<SourceId, BTreeSet<FragmentId>> {
@@ -435,10 +411,7 @@ impl TableFragments {
 
         for fragment in self.fragments() {
             for actor in &fragment.actors {
-                if let Some(source_id) =
-                    TableFragments::find_stream_source(actor.nodes.as_ref().unwrap())
-                        .map(|s| s.source_id)
-                {
+                if let Some(source_id) = actor.nodes.as_ref().unwrap().find_stream_source() {
                     source_fragments
                         .entry(source_id)
                         .or_insert(BTreeSet::new())
@@ -449,6 +422,29 @@ impl TableFragments {
             }
         }
         source_fragments
+    }
+
+    pub fn source_backfill_fragments(
+        &self,
+    ) -> MetadataModelResult<HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>> {
+        let mut source_fragments = HashMap::new();
+
+        for fragment in self.fragments() {
+            for actor in &fragment.actors {
+                if let Some(source_id) = actor.nodes.as_ref().unwrap().find_source_backfill() {
+                    if fragment.upstream_fragment_ids.len() != 1 {
+                        return Err(anyhow::anyhow!("SourceBackfill should have only one upstream fragment, found {:?} for fragment {}", fragment.upstream_fragment_ids, fragment.fragment_id).into());
+                    }
+                    source_fragments
+                        .entry(source_id)
+                        .or_insert(BTreeSet::new())
+                        .insert((fragment.fragment_id, fragment.upstream_fragment_ids[0]));
+
+                    break;
+                }
+            }
+        }
+        Ok(source_fragments)
     }
 
     /// Resolve dependent table
@@ -483,7 +479,7 @@ impl TableFragments {
     pub fn worker_actor_states(&self) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
         let mut map = BTreeMap::default();
         for (&actor_id, actor_status) in &self.actor_status {
-            let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
+            let node_id = actor_status.worker_id() as WorkerId;
             map.entry(node_id)
                 .or_insert_with(Vec::new)
                 .push((actor_id, actor_status.state()));
@@ -495,32 +491,10 @@ impl TableFragments {
     pub fn worker_actor_ids(&self) -> BTreeMap<WorkerId, Vec<ActorId>> {
         let mut map = BTreeMap::default();
         for (&actor_id, actor_status) in &self.actor_status {
-            let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
+            let node_id = actor_status.worker_id() as WorkerId;
             map.entry(node_id).or_insert_with(Vec::new).push(actor_id);
         }
         map
-    }
-
-    pub fn worker_parallel_units(&self) -> HashMap<WorkerId, HashSet<ParallelUnitId>> {
-        let mut map = HashMap::new();
-        for actor_status in self.actor_status.values() {
-            map.entry(actor_status.get_parallel_unit().unwrap().worker_node_id)
-                .or_insert_with(HashSet::new)
-                .insert(actor_status.get_parallel_unit().unwrap().id);
-        }
-        map
-    }
-
-    pub fn update_vnode_mapping(&mut self, migrate_map: &HashMap<ParallelUnitId, ParallelUnit>) {
-        for fragment in self.fragments.values_mut() {
-            if let Some(mapping) = &mut fragment.vnode_mapping {
-                mapping.data.iter_mut().for_each(|id| {
-                    if migrate_map.contains_key(id) {
-                        *id = migrate_map.get(id).unwrap().id;
-                    }
-                });
-            }
-        }
     }
 
     /// Returns the status of actors group by worker id.
@@ -528,10 +502,7 @@ impl TableFragments {
         let mut actors = BTreeMap::default();
         for fragment in self.fragments.values() {
             for actor in &fragment.actors {
-                let node_id = self.actor_status[&actor.actor_id]
-                    .get_parallel_unit()
-                    .unwrap()
-                    .worker_node_id as WorkerId;
+                let node_id = self.actor_status[&actor.actor_id].worker_id() as WorkerId;
                 if !include_inactive
                     && self.actor_status[&actor.actor_id].state == ActorState::Inactive as i32
                 {
@@ -546,20 +517,6 @@ impl TableFragments {
         actors
     }
 
-    pub fn worker_barrier_inject_actor_states(
-        &self,
-    ) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
-        let mut map = BTreeMap::default();
-        let barrier_inject_actor_ids = self.barrier_inject_actor_ids();
-        for &actor_id in &barrier_inject_actor_ids {
-            let actor_status = &self.actor_status[&actor_id];
-            map.entry(actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId)
-                .or_insert_with(Vec::new)
-                .push((actor_id, actor_status.state()));
-        }
-        map
-    }
-
     /// Returns actor map: `actor_id` => `StreamActor`.
     pub fn actor_map(&self) -> HashMap<ActorId, StreamActor> {
         let mut actor_map = HashMap::default();
@@ -569,6 +526,19 @@ impl TableFragments {
             });
         });
         actor_map
+    }
+
+    pub fn mv_table_id(&self) -> Option<u32> {
+        if self
+            .fragments
+            .values()
+            .flat_map(|f| f.state_table_ids.iter())
+            .any(|table_id| *table_id == self.table_id.table_id)
+        {
+            Some(self.table_id.table_id)
+        } else {
+            None
+        }
     }
 
     /// Returns the internal table ids without the mview table.

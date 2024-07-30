@@ -42,15 +42,15 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
     private final boolean pubAutoCreate;
 
-    private static final String AWS_RDS_HOST = "rds.amazonaws.com";
+    private static final String AWS_RDS_HOST = "amazonaws.com";
     private final boolean isAwsRds;
 
     // Whether the properties to validate is shared by multiple tables.
     // If true, we will skip validation check for table
-    private final boolean isMultiTableShared;
+    private final boolean isCdcSourceJob;
 
     public PostgresValidator(
-            Map<String, String> userProps, TableSchema tableSchema, boolean isMultiTableShared)
+            Map<String, String> userProps, TableSchema tableSchema, boolean isCdcSourceJob)
             throws SQLException {
         this.userProps = userProps;
         this.tableSchema = tableSchema;
@@ -74,19 +74,24 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
         this.pubAutoCreate =
                 userProps.get(DbzConnectorConfig.PG_PUB_CREATE).equalsIgnoreCase("true");
-        this.isMultiTableShared = isMultiTableShared;
+        this.isCdcSourceJob = isCdcSourceJob;
     }
 
     @Override
     public void validateDbConfig() {
-        // TODO: check database server version
-        try (var stmt = jdbcConnection.createStatement()) {
-            // check whether wal has been enabled
-            var res = stmt.executeQuery(ValidatorUtils.getSql("postgres.wal"));
-            while (res.next()) {
-                if (!res.getString(1).equals("logical")) {
-                    throw ValidatorUtils.invalidArgument(
-                            "Postgres wal_level should be 'logical'.\nPlease modify the config and restart your Postgres server.");
+        try {
+            if (jdbcConnection.getMetaData().getDatabaseMajorVersion() > 16) {
+                throw ValidatorUtils.failedPrecondition("Postgres version should be less than 16.");
+            }
+
+            try (var stmt = jdbcConnection.createStatement()) {
+                // check whether wal has been enabled
+                var res = stmt.executeQuery(ValidatorUtils.getSql("postgres.wal"));
+                while (res.next()) {
+                    if (!res.getString(1).equals("logical")) {
+                        throw ValidatorUtils.invalidArgument(
+                                "Postgres wal_level should be 'logical'.\nPlease modify the config and restart your Postgres server.");
+                    }
                 }
             }
         } catch (SQLException e) {
@@ -136,6 +141,11 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         }
     }
 
+    @Override
+    boolean isCdcSourceJob() {
+        return isCdcSourceJob;
+    }
+
     /** For Citus which is a distributed version of PG */
     public void validateDistributedTable() throws SQLException {
         try (var stmt =
@@ -152,7 +162,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     private void validateTableSchema() throws SQLException {
-        if (isMultiTableShared) {
+        if (isCdcSourceJob) {
             return;
         }
         try (var stmt = jdbcConnection.prepareStatement(ValidatorUtils.getSql("postgres.table"))) {
@@ -170,16 +180,15 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         // check primary key
         // reference: https://wiki.postgresql.org/wiki/Retrieve_primary_key_columns
         try (var stmt = jdbcConnection.prepareStatement(ValidatorUtils.getSql("postgres.pk"))) {
-            stmt.setString(1, this.schemaName + "." + this.tableName);
+            stmt.setString(1, String.format("\"%s\".\"%s\"", this.schemaName, this.tableName));
             var res = stmt.executeQuery();
             var pkFields = new HashSet<String>();
             while (res.next()) {
                 var name = res.getString(1);
-                // RisingWave always use lower case for column name
-                pkFields.add(name.toLowerCase());
+                pkFields.add(name);
             }
 
-            if (!ValidatorUtils.isPrimaryKeyMatch(tableSchema, pkFields)) {
+            if (!isPrimaryKeyMatch(tableSchema, pkFields)) {
                 throw ValidatorUtils.invalidArgument("Primary key mismatch");
             }
         }
@@ -216,6 +225,19 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 }
             }
         }
+    }
+
+    private boolean isPrimaryKeyMatch(TableSchema sourceSchema, Set<String> pkFields) {
+        if (sourceSchema.getPrimaryKeys().size() != pkFields.size()) {
+            return false;
+        }
+        // postgres column name is case-sensitive
+        for (var colName : sourceSchema.getPrimaryKeys()) {
+            if (!pkFields.contains(colName)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void validatePrivileges() throws SQLException {
@@ -280,7 +302,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     private void validateTablePrivileges(boolean isSuperUser) throws SQLException {
-        if (isSuperUser || isMultiTableShared) {
+        // cdc source job doesn't have table schema to validate, since its schema is fixed to jsonb
+        if (isSuperUser || isCdcSourceJob) {
             return;
         }
 
@@ -334,9 +357,9 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             }
         }
 
-        // If the source properties is shared by multiple tables, skip the following
+        // If the source properties is created by share source, skip the following
         // check of publication
-        if (isMultiTableShared) {
+        if (isCdcSourceJob) {
             return;
         }
 
@@ -419,7 +442,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     private void validatePublicationPrivileges() throws SQLException {
-        if (isMultiTableShared) {
+        if (isCdcSourceJob) {
             throw ValidatorUtils.invalidArgument(
                     "The connector properties is shared by multiple tables unexpectedly");
         }
@@ -491,14 +514,15 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     protected void alterPublicationIfNeeded() throws SQLException {
-        if (isMultiTableShared) {
+        if (isCdcSourceJob) {
             throw ValidatorUtils.invalidArgument(
-                    "The connector properties is shared by multiple tables unexpectedly");
+                    "The connector properties is created by a shared source unexpectedly");
         }
 
         String alterPublicationSql =
                 String.format(
-                        "ALTER PUBLICATION %s ADD TABLE %s", pubName, schemaName + "." + tableName);
+                        "ALTER PUBLICATION %s ADD TABLE %s",
+                        pubName, String.format("\"%s\".\"%s\"", this.schemaName, this.tableName));
         try (var stmt = jdbcConnection.createStatement()) {
             LOG.info("Altered publication with statement: {}", alterPublicationSql);
             stmt.execute(alterPublicationSql);
@@ -534,7 +558,11 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 return val == Data.DataType.TypeName.DOUBLE_VALUE;
             case "decimal":
             case "numeric":
-                return val == Data.DataType.TypeName.DECIMAL_VALUE;
+                return val == Data.DataType.TypeName.DECIMAL_VALUE
+                        // We allow user to map numeric into rw_int256 or varchar to avoid precision
+                        // loss in the conversion from pg-numeric to rw-numeric
+                        || val == Data.DataType.TypeName.INT256_VALUE
+                        || val == Data.DataType.TypeName.VARCHAR_VALUE;
             case "varchar":
             case "character varying":
                 return val == Data.DataType.TypeName.VARCHAR_VALUE;

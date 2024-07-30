@@ -16,3 +16,5 @@ mod mem_context;
 pub use mem_context::*;
 mod alloc;
 pub use alloc::*;
+mod monitored_heap;
+pub use monitored_heap::*;

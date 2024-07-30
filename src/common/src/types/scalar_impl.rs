@@ -15,8 +15,6 @@
 use std::hash::Hasher;
 
 use super::*;
-use crate::array::list_array::{ListRef, ListValue};
-use crate::array::struct_array::{StructRef, StructValue};
 use crate::{dispatch_scalar_ref_variants, dispatch_scalar_variants, for_all_native_types};
 
 /// `ScalarPartialOrd` allows comparison between `Scalar` and `ScalarRef`.
@@ -29,7 +27,7 @@ pub trait ScalarPartialOrd: Scalar {
 /// Implement `Scalar` and `ScalarRef` for native type.
 /// For `PrimitiveArrayItemType`, clone is trivial, so `T` is both `Scalar` and `ScalarRef`.
 macro_rules! impl_all_native_scalar {
-    ($({ $scalar_type:ty, $variant_name:ident } ),*) => {
+    ($({ $scalar_type:ty, $_variant_name:ident, $_read_fn:ident } ),*) => {
         $(
             impl Scalar for $scalar_type {
                 type ScalarRefType<'a> = Self;

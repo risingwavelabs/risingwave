@@ -14,31 +14,28 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
-use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use rdkafka::client::BrokerAddr;
-use rdkafka::consumer::ConsumerContext;
-use rdkafka::producer::{DeliveryResult, ProducerContext};
-use rdkafka::{ClientContext, Statistics};
+use risingwave_common::bail;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::connection::PrivateLinkService;
 
-use crate::common::{
+use crate::connector_common::{
     AwsPrivateLinkItem, PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
 };
-use crate::source::kafka::stats::RdKafkaStats;
+use crate::error::ConnectorResult;
 use crate::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
-use crate::source::KAFKA_CONNECTOR;
 
 pub const PRIVATELINK_ENDPOINT_KEY: &str = "privatelink.endpoint";
 pub const CONNECTION_NAME_KEY: &str = "connection.name";
 
 #[derive(Debug)]
-enum PrivateLinkContextRole {
+pub(super) enum PrivateLinkContextRole {
     Consumer,
+    #[expect(dead_code)]
     Producer,
 }
 
@@ -51,13 +48,14 @@ impl std::fmt::Display for PrivateLinkContextRole {
     }
 }
 
-struct BrokerAddrRewriter {
+pub(super) struct BrokerAddrRewriter {
+    #[expect(dead_code)]
     role: PrivateLinkContextRole,
     rewrite_map: BTreeMap<BrokerAddr, BrokerAddr>,
 }
 
 impl BrokerAddrRewriter {
-    fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
+    pub(super) fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
         let rewrote_addr = match self.rewrite_map.get(&addr) {
             None => addr,
             Some(new_addr) => new_addr.clone(),
@@ -67,11 +65,11 @@ impl BrokerAddrRewriter {
 
     pub fn new(
         role: PrivateLinkContextRole,
-        broker_rewrite_map: Option<HashMap<String, String>>,
-    ) -> anyhow::Result<Self> {
-        tracing::info!("[{}] rewrite map {:?}", role, broker_rewrite_map);
-        let rewrite_map: anyhow::Result<BTreeMap<BrokerAddr, BrokerAddr>> = broker_rewrite_map
+        broker_rewrite_map: Option<BTreeMap<String, String>>,
+    ) -> ConnectorResult<Self> {
+        let rewrite_map: ConnectorResult<BTreeMap<BrokerAddr, BrokerAddr>> = broker_rewrite_map
             .map_or(Ok(BTreeMap::new()), |addr_map| {
+                tracing::info!("[{}] rewrite map {:?}", role, addr_map);
                 addr_map
                     .into_iter()
                     .map(|(old_addr, new_addr)| {
@@ -94,94 +92,6 @@ impl BrokerAddrRewriter {
     }
 }
 
-pub struct PrivateLinkConsumerContext {
-    inner: BrokerAddrRewriter,
-
-    // identifier is required when reporting metrics as a label, usually it is compose by connector
-    // format (source or sink) and corresponding id (source_id or sink_id)
-    // identifier and metrics should be set at the same time
-    identifier: Option<String>,
-    metrics: Option<Arc<RdKafkaStats>>,
-}
-
-impl PrivateLinkConsumerContext {
-    pub fn new(
-        broker_rewrite_map: Option<HashMap<String, String>>,
-        identifier: Option<String>,
-        metrics: Option<Arc<RdKafkaStats>>,
-    ) -> anyhow::Result<Self> {
-        let inner = BrokerAddrRewriter::new(PrivateLinkContextRole::Consumer, broker_rewrite_map)?;
-        Ok(Self {
-            inner,
-            identifier,
-            metrics,
-        })
-    }
-}
-
-impl ClientContext for PrivateLinkConsumerContext {
-    /// this func serves as a callback when `poll` is completed.
-    fn stats(&self, statistics: Statistics) {
-        if let Some(metrics) = &self.metrics
-            && let Some(id) = &self.identifier
-        {
-            metrics.report(id.as_str(), &statistics);
-        }
-    }
-
-    fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
-        self.inner.rewrite_broker_addr(addr)
-    }
-}
-
-// required by the trait bound of BaseConsumer
-impl ConsumerContext for PrivateLinkConsumerContext {}
-
-pub struct PrivateLinkProducerContext {
-    inner: BrokerAddrRewriter,
-
-    // identifier is required when reporting metrics as a label, usually it is compose by connector
-    // format (source or sink) and corresponding id (source_id or sink_id)
-    // identifier and metrics should be set at the same time
-    identifier: Option<String>,
-    metrics: Option<Arc<RdKafkaStats>>,
-}
-
-impl PrivateLinkProducerContext {
-    pub fn new(
-        broker_rewrite_map: Option<HashMap<String, String>>,
-        identifier: Option<String>,
-        metrics: Option<Arc<RdKafkaStats>>,
-    ) -> anyhow::Result<Self> {
-        let inner = BrokerAddrRewriter::new(PrivateLinkContextRole::Producer, broker_rewrite_map)?;
-        Ok(Self {
-            inner,
-            identifier,
-            metrics,
-        })
-    }
-}
-
-impl ClientContext for PrivateLinkProducerContext {
-    fn stats(&self, statistics: Statistics) {
-        if let Some(metrics) = &self.metrics
-            && let Some(id) = &self.identifier
-        {
-            metrics.report(id.as_str(), &statistics);
-        }
-    }
-
-    fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
-        self.inner.rewrite_broker_addr(addr)
-    }
-}
-
-impl ProducerContext for PrivateLinkProducerContext {
-    type DeliveryOpaque = ();
-
-    fn delivery(&self, _: &DeliveryResult<'_>, _: Self::DeliveryOpaque) {}
-}
-
 #[inline(always)]
 fn kafka_props_broker_key(with_properties: &BTreeMap<String, String>) -> &str {
     if with_properties.contains_key(KAFKA_PROPS_BROKER_KEY) {
@@ -195,28 +105,19 @@ fn kafka_props_broker_key(with_properties: &BTreeMap<String, String>) -> &str {
 fn get_property_required(
     with_properties: &BTreeMap<String, String>,
     property: &str,
-) -> anyhow::Result<String> {
+) -> ConnectorResult<String> {
     with_properties
         .get(property)
         .map(|s| s.to_lowercase())
-        .ok_or_else(|| anyhow!("Required property \"{property}\" is not provided"))
-}
-
-#[inline(always)]
-fn is_kafka_connector(with_properties: &BTreeMap<String, String>) -> bool {
-    const UPSTREAM_SOURCE_KEY: &str = "connector";
-    with_properties
-        .get(UPSTREAM_SOURCE_KEY)
-        .unwrap_or(&"".to_string())
-        .to_lowercase()
-        .eq_ignore_ascii_case(KAFKA_CONNECTOR)
+        .with_context(|| format!("Required property \"{property}\" is not provided"))
+        .map_err(Into::into)
 }
 
 pub fn insert_privatelink_broker_rewrite_map(
     with_options: &mut BTreeMap<String, String>,
     svc: Option<&PrivateLinkService>,
     privatelink_endpoint: Option<String>,
-) -> anyhow::Result<()> {
+) -> ConnectorResult<()> {
     let mut broker_rewrite_map = HashMap::new();
     let servers = get_property_required(with_options, kafka_props_broker_key(with_options))?;
     let broker_addrs = servers.split(',').collect_vec();
@@ -227,11 +128,11 @@ pub fn insert_privatelink_broker_rewrite_map(
     with_options.remove(PRIVATE_LINK_TARGETS_KEY);
 
     if broker_addrs.len() != link_targets.len() {
-        return Err(anyhow!(
+        bail!(
             "The number of broker addrs {} does not match the number of private link targets {}",
             broker_addrs.len(),
             link_targets.len()
-        ));
+        );
     }
 
     if let Some(endpoint) = privatelink_endpoint {
@@ -241,15 +142,15 @@ pub fn insert_privatelink_broker_rewrite_map(
         }
     } else {
         if svc.is_none() {
-            return Err(anyhow!("Privatelink endpoint not found.",));
+            bail!("Privatelink endpoint not found.");
         }
         let svc = svc.unwrap();
         for (link, broker) in link_targets.iter().zip_eq_fast(broker_addrs.into_iter()) {
             if svc.dns_entries.is_empty() {
-                return Err(anyhow!(
+                bail!(
                     "No available private link endpoints for Kafka broker {}",
                     broker
-                ));
+                );
             }
             // rewrite the broker address to the dns name w/o az
             // requires the NLB has enabled the cross-zone load balancing

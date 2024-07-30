@@ -53,6 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "task_service",
         "telemetry",
         "user",
+        "secret",
     ];
     let protos: Vec<String> = proto_files
         .iter()
@@ -65,6 +66,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".plan_common.ExternalTableDesc",
         ".hummock.CompactTask",
         ".catalog.StreamSourceInfo",
+        ".secret.SecretRef",
+        ".catalog.Source",
+        ".catalog.Sink",
+        ".catalog.View",
+        ".catalog.SinkFormatDesc",
+        ".connector_service.ValidateSourceRequest",
+        ".connector_service.GetEventStreamRequest",
+        ".connector_service.SinkParam",
+        ".stream_plan.SinkDesc",
+        ".stream_plan.StreamFsFetch",
+        ".stream_plan.SourceBackfillNode",
+        ".stream_plan.StreamSource",
+        ".batch_plan.SourceNode",
     ];
 
     // Build protobuf structs.
@@ -99,11 +113,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // The requirement is from Source node -> SourceCatalog -> WatermarkDesc -> expr
         .type_attribute("catalog.WatermarkDesc", "#[derive(Eq, Hash)]")
         .type_attribute("catalog.StreamSourceInfo", "#[derive(Eq, Hash)]")
+        .type_attribute("secret.SecretRef", "#[derive(Eq, Hash)]")
+        .type_attribute("catalog.IndexColumnProperties", "#[derive(Eq, Hash)]")
         .type_attribute("expr.ExprNode", "#[derive(Eq, Hash)]")
         .type_attribute("data.DataType", "#[derive(Eq, Hash)]")
         .type_attribute("expr.ExprNode.rex_node", "#[derive(Eq, Hash)]")
         .type_attribute("expr.ExprNode.NowRexNode", "#[derive(Eq, Hash)]")
         .type_attribute("expr.InputRef", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.UserDefinedFunctionMetadata", "#[derive(Eq, Hash)]")
         .type_attribute("data.Datum", "#[derive(Eq, Hash)]")
         .type_attribute("expr.FunctionCall", "#[derive(Eq, Hash)]")
         .type_attribute("expr.UserDefinedFunction", "#[derive(Eq, Hash)]")
@@ -138,6 +155,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.AdditionalColumnHeader", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.AdditionalColumnHeaders", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.AdditionalColumnOffset", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalDatabaseName", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalSchemaName", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalTableName", "#[derive(Eq, Hash)]")
+        .type_attribute(
+            "plan_common.AdditionalCollectionName",
+            "#[derive(Eq, Hash)]",
+        )
         .type_attribute("common.ColumnOrder", "#[derive(Eq, Hash)]")
         .type_attribute("common.OrderType", "#[derive(Eq, Hash)]")
         .type_attribute("common.Buffer", "#[derive(Eq)]")
@@ -157,6 +181,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("hummock.LevelHandler", "#[derive(Eq)]")
         .type_attribute("hummock.TableOption", "#[derive(Eq)]")
         .type_attribute("hummock.InputLevel", "#[derive(Eq)]")
+        .type_attribute("hummock.TableSchema", "#[derive(Eq)]")
         .type_attribute("hummock.CompactTask", "#[derive(Eq)]")
         .type_attribute("hummock.TableWatermarks", "#[derive(Eq)]")
         .type_attribute("hummock.VnodeWatermark", "#[derive(Eq)]")

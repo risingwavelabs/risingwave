@@ -21,8 +21,8 @@ import {
   dependentsColumn,
   Relations,
 } from "../components/Relations"
+import { getSources } from "../lib/api/streaming"
 import { Source } from "../proto/gen/catalog"
-import { getSources } from "./api/streaming"
 
 export default function DataSources() {
   const rowFormatColumn: Column<Source> = {

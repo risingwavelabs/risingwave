@@ -21,7 +21,6 @@
 //! are encoded from both `t.b` and `t.c`. If `t.b="abc"` and `t.c=1`, the hashkey may be
 //! encoded in certain format of `("abc", 1)`.
 
-use std::convert::TryInto;
 use std::default::Default;
 use std::fmt::Debug;
 use std::hash::{BuildHasher, Hasher};
@@ -30,11 +29,11 @@ use std::marker::PhantomData;
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 use fixedbitset::FixedBitSet;
+use risingwave_common_estimate_size::EstimateSize;
 use smallbitset::Set64;
 use static_assertions::const_assert_eq;
 
 use crate::array::{ListValue, StructValue};
-use crate::estimate_size::EstimateSize;
 use crate::types::{
     DataType, Date, Decimal, Int256, Int256Ref, JsonbVal, Scalar, ScalarRef, ScalarRefImpl, Serial,
     Time, Timestamp, Timestamptz, F32, F64,
@@ -237,7 +236,7 @@ impl<T: BuildHasher> From<u64> for HashCode<T> {
 }
 
 impl<T: BuildHasher> HashCode<T> {
-    pub fn value(self) -> u64 {
+    pub fn value(&self) -> u64 {
         self.value
     }
 }
@@ -562,14 +561,14 @@ impl HashKeySer<'_> for Date {
 impl HashKeyDe for Date {
     fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
         let days = buf.get_i32_ne();
-        Date::with_days(days).unwrap()
+        Date::with_days_since_ce(days).unwrap()
     }
 }
 
 impl HashKeySer<'_> for Timestamp {
     fn serialize_into(self, mut buf: impl BufMut) {
-        buf.put_i64_ne(self.0.timestamp());
-        buf.put_u32_ne(self.0.timestamp_subsec_nanos());
+        buf.put_i64_ne(self.0.and_utc().timestamp());
+        buf.put_u32_ne(self.0.and_utc().timestamp_subsec_nanos());
     }
 
     fn exact_size() -> Option<usize> {
@@ -643,11 +642,9 @@ mod tests {
         DateArray, DecimalArray, F32Array, F64Array, I16Array, I32Array, I32ArrayBuilder, I64Array,
         TimeArray, TimestampArray, Utf8Array,
     };
-    use crate::hash::{
-        HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
-    };
+    use crate::hash::{HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized};
     use crate::test_utils::rand_array::seed_rand_array_ref;
-    use crate::types::{DataType, Datum};
+    use crate::types::Datum;
 
     #[derive(Hash, PartialEq, Eq)]
     struct Row(Vec<Datum>);
@@ -698,8 +695,7 @@ mod tests {
                     100,
                     PrecomputedBuildHasher,
                 );
-            let keys =
-                K::build(column_indexes.as_slice(), &data).expect("Failed to build hash keys");
+            let keys = K::build_many(column_indexes.as_slice(), &data);
 
             for (row_id, key) in keys.into_iter().enumerate() {
                 let row_ids = fast_hash_map.entry(key).or_default();
@@ -741,7 +737,7 @@ mod tests {
         F: FnOnce() -> (DataChunk, Vec<DataType>),
     {
         let (data, types) = data_gen();
-        let keys = K::build(column_indexes.as_slice(), &data).expect("Failed to build hash keys");
+        let keys = K::build_many(column_indexes.as_slice(), &data);
 
         let mut array_builders = column_indexes
             .iter()
@@ -839,15 +835,14 @@ mod tests {
     // losslessly.
     #[test]
     fn test_simple_hash_key_nullable_serde() {
-        let keys = Key64::build(
+        let keys = Key64::build_many(
             &[0, 1],
             &DataChunk::from_pretty(
                 "i i
                  1 .
                  . 2",
             ),
-        )
-        .unwrap();
+        );
 
         let mut array_builders = [0, 1]
             .iter()

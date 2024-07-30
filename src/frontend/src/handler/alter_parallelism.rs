@@ -52,7 +52,7 @@ pub async fn handle_alter_parallelism(
             | StatementType::ALTER_MATERIALIZED_VIEW
             | StatementType::ALTER_INDEX => {
                 let (table, schema_name) =
-                    reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
+                    reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
 
                 match (table.table_type(), stmt_type) {
                     (TableType::Internal, _) => {

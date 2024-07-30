@@ -48,8 +48,11 @@ pub async fn handle_alter_set_schema(
 
         match stmt_type {
             StatementType::ALTER_TABLE | StatementType::ALTER_MATERIALIZED_VIEW => {
-                let (table, old_schema_name) =
-                    catalog_reader.get_table_by_name(db_name, schema_path, &real_obj_name)?;
+                let (table, old_schema_name) = catalog_reader.get_created_table_by_name(
+                    db_name,
+                    schema_path,
+                    &real_obj_name,
+                )?;
                 if old_schema_name == new_schema_name {
                     return Ok(RwPgResponse::empty_result(stmt_type));
                 }
@@ -102,6 +105,23 @@ pub async fn handle_alter_set_schema(
                     &sink.name,
                 )?;
                 Object::SinkId(sink.id.sink_id)
+            }
+            StatementType::ALTER_SUBSCRIPTION => {
+                let (subscription, old_schema_name) = catalog_reader.get_subscription_by_name(
+                    db_name,
+                    schema_path,
+                    &real_obj_name,
+                )?;
+                if old_schema_name == new_schema_name {
+                    return Ok(RwPgResponse::empty_result(stmt_type));
+                }
+                session.check_privilege_for_drop_alter(old_schema_name, &**subscription)?;
+                catalog_reader.check_relation_name_duplicated(
+                    db_name,
+                    &new_schema_name,
+                    &subscription.name,
+                )?;
+                Object::SubscriptionId(subscription.id.subscription_id)
             }
             StatementType::ALTER_CONNECTION => {
                 let (connection, old_schema_name) =
@@ -192,7 +212,7 @@ pub mod tests {
             let catalog_reader = session.env().catalog_reader().read_guard();
             let schema_path = SchemaPath::Name(schema_name);
             catalog_reader
-                .get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "test_table")
+                .get_created_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "test_table")
                 .unwrap()
                 .0
                 .clone()

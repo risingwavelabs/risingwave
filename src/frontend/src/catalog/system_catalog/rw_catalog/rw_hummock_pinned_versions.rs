@@ -20,6 +20,7 @@ use crate::error::Result;
 
 #[derive(Fields)]
 struct RwHummockPinnedVersion {
+    #[primary_key]
     worker_node_id: i32,
     min_pinned_version_id: i64,
 }

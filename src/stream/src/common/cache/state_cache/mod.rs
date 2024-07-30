@@ -14,7 +14,7 @@
 
 pub use ordered::*;
 use risingwave_common::array::Op;
-use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common_estimate_size::EstimateSize;
 pub use top_n::*;
 
 mod ordered;

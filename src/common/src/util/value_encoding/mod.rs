@@ -20,7 +20,7 @@ use either::{for_both, Either};
 use enum_as_inner::EnumAsInner;
 use risingwave_pb::data::PbDatum;
 
-use crate::array::{ArrayImpl, ListRef, ListValue, StructRef, StructValue};
+use crate::array::ArrayImpl;
 use crate::row::{Row, RowDeserializer as BasicDeserializer};
 use crate::types::*;
 
@@ -214,9 +214,11 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::Decimal(v) => serialize_decimal(&v, buf),
         ScalarRefImpl::Interval(v) => serialize_interval(&v, buf),
         ScalarRefImpl::Date(v) => serialize_date(v.0.num_days_from_ce(), buf),
-        ScalarRefImpl::Timestamp(v) => {
-            serialize_timestamp(v.0.timestamp(), v.0.timestamp_subsec_nanos(), buf)
-        }
+        ScalarRefImpl::Timestamp(v) => serialize_timestamp(
+            v.0.and_utc().timestamp(),
+            v.0.and_utc().timestamp_subsec_nanos(),
+            buf,
+        ),
         ScalarRefImpl::Timestamptz(v) => buf.put_i64_le(v.timestamp_micros()),
         ScalarRefImpl::Time(v) => {
             serialize_time(v.0.num_seconds_from_midnight(), v.0.nanosecond(), buf)
@@ -426,7 +428,7 @@ fn deserialize_timestamp(data: &mut impl Buf) -> Result<Timestamp> {
 
 fn deserialize_date(data: &mut impl Buf) -> Result<Date> {
     let days = data.get_i32_le();
-    Date::with_days(days).map_err(|_e| ValueEncodingError::InvalidDateEncoding(days))
+    Date::with_days_since_ce(days).map_err(|_e| ValueEncodingError::InvalidDateEncoding(days))
 }
 
 fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {

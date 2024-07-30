@@ -18,13 +18,14 @@ normal = ["workspace-hack"]
 anyhow = "1"
 async-trait = "0.1"
 bytes = "1"
-clap = { version = "4", features = ["derive"] }
+clap = { workspace = true }
+foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 prometheus = { version = "0.13" }
-rand = "0.8"
+rand = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_compactor = { workspace = true }
-risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
+risingwave_hummock_sdk = { workspace = true }
 risingwave_hummock_test = { workspace = true }
 risingwave_meta = { workspace = true }
 risingwave_meta_node = { workspace = true }
@@ -45,7 +46,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tracing = "0.1"
 
 [dev-dependencies]
-risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
+risingwave_hummock_sdk = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

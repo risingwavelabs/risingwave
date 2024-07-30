@@ -283,9 +283,10 @@ pub(super) fn validate_response(
 }
 
 pub(super) async fn run_query(timeout_duration: u64, client: &Client, query: &str) -> Result<i64> {
-    let (skipped_count, _) = run_query_inner(timeout_duration, client, query).await?;
+    let (skipped_count, _) = run_query_inner(timeout_duration, client, query, true).await?;
     Ok(skipped_count)
 }
+
 /// Run query, handle permissible errors
 /// For recovery error, just do bounded retry.
 /// For other errors, validate them accordingly, skipping if they are permitted.
@@ -296,15 +297,22 @@ pub(super) async fn run_query_inner(
     timeout_duration: u64,
     client: &Client,
     query: &str,
+    skip_timeout: bool,
 ) -> Result<(i64, Vec<SimpleQueryMessage>)> {
     let query_task = client.simple_query(query);
     let result = timeout(Duration::from_secs(timeout_duration), query_task).await;
     let response = match result {
         Ok(r) => r,
-        Err(_) => bail!(
-            "[UNEXPECTED ERROR] Query timeout after {timeout_duration}s:\n{:?}",
-            query
-        ),
+        Err(_) => {
+            if skip_timeout {
+                return Ok((1, vec![]));
+            } else {
+                bail!(
+                    "[UNEXPECTED ERROR] Query timeout after {timeout_duration}s:\n{:?}",
+                    query
+                )
+            }
+        }
     };
     if let Err(e) = &response
         && let Some(e) = e.as_db_error()

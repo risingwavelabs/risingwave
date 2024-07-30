@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::env;
 use std::fs::{create_dir_all, OpenOptions};
 use std::io::BufWriter;
@@ -23,6 +24,7 @@ use std::sync::LazyLock;
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 use parking_lot::Mutex;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::runtime::Runtime;
@@ -286,8 +288,18 @@ impl TraceSpan {
         )
     }
 
-    pub fn new_sync_span(epoch: u64, storage_type: StorageType) -> MayTraceSpan {
-        Self::new_global_op(Operation::Sync(epoch), storage_type)
+    pub fn new_sync_span(
+        epoch: u64,
+        table_ids: &HashSet<TableId>,
+        storage_type: StorageType,
+    ) -> MayTraceSpan {
+        Self::new_global_op(
+            Operation::Sync(
+                epoch,
+                table_ids.iter().map(|table_id| table_id.table_id).collect(),
+            ),
+            storage_type,
+        )
     }
 
     pub fn new_seal_span(

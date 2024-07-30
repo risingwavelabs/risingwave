@@ -39,7 +39,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let is_append_only = node.is_append_only;
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash join"));
 
@@ -136,7 +136,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
 
         let args = HashJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
-            info: params.info,
+            info: params.info.clone(),
             source_l,
             source_r,
             params_l,
@@ -155,17 +155,23 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             join_type_proto: node.get_join_type()?,
             join_key_data_types,
             chunk_size: params.env.config().developer.chunk_size,
+            high_join_amplification_threshold: params
+                .env
+                .config()
+                .developer
+                .high_join_amplification_threshold,
         };
 
-        args.dispatch()
+        let exec = args.dispatch()?;
+        Ok((params.info, exec).into())
     }
 }
 
 struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     ctx: ActorContextRef,
     info: ExecutorInfo,
-    source_l: Box<dyn Executor>,
-    source_r: Box<dyn Executor>,
+    source_l: Executor,
+    source_r: Executor,
     params_l: JoinParams,
     params_r: JoinParams,
     null_safe: Vec<bool>,
@@ -182,37 +188,38 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     join_type_proto: JoinTypeProto,
     join_key_data_types: Vec<DataType>,
     chunk_size: usize,
+    high_join_amplification_threshold: usize,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
-    type Output = StreamResult<BoxedExecutor>;
+    type Output = StreamResult<Box<dyn Execute>>;
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         /// This macro helps to fill the const generic type parameter.
         macro_rules! build {
             ($join_type:ident) => {
-                Ok(Box::new(
-                    HashJoinExecutor::<K, S, { JoinType::$join_type }>::new(
-                        self.ctx,
-                        self.info,
-                        self.source_l,
-                        self.source_r,
-                        self.params_l,
-                        self.params_r,
-                        self.null_safe,
-                        self.output_indices,
-                        self.cond,
-                        self.inequality_pairs,
-                        self.state_table_l,
-                        self.degree_state_table_l,
-                        self.state_table_r,
-                        self.degree_state_table_r,
-                        self.lru_manager,
-                        self.is_append_only,
-                        self.metrics,
-                        self.chunk_size,
-                    ),
-                ))
+                Ok(HashJoinExecutor::<K, S, { JoinType::$join_type }>::new(
+                    self.ctx,
+                    self.info,
+                    self.source_l,
+                    self.source_r,
+                    self.params_l,
+                    self.params_r,
+                    self.null_safe,
+                    self.output_indices,
+                    self.cond,
+                    self.inequality_pairs,
+                    self.state_table_l,
+                    self.degree_state_table_l,
+                    self.state_table_r,
+                    self.degree_state_table_r,
+                    self.lru_manager,
+                    self.is_append_only,
+                    self.metrics,
+                    self.chunk_size,
+                    self.high_join_amplification_threshold,
+                )
+                .boxed())
             };
         }
         match self.join_type_proto {

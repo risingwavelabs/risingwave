@@ -14,6 +14,8 @@
 
 use std::collections::HashMap;
 
+use anyhow::Context;
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
@@ -28,9 +30,10 @@ use risingwave_pb::hummock::{
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::EventLog;
+use risingwave_pb::meta::{EventLog, PbThrottleTarget, RecoveryStatus};
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
@@ -41,6 +44,8 @@ use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 /// in this trait so that the mocking can be simplified.
 #[async_trait::async_trait]
 pub trait FrontendMetaClient: Send + Sync {
+    async fn try_unregister(&self);
+
     async fn pin_snapshot(&self) -> Result<HummockSnapshot>;
 
     async fn get_snapshot(&self) -> Result<HummockSnapshot>;
@@ -48,6 +53,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot>;
 
     async fn wait(&self) -> Result<()>;
+
+    async fn recover(&self) -> Result<()>;
 
     async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>>;
 
@@ -62,6 +69,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
 
+    async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>>;
+
     async fn unpin_snapshot(&self) -> Result<()>;
 
     async fn unpin_snapshot_before(&self, epoch: u64) -> Result<()>;
@@ -75,6 +84,10 @@ pub trait FrontendMetaClient: Send + Sync {
         param: String,
         value: Option<String>,
     ) -> Result<Option<SystemParamsReader>>;
+
+    async fn get_session_params(&self) -> Result<SessionConfig>;
+
+    async fn set_session_param(&self, param: String, value: Option<String>) -> Result<String>;
 
     async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
 
@@ -106,12 +119,32 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_all_nodes(&self) -> Result<Vec<WorkerNode>>;
 
     async fn list_compact_task_progress(&self) -> Result<Vec<CompactTaskProgress>>;
+
+    async fn apply_throttle(
+        &self,
+        kind: PbThrottleTarget,
+        id: u32,
+        rate_limit: Option<u32>,
+    ) -> Result<()>;
+
+    async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Result<Vec<u64>>;
+
+    async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for FrontendMetaClientImpl {
+    async fn try_unregister(&self) {
+        self.0.try_unregister().await;
+    }
+
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
         self.0.pin_snapshot().await
     }
@@ -126,6 +159,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn wait(&self) -> Result<()> {
         self.0.wait().await
+    }
+
+    async fn recover(&self) -> Result<()> {
+        self.0.recover().await
     }
 
     async fn cancel_creating_jobs(&self, infos: PbJobs) -> Result<Vec<u32>> {
@@ -151,6 +188,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.list_actor_states().await
     }
 
+    async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {
+        self.0.list_object_dependencies().await
+    }
+
     async fn unpin_snapshot(&self) -> Result<()> {
         self.0.unpin_snapshot().await
     }
@@ -174,6 +215,17 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         value: Option<String>,
     ) -> Result<Option<SystemParamsReader>> {
         self.0.set_system_param(param, value).await
+    }
+
+    async fn get_session_params(&self) -> Result<SessionConfig> {
+        let session_config: SessionConfig =
+            serde_json::from_str(&self.0.get_session_params().await?)
+                .context("failed to parse session config")?;
+        Ok(session_config)
+    }
+
+    async fn set_session_param(&self, param: String, value: Option<String>) -> Result<String> {
+        self.0.set_session_param(param, value).await
     }
 
     async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
@@ -262,5 +314,32 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_compact_task_progress(&self) -> Result<Vec<CompactTaskProgress>> {
         self.0.list_compact_task_progress().await
+    }
+
+    async fn apply_throttle(
+        &self,
+        kind: PbThrottleTarget,
+        id: u32,
+        rate_limit: Option<u32>,
+    ) -> Result<()> {
+        self.0
+            .apply_throttle(kind, id, rate_limit)
+            .await
+            .map(|_| ())
+    }
+
+    async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Result<Vec<u64>> {
+        self.0
+            .list_change_log_epochs(table_id, min_epoch, max_count)
+            .await
+    }
+
+    async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {
+        self.0.get_cluster_recovery_status().await
     }
 }

@@ -20,6 +20,7 @@ use risingwave_expr::expr_context::capture_expr_context;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::{self, Plan};
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::{ExecuteRequest, GetDataResponse};
+use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::ComputeClient;
 use tonic::Streaming;
 
@@ -81,7 +82,7 @@ impl ExchangeSource for GrpcExchangeSource {
             }
             Some(r) => r,
         };
-        let task_data = res?;
+        let task_data = res.map_err(RpcError::from_batch_status)?;
         let data = DataChunk::from_protobuf(task_data.get_record_batch()?)?.compact();
         trace!(
             "Receiver taskOutput = {:?}, data = {:?}",

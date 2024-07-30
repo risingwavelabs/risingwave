@@ -53,7 +53,7 @@ pub struct Args {
 
     /// The number of CPU cores for each compute node.
     ///
-    /// This determines worker_node_parallelism.
+    /// This determines `worker_node_parallelism`.
     #[clap(long, default_value = "2")]
     compute_node_cores: usize,
 
@@ -169,9 +169,9 @@ async fn main() {
         meta_nodes: args.meta_nodes,
         sqlite_data_dir: args.sqlite_data_dir,
         per_session_queries: if args.use_arrangement_backfill {
-            vec!["SET enable_arrangement_backfill = true;".to_string()].into()
+            vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".to_string()].into()
         } else {
-            vec![].into()
+            vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".to_string()].into()
         },
         ..Default::default()
     };

@@ -62,7 +62,6 @@ pub enum Components {
     Hdfs,
     PrometheusAndGrafana,
     Etcd,
-    Kafka,
     Pubsub,
     Redis,
     Tracing,
@@ -70,11 +69,16 @@ pub enum Components {
     BuildConnectorNode,
     Dashboard,
     Release,
-    AllInOne,
     Sanitizer,
     DynamicLinking,
     HummockTrace,
     Coredump,
+    NoBacktrace,
+    ExternalUdf,
+    WasmUdf,
+    JsUdf,
+    DenoUdf,
+    PythonUdf,
 }
 
 impl Components {
@@ -84,7 +88,6 @@ impl Components {
             Self::Hdfs => "[Component] Hummock: Hdfs Backend",
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
             Self::Etcd => "[Component] Etcd",
-            Self::Kafka => "[Component] Kafka",
             Self::Pubsub => "[Component] Google Pubsub",
             Self::Redis => "[Component] Redis",
             Self::BuildConnectorNode => "[Build] Build RisingWave Connector (Java)",
@@ -92,11 +95,16 @@ impl Components {
             Self::Dashboard => "[Build] Dashboard",
             Self::Tracing => "[Component] Tracing: Grafana Tempo",
             Self::Release => "[Build] Enable release mode",
-            Self::AllInOne => "[Build] Enable all-in-one binary",
             Self::Sanitizer => "[Build] Enable sanitizer",
             Self::DynamicLinking => "[Build] Enable dynamic linking",
             Self::HummockTrace => "[Build] Hummock Trace",
             Self::Coredump => "[Runtime] Enable coredump",
+            Self::NoBacktrace => "[Runtime] Disable backtrace",
+            Self::ExternalUdf => "[Build] Enable external UDF",
+            Self::WasmUdf => "[Build] Enable Wasm UDF",
+            Self::JsUdf => "[Build] Enable JS UDF",
+            Self::DenoUdf => "[Build] Enable Deno UDF",
+            Self::PythonUdf => "[Build] Enable Python UDF",
         }
         .into()
     }
@@ -120,11 +128,6 @@ Required if you want to view metrics."
 Required if you want to persistent meta-node data.
                 "
             }
-            Self::Kafka => {
-                "
-Required if you want to create source from Kafka.
-                "
-            }
             Self::Pubsub => {
                 "
 Required if you want to create source from Emulated Google Pub/sub.
@@ -138,7 +141,12 @@ to RiseDev directory."
             }
             Self::Dashboard => {
                 "
-Required if you want to build dashboard from source."
+Required if you want to build dashboard from source.
+This is generally not the option you want to use to develop the
+dashboard. Instead, directly run `npm run dev` in the dashboard
+directory to start the development server, set the API endpoint
+to a running RisingWave cluster in the settings page.
+"
             }
             Self::Tracing => {
                 "
@@ -148,12 +156,6 @@ you download Grafana Tempo."
             Self::Release => {
                 "
 Build RisingWave in release mode"
-            }
-            Self::AllInOne => {
-                "
-With this option enabled, RiseDev will help you create
-symlinks to `risingwave` all-in-one binary, so as to build
-and use `risingwave` in all-in-one mode."
             }
             Self::Sanitizer => {
                 "
@@ -195,6 +197,16 @@ the binaries will also be codesigned with `get-task-allow` enabled.
 As a result, RisingWave will dump the core on panics.
                 "
             }
+            Self::NoBacktrace => {
+                "
+With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching nodes.
+                "
+            }
+            Self::ExternalUdf => "Required if you want to support external UDF.",
+            Self::WasmUdf => "Required if you want to support WASM UDF.",
+            Self::JsUdf => "Required if you want to support JS UDF.",
+            Self::DenoUdf => "Required if you want to support Deno UDF.",
+            Self::PythonUdf => "Required if you want to support Python UDF.",
         }
         .into()
     }
@@ -205,18 +217,23 @@ As a result, RisingWave will dump the core on panics.
             "ENABLE_HDFS" => Some(Self::Hdfs),
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
             "ENABLE_ETCD" => Some(Self::Etcd),
-            "ENABLE_KAFKA" => Some(Self::Kafka),
             "ENABLE_PUBSUB" => Some(Self::Pubsub),
             "ENABLE_BUILD_RUST" => Some(Self::RustComponents),
             "ENABLE_BUILD_DASHBOARD" => Some(Self::Dashboard),
             "ENABLE_COMPUTE_TRACING" => Some(Self::Tracing),
             "ENABLE_RELEASE_PROFILE" => Some(Self::Release),
             "ENABLE_DYNAMIC_LINKING" => Some(Self::DynamicLinking),
-            "ENABLE_ALL_IN_ONE" => Some(Self::AllInOne),
             "ENABLE_SANITIZER" => Some(Self::Sanitizer),
             "ENABLE_REDIS" => Some(Self::Redis),
             "ENABLE_BUILD_RW_CONNECTOR" => Some(Self::BuildConnectorNode),
             "ENABLE_HUMMOCK_TRACE" => Some(Self::HummockTrace),
+            "ENABLE_COREDUMP" => Some(Self::Coredump),
+            "DISABLE_BACKTRACE" => Some(Self::NoBacktrace),
+            "ENABLE_EXTERNAL_UDF" => Some(Self::ExternalUdf),
+            "ENABLE_WASM_UDF" => Some(Self::WasmUdf),
+            "ENABLE_JS_UDF" => Some(Self::JsUdf),
+            "ENABLE_DENO_UDF" => Some(Self::DenoUdf),
+            "ENABLE_PYTHON_UDF" => Some(Self::PythonUdf),
             _ => None,
         }
     }
@@ -227,19 +244,23 @@ As a result, RisingWave will dump the core on panics.
             Self::Hdfs => "ENABLE_HDFS",
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::Etcd => "ENABLE_ETCD",
-            Self::Kafka => "ENABLE_KAFKA",
             Self::Pubsub => "ENABLE_PUBSUB",
             Self::Redis => "ENABLE_REDIS",
             Self::RustComponents => "ENABLE_BUILD_RUST",
             Self::Dashboard => "ENABLE_BUILD_DASHBOARD",
             Self::Tracing => "ENABLE_COMPUTE_TRACING",
             Self::Release => "ENABLE_RELEASE_PROFILE",
-            Self::AllInOne => "ENABLE_ALL_IN_ONE",
             Self::Sanitizer => "ENABLE_SANITIZER",
             Self::BuildConnectorNode => "ENABLE_BUILD_RW_CONNECTOR",
             Self::DynamicLinking => "ENABLE_DYNAMIC_LINKING",
             Self::HummockTrace => "ENABLE_HUMMOCK_TRACE",
             Self::Coredump => "ENABLE_COREDUMP",
+            Self::NoBacktrace => "DISABLE_BACKTRACE",
+            Self::ExternalUdf => "ENABLE_EXTERNAL_UDF",
+            Self::WasmUdf => "ENABLE_WASM_UDF",
+            Self::JsUdf => "ENABLE_JS_UDF",
+            Self::DenoUdf => "ENABLE_DENO_UDF",
+            Self::PythonUdf => "ENABLE_PYTHON_UDF",
         }
         .into()
     }

@@ -21,8 +21,8 @@ import {
   Relations,
   streamingJobColumns,
 } from "../components/Relations"
+import { getTables } from "../lib/api/streaming"
 import { Table } from "../proto/gen/catalog"
-import { getTables } from "./api/streaming"
 
 export default function Tables() {
   const associatedSourceColumn: Column<Table> = {

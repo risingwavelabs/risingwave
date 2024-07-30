@@ -16,20 +16,22 @@ use std::cmp::Ordering::{Equal, Greater, Less};
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
-use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
+use crate::hummock::iterator::{
+    DirectionEnum, HummockIterator, HummockIteratorDirection, ValueMeta,
+};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SstableIteratorType, SstableStoreRef};
 use crate::monitor::StoreLocalStatistic;
 
 fn smallest_key(sstable_info: &SstableInfo) -> &[u8] {
-    &sstable_info.key_range.as_ref().unwrap().left
+    &sstable_info.key_range.left
 }
 
 fn largest_key(sstable_info: &SstableInfo) -> &[u8] {
-    &sstable_info.key_range.as_ref().unwrap().right
+    &sstable_info.key_range.right
 }
 
 /// Served as the concrete implementation of `ConcatIterator` and `BackwardConcatIterator`.
@@ -158,8 +160,7 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
                 }
                 DirectionEnum::Backward => {
                     let ord = FullKey::decode(largest_key(table)).cmp(&key);
-                    ord == Greater
-                        || (ord == Equal && !table.key_range.as_ref().unwrap().right_exclusive)
+                    ord == Greater || (ord == Equal && !table.key_range.right_exclusive)
                 }
             })
             .saturating_sub(1); // considering the boundary of 0
@@ -179,5 +180,12 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
         if let Some(iter) = &self.sstable_iter {
             iter.collect_local_statistic(stats);
         }
+    }
+
+    fn value_meta(&self) -> ValueMeta {
+        self.sstable_iter
+            .as_ref()
+            .expect("no table iter")
+            .value_meta()
     }
 }

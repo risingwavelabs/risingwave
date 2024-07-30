@@ -17,7 +17,7 @@
 
 import { Box, Text, Tooltip } from "@chakra-ui/react"
 import { tinycolor } from "@ctrl/tinycolor"
-import { p50, p90, p95, p99 } from "../pages/api/metric"
+import { p50, p90, p95, p99 } from "../lib/api/metric"
 import { MetricsSample } from "./metrics"
 
 export default function RateBar({ samples }: { samples: MetricsSample[] }) {

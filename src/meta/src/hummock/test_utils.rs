@@ -12,26 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg(any(test, feature = "test"))]
+
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
+use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::level::Levels;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::table_watermark::TableWatermarks;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionStateTableInfo};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
-#[cfg(test)]
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::{CompactionConfig, HummockSnapshot, KeyRange, SstableInfo};
+use risingwave_pb::hummock::CompactionConfig;
 use risingwave_pb::meta::add_worker_node_request::Property;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-#[cfg(test)]
-use crate::hummock::compaction::selector::default_compaction_selector;
-use crate::hummock::{CommitEpochInfo, CompactorManager, HummockManager, HummockManagerRef};
+use crate::hummock::compaction::selector::{default_compaction_selector, LocalSelectorStatistic};
+use crate::hummock::compaction::{CompactionDeveloperConfig, CompactionSelectorContext};
+use crate::hummock::level_handler::LevelHandler;
+use crate::hummock::model::CompactionGroup;
+use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
 use crate::manager::{
     ClusterManager, ClusterManagerRef, FragmentManager, MetaSrvEnv, META_NODE_ID,
 };
@@ -39,22 +50,19 @@ use crate::rpc::metrics::MetaMetrics;
 
 pub fn to_local_sstable_info(ssts: &[SstableInfo]) -> Vec<LocalSstableInfo> {
     ssts.iter()
-        .map(|sst| {
-            LocalSstableInfo::with_compaction_group(
-                StaticCompactionGroupId::StateDefault.into(),
-                sst.clone(),
-            )
-        })
+        .map(|sst| LocalSstableInfo::for_test(sst.clone()))
         .collect_vec()
 }
 
-#[cfg(test)]
 pub async fn add_test_tables(
     hummock_manager: &HummockManager,
     context_id: HummockContextId,
 ) -> Vec<Vec<SstableInfo>> {
     // Increase version by 2.
-    let mut epoch: u64 = 1;
+
+    use risingwave_common::util::epoch::EpochExt;
+
+    let mut epoch = test_epoch(1);
     let sstable_ids = get_sst_ids(hummock_manager, 3).await;
     let test_tables = generate_test_sstables_with_table_id(epoch, 1, sstable_ids);
     register_sstable_infos_to_compaction_group(
@@ -66,10 +74,10 @@ pub async fn add_test_tables(
     let ssts = to_local_sstable_info(&test_tables);
     let sst_to_worker = ssts
         .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, context_id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
+        .commit_epoch_for_test(epoch, ssts, sst_to_worker)
         .await
         .unwrap();
     // Simulate a compaction and increase version by 1.
@@ -114,7 +122,7 @@ pub async fn add_test_tables(
         assert_eq!(compactor.context_id(), context_id);
     }
 
-    let ret = hummock_manager
+    hummock_manager
         .report_compact_task_for_test(
             compact_task.task_id,
             Some(compact_task),
@@ -124,14 +132,13 @@ pub async fn add_test_tables(
         )
         .await
         .unwrap();
-    assert!(ret);
     if temp_compactor {
         hummock_manager
             .compactor_manager_ref_for_test()
             .remove_compactor(context_id);
     }
     // Increase version by 1.
-    epoch += 1;
+    epoch.inc_epoch();
     let test_tables_3 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager,
@@ -142,10 +149,10 @@ pub async fn add_test_tables(
     let ssts = to_local_sstable_info(&test_tables_3);
     let sst_to_worker = ssts
         .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, context_id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
+        .commit_epoch_for_test(epoch, ssts, sst_to_worker)
         .await
         .unwrap();
     vec![test_tables, test_tables_2, test_tables_3]
@@ -161,21 +168,21 @@ pub fn generate_test_sstables_with_table_id(
         sst_info.push(SstableInfo {
             object_id: sst_id,
             sst_id,
-            key_range: Some(KeyRange {
-                left: key_with_epoch(
+            key_range: KeyRange {
+                left: Bytes::from(key_with_epoch(
                     format!("{:03}\0\0_key_test_{:05}", table_id, i + 1)
                         .as_bytes()
                         .to_vec(),
                     epoch,
-                ),
-                right: key_with_epoch(
+                )),
+                right: Bytes::from(key_with_epoch(
                     format!("{:03}\0\0_key_test_{:05}", table_id, (i + 1) * 10)
                         .as_bytes()
                         .to_vec(),
                     epoch,
-                ),
+                )),
                 right_exclusive: false,
-            }),
+            },
             file_size: 2,
             table_ids: vec![table_id],
             uncompressed_file_size: 2,
@@ -192,11 +199,11 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) ->
         sst_info.push(SstableInfo {
             object_id: sst_id,
             sst_id,
-            key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(sst_id, i + 1, epoch),
-                right: iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch),
+            key_range: KeyRange {
+                left: Bytes::from(iterator_test_key_of_epoch(sst_id, i + 1, epoch)),
+                right: Bytes::from(iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch)),
                 right_exclusive: false,
-            }),
+            },
             file_size: 2,
             table_ids: vec![sst_id as u32, sst_id as u32 * 10000],
             uncompressed_file_size: 2,
@@ -233,7 +240,7 @@ pub async fn register_table_ids_to_compaction_group(
     compaction_group_id: CompactionGroupId,
 ) {
     hummock_manager_ref
-        .register_table_ids(
+        .register_table_ids_for_test(
             &table_ids
                 .iter()
                 .map(|table_id| (*table_id, compaction_group_id))
@@ -248,8 +255,9 @@ pub async fn unregister_table_ids_from_compaction_group(
     table_ids: &[u32],
 ) {
     hummock_manager_ref
-        .unregister_table_ids_fail_fast(table_ids)
-        .await;
+        .unregister_table_ids(table_ids.iter().map(|table_id| TableId::new(*table_id)))
+        .await
+        .unwrap();
 }
 
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.
@@ -270,7 +278,7 @@ pub fn iterator_test_key_of_epoch(
 pub fn get_sorted_object_ids(sstables: &[SstableInfo]) -> Vec<HummockSstableObjectId> {
     sstables
         .iter()
-        .map(|table| table.get_object_id())
+        .map(|table| table.object_id)
         .sorted()
         .collect_vec()
 }
@@ -289,7 +297,7 @@ pub fn get_sorted_committed_object_ids(
         .levels
         .iter()
         .chain(levels.l0.as_ref().unwrap().sub_levels.iter())
-        .flat_map(|levels| levels.table_infos.iter().map(|info| info.get_object_id()))
+        .flat_map(|levels| levels.table_infos.iter().map(|info| info.object_id))
         .sorted()
         .collect_vec()
 }
@@ -375,13 +383,13 @@ pub async fn commit_from_meta_node(
     hummock_manager_ref: &HummockManager,
     epoch: HummockEpoch,
     ssts: Vec<LocalSstableInfo>,
-) -> crate::hummock::error::Result<Option<HummockSnapshot>> {
+) -> crate::hummock::error::Result<()> {
     let sst_to_worker = ssts
         .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), META_NODE_ID))
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, META_NODE_ID))
         .collect();
     hummock_manager_ref
-        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
+        .commit_epoch_for_test(epoch, ssts, sst_to_worker)
         .await
 }
 
@@ -391,15 +399,39 @@ pub async fn add_ssts(
     context_id: HummockContextId,
 ) -> Vec<SstableInfo> {
     let table_ids = get_sst_ids(hummock_manager, 3).await;
-    let test_tables = generate_test_sstables_with_table_id(epoch, 1, table_ids);
+    let test_tables = generate_test_sstables_with_table_id(test_epoch(epoch), 1, table_ids);
     let ssts = to_local_sstable_info(&test_tables);
     let sst_to_worker = ssts
         .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, context_id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
+        .commit_epoch_for_test(epoch, ssts, sst_to_worker)
         .await
         .unwrap();
     test_tables
+}
+
+pub fn compaction_selector_context<'a>(
+    group: &'a CompactionGroup,
+    levels: &'a Levels,
+    member_table_ids: &'a BTreeSet<TableId>,
+    level_handlers: &'a mut [LevelHandler],
+    selector_stats: &'a mut LocalSelectorStatistic,
+    table_id_to_options: &'a HashMap<u32, TableOption>,
+    developer_config: Arc<CompactionDeveloperConfig>,
+    table_watermarks: &'a HashMap<TableId, Arc<TableWatermarks>>,
+    state_table_info: &'a HummockVersionStateTableInfo,
+) -> CompactionSelectorContext<'a> {
+    CompactionSelectorContext {
+        group,
+        levels,
+        member_table_ids,
+        level_handlers,
+        selector_stats,
+        table_id_to_options,
+        developer_config,
+        table_watermarks,
+        state_table_info,
+    }
 }

@@ -17,8 +17,8 @@ use fixedbitset::FixedBitSet;
 use futures::FutureExt;
 use paste::paste;
 use risingwave_common::array::ListValue;
-use risingwave_common::types::{DataType, Datum, JsonbVal, Scalar};
-use risingwave_expr::aggregate::AggKind;
+use risingwave_common::types::{DataType, Datum, JsonbVal, Scalar, ScalarImpl};
+use risingwave_expr::aggregate::PbAggKind;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
@@ -53,8 +53,8 @@ mod utils;
 pub use agg_call::AggCall;
 pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef, Depth};
 pub use expr_mutator::ExprMutator;
-pub use expr_rewriter::ExprRewriter;
-pub use expr_visitor::ExprVisitor;
+pub use expr_rewriter::{default_rewrite_expr, ExprRewriter};
+pub use expr_visitor::{default_visit_expr, ExprVisitor};
 pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
 pub use function_call_with_lambda::FunctionCallWithLambda;
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
@@ -74,6 +74,10 @@ pub use user_defined_function::UserDefinedFunction;
 pub use utils::*;
 pub use window_function::WindowFunction;
 
+const EXPR_DEPTH_THRESHOLD: usize = 30;
+const EXPR_TOO_DEEP_NOTICE: &str = "Some expression is too complicated. \
+Consider simplifying or splitting the query if you encounter any issues.";
+
 /// the trait of bound expressions
 pub trait Expr: Into<ExprImpl> {
     /// Get the return type of the expr
@@ -88,6 +92,14 @@ macro_rules! impl_expr_impl {
         #[derive(Clone, Eq, PartialEq, Hash, EnumAsInner)]
         pub enum ExprImpl {
             $($t(Box<$t>),)*
+        }
+
+        impl ExprImpl {
+            pub fn variant_name(&self) -> &'static str {
+                match self {
+                    $(ExprImpl::$t(_) => stringify!($t),)*
+                }
+            }
         }
 
         $(
@@ -191,7 +203,7 @@ impl ExprImpl {
     #[inline(always)]
     pub fn count_star() -> Self {
         AggCall::new(
-            AggKind::Count,
+            PbAggKind::Count.into(),
             vec![],
             false,
             OrderBy::any(),
@@ -200,6 +212,20 @@ impl ExprImpl {
         )
         .unwrap()
         .into()
+    }
+
+    /// Create a new expression by merging the given expressions by `And`.
+    ///
+    /// If `exprs` is empty, return a literal `true`.
+    pub fn and(exprs: impl IntoIterator<Item = ExprImpl>) -> Self {
+        merge_expr_by_logical(exprs, ExprType::And, ExprImpl::literal_bool(true))
+    }
+
+    /// Create a new expression by merging the given expressions by `Or`.
+    ///
+    /// If `exprs` is empty, return a literal `false`.
+    pub fn or(exprs: impl IntoIterator<Item = ExprImpl>) -> Self {
+        merge_expr_by_logical(exprs, ExprType::Or, ExprImpl::literal_bool(false))
     }
 
     /// Collect all `InputRef`s' indexes in the expression.
@@ -395,7 +421,7 @@ macro_rules! impl_has_variant {
     };
 }
 
-impl_has_variant! {InputRef, Literal, FunctionCall, FunctionCallWithLambda, AggCall, Subquery, TableFunction, WindowFunction}
+impl_has_variant! {InputRef, Literal, FunctionCall, FunctionCallWithLambda, AggCall, Subquery, TableFunction, WindowFunction, Now}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InequalityInputPair {
@@ -403,7 +429,7 @@ pub struct InequalityInputPair {
     pub(crate) key_required_larger: usize,
     /// Input index of less side of inequality.
     pub(crate) key_required_smaller: usize,
-    /// greater >= less + delta_expression
+    /// greater >= less + `delta_expression`
     pub(crate) delta_expression: Option<(ExprType, ExprImpl)>,
 }
 
@@ -614,6 +640,7 @@ impl ExprImpl {
             struct HasOthers {
                 has_others: bool,
             }
+
             impl ExprVisitor for HasOthers {
                 fn visit_expr(&mut self, expr: &ExprImpl) {
                     match expr {
@@ -627,10 +654,36 @@ impl ExprImpl {
                         | ExprImpl::Parameter(_)
                         | ExprImpl::Now(_) => self.has_others = true,
                         ExprImpl::Literal(_inner) => {}
-                        ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
+                        ExprImpl::FunctionCall(inner) => {
+                            if !self.is_short_circuit(inner) {
+                                // only if the current `func_call` is *not* a short-circuit
+                                // expression, e.g., true or (...) | false and (...),
+                                // shall we proceed to visit it.
+                                self.visit_function_call(inner)
+                            }
+                        }
                         ExprImpl::FunctionCallWithLambda(inner) => {
                             self.visit_function_call_with_lambda(inner)
                         }
+                    }
+                }
+            }
+
+            impl HasOthers {
+                fn is_short_circuit(&self, func_call: &FunctionCall) -> bool {
+                    /// evaluate the first parameter of `Or` or `And` function call
+                    fn eval_first(e: &ExprImpl, expect: bool) -> bool {
+                        if let ExprImpl::Literal(l) = e {
+                            *l.get_data() == Some(ScalarImpl::Bool(expect))
+                        } else {
+                            false
+                        }
+                    }
+
+                    match func_call.func_type {
+                        ExprType::Or => eval_first(&func_call.inputs()[0], true),
+                        ExprType::And => eval_first(&func_call.inputs()[0], false),
+                        _ => false,
                     }
                 }
             }
@@ -715,40 +768,31 @@ impl ExprImpl {
         }
     }
 
-    /// Accepts expressions of the form `input_expr cmp now() [+- const_expr]` or
-    /// `now() [+- const_expr] cmp input_expr`, where `input_expr` contains an
-    /// `InputRef` and contains no `now()`.
+    /// Accepts expressions of the form `input_expr cmp now_expr` or `now_expr cmp input_expr`,
+    /// where `input_expr` contains an `InputRef` and contains no `now()`, and `now_expr`
+    /// contains a `now()` but no `InputRef`.
     ///
     /// Canonicalizes to the first ordering and returns `(input_expr, cmp, now_expr)`
     pub fn as_now_comparison_cond(&self) -> Option<(ExprImpl, ExprType, ExprImpl)> {
         if let ExprImpl::FunctionCall(function_call) = self {
             match function_call.func_type() {
-                ty @ (ExprType::LessThan
+                ty @ (ExprType::Equal
+                | ExprType::LessThan
                 | ExprType::LessThanOrEqual
                 | ExprType::GreaterThan
                 | ExprType::GreaterThanOrEqual) => {
                     let (_, op1, op2) = function_call.clone().decompose_as_binary();
-                    if op1.count_nows() == 0
+                    if !op1.has_now()
                         && op1.has_input_ref()
-                        && op2.count_nows() > 0
-                        && op2.is_now_offset()
+                        && op2.has_now()
+                        && !op2.has_input_ref()
                     {
                         Some((op1, ty, op2))
-                    } else if op2.count_nows() == 0
+                    } else if op1.has_now()
+                        && !op1.has_input_ref()
+                        && !op2.has_now()
                         && op2.has_input_ref()
-                        && op1.count_nows() > 0
-                        && op1.is_now_offset()
                     {
-                        Some((op2, Self::reverse_comparison(ty), op1))
-                    } else {
-                        None
-                    }
-                }
-                ty @ ExprType::Equal => {
-                    let (_, op1, op2) = function_call.clone().decompose_as_binary();
-                    if op1.count_nows() == 0 && op1.has_input_ref() && op2.count_nows() > 0 {
-                        Some((op1, ty, op2))
-                    } else if op2.count_nows() == 0 && op2.has_input_ref() && op1.count_nows() > 0 {
                         Some((op2, Self::reverse_comparison(ty), op1))
                     } else {
                         None
@@ -806,23 +850,6 @@ impl ExprImpl {
             }
         } else {
             None
-        }
-    }
-
-    /// Checks if expr is of the form `now() [+- const_expr]`
-    fn is_now_offset(&self) -> bool {
-        if let ExprImpl::Now(_) = self {
-            true
-        } else if let ExprImpl::FunctionCall(f) = self {
-            match f.func_type() {
-                ExprType::Add | ExprType::Subtract => {
-                    let (_, lhs, rhs) = f.clone().decompose_as_binary();
-                    lhs.is_now_offset() && rhs.is_const()
-                }
-                _ => false,
-            }
-        } else {
-            false
         }
     }
 
@@ -1009,11 +1036,7 @@ impl ExprImpl {
 
 impl From<Condition> for ExprImpl {
     fn from(c: Condition) -> Self {
-        merge_expr_by_binary(
-            c.conjunctions.into_iter(),
-            ExprType::And,
-            ExprImpl::literal_bool(true),
-        )
+        ExprImpl::and(c.conjunctions)
     }
 }
 

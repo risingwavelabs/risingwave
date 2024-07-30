@@ -34,7 +34,7 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
@@ -55,12 +55,12 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             build_distinct_dedup_table_from_proto(node.get_distinct_dedup_tables(), store, None)
                 .await;
 
-        Ok(SimpleAggExecutor::new(AggExecutorArgs {
+        let exec = SimpleAggExecutor::new(AggExecutorArgs {
             version: node.version(),
 
             input,
             actor_ctx: params.actor_context,
-            info: params.info,
+            info: params.info.clone(),
 
             extreme_cache_size: params.env.config().developer.unsafe_extreme_cache_size,
 
@@ -71,7 +71,8 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             distinct_dedup_tables,
             watermark_epoch: params.watermark_epoch,
             extra: SimpleAggExecutorExtraArgs {},
-        })?
-        .boxed())
+        })?;
+
+        Ok((params.info, exec).into())
     }
 }

@@ -1,8 +1,6 @@
-select
+SELECT
     *
-from
-    nats_source_table
-order by
-    id
+FROM
+    live_stream_metrics
 LIMIT
     10;

@@ -12,28 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::cmp::min;
+use std::collections::HashSet;
 use std::default::Default;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
+use std::marker::PhantomData;
 use std::ops::Bound;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{Stream, TryStreamExt};
 use futures_async_stream::try_stream;
 use prost::Message;
+use risingwave_common::array::Op;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
-use risingwave_hummock_sdk::table_watermark::{
-    TableWatermarks, VnodeWatermark, WatermarkDirection,
-};
-use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
+use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
     TracedReadOptions, TracedSealCurrentEpochOptions, TracedWriteOptions,
 };
+use risingwave_pb::hummock::PbVnodeWatermark;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
@@ -42,40 +46,200 @@ use crate::storage_value::StorageValue;
 
 pub trait StaticSendSync = Send + Sync + 'static;
 
-pub trait StateStoreIter: Send + Sync {
-    type Item: Send;
-
-    fn next(&mut self) -> impl Future<Output = StorageResult<Option<Self::Item>>> + Send + '_;
+pub trait IterItem: Send + 'static {
+    type ItemRef<'a>: Send + Copy + 'a;
 }
 
-pub trait StateStoreIterExt: StateStoreIter {
-    type ItemStream: Stream<Item = StorageResult<<Self as StateStoreIter>::Item>> + Send;
-
-    fn into_stream(self) -> Self::ItemStream;
+impl IterItem for StateStoreIterItem {
+    type ItemRef<'a> = StateStoreIterItemRef<'a>;
 }
 
-#[try_stream(ok = I::Item, error = StorageError)]
-async fn into_stream_inner<I: StateStoreIter>(mut iter: I) {
-    while let Some(item) = iter.next().await? {
-        yield item;
+impl IterItem for StateStoreReadLogItem {
+    type ItemRef<'a> = StateStoreReadLogItemRef<'a>;
+}
+
+pub trait StateStoreIter<T: IterItem = StateStoreIterItem>: Send {
+    fn try_next(
+        &mut self,
+    ) -> impl Future<Output = StorageResult<Option<T::ItemRef<'_>>>> + Send + '_;
+}
+
+pub fn to_owned_item((key, value): StateStoreIterItemRef<'_>) -> StorageResult<StateStoreIterItem> {
+    Ok((key.copy_into(), Bytes::copy_from_slice(value)))
+}
+
+pub trait StateStoreIterExt<T: IterItem = StateStoreIterItem>: StateStoreIter<T> + Sized {
+    type ItemStream<O: Send, F: Send + for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O>>: Stream<Item = StorageResult<O>>
+        + Send;
+
+    fn into_stream<O: Send, F: for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O> + Send>(
+        self,
+        f: F,
+    ) -> Self::ItemStream<O, F>;
+
+    fn fused(self) -> FusedStateStoreIter<Self, T> {
+        FusedStateStoreIter::new(self)
     }
 }
 
-pub type StreamTypeOfIter<I> = <I as StateStoreIterExt>::ItemStream;
-impl<I: StateStoreIter> StateStoreIterExt for I {
-    type ItemStream = impl Stream<Item = StorageResult<<Self as StateStoreIter>::Item>>;
-
-    fn into_stream(self) -> Self::ItemStream {
-        into_stream_inner(self)
+#[try_stream(ok = O, error = StorageError)]
+async fn into_stream_inner<
+    T: IterItem,
+    I: StateStoreIter<T>,
+    O: Send,
+    F: for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O> + Send,
+>(
+    iter: I,
+    f: F,
+) {
+    let mut iter = iter.fused();
+    while let Some(item) = iter.try_next().await? {
+        yield f(item)?;
     }
 }
 
+pub struct FromStreamStateStoreIter<S> {
+    inner: S,
+    item_buffer: Option<StateStoreIterItem>,
+}
+
+impl<S> FromStreamStateStoreIter<S> {
+    pub fn new(inner: S) -> Self {
+        Self {
+            inner,
+            item_buffer: None,
+        }
+    }
+}
+
+impl<S: Stream<Item = StorageResult<StateStoreIterItem>> + Unpin + Send> StateStoreIter
+    for FromStreamStateStoreIter<S>
+{
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+        self.item_buffer = self.inner.try_next().await?;
+        Ok(self
+            .item_buffer
+            .as_ref()
+            .map(|(key, value)| (key.to_ref(), value.as_ref())))
+    }
+}
+
+pub struct FusedStateStoreIter<I, T> {
+    inner: I,
+    finished: bool,
+    _phantom: PhantomData<T>,
+}
+
+impl<I, T> FusedStateStoreIter<I, T> {
+    fn new(inner: I) -> Self {
+        Self {
+            inner,
+            finished: false,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<T: IterItem, I: StateStoreIter<T>> FusedStateStoreIter<I, T> {
+    async fn try_next(&mut self) -> StorageResult<Option<T::ItemRef<'_>>> {
+        assert!(!self.finished, "call try_next after finish");
+        let result = self.inner.try_next().await;
+        match &result {
+            Ok(Some(_)) => {}
+            Ok(None) | Err(_) => {
+                self.finished = true;
+            }
+        }
+        result
+    }
+}
+
+impl<T: IterItem, I: StateStoreIter<T>> StateStoreIterExt<T> for I {
+    type ItemStream<O: Send, F: Send + for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O>> =
+        impl Stream<Item = StorageResult<O>> + Send;
+
+    fn into_stream<O: Send, F: for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O> + Send>(
+        self,
+        f: F,
+    ) -> Self::ItemStream<O, F> {
+        into_stream_inner(self, f)
+    }
+}
+
+pub type StateStoreIterItemRef<'a> = (FullKey<&'a [u8]>, &'a [u8]);
 pub type StateStoreIterItem = (FullKey<Bytes>, Bytes);
-pub trait StateStoreIterItemStream = Stream<Item = StorageResult<StateStoreIterItem>> + Send;
-pub trait StateStoreReadIterStream = StateStoreIterItemStream + 'static;
+pub trait StateStoreReadIter = StateStoreIter + 'static;
+
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+pub enum ChangeLogValue<T> {
+    Insert(T),
+    Update { new_value: T, old_value: T },
+    Delete(T),
+}
+
+impl<T> ChangeLogValue<T> {
+    pub fn try_map<O>(self, f: impl Fn(T) -> StorageResult<O>) -> StorageResult<ChangeLogValue<O>> {
+        Ok(match self {
+            ChangeLogValue::Insert(value) => ChangeLogValue::Insert(f(value)?),
+            ChangeLogValue::Update {
+                new_value,
+                old_value,
+            } => ChangeLogValue::Update {
+                new_value: f(new_value)?,
+                old_value: f(old_value)?,
+            },
+            ChangeLogValue::Delete(value) => ChangeLogValue::Delete(f(value)?),
+        })
+    }
+
+    pub fn into_op_value_iter(self) -> impl Iterator<Item = (Op, T)> {
+        std::iter::from_coroutine(move || match self {
+            Self::Insert(row) => {
+                yield (Op::Insert, row);
+            }
+            Self::Delete(row) => {
+                yield (Op::Delete, row);
+            }
+            Self::Update {
+                old_value,
+                new_value,
+            } => {
+                yield (Op::UpdateDelete, old_value);
+                yield (Op::UpdateInsert, new_value);
+            }
+        })
+    }
+}
+
+impl<T: AsRef<[u8]>> ChangeLogValue<T> {
+    pub fn to_ref(&self) -> ChangeLogValue<&[u8]> {
+        match self {
+            ChangeLogValue::Insert(val) => ChangeLogValue::Insert(val.as_ref()),
+            ChangeLogValue::Update {
+                new_value,
+                old_value,
+            } => ChangeLogValue::Update {
+                new_value: new_value.as_ref(),
+                old_value: old_value.as_ref(),
+            },
+            ChangeLogValue::Delete(val) => ChangeLogValue::Delete(val.as_ref()),
+        }
+    }
+}
+
+pub type StateStoreReadLogItem = (TableKey<Bytes>, ChangeLogValue<Bytes>);
+pub type StateStoreReadLogItemRef<'a> = (TableKey<&'a [u8]>, ChangeLogValue<&'a [u8]>);
+#[derive(Clone)]
+pub struct ReadLogOptions {
+    pub table_id: TableId,
+}
+
+pub trait StateStoreReadChangeLogIter = StateStoreIter<StateStoreReadLogItem> + Send + 'static;
 
 pub trait StateStoreRead: StaticSendSync {
-    type IterStream: StateStoreReadIterStream;
+    type Iter: StateStoreReadIter;
+    type RevIter: StateStoreReadIter;
+    type ChangeLogIter: StateStoreReadChangeLogIter;
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -96,7 +260,21 @@ pub trait StateStoreRead: StaticSendSync {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream>> + Send + '_;
+    ) -> impl Future<Output = StorageResult<Self::Iter>> + Send + '_;
+
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter>> + Send + '_;
+
+    fn iter_log(
+        &self,
+        epoch_range: (u64, u64),
+        key_range: TableKeyRange,
+        options: ReadLogOptions,
+    ) -> impl Future<Output = StorageResult<Self::ChangeLogIter>> + Send + '_;
 }
 
 pub trait StateStoreReadExt: StaticSendSync {
@@ -127,12 +305,14 @@ impl<S: StateStoreRead> StateStoreReadExt for S {
         if limit.is_some() {
             read_options.prefetch_options.prefetch = false;
         }
+        const MAX_INITIAL_CAP: usize = 1024;
         let limit = limit.unwrap_or(usize::MAX);
-        self.iter(key_range, epoch, read_options)
-            .await?
-            .take(limit)
-            .try_collect()
-            .await
+        let mut ret = Vec::with_capacity(min(limit, MAX_INITIAL_CAP));
+        let mut iter = self.iter(key_range, epoch, read_options).await?;
+        while let Some((key, value)) = iter.try_next().await? {
+            ret.push((key.copy_into(), Bytes::copy_from_slice(value)))
+        }
+        Ok(ret)
     }
 }
 
@@ -159,15 +339,7 @@ pub trait StateStoreWrite: StaticSendSync {
     ) -> StorageResult<usize>;
 }
 
-#[derive(Default, Debug)]
-pub struct SyncResult {
-    /// The size of all synced shared buffers.
-    pub sync_size: usize,
-    /// The sst_info of sync.
-    pub uncommitted_ssts: Vec<LocalSstableInfo>,
-    /// The collected table watermarks written by state tables.
-    pub table_watermarks: HashMap<TableId, TableWatermarks>,
-}
+pub trait SyncFuture = Future<Output = StorageResult<SyncResult>> + Send + 'static;
 
 pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     type Local: LocalStateStore;
@@ -179,7 +351,7 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
         epoch: HummockReadEpoch,
     ) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
-    fn sync(&self, epoch: u64) -> impl Future<Output = StorageResult<SyncResult>> + Send + '_;
+    fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture;
 
     /// update max current epoch in storage.
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
@@ -203,7 +375,8 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
 /// written by itself. Each local state store is not `Clone`, and is owned by a streaming state
 /// table.
 pub trait LocalStateStore: StaticSendSync {
-    type IterStream<'a>: StateStoreIterItemStream + 'a;
+    type Iter<'a>: StateStoreIter + 'a;
+    type RevIter<'a>: StateStoreIter + 'a;
 
     /// Point gets a value from the state store.
     /// The result is based on the latest written snapshot.
@@ -222,7 +395,15 @@ pub trait LocalStateStore: StaticSendSync {
         &self,
         key_range: TableKeyRange,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_;
+    ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_;
+
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_;
+
+    fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes>;
 
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
     fn insert(
@@ -256,20 +437,9 @@ pub trait LocalStateStore: StaticSendSync {
     /// the previous write epoch is sealed.
     fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
 
-    /// Check existence of a given `key_range`.
-    /// It is better to provide `prefix_hint` in `read_options`, which will be used
-    /// for checking bloom filter if hummock is used. If `prefix_hint` is not provided,
-    /// the false positive rate can be significantly higher because bloom filter cannot
-    /// be used.
-    ///
-    /// Returns:
-    /// - false: `key_range` is guaranteed to be absent in storage.
-    /// - true: `key_range` may or may not exist in storage.
-    fn may_exist(
-        &self,
-        key_range: TableKeyRange,
-        read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<bool>> + Send + '_;
+    // Updates the vnode bitmap corresponding to the local state store
+    // Returns the previous vnode bitmap
+    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap>;
 }
 
 /// If `prefetch` is true, prefetch will be enabled. Prefetching may increase the memory
@@ -338,6 +508,7 @@ pub struct ReadOptions {
     /// Read from historical hummock version of meta snapshot backup.
     /// It should only be used by `StorageTable` for batch query.
     pub read_version_from_backup: bool,
+    pub read_version_from_time_travel: bool,
 }
 
 impl From<TracedReadOptions> for ReadOptions {
@@ -350,6 +521,7 @@ impl From<TracedReadOptions> for ReadOptions {
             retention_seconds: value.retention_seconds,
             table_id: value.table_id.into(),
             read_version_from_backup: value.read_version_from_backup,
+            read_version_from_time_travel: value.read_version_from_time_travel,
         }
     }
 }
@@ -364,6 +536,7 @@ impl From<ReadOptions> for TracedReadOptions {
             retention_seconds: value.retention_seconds,
             table_id: value.table_id.into(),
             read_version_from_backup: value.read_version_from_backup,
+            read_version_from_time_travel: value.read_version_from_time_travel,
         }
     }
 }
@@ -404,16 +577,21 @@ pub static CHECK_BYTES_EQUAL: LazyLock<Arc<dyn CheckOldValueEquality>> =
 pub enum OpConsistencyLevel {
     #[default]
     Inconsistent,
-    ConsistentOldValue(Arc<dyn CheckOldValueEquality>),
+    ConsistentOldValue {
+        check_old_value: Arc<dyn CheckOldValueEquality>,
+        /// whether should store the old value
+        is_log_store: bool,
+    },
 }
 
 impl Debug for OpConsistencyLevel {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             OpConsistencyLevel::Inconsistent => f.write_str("OpConsistencyLevel::Inconsistent"),
-            OpConsistencyLevel::ConsistentOldValue(_) => {
-                f.write_str("OpConsistencyLevel::ConsistentOldValue")
-            }
+            OpConsistencyLevel::ConsistentOldValue { is_log_store, .. } => f
+                .debug_struct("OpConsistencyLevel::ConsistentOldValue")
+                .field("is_log_store", is_log_store)
+                .finish(),
         }
     }
 }
@@ -426,8 +604,23 @@ impl PartialEq<Self> for OpConsistencyLevel {
                 OpConsistencyLevel::Inconsistent,
                 OpConsistencyLevel::Inconsistent
             ) | (
-                OpConsistencyLevel::ConsistentOldValue(_),
-                OpConsistencyLevel::ConsistentOldValue(_),
+                OpConsistencyLevel::ConsistentOldValue {
+                    is_log_store: true,
+                    ..
+                },
+                OpConsistencyLevel::ConsistentOldValue {
+                    is_log_store: true,
+                    ..
+                },
+            ) | (
+                OpConsistencyLevel::ConsistentOldValue {
+                    is_log_store: false,
+                    ..
+                },
+                OpConsistencyLevel::ConsistentOldValue {
+                    is_log_store: false,
+                    ..
+                },
             )
         )
     }
@@ -442,22 +635,25 @@ impl OpConsistencyLevel {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct NewLocalOptions {
     pub table_id: TableId,
     /// Whether the operation is consistent. The term `consistent` requires the following:
     ///
     /// 1. A key cannot be inserted or deleted for more than once, i.e. inserting to an existing
-    /// key or deleting an non-existing key is not allowed.
+    ///    key or deleting an non-existing key is not allowed.
     ///
     /// 2. The old value passed from
-    /// `update` and `delete` should match the original stored value.
+    ///    `update` and `delete` should match the original stored value.
     pub op_consistency_level: OpConsistencyLevel,
     pub table_option: TableOption,
 
     /// Indicate if this is replicated. If it is, we should not
-    /// upload its ReadVersions.
+    /// upload its `ReadVersions`.
     pub is_replicated: bool,
+
+    /// The vnode bitmap for the local state store instance
+    pub vnodes: Arc<Bitmap>,
 }
 
 impl From<TracedNewLocalOptions> for NewLocalOptions {
@@ -467,11 +663,16 @@ impl From<TracedNewLocalOptions> for NewLocalOptions {
             op_consistency_level: match value.op_consistency_level {
                 TracedOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
                 TracedOpConsistencyLevel::ConsistentOldValue => {
-                    OpConsistencyLevel::ConsistentOldValue(CHECK_BYTES_EQUAL.clone())
+                    OpConsistencyLevel::ConsistentOldValue {
+                        check_old_value: CHECK_BYTES_EQUAL.clone(),
+                        // TODO: for simplicity, set it to false
+                        is_log_store: false,
+                    }
                 }
             },
             table_option: value.table_option.into(),
             is_replicated: value.is_replicated,
+            vnodes: Arc::new(value.vnodes.into()),
         }
     }
 }
@@ -482,12 +683,13 @@ impl From<NewLocalOptions> for TracedNewLocalOptions {
             table_id: value.table_id.into(),
             op_consistency_level: match value.op_consistency_level {
                 OpConsistencyLevel::Inconsistent => TracedOpConsistencyLevel::Inconsistent,
-                OpConsistencyLevel::ConsistentOldValue(_) => {
+                OpConsistencyLevel::ConsistentOldValue { .. } => {
                     TracedOpConsistencyLevel::ConsistentOldValue
                 }
             },
             table_option: value.table_option.into(),
             is_replicated: value.is_replicated,
+            vnodes: value.vnodes.as_ref().clone().into(),
         }
     }
 }
@@ -497,12 +699,14 @@ impl NewLocalOptions {
         table_id: TableId,
         op_consistency_level: OpConsistencyLevel,
         table_option: TableOption,
+        vnodes: Arc<Bitmap>,
     ) -> Self {
         NewLocalOptions {
             table_id,
             op_consistency_level,
             table_option,
             is_replicated: false,
+            vnodes,
         }
     }
 
@@ -510,12 +714,14 @@ impl NewLocalOptions {
         table_id: TableId,
         op_consistency_level: OpConsistencyLevel,
         table_option: TableOption,
+        vnodes: Arc<Bitmap>,
     ) -> Self {
         NewLocalOptions {
             table_id,
             op_consistency_level,
             table_option,
             is_replicated: true,
+            vnodes,
         }
     }
 
@@ -527,6 +733,7 @@ impl NewLocalOptions {
                 retention_seconds: None,
             },
             is_replicated: false,
+            vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT)),
         }
     }
 }
@@ -537,14 +744,8 @@ pub struct InitOptions {
 }
 
 impl InitOptions {
-    pub fn new_with_epoch(epoch: EpochPair) -> Self {
+    pub fn new(epoch: EpochPair) -> Self {
         Self { epoch }
-    }
-}
-
-impl From<EpochPair> for InitOptions {
-    fn from(value: EpochPair) -> Self {
-        Self { epoch: value }
     }
 }
 
@@ -577,14 +778,17 @@ impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
                 (
                     direction == WatermarkDirection::Ascending,
                     watermarks
-                        .iter()
-                        .map(|watermark| Message::encode_to_vec(&watermark.to_protobuf()))
+                        .into_iter()
+                        .map(|watermark| {
+                            let pb_watermark = PbVnodeWatermark::from(watermark);
+                            Message::encode_to_vec(&pb_watermark)
+                        })
                         .collect(),
                 )
             }),
             switch_op_consistency_level: value
                 .switch_op_consistency_level
-                .map(|level| matches!(level, OpConsistencyLevel::ConsistentOldValue(_))),
+                .map(|level| matches!(level, OpConsistencyLevel::ConsistentOldValue { .. })),
         }
     }
 }
@@ -600,10 +804,10 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
                         WatermarkDirection::Descending
                     },
                     watermarks
-                        .iter()
+                        .into_iter()
                         .map(|serialized_watermark| {
                             Message::decode(serialized_watermark.as_slice())
-                                .map(|pb| VnodeWatermark::from_protobuf(&pb))
+                                .map(|pb: PbVnodeWatermark| VnodeWatermark::from(pb))
                                 .expect("should not failed")
                         })
                         .collect(),
@@ -611,7 +815,10 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
             }),
             switch_op_consistency_level: value.switch_op_consistency_level.map(|enable| {
                 if enable {
-                    OpConsistencyLevel::ConsistentOldValue(CHECK_BYTES_EQUAL.clone())
+                    OpConsistencyLevel::ConsistentOldValue {
+                        check_old_value: CHECK_BYTES_EQUAL.clone(),
+                        is_log_store: false,
+                    }
                 } else {
                     OpConsistencyLevel::Inconsistent
                 }

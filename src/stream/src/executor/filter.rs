@@ -12,16 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
-
-use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk};
-use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::catalog::Schema;
+use risingwave_common::array::{Array, ArrayImpl, Op};
+use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
 
-use super::*;
+use crate::executor::prelude::*;
 
 /// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a boolean array on whether each item should be retained. And then,
@@ -29,8 +25,7 @@ use super::*;
 /// to the result of the expression.
 pub struct FilterExecutor {
     _ctx: ActorContextRef,
-    info: ExecutorInfo,
-    input: BoxedExecutor,
+    input: Executor,
 
     /// Expression of the current filter, note that the filter must always have the same output for
     /// the same input.
@@ -38,15 +33,9 @@ pub struct FilterExecutor {
 }
 
 impl FilterExecutor {
-    pub fn new(
-        ctx: ActorContextRef,
-        info: ExecutorInfo,
-        input: Box<dyn Executor>,
-        expr: NonStrictExpression,
-    ) -> Self {
+    pub fn new(ctx: ActorContextRef, input: Executor, expr: NonStrictExpression) -> Self {
         Self {
             _ctx: ctx,
-            info,
             input,
             expr,
         }
@@ -135,19 +124,7 @@ impl Debug for FilterExecutor {
     }
 }
 
-impl Executor for FilterExecutor {
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
+impl Execute for FilterExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -180,11 +157,8 @@ impl FilterExecutor {
 
 #[cfg(test)]
 mod tests {
-    use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::DataType;
+    use risingwave_common::catalog::Field;
 
     use super::super::test_utils::expr::build_from_pretty;
     use super::super::test_utils::MockSource;
@@ -218,23 +192,14 @@ mod tests {
             ],
         };
         let pk_indices = PkIndices::new();
-        let source =
-            MockSource::with_chunks(schema.clone(), pk_indices.clone(), vec![chunk1, chunk2]);
-        let info = ExecutorInfo {
-            schema,
-            pk_indices,
-            identity: "FilterExecutor".to_string(),
-        };
+        let source = MockSource::with_chunks(vec![chunk1, chunk2])
+            .into_executor(schema.clone(), pk_indices.clone());
 
         let test_expr = build_from_pretty("(greater_than:boolean $0:int8 $1:int8)");
 
-        let filter = Box::new(FilterExecutor::new(
-            ActorContext::for_test(123),
-            info,
-            Box::new(source),
-            test_expr,
-        ));
-        let mut filter = filter.execute();
+        let mut filter = FilterExecutor::new(ActorContext::for_test(123), source, test_expr)
+            .boxed()
+            .execute();
 
         let chunk = filter.next().await.unwrap().unwrap().into_chunk().unwrap();
         assert_eq!(

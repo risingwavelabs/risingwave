@@ -14,11 +14,12 @@
 
 use risingwave_common::bail;
 
+use crate::error::ConnectorResult;
 use crate::only_parse_payload;
 use crate::parser::unified::maxwell::MaxwellChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
-    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParserFormat,
+    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, ParserFormat,
     SourceStreamChunkRowWriter, SpecificParserConfig,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
@@ -35,12 +36,10 @@ impl MaxwellParser {
         props: SpecificParserConfig,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         match props.encoding_config {
             EncodingProperties::Json(_) => {
-                let payload_builder =
-                    AccessBuilderImpl::new_default(props.encoding_config, EncodingType::Value)
-                        .await?;
+                let payload_builder = AccessBuilderImpl::new_default(props.encoding_config).await?;
                 Ok(Self {
                     payload_builder,
                     rw_columns,
@@ -55,7 +54,7 @@ impl MaxwellParser {
         &mut self,
         payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> anyhow::Result<()> {
+    ) -> ConnectorResult<()> {
         let payload_accessor = self.payload_builder.generate_accessor(payload).await?;
         let row_op = MaxwellChangeEvent::new(payload_accessor);
 
@@ -81,7 +80,7 @@ impl ByteStreamSourceParser for MaxwellParser {
         _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> anyhow::Result<()> {
+    ) -> ConnectorResult<()> {
         // restrict the behaviours since there is no corresponding
         // key/value test for maxwell yet.
         only_parse_payload!(self, payload, writer)

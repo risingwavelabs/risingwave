@@ -25,6 +25,8 @@ use risingwave_common::types::{
 use rust_decimal::Decimal as RustDecimal;
 use thiserror_ext::AsReport;
 
+use crate::parser::util::log_error;
+
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
 
 macro_rules! handle_data_type {
@@ -33,9 +35,7 @@ macro_rules! handle_data_type {
         match res {
             Ok(val) => val.map(|v| ScalarImpl::from(v)),
             Err(err) => {
-                if let Ok(sc) = LOG_SUPPERSSER.check() {
-                    tracing::error!("parse column `{}` fail: {} ({} suppressed)", $name, err, sc);
-                }
+                log_error!($name, err, "parse column failed");
                 None
             }
         }
@@ -45,9 +45,7 @@ macro_rules! handle_data_type {
         match res {
             Ok(val) => val.map(|v| ScalarImpl::from(<$rw_type>::from(v))),
             Err(err) => {
-                if let Ok(sc) = LOG_SUPPERSSER.check() {
-                    tracing::error!("parse column `{}` fail: {} ({} suppressed)", $name, err, sc);
-                }
+                log_error!($name, err, "parse column failed");
                 None
             }
         }
@@ -100,17 +98,12 @@ pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> Owne
                         .unwrap_or(Ok(None));
                     match res {
                         Ok(val) => val.map(|v| {
-                            ScalarImpl::from(Timestamptz::from_micros(v.timestamp_micros()))
+                            ScalarImpl::from(Timestamptz::from_micros(
+                                v.and_utc().timestamp_micros(),
+                            ))
                         }),
                         Err(err) => {
-                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                tracing::error!(
-                                    suppressed_count,
-                                    column_name = name,
-                                    error = %err.as_report(),
-                                    "parse column failed",
-                                );
-                            }
+                            log_error!(name, err, "parse column failed");
                             None
                         }
                     }
@@ -122,14 +115,7 @@ pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> Owne
                     match res {
                         Ok(val) => val.map(|v| ScalarImpl::from(v.into_boxed_slice())),
                         Err(err) => {
-                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                tracing::error!(
-                                    suppressed_count,
-                                    column_name = name,
-                                    error = %err.as_report(),
-                                    "parse column failed",
-                                );
-                            }
+                            log_error!(name, err, "parse column failed");
                             None
                         }
                     }
@@ -163,7 +149,7 @@ mod tests {
     use mysql_async::Row as MySqlRow;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::row::Row;
-    use risingwave_common::types::{DataType, ToText};
+    use risingwave_common::types::DataType;
     use tokio_stream::StreamExt;
 
     use crate::parser::mysql_row_to_owned_row;
@@ -201,7 +187,7 @@ mod tests {
                 let d = owned_row.datum_at(2);
                 if let Some(scalar) = d {
                     let v = scalar.into_timestamptz();
-                    println!("timestamp: {}", v.to_text());
+                    println!("timestamp: {:?}", v);
                 }
             }
         }

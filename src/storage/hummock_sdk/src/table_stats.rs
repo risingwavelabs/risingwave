@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use std::borrow::Borrow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
+use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::PbTableStats;
 
 use crate::version::HummockVersion;
@@ -105,14 +106,13 @@ pub fn from_prost_table_stats_map(
 pub fn purge_prost_table_stats(
     table_stats: &mut PbTableStatsMap,
     hummock_version: &HummockVersion,
-) {
-    let mut all_tables_in_version: HashSet<u32> = HashSet::default();
-    for group in hummock_version.levels.keys() {
-        hummock_version.level_iter(*group, |level| {
-            all_tables_in_version
-                .extend(level.table_infos.iter().flat_map(|s| s.table_ids.clone()));
-            true
-        })
-    }
-    table_stats.retain(|k, _| all_tables_in_version.contains(k));
+) -> bool {
+    let prev_count = table_stats.len();
+    table_stats.retain(|table_id, _| {
+        hummock_version
+            .state_table_info
+            .info()
+            .contains_key(&TableId::new(*table_id))
+    });
+    prev_count != table_stats.len()
 }

@@ -16,14 +16,12 @@
 // This source code is licensed under both the GPLv2 (found in the
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::catalog::TableOption;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
+use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{compact_task, CompactionConfig, LevelType};
+use risingwave_pb::hummock::compact_task::PbTaskType;
+use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::{
     create_compaction_task, CompactionSelector, LevelCompactionPicker, TierCompactionPicker,
@@ -33,11 +31,11 @@ use crate::hummock::compaction::picker::{
     CompactionPicker, CompactionTaskValidator, IntraCompactionPicker, LocalPickerStatistic,
     MinOverlappingPicker,
 };
+use crate::hummock::compaction::selector::CompactionSelectorContext;
 use crate::hummock::compaction::{
-    create_overlap_strategy, CompactionDeveloperConfig, CompactionTask, LocalSelectorStatistic,
+    create_overlap_strategy, CompactionDeveloperConfig, CompactionTask,
 };
 use crate::hummock::level_handler::LevelHandler;
-use crate::hummock::model::CompactionGroup;
 
 pub const SCORE_BASE: u64 = 100;
 
@@ -229,7 +227,7 @@ impl DynamicLevelSelectorCore {
                 .unwrap()
                 .sub_levels
                 .iter()
-                .filter(|level| level.level_type() == LevelType::Overlapping)
+                .filter(|level| level.level_type == LevelType::Overlapping)
                 .map(|level| level.table_infos.len())
                 .sum::<usize>();
             if overlapping_file_count > 0 {
@@ -258,7 +256,7 @@ impl DynamicLevelSelectorCore {
                 .iter()
                 .filter(|level| {
                     level.vnode_partition_count == self.config.split_weight_by_vnode
-                        && level.level_type() == LevelType::Nonoverlapping
+                        && level.level_type == LevelType::Nonoverlapping
                 })
                 .map(|level| level.total_file_size)
                 .sum::<u64>()
@@ -276,7 +274,7 @@ impl DynamicLevelSelectorCore {
                 .unwrap()
                 .sub_levels
                 .iter()
-                .filter(|level| level.level_type() == LevelType::Nonoverlapping)
+                .filter(|level| level.level_type == LevelType::Nonoverlapping)
                 .count() as u64;
             let non_overlapping_level_score = non_overlapping_level_count * SCORE_BASE
                 / std::cmp::max(
@@ -314,14 +312,9 @@ impl DynamicLevelSelectorCore {
             if level_idx < ctx.base_level || level_idx >= self.config.max_level as usize {
                 continue;
             }
-            let upper_level = if level_idx == ctx.base_level {
-                0
-            } else {
-                level_idx - 1
-            };
-            let total_size = level.total_file_size
-                + handlers[upper_level].get_pending_output_file_size(level.level_idx)
-                - handlers[level_idx].get_pending_output_file_size(level.level_idx + 1);
+            let output_file_size =
+                handlers[level_idx].get_pending_output_file_size(level.level_idx + 1);
+            let total_size = level.total_file_size.saturating_sub(output_file_size);
             if total_size == 0 {
                 continue;
             }
@@ -382,7 +375,7 @@ impl DynamicLevelSelectorCore {
         let mut level_bytes;
         let mut next_level_bytes = 0;
         for level in &levels.levels[ctx.base_level - 1..levels.levels.len()] {
-            let level_index = level.get_level_idx() as usize;
+            let level_index = level.level_idx as usize;
 
             if next_level_bytes > 0 {
                 level_bytes = next_level_bytes;
@@ -425,13 +418,16 @@ impl CompactionSelector for DynamicLevelSelector {
     fn pick_compaction(
         &mut self,
         task_id: HummockCompactionTaskId,
-        compaction_group: &CompactionGroup,
-        levels: &Levels,
-        level_handlers: &mut [LevelHandler],
-        selector_stats: &mut LocalSelectorStatistic,
-        _table_id_to_options: HashMap<u32, TableOption>,
-        developer_config: Arc<CompactionDeveloperConfig>,
+        context: CompactionSelectorContext<'_>,
     ) -> Option<CompactionTask> {
+        let CompactionSelectorContext {
+            group: compaction_group,
+            levels,
+            level_handlers,
+            selector_stats,
+            developer_config,
+            ..
+        } = context;
         let dynamic_level_core = DynamicLevelSelectorCore::new(
             compaction_group.compaction_config.clone(),
             developer_config,
@@ -476,20 +472,21 @@ impl CompactionSelector for DynamicLevelSelector {
         "DynamicLevelSelector"
     }
 
-    fn task_type(&self) -> compact_task::TaskType {
-        compact_task::TaskType::Dynamic
+    fn task_type(&self) -> PbTaskType {
+        PbTaskType::Dynamic
     }
 }
 
 #[cfg(test)]
 pub mod tests {
-    use std::collections::HashMap;
+    use std::collections::{BTreeSet, HashMap};
     use std::sync::Arc;
 
     use itertools::Itertools;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
+    use risingwave_hummock_sdk::level::Levels;
+    use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
     use risingwave_pb::hummock::compaction_config::CompactionMode;
-    use risingwave_pb::hummock::hummock_version::Levels;
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::selector::tests::{
@@ -502,6 +499,7 @@ pub mod tests {
     use crate::hummock::compaction::CompactionDeveloperConfig;
     use crate::hummock::level_handler::LevelHandler;
     use crate::hummock::model::CompactionGroup;
+    use crate::hummock::test_utils::compaction_selector_context;
 
     #[test]
     fn test_dynamic_level() {
@@ -588,7 +586,7 @@ pub mod tests {
             .max_compaction_bytes(10000)
             .level0_tier_compact_file_number(4)
             .compaction_mode(CompactionMode::Range as i32)
-            .level0_sub_level_compact_level_count(1)
+            .level0_sub_level_compact_level_count(3)
             .build();
         let group_config = CompactionGroup::new(1, config.clone());
         let levels = vec![
@@ -605,7 +603,6 @@ pub mod tests {
                 3,
                 10,
             ))),
-            member_table_ids: vec![1],
             ..Default::default()
         };
 
@@ -615,12 +612,17 @@ pub mod tests {
         let compaction = selector
             .pick_compaction(
                 1,
-                &group_config,
-                &levels,
-                &mut levels_handlers,
-                &mut local_stats,
-                HashMap::default(),
-                Arc::new(CompactionDeveloperConfig::default()),
+                compaction_selector_context(
+                    &group_config,
+                    &levels,
+                    &BTreeSet::new(),
+                    &mut levels_handlers,
+                    &mut local_stats,
+                    &HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
+                    &Default::default(),
+                    &HummockVersionStateTableInfo::empty(),
+                ),
             )
             .unwrap();
         assert_compaction_task(&compaction, &levels_handlers);
@@ -642,12 +644,17 @@ pub mod tests {
         let compaction = selector
             .pick_compaction(
                 1,
-                &group_config,
-                &levels,
-                &mut levels_handlers,
-                &mut local_stats,
-                HashMap::default(),
-                Arc::new(CompactionDeveloperConfig::default()),
+                compaction_selector_context(
+                    &group_config,
+                    &levels,
+                    &BTreeSet::new(),
+                    &mut levels_handlers,
+                    &mut local_stats,
+                    &HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
+                    &Default::default(),
+                    &HummockVersionStateTableInfo::empty(),
+                ),
             )
             .unwrap();
         assert_compaction_task(&compaction, &levels_handlers);
@@ -661,12 +668,17 @@ pub mod tests {
         let compaction = selector
             .pick_compaction(
                 2,
-                &group_config,
-                &levels,
-                &mut levels_handlers,
-                &mut local_stats,
-                HashMap::default(),
-                Arc::new(CompactionDeveloperConfig::default()),
+                compaction_selector_context(
+                    &group_config,
+                    &levels,
+                    &BTreeSet::new(),
+                    &mut levels_handlers,
+                    &mut local_stats,
+                    &HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
+                    &Default::default(),
+                    &HummockVersionStateTableInfo::empty(),
+                ),
             )
             .unwrap();
         assert_compaction_task(&compaction, &levels_handlers);
@@ -676,7 +688,7 @@ pub mod tests {
             compaction.input.input_levels[0]
                 .table_infos
                 .iter()
-                .map(|sst| sst.get_sst_id())
+                .map(|sst| sst.sst_id)
                 .collect_vec(),
             vec![5]
         );
@@ -684,7 +696,7 @@ pub mod tests {
             compaction.input.input_levels[1]
                 .table_infos
                 .iter()
-                .map(|sst| sst.get_sst_id())
+                .map(|sst| sst.sst_id)
                 .collect_vec(),
             vec![10]
         );
@@ -697,12 +709,17 @@ pub mod tests {
         // to score.
         let compaction = selector.pick_compaction(
             2,
-            &group_config,
-            &levels,
-            &mut levels_handlers,
-            &mut local_stats,
-            HashMap::default(),
-            Arc::new(CompactionDeveloperConfig::default()),
+            compaction_selector_context(
+                &group_config,
+                &levels,
+                &BTreeSet::new(),
+                &mut levels_handlers,
+                &mut local_stats,
+                &HashMap::default(),
+                Arc::new(CompactionDeveloperConfig::default()),
+                &Default::default(),
+                &HummockVersionStateTableInfo::empty(),
+            ),
         );
         assert!(compaction.is_none());
     }

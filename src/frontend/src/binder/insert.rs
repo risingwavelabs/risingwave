@@ -22,7 +22,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem};
 
 use super::statement::RewriteExprsRecursive;
 use super::BoundQuery;
-use crate::binder::Binder;
+use crate::binder::{Binder, Clause};
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef};
@@ -102,6 +102,8 @@ impl Binder {
         returning_items: Vec<SelectItem>,
     ) -> Result<BoundInsert> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
+        // bind insert table
+        self.context.clause = Some(Clause::Insert);
         self.bind_table(schema_name.as_deref(), &table_name, None)?;
 
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, true)?;
@@ -173,14 +175,14 @@ impl Binder {
         // is given and it is NOT equivalent to assignment cast over potential implicit cast inside.
         // For example, the following is valid:
         //
-        // ```
+        // ```sql
         //   create table t (v1 time);
         //   insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
         // ```
         //
         // But the followings are not:
         //
-        // ```
+        // ```sql
         //   values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
         //   insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05') limit 1;
         // ```

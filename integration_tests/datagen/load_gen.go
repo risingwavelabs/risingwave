@@ -6,6 +6,7 @@ import (
 	"datagen/ad_ctr"
 	"datagen/cdn_metrics"
 	"datagen/clickstream"
+	"datagen/compatible_data"
 	"datagen/delivery"
 	"datagen/ecommerce"
 	"datagen/gen"
@@ -15,6 +16,7 @@ import (
 	"datagen/sink/kafka"
 	"datagen/sink/kinesis"
 	"datagen/sink/mysql"
+	"datagen/sink/nats"
 	"datagen/sink/postgres"
 	"datagen/sink/pulsar"
 	"datagen/sink/s3"
@@ -39,6 +41,8 @@ func createSink(ctx context.Context, cfg gen.GeneratorConfig) (sink.Sink, error)
 		return kinesis.OpenKinesisSink(cfg.Kinesis)
 	} else if cfg.Sink == "s3" {
 		return s3.OpenS3Sink(cfg.S3)
+	} else if cfg.Sink == "nats" {
+		return nats.OpenNatsSink(cfg.Nats)
 	} else {
 		return nil, fmt.Errorf("invalid sink type: %s", cfg.Sink)
 	}
@@ -64,6 +68,8 @@ func newGen(cfg gen.GeneratorConfig) (gen.LoadGenerator, error) {
 		return livestream.NewLiveStreamMetricsGen(cfg), nil
 	} else if cfg.Mode == "nexmark" {
 		return nexmark.NewNexmarkGen(cfg), nil
+	} else if cfg.Mode == "compatible-data" {
+		return compatible_data.NewCompatibleDataGen(), nil
 	} else {
 		return nil, fmt.Errorf("invalid mode: %s", cfg.Mode)
 	}
@@ -144,6 +150,13 @@ func generateLoad(ctx context.Context, cfg gen.GeneratorConfig) error {
 				if err := sinkImpl.Flush(ctx); err != nil {
 					return err
 				}
+			}
+			if cfg.TotalEvents > 0 && count >= cfg.TotalEvents {
+				if err := sinkImpl.Flush(ctx); err != nil {
+					return err
+				}
+				log.Printf("Sent %d records in total (Elapsed: %s)", count, time.Since(initTime).String())
+				return nil
 			}
 		}
 	}

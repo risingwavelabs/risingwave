@@ -45,6 +45,10 @@ impl Row {
     pub fn values(&self) -> &[Option<Bytes>] {
         &self.0
     }
+
+    pub fn take(self) -> Vec<Option<Bytes>> {
+        self.0
+    }
 }
 
 impl Index<usize> for Row {
@@ -55,6 +59,7 @@ impl Index<usize> for Row {
     }
 }
 
+/// <https://www.postgresql.org/docs/current/protocol-overview.html#PROTOCOL-FORMAT-CODES>
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
     Binary,

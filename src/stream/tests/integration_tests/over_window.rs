@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use risingwave_common::session_config::OverWindowCachePolicy;
-use risingwave_expr::aggregate::{AggArgs, AggKind};
+use risingwave_expr::aggregate::{AggArgs, PbAggKind};
 use risingwave_expr::window_function::{
     Frame, FrameBound, FrameExclusion, WindowFuncCall, WindowFuncKind,
 };
 use risingwave_stream::executor::monitor::StreamingMetrics;
-use risingwave_stream::executor::{ExecutorInfo, OverWindowExecutor, OverWindowExecutorArgs};
+use risingwave_stream::executor::{OverWindowExecutor, OverWindowExecutorArgs};
 
 use crate::prelude::*;
 
@@ -63,7 +63,6 @@ async fn create_executor<S: StateStore>(
         });
         Schema { fields }
     };
-    let output_pk_indices = vec![2];
 
     let state_table = StateTable::new_without_distribution(
         store,
@@ -74,17 +73,14 @@ async fn create_executor<S: StateStore>(
     )
     .await;
 
-    let (tx, source) = MockSource::channel(input_schema, input_pk_indices.clone());
+    let (tx, source) = MockSource::channel();
+    let source = source.into_executor(input_schema, input_pk_indices.clone());
     let executor = OverWindowExecutor::new(OverWindowExecutorArgs {
         actor_ctx: ActorContext::for_test(123),
-        info: ExecutorInfo {
-            schema: output_schema,
-            pk_indices: output_pk_indices,
-            identity: "OverWindowExecutor".to_string(),
-        },
 
-        input: source.boxed(),
+        input: source,
 
+        schema: output_schema,
         calls,
         partition_key_indices,
         order_key_indices,
@@ -108,15 +104,15 @@ async fn test_over_window_lag_lead_append_only() {
     let calls = vec![
         // lag(x, 1)
         WindowFuncCall {
-            kind: WindowFuncKind::Aggregate(AggKind::FirstValue),
-            args: AggArgs::Unary(DataType::Int32, 3),
+            kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
             return_type: DataType::Int32,
             frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Preceding(1)),
         },
         // lead(x, 1)
         WindowFuncCall {
-            kind: WindowFuncKind::Aggregate(AggKind::FirstValue),
-            args: AggArgs::Unary(DataType::Int32, 3),
+            kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
             return_type: DataType::Int32,
             frame: Frame::rows(FrameBound::Following(1), FrameBound::Following(1)),
         },
@@ -219,15 +215,15 @@ async fn test_over_window_lag_lead_with_updates() {
     let calls = vec![
         // lag(x, 1)
         WindowFuncCall {
-            kind: WindowFuncKind::Aggregate(AggKind::FirstValue),
-            args: AggArgs::Unary(DataType::Int32, 3),
+            kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
             return_type: DataType::Int32,
             frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Preceding(1)),
         },
         // lead(x, 1)
         WindowFuncCall {
-            kind: WindowFuncKind::Aggregate(AggKind::FirstValue),
-            args: AggArgs::Unary(DataType::Int32, 3),
+            kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
             return_type: DataType::Int32,
             frame: Frame::rows(FrameBound::Following(1), FrameBound::Following(1)),
         },
@@ -394,8 +390,8 @@ async fn test_over_window_sum() {
         //   rows between 1 preceding and 2 following exclude current row
         // )
         WindowFuncCall {
-            kind: WindowFuncKind::Aggregate(AggKind::Sum),
-            args: AggArgs::Unary(DataType::Int32, 3),
+            kind: WindowFuncKind::Aggregate(PbAggKind::Sum.into()),
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
             return_type: DataType::Int64,
             frame: Frame::rows_with_exclusion(
                 FrameBound::Preceding(1),

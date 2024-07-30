@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::manager::{LocalNotification, MetadataManager};
 use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::ThrottleConfig;
@@ -108,7 +108,7 @@ impl StreamManagerService for StreamServiceImpl {
         let request = request.into_inner();
 
         let actor_to_apply = match request.kind() {
-            ThrottleTarget::Source => {
+            ThrottleTarget::Source | ThrottleTarget::TableWithSource => {
                 self.metadata_manager
                     .update_source_rate_limit_by_source_id(request.id as SourceId, request.rate)
                     .await?
@@ -284,6 +284,7 @@ impl StreamManagerService for StreamServiceImpl {
                     .map(|(table_id, state, parallelism)| {
                         let parallelism = match parallelism {
                             StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
+                            StreamingParallelism::Custom => model::TableParallelism::Custom,
                             StreamingParallelism::Fixed(n) => {
                                 model::TableParallelism::Fixed(n as _)
                             }
@@ -373,7 +374,7 @@ impl StreamManagerService for StreamServiceImpl {
                                 actor_id,
                                 fragment_id: actor_to_fragment[&actor_id],
                                 state: status.state,
-                                parallel_unit_id: status.parallel_unit.as_ref().unwrap().id,
+                                worker_id: status.worker_id(),
                             }
                         })
                     })
@@ -387,12 +388,39 @@ impl StreamManagerService for StreamServiceImpl {
                         actor_id: actor_location.actor_id as _,
                         fragment_id: actor_location.fragment_id as _,
                         state: PbActorState::from(actor_location.status) as _,
-                        parallel_unit_id: actor_location.parallel_unit_id as _,
+                        worker_id: actor_location.worker_id as _,
                     })
                     .collect_vec()
             }
         };
 
         Ok(Response::new(ListActorStatesResponse { states }))
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn list_object_dependencies(
+        &self,
+        _request: Request<ListObjectDependenciesRequest>,
+    ) -> Result<Response<ListObjectDependenciesResponse>, Status> {
+        let dependencies = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_object_dependencies().await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.list_object_dependencies().await?,
+        };
+
+        Ok(Response::new(ListObjectDependenciesResponse {
+            dependencies,
+        }))
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn recover(
+        &self,
+        _request: Request<RecoverRequest>,
+    ) -> Result<Response<RecoverResponse>, Status> {
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(LocalNotification::AdhocRecovery)
+            .await;
+        Ok(Response::new(RecoverResponse {}))
     }
 }

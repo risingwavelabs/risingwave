@@ -32,12 +32,12 @@ import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis } from "recharts"
 import { Metrics, MetricsSample } from "../components/metrics"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
-import { WorkerNode } from "../proto/gen/common"
 import {
   getClusterInfoComputeNode,
   getClusterInfoFrontend,
   getClusterMetrics,
-} from "./api/cluster"
+} from "../lib/api/cluster"
+import { WorkerNode } from "../proto/gen/common"
 
 function WorkerNodeComponent({
   workerNodeType,

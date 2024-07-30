@@ -13,20 +13,21 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::zip_eq_fast;
-use risingwave_common::{bail_not_implemented, not_implemented};
+use risingwave_common::{bail_no_function, bail_not_implemented, not_implemented};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
 use risingwave_sqlparser::ast::{
-    Array, BinaryOperator, DataType as AstDataType, Expr, Function, JsonPredicateType, ObjectName,
-    Query, StructField, TrimWhereField, UnaryOperator,
+    Array, BinaryOperator, DataType as AstDataType, EscapeChar, Expr, Function, JsonPredicateType,
+    ObjectName, Query, StructField, TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
 use crate::binder::Binder;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
+use crate::handler::create_sql_function::SQL_UDF_PATTERN;
 
 mod binary_op;
 mod column;
@@ -73,7 +74,7 @@ impl Binder {
             Expr::Identifier(ident) => {
                 if SYS_FUNCTION_WITHOUT_ARGS
                     .iter()
-                    .any(|e| ident.real_value().as_str() == *e)
+                    .any(|e| ident.real_value().as_str() == *e && ident.quote_style().is_none())
                 {
                     // Rewrite a system variable to a function call, e.g. `SELECT current_schema;`
                     // will be rewritten to `SELECT current_schema();`.
@@ -146,12 +147,24 @@ impl Binder {
                 low,
                 high,
             } => self.bind_between(*expr, negated, *low, *high),
+            Expr::Like {
+                negated,
+                expr,
+                pattern,
+                escape_char,
+            } => self.bind_like(ExprType::Like, *expr, negated, *pattern, escape_char),
+            Expr::ILike {
+                negated,
+                expr,
+                pattern,
+                escape_char,
+            } => self.bind_like(ExprType::ILike, *expr, negated, *pattern, escape_char),
             Expr::SimilarTo {
                 expr,
                 negated,
-                pat,
-                esc_text,
-            } => self.bind_similar_to(*expr, negated, *pat, esc_text),
+                pattern,
+                escape_char,
+            } => self.bind_similar_to(*expr, negated, *pattern, escape_char),
             Expr::InList {
                 expr,
                 list,
@@ -162,7 +175,7 @@ impl Binder {
             Expr::AtTimeZone {
                 timestamp,
                 time_zone,
-            } => self.bind_at_time_zone(*timestamp, time_zone),
+            } => self.bind_at_time_zone(*timestamp, *time_zone),
             // special syntax for string
             Expr::Trim {
                 expr,
@@ -206,9 +219,9 @@ impl Binder {
         .into())
     }
 
-    pub(super) fn bind_at_time_zone(&mut self, input: Expr, time_zone: String) -> Result<ExprImpl> {
+    pub(super) fn bind_at_time_zone(&mut self, input: Expr, time_zone: Expr) -> Result<ExprImpl> {
         let input = self.bind_expr_inner(input)?;
-        let time_zone = self.bind_string(time_zone)?.into();
+        let time_zone = self.bind_expr_inner(time_zone)?;
         FunctionCall::new(ExprType::AtTimeZone, vec![input, time_zone]).map(Into::into)
     }
 
@@ -393,6 +406,12 @@ impl Binder {
             if let Some(expr) = self.udf_context.get_expr(&format!("${index}")) {
                 return Ok(expr.clone());
             }
+            // Same as `bind_column`, the error message here
+            // help with hint display when invalid definition occurs
+            return Err(ErrorCode::BindError(format!(
+                "{SQL_UDF_PATTERN} failed to find unnamed parameter ${index}"
+            ))
+            .into());
         }
 
         Ok(Parameter::new(index, self.param_types.clone()).into())
@@ -436,22 +455,77 @@ impl Binder {
         Ok(func_call.into())
     }
 
+    fn bind_like(
+        &mut self,
+        expr_type: ExprType,
+        expr: Expr,
+        negated: bool,
+        pattern: Expr,
+        escape_char: Option<EscapeChar>,
+    ) -> Result<ExprImpl> {
+        if matches!(pattern, Expr::AllOp(_) | Expr::SomeOp(_)) {
+            if escape_char.is_some() {
+                // PostgreSQL also don't support the pattern due to the complexity of implementation.
+                // The SQL will failed on PostgreSQL 16.1:
+                // ```sql
+                // select 'a' like any(array[null]) escape '';
+                // ```
+                bail_not_implemented!(
+                    "LIKE with both ALL|ANY pattern and escape character is not supported"
+                )
+            }
+            // Use the `bind_binary_op` path to handle the ALL|ANY pattern.
+            let op = match (expr_type, negated) {
+                (ExprType::Like, false) => BinaryOperator::PGLikeMatch,
+                (ExprType::Like, true) => BinaryOperator::PGNotLikeMatch,
+                (ExprType::ILike, false) => BinaryOperator::PGILikeMatch,
+                (ExprType::ILike, true) => BinaryOperator::PGNotILikeMatch,
+                _ => unreachable!(),
+            };
+            return self.bind_binary_op(expr, op, pattern);
+        }
+        let expr = self.bind_expr_inner(expr)?;
+        let pattern = self.bind_expr_inner(pattern)?;
+        match (expr.return_type(), pattern.return_type()) {
+            (DataType::Varchar, DataType::Varchar) => {}
+            (string_ty, pattern_ty) => match expr_type {
+                ExprType::Like => bail_no_function!("like({}, {})", string_ty, pattern_ty),
+                ExprType::ILike => bail_no_function!("ilike({}, {})", string_ty, pattern_ty),
+                _ => unreachable!(),
+            },
+        }
+        let args = match escape_char {
+            Some(escape_char) => {
+                let escape_char = ExprImpl::literal_varchar(escape_char.to_string());
+                vec![expr, pattern, escape_char]
+            }
+            None => vec![expr, pattern],
+        };
+        let func_call = FunctionCall::new_unchecked(expr_type, args, DataType::Boolean);
+        let func_call = if negated {
+            FunctionCall::new_unchecked(ExprType::Not, vec![func_call.into()], DataType::Boolean)
+        } else {
+            func_call
+        };
+        Ok(func_call.into())
+    }
+
     /// Bind `<expr> [ NOT ] SIMILAR TO <pat> ESCAPE <esc_text>`
     pub(super) fn bind_similar_to(
         &mut self,
         expr: Expr,
         negated: bool,
-        pat: Expr,
-        esc_text: Option<Box<Expr>>,
+        pattern: Expr,
+        escape_char: Option<EscapeChar>,
     ) -> Result<ExprImpl> {
         let expr = self.bind_expr_inner(expr)?;
-        let pat = self.bind_expr_inner(pat)?;
+        let pattern = self.bind_expr_inner(pattern)?;
 
-        let esc_inputs = if let Some(et) = esc_text {
-            let esc_text = self.bind_expr_inner(*et)?;
-            vec![pat, esc_text]
+        let esc_inputs = if let Some(escape_char) = escape_char {
+            let escape_char = ExprImpl::literal_varchar(escape_char.to_string());
+            vec![pattern, escape_char]
         } else {
-            vec![pat]
+            vec![pattern]
         };
 
         let esc_call =
@@ -471,6 +545,181 @@ impl Binder {
         Ok(func_call.into())
     }
 
+    /// The optimization check for the following case-when expression pattern
+    /// e.g., select case 1 when (...) then (...) else (...) end;
+    fn check_constant_case_when_optimization(
+        &mut self,
+        conditions: Vec<Expr>,
+        results_expr: Vec<ExprImpl>,
+        operand: Option<Box<Expr>>,
+        fallback: Option<ExprImpl>,
+        constant_case_when_eval_inputs: &mut Vec<ExprImpl>,
+    ) -> bool {
+        // The operand value to be compared later
+        let operand_value;
+
+        if let Some(operand) = operand {
+            let Ok(operand) = self.bind_expr_inner(*operand) else {
+                return false;
+            };
+            if !operand.is_const() {
+                return false;
+            }
+            operand_value = operand;
+        } else {
+            return false;
+        }
+
+        for (condition, result) in zip_eq_fast(conditions, results_expr) {
+            if let Expr::Value(_) = condition.clone() {
+                let Ok(res) = self.bind_expr_inner(condition.clone()) else {
+                    return false;
+                };
+                // Found a match
+                if res == operand_value {
+                    constant_case_when_eval_inputs.push(result);
+                    return true;
+                }
+            } else {
+                return false;
+            }
+        }
+
+        // Otherwise this will eventually go through fallback arm
+        debug_assert!(
+            constant_case_when_eval_inputs.is_empty(),
+            "expect `inputs` to be empty"
+        );
+
+        let Some(fallback) = fallback else {
+            return false;
+        };
+
+        constant_case_when_eval_inputs.push(fallback);
+        true
+    }
+
+    /// Helper function to compare or set column identifier
+    /// used in `check_convert_simple_form`
+    fn compare_or_set(col_expr: &mut Option<Expr>, test_expr: Expr) -> bool {
+        let Expr::Identifier(test_ident) = test_expr else {
+            return false;
+        };
+        if let Some(expr) = col_expr {
+            let Expr::Identifier(ident) = expr else {
+                return false;
+            };
+            if ident.real_value() != test_ident.real_value() {
+                return false;
+            }
+        } else {
+            *col_expr = Some(Expr::Identifier(test_ident));
+        }
+        true
+    }
+
+    /// left expression and right expression must be either:
+    /// `<constant> <Eq> <identifier>` or `<identifier> <Eq> <constant>`
+    /// used in `check_convert_simple_form`
+    fn check_invariant(left: Expr, op: BinaryOperator, right: Expr) -> bool {
+        if op != BinaryOperator::Eq {
+            return false;
+        }
+        if let Expr::Identifier(_) = left {
+            // <identifier> <Eq> <constant>
+            let Expr::Value(_) = right else {
+                return false;
+            };
+        } else {
+            // <constant> <Eq> <identifier>
+            let Expr::Value(_) = left else {
+                return false;
+            };
+            let Expr::Identifier(_) = right else {
+                return false;
+            };
+        }
+        true
+    }
+
+    /// Helper function to extract expression out and insert
+    /// the corresponding bound version to `inputs`
+    /// used in `check_convert_simple_form`
+    /// Note: this function will be invoked per arm
+    fn try_extract_simple_form(
+        &mut self,
+        ident_expr: Expr,
+        constant_expr: Expr,
+        column_expr: &mut Option<Expr>,
+        inputs: &mut Vec<ExprImpl>,
+    ) -> bool {
+        if !Self::compare_or_set(column_expr, ident_expr) {
+            return false;
+        }
+        let Ok(bound_expr) = self.bind_expr_inner(constant_expr) else {
+            return false;
+        };
+        inputs.push(bound_expr);
+        true
+    }
+
+    /// See if the case when expression in form
+    /// `select case when <expr_1 = constant> (...with same pattern...) else <constant> end;`
+    /// If so, this expression could also be converted to constant lookup
+    fn check_convert_simple_form(
+        &mut self,
+        conditions: Vec<Expr>,
+        results_expr: Vec<ExprImpl>,
+        fallback: Option<ExprImpl>,
+        constant_lookup_inputs: &mut Vec<ExprImpl>,
+    ) -> bool {
+        let mut column_expr = None;
+
+        for (condition, result) in zip_eq_fast(conditions, results_expr) {
+            if let Expr::BinaryOp { left, op, right } = condition {
+                if !Self::check_invariant(*(left.clone()), op.clone(), *(right.clone())) {
+                    return false;
+                }
+                if let Expr::Identifier(_) = *(left.clone()) {
+                    if !self.try_extract_simple_form(
+                        *left,
+                        *right,
+                        &mut column_expr,
+                        constant_lookup_inputs,
+                    ) {
+                        return false;
+                    }
+                } else if !self.try_extract_simple_form(
+                    *right,
+                    *left,
+                    &mut column_expr,
+                    constant_lookup_inputs,
+                ) {
+                    return false;
+                }
+                constant_lookup_inputs.push(result);
+            } else {
+                return false;
+            }
+        }
+
+        // Insert operand first
+        let Some(operand) = column_expr else {
+            return false;
+        };
+        let Ok(bound_operand) = self.bind_expr_inner(operand) else {
+            return false;
+        };
+        constant_lookup_inputs.insert(0, bound_operand);
+
+        // fallback insertion
+        if let Some(expr) = fallback {
+            constant_lookup_inputs.push(expr);
+        }
+
+        true
+    }
+
     /// The helper function to check if the current case-when
     /// expression in `bind_case` could be optimized
     /// into `ConstantLookupExpression`
@@ -486,16 +735,26 @@ impl Binder {
             return false;
         }
 
-        // TODO(Zihao): we could possibly optimize some simple cases when
-        // `operand` is None in the future, the current choice is not conducting the optimization.
-        // e.g., select case when c1 = 1 then (...) when (same pattern) then (... ) [else (...)] end from t1;
         if let Some(operand) = operand {
             let Ok(operand) = self.bind_expr_inner(*operand) else {
                 return false;
             };
+            // This optimization should be done in subsequent optimization phase
+            // if the operand is const
+            // e.g., select case 1 when 1 then 114514 else 1919810 end;
+            if operand.is_const() {
+                return false;
+            }
             constant_lookup_inputs.push(operand);
         } else {
-            return false;
+            // Try converting to simple form
+            // see the example as illustrated in `check_convert_simple_form`
+            return self.check_convert_simple_form(
+                conditions,
+                results_expr,
+                fallback,
+                constant_lookup_inputs,
+            );
         }
 
         for (condition, result) in zip_eq_fast(conditions, results_expr) {
@@ -506,7 +765,7 @@ impl Binder {
                 constant_lookup_inputs.push(input);
             } else {
                 // If at least one condition is not in the simple form / not constant,
-                // we can NOT do the subsequent optimization then
+                // we can NOT do the subsequent optimization pass
                 return false;
             }
 
@@ -538,6 +797,27 @@ impl Binder {
             .transpose()?;
 
         let mut constant_lookup_inputs = Vec::new();
+        let mut constant_case_when_eval_inputs = Vec::new();
+
+        let constant_case_when_flag = self.check_constant_case_when_optimization(
+            conditions.clone(),
+            results_expr.clone(),
+            operand.clone(),
+            else_result_expr.clone(),
+            &mut constant_case_when_eval_inputs,
+        );
+
+        if constant_case_when_flag {
+            // Sanity check
+            if constant_case_when_eval_inputs.len() != 1 {
+                return Err(ErrorCode::BindError(
+                    "expect `constant_case_when_eval_inputs` only contains a single bound expression".to_string()
+                )
+                .into());
+            }
+            // Directly return the first element of the vector
+            return Ok(constant_case_when_eval_inputs[0].take());
+        }
 
         // See if the case-when expression can be optimized
         let optimize_flag = self.check_bind_case_optimization(
@@ -722,10 +1002,23 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 .collect::<Result<Vec<_>>>()?,
             types.iter().map(|f| f.name.real_value()).collect_vec(),
         ),
-        AstDataType::Custom(qualified_type_name) if qualified_type_name.0.len() == 1 => {
-            // In PostgreSQL, these are not keywords but pre-defined names that could be extended by
-            // `CREATE TYPE`.
-            match qualified_type_name.0[0].real_value().as_str() {
+        AstDataType::Custom(qualified_type_name) => {
+            let idents = qualified_type_name
+                .0
+                .iter()
+                .map(|n| n.real_value())
+                .collect_vec();
+            let name = if idents.len() == 1 {
+                idents[0].as_str() // `int2`
+            } else if idents.len() == 2 && idents[0] == PG_CATALOG_SCHEMA_NAME {
+                idents[1].as_str() // `pg_catalog.text`
+            } else {
+                return Err(new_err().into());
+            };
+
+            // In PostgreSQL, these are non-keywords or non-reserved keywords but pre-defined
+            // names that could be extended by `CREATE TYPE`.
+            match name {
                 "int2" => DataType::Int16,
                 "int4" => DataType::Int32,
                 "int8" => DataType::Int64,
@@ -733,6 +1026,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 "float4" => DataType::Float32,
                 "float8" => DataType::Float64,
                 "timestamptz" => DataType::Timestamptz,
+                "text" => DataType::Varchar,
                 "serial" => {
                     return Err(ErrorCode::NotSupported(
                         "Column type SERIAL is not supported".into(),
@@ -748,7 +1042,6 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Regclass
         | AstDataType::Regproc
         | AstDataType::Uuid
-        | AstDataType::Custom(_)
         | AstDataType::Decimal(_, _)
         | AstDataType::Time(true) => return Err(new_err().into()),
     };

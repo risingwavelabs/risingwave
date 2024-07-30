@@ -21,17 +21,17 @@ use crate::error::Result;
 
 /// `rw_types` stores all supported types in the database.
 #[derive(Fields)]
-struct RwType {
+pub struct RwType {
     #[primary_key]
-    id: i32,
-    name: String,
-    input_oid: String,
-    typelem: i32,
-    typarray: i32,
+    pub id: i32,
+    pub name: String,
+    pub input_oid: String,
+    pub typelem: i32,
+    pub typarray: i32,
 }
 
 #[system_catalog(table, "rw_catalog.rw_types")]
-fn read_rw_types(_: &SysCatalogReaderImpl) -> Result<Vec<RwType>> {
+pub fn read_rw_types(_: &SysCatalogReaderImpl) -> Result<Vec<RwType>> {
     let mut rows = vec![];
     for (id, name, input_oid, typelem, typarray) in RW_TYPE_DATA {
         rows.push(RwType {

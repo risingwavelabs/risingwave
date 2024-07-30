@@ -12,27 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Debug, Formatter};
-
 use either::Either;
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use multimap::MultiMap;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{ArrayRef, DataChunk, Op};
 use risingwave_common::bail;
-use risingwave_common::catalog::Schema;
-use risingwave_common::row::{Row, RowExt};
-use risingwave_common::types::{DataType, Datum, DatumRef, ToOwnedDatum};
+use risingwave_common::row::RowExt;
+use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::{LogReport, NonStrictExpression};
-use risingwave_expr::table_function::ProjectSetSelectItem;
+use risingwave_expr::expr::{self, EvalErrorReport, NonStrictExpression};
+use risingwave_expr::table_function::{self, BoxedTableFunction, TableFunctionOutputIter};
+use risingwave_expr::ExprError;
+use risingwave_pb::expr::project_set_select_item::PbSelectItem;
+use risingwave_pb::expr::PbProjectSetSelectItem;
 
-use super::error::StreamExecutorError;
-use super::{
-    ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef,
-    StreamExecutorResult, Watermark,
-};
-use crate::common::StreamChunkBuilder;
+use crate::executor::prelude::*;
+use crate::task::ActorEvalErrorReport;
 
 const PROJ_ROW_ID_OFFSET: usize = 1;
 
@@ -40,42 +34,42 @@ const PROJ_ROW_ID_OFFSET: usize = 1;
 /// and returns a new data chunk. And then, `ProjectSetExecutor` will insert, delete
 /// or update element into next operator according to the result of the expression.
 pub struct ProjectSetExecutor {
-    input: BoxedExecutor,
+    input: Executor,
     inner: Inner,
 }
 
 struct Inner {
     _ctx: ActorContextRef,
-    info: ExecutorInfo,
 
-    /// Expressions of the current project_section.
+    /// Expressions of the current `project_section`.
     select_list: Vec<ProjectSetSelectItem>,
     chunk_size: usize,
-    /// All the watermark derivations, (input_column_index, expr_idx). And the
-    /// derivation expression is the project_set's expression itself.
+    /// All the watermark derivations, (`input_column_index`, `expr_idx`). And the
+    /// derivation expression is the `project_set`'s expression itself.
     watermark_derivations: MultiMap<usize, usize>,
     /// Indices of nondecreasing expressions in the expression list.
     nondecreasing_expr_indices: Vec<usize>,
+    error_report: ActorEvalErrorReport,
 }
 
 impl ProjectSetExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
-        input: Box<dyn Executor>,
+        input: Executor,
         select_list: Vec<ProjectSetSelectItem>,
         chunk_size: usize,
         watermark_derivations: MultiMap<usize, usize>,
         nondecreasing_expr_indices: Vec<usize>,
+        error_report: ActorEvalErrorReport,
     ) -> Self {
         let inner = Inner {
             _ctx: ctx,
-            info,
             select_list,
             chunk_size,
             watermark_derivations,
             nondecreasing_expr_indices,
+            error_report,
         };
 
         Self { input, inner }
@@ -90,27 +84,15 @@ impl Debug for ProjectSetExecutor {
     }
 }
 
-impl Executor for ProjectSetExecutor {
+impl Execute for ProjectSetExecutor {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.inner.execute(self.input).boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.inner.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info.identity
     }
 }
 
 impl Inner {
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute(self, input: BoxedExecutor) {
+    async fn execute(self, input: Executor) {
         assert!(!self.select_list.is_empty());
         // First column will be `projected_row_id`, which represents the index in the
         // output table
@@ -177,11 +159,19 @@ impl Inner {
                             for (item, value) in results.iter_mut().zip_eq_fast(&mut row[1..]) {
                                 *value = match item {
                                     Either::Left(state) => {
-                                        if let Some((i, value)) = state.peek()
+                                        if let Some((i, result)) = state.peek()
                                             && i == row_idx
                                         {
-                                            valid = true;
-                                            value
+                                            match result {
+                                                Ok(value) => {
+                                                    valid = true;
+                                                    value
+                                                }
+                                                Err(err) => {
+                                                    self.error_report.report(err);
+                                                    None
+                                                }
+                                            }
                                         } else {
                                             None
                                         }
@@ -251,17 +241,13 @@ impl Inner {
         for expr_idx in expr_indices {
             let expr_idx = *expr_idx;
             let derived_watermark = match &self.select_list[expr_idx] {
-                ProjectSetSelectItem::Expr(expr) => {
+                ProjectSetSelectItem::Scalar(expr) => {
                     watermark
                         .clone()
-                        .transform_with_expr(
-                            // TODO: should we build `expr` in non-strict mode?
-                            &NonStrictExpression::new_topmost(expr, LogReport),
-                            expr_idx + PROJ_ROW_ID_OFFSET,
-                        )
+                        .transform_with_expr(expr, expr_idx + PROJ_ROW_ID_OFFSET)
                         .await
                 }
-                ProjectSetSelectItem::TableFunction(_) => {
+                ProjectSetSelectItem::Set(_) => {
                     bail!("Watermark should not be produced by a table function");
                 }
             };
@@ -270,11 +256,71 @@ impl Inner {
                 ret.push(derived_watermark);
             } else {
                 warn!(
-                    "{} derive a NULL watermark with the expression {}!",
-                    self.info.identity, expr_idx
+                    "a NULL watermark is derived with the expression {}!",
+                    expr_idx
                 );
             }
         }
         Ok(ret)
+    }
+}
+
+/// Either a scalar expression or a set-returning function.
+///
+/// See also [`PbProjectSetSelectItem`].
+///
+/// A similar enum is defined in the `batch` module. The difference is that
+/// we use `NonStrictExpression` instead of `BoxedExpression` here.
+#[derive(Debug)]
+pub enum ProjectSetSelectItem {
+    Scalar(NonStrictExpression),
+    Set(BoxedTableFunction),
+}
+
+impl From<BoxedTableFunction> for ProjectSetSelectItem {
+    fn from(table_function: BoxedTableFunction) -> Self {
+        ProjectSetSelectItem::Set(table_function)
+    }
+}
+
+impl From<NonStrictExpression> for ProjectSetSelectItem {
+    fn from(expr: NonStrictExpression) -> Self {
+        ProjectSetSelectItem::Scalar(expr)
+    }
+}
+
+impl ProjectSetSelectItem {
+    pub fn from_prost(
+        prost: &PbProjectSetSelectItem,
+        error_report: impl EvalErrorReport + 'static,
+        chunk_size: usize,
+    ) -> Result<Self, ExprError> {
+        match prost.select_item.as_ref().unwrap() {
+            PbSelectItem::Expr(expr) => {
+                expr::build_non_strict_from_prost(expr, error_report).map(Self::Scalar)
+            }
+            PbSelectItem::TableFunction(tf) => {
+                table_function::build_from_prost(tf, chunk_size).map(Self::Set)
+            }
+        }
+    }
+
+    pub fn return_type(&self) -> DataType {
+        match self {
+            ProjectSetSelectItem::Scalar(expr) => expr.return_type(),
+            ProjectSetSelectItem::Set(tf) => tf.return_type(),
+        }
+    }
+
+    pub async fn eval<'a>(
+        &'a self,
+        input: &'a DataChunk,
+    ) -> Result<Either<TableFunctionOutputIter<'a>, ArrayRef>, ExprError> {
+        match self {
+            Self::Scalar(expr) => Ok(Either::Right(expr.eval_infallible(input).await)),
+            Self::Set(tf) => Ok(Either::Left(
+                TableFunctionOutputIter::new(tf.eval(input).await).await?,
+            )),
+        }
     }
 }

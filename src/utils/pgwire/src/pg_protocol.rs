@@ -29,7 +29,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::query_log::*;
 use risingwave_common::{PG_VERSION, SERVER_ENCODING, STANDARD_CONFORMING_STRINGS};
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{RedactSqlOptionKeywordsRef, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -101,6 +101,8 @@ where
 
     // Client Address
     peer_addr: AddressRef,
+
+    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
 }
 
 /// Configures TLS encryption for connections.
@@ -152,14 +154,29 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
 }
 
 /// Record `sql` in the current tracing span.
-fn record_sql_in_span(sql: &str) {
+fn record_sql_in_span(sql: &str, redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>) {
+    let redacted_sql = if let Some(keywords) = redact_sql_option_keywords {
+        redact_sql(sql, keywords)
+    } else {
+        sql.to_owned()
+    };
     tracing::Span::current().record(
         "sql",
         tracing::field::display(truncated_fmt::TruncatedFmt(
-            &sql,
+            &redacted_sql,
             *RW_QUERY_LOG_TRUNCATE_LEN,
         )),
     );
+}
+
+fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> String {
+    match Parser::parse_sql(sql) {
+        Ok(sqls) => sqls
+            .into_iter()
+            .map(|sql| sql.to_redacted_string(keywords.clone()))
+            .join(";"),
+        Err(_) => sql.to_owned(),
+    }
 }
 
 impl<S, SM> PgProtocol<S, SM>
@@ -172,6 +189,7 @@ where
         session_mgr: Arc<SM>,
         tls_config: Option<TlsConfig>,
         peer_addr: AddressRef,
+        redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
     ) -> Self {
         Self {
             stream: Conn::Unencrypted(PgStream {
@@ -193,6 +211,7 @@ where
             statement_portal_dependency: Default::default(),
             ignore_util_sync: false,
             peer_addr,
+            redact_sql_option_keywords,
         }
     }
 
@@ -295,6 +314,8 @@ where
             let elapsed = start.elapsed();
 
             // Always log if an error occurs.
+            // Note: all messages will be processed through this code path, making it the
+            //       only necessary place to log errors.
             if let Err(error) = &result {
                 tracing::error!(error = %error.as_report(), "error when process message");
             }
@@ -385,9 +406,10 @@ where
         }
 
         match msg {
+            FeMessage::Gss => self.process_gss_msg().await?,
             FeMessage::Ssl => self.process_ssl_msg().await?,
             FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
-            FeMessage::Password(msg) => self.process_password_msg(msg)?,
+            FeMessage::Password(msg) => self.process_password_msg(msg).await?,
             FeMessage::Query(query_msg) => self.process_query_msg(query_msg.get_sql()).await?,
             FeMessage::CancelQuery(m) => self.process_cancel_msg(m)?,
             FeMessage::Terminate => self.process_terminate(),
@@ -454,11 +476,17 @@ where
         ))
     }
 
+    async fn process_gss_msg(&mut self) -> PsqlResult<()> {
+        // We don't support GSSAPI, so we just say no gracefully.
+        self.stream.write(&BeMessage::EncryptionResponseNo).await?;
+        Ok(())
+    }
+
     async fn process_ssl_msg(&mut self) -> PsqlResult<()> {
         if let Some(context) = self.tls_context.as_ref() {
             // If got and ssl context, say yes for ssl connection.
             // Construct ssl stream and replace with current one.
-            self.stream.write(&BeMessage::EncryptionResponseYes).await?;
+            self.stream.write(&BeMessage::EncryptionResponseSsl).await?;
             let ssl_stream = self.stream.ssl(context).await?;
             self.stream = Conn::Ssl(ssl_stream);
         } else {
@@ -508,7 +536,7 @@ where
                     })?;
                 self.ready_for_query()?;
             }
-            UserAuthenticator::ClearText(_) => {
+            UserAuthenticator::ClearText(_) | UserAuthenticator::OAuth(_) => {
                 self.stream
                     .write_no_flush(&BeMessage::AuthenticationCleartextPassword)?;
             }
@@ -523,11 +551,9 @@ where
         Ok(())
     }
 
-    fn process_password_msg(&mut self, msg: FePasswordMessage) -> PsqlResult<()> {
+    async fn process_password_msg(&mut self, msg: FePasswordMessage) -> PsqlResult<()> {
         let authenticator = self.session.as_ref().unwrap().user_authenticator();
-        if !authenticator.authenticate(&msg.password) {
-            return Err(PsqlError::PasswordError);
-        }
+        authenticator.authenticate(&msg.password).await?;
         self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
         self.stream
             .write_parameter_status_msg_no_flush(&ParameterStatus::default())?;
@@ -548,7 +574,7 @@ where
     async fn process_query_msg(&mut self, query_string: io::Result<&str>) -> PsqlResult<()> {
         let sql: Arc<str> =
             Arc::from(query_string.map_err(|err| PsqlError::SimpleQueryError(Box::new(err)))?);
-        record_sql_in_span(&sql);
+        record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
         let session = self.session.clone().unwrap();
 
         session.check_idle_in_transaction_timeout()?;
@@ -563,11 +589,8 @@ where
         session: Arc<SM::Session>,
     ) -> PsqlResult<()> {
         // Parse sql.
-        let stmts = Parser::parse_sql(&sql)
-            .inspect_err(
-                |e| tracing::error!(sql = &*sql, error = %e.as_report(), "failed to parse sql"),
-            )
-            .map_err(|err| PsqlError::SimpleQueryError(err.into()))?;
+        let stmts =
+            Parser::parse_sql(&sql).map_err(|err| PsqlError::SimpleQueryError(err.into()))?;
         if stmts.is_empty() {
             self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         }
@@ -660,7 +683,7 @@ where
 
     fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
-        record_sql_in_span(sql);
+        record_sql_in_span(sql, self.redact_sql_option_keywords.clone());
         let session = self.session.clone().unwrap();
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
 
@@ -686,9 +709,6 @@ where
 
         let stmt = {
             let stmts = Parser::parse_sql(sql)
-                .inspect_err(
-                    |e| tracing::error!(sql, error = %e.as_report(), "failed to parse sql"),
-                )
                 .map_err(|err| PsqlError::ExtendedPrepareError(err.into()))?;
 
             if stmts.len() > 1 {
@@ -766,7 +786,7 @@ where
             self.unnamed_portal.replace(portal);
         } else {
             assert!(
-                self.result_cache.get(&portal_name).is_none(),
+                !self.result_cache.contains_key(&portal_name),
                 "Named portal never can be overridden."
             );
             self.portal_store.insert(portal_name.clone(), portal);
@@ -797,7 +817,7 @@ where
         } else {
             let portal = self.get_portal(&portal_name)?;
             let sql: Arc<str> = Arc::from(format!("{}", portal));
-            record_sql_in_span(&sql);
+            record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
 
             session.check_idle_in_transaction_timeout()?;
             let _exec_context_guard = session.init_exec_context(sql.clone());
@@ -1202,5 +1222,27 @@ pub mod truncated_fmt {
                 "select '...(truncated)",
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::*;
+
+    #[test]
+    fn test_redact_parsable_sql() {
+        let keywords = Arc::new(HashSet::from(["v2".into(), "v4".into(), "b".into()]));
+        let sql = r"
+        create source temp (k bigint, v varchar) with (
+            connector = 'datagen',
+            v1 = 123,
+            v2 = 'with',
+            v3 = false,
+            v4 = '',
+        ) FORMAT plain ENCODE json (a='1',b='2')
+        ";
+        assert_eq!(redact_sql(sql, keywords), "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = 'datagen', v1 = 123, v2 = [REDACTED], v3 = false, v4 = [REDACTED]) FORMAT PLAIN ENCODE JSON (a = '1', b = [REDACTED])");
     }
 }

@@ -32,6 +32,7 @@ use itertools::Itertools;
 use madsim::runtime::{Handle, NodeHandle};
 use rand::seq::IteratorRandom;
 use rand::Rng;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 #[cfg(madsim)]
 use risingwave_object_store::object::sim::SimServer as ObjectStoreSimServer;
 use risingwave_pb::common::WorkerNode;
@@ -82,7 +83,7 @@ pub struct Configuration {
 
     /// The number of CPU cores for each compute node.
     ///
-    /// This determines worker_node_parallelism.
+    /// This determines `worker_node_parallelism`.
     pub compute_node_cores: usize,
 
     /// Queries to run per session.
@@ -166,7 +167,7 @@ impl Configuration {
             meta_nodes: 3,
             compactor_nodes: 2,
             compute_node_cores: 2,
-            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL = false;".into()]
+            per_session_queries: vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".into()]
                 .into(),
             ..Default::default()
         }
@@ -186,6 +187,9 @@ impl Configuration {
                 r#"[meta]
 max_heartbeat_interval_secs = {max_heartbeat_interval_secs}
 disable_automatic_parallelism_control = {disable_automatic_parallelism_control}
+parallelism_control_trigger_first_delay_sec = 0
+parallelism_control_batch_size = 0
+parallelism_control_trigger_period_sec = 10
 
 [system]
 barrier_interval_ms = 250
@@ -258,7 +262,7 @@ metrics_level = "Disabled"
             meta_nodes: 1,
             compactor_nodes: 1,
             compute_node_cores: 1,
-            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL = true;".into()]
+            per_session_queries: vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".into()]
                 .into(),
             ..Default::default()
         }
@@ -287,6 +291,26 @@ metrics_level = "Disabled"
             meta_nodes: 3,
             compactor_nodes: 2,
             compute_node_cores: 2,
+            ..Default::default()
+        }
+    }
+
+    pub fn enable_arrangement_backfill() -> Self {
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+            file.write_all(include_bytes!("disable_arrangement_backfill.toml"))
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            frontend_nodes: 1,
+            compute_nodes: 1,
+            meta_nodes: 1,
+            compactor_nodes: 1,
+            compute_node_cores: 1,
+            per_session_queries: vec![].into(),
             ..Default::default()
         }
     }
@@ -412,12 +436,19 @@ impl Cluster {
                 "hummock+sim://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
                 "--data-directory",
                 "hummock_001",
+                "--temp-secret-file-dir",
+                &format!("./secrets/meta-{i}"),
             ]);
             handle
                 .create_node()
                 .name(format!("meta-{i}"))
                 .ip([192, 168, 1, i as u8].into())
-                .init(move || risingwave_meta_node::start(opts.clone()))
+                .init(move || {
+                    risingwave_meta_node::start(
+                        opts.clone(),
+                        CancellationToken::new(), // dummy
+                    )
+                })
                 .build();
         }
 
@@ -434,12 +465,19 @@ impl Cluster {
                 "0.0.0.0:4566",
                 "--advertise-addr",
                 &format!("192.168.2.{i}:4566"),
+                "--temp-secret-file-dir",
+                &format!("./secrets/frontend-{i}"),
             ]);
             handle
                 .create_node()
                 .name(format!("frontend-{i}"))
                 .ip([192, 168, 2, i as u8].into())
-                .init(move || risingwave_frontend::start(opts.clone()))
+                .init(move || {
+                    risingwave_frontend::start(
+                        opts.clone(),
+                        CancellationToken::new(), // dummy
+                    )
+                })
                 .build();
         }
 
@@ -457,13 +495,20 @@ impl Cluster {
                 "6979321856",
                 "--parallelism",
                 &conf.compute_node_cores.to_string(),
+                "--temp-secret-file-dir",
+                &format!("./secrets/compute-{i}"),
             ]);
             handle
                 .create_node()
                 .name(format!("compute-{i}"))
                 .ip([192, 168, 3, i as u8].into())
                 .cores(conf.compute_node_cores)
-                .init(move || risingwave_compute::start(opts.clone()))
+                .init(move || {
+                    risingwave_compute::start(
+                        opts.clone(),
+                        CancellationToken::new(), // dummy
+                    )
+                })
                 .build();
         }
 
@@ -482,7 +527,12 @@ impl Cluster {
                 .create_node()
                 .name(format!("compactor-{i}"))
                 .ip([192, 168, 4, i as u8].into())
-                .init(move || risingwave_compactor::start(opts.clone()))
+                .init(move || {
+                    risingwave_compactor::start(
+                        opts.clone(),
+                        CancellationToken::new(), // dummy
+                    )
+                })
                 .build();
         }
 
@@ -852,9 +902,7 @@ impl Session {
     }
 
     pub async fn is_arrangement_backfill_enabled(&mut self) -> Result<bool> {
-        let result = self
-            .run("show streaming_enable_arrangement_backfill")
-            .await?;
+        let result = self.run("show streaming_use_arrangement_backfill").await?;
         Ok(result == "true")
     }
 }

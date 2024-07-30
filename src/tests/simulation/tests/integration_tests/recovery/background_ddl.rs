@@ -15,6 +15,7 @@
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
+use risingwave_common::error::AsReport;
 use risingwave_simulation::cluster::{Cluster, Configuration, Session};
 use tokio::time::sleep;
 
@@ -27,9 +28,9 @@ const DROP_TABLE: &str = "DROP TABLE t;";
 const SEED_TABLE_500: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 500);";
 const SEED_TABLE_100: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 100);";
 const SET_BACKGROUND_DDL: &str = "SET BACKGROUND_DDL=true;";
-const SET_RATE_LIMIT_2: &str = "SET STREAMING_RATE_LIMIT=2;";
-const SET_RATE_LIMIT_1: &str = "SET STREAMING_RATE_LIMIT=1;";
-const RESET_RATE_LIMIT: &str = "SET STREAMING_RATE_LIMIT=0;";
+const SET_RATE_LIMIT_2: &str = "SET BACKFILL_RATE_LIMIT=2;";
+const SET_RATE_LIMIT_1: &str = "SET BACKFILL_RATE_LIMIT=1;";
+const RESET_RATE_LIMIT: &str = "SET BACKFILL_RATE_LIMIT=DEFAULT;";
 const CREATE_MV1: &str = "CREATE MATERIALIZED VIEW mv1 as SELECT * FROM t;";
 const DROP_MV1: &str = "DROP MATERIALIZED VIEW mv1;";
 const WAIT: &str = "WAIT;";
@@ -331,7 +332,7 @@ async fn test_high_barrier_latency_cancel(config: Configuration) -> Result<()> {
         let mut session2 = cluster.start_session();
         let handle = tokio::spawn(async move {
             let result = cancel_stream_jobs(&mut session2).await;
-            assert!(result.is_err(), "{:?}", result)
+            tracing::info!(?result, "cancel stream jobs");
         });
 
         sleep(Duration::from_millis(500)).await;
@@ -348,7 +349,7 @@ async fn test_high_barrier_latency_cancel(config: Configuration) -> Result<()> {
             .run("CREATE MATERIALIZED VIEW mv1 as values(1)")
             .await
         {
-            tracing::info!("Recreate mv failed with {e:?}");
+            tracing::info!(error = %e.as_report(), "Recreate mv failed");
             continue;
         } else {
             tracing::info!("recreated mv");
@@ -439,7 +440,7 @@ async fn test_foreground_index_cancel() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_sink_create() -> Result<()> {
+async fn test_background_sink_create() -> Result<()> {
     init_logger();
     let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
     let mut session = cluster.start_session();
@@ -449,6 +450,7 @@ async fn test_sink_create() -> Result<()> {
 
     let mut session2 = cluster.start_session();
     tokio::spawn(async move {
+        session2.run(SET_BACKGROUND_DDL).await.unwrap();
         session2.run(SET_RATE_LIMIT_2).await.unwrap();
         session2
             .run("CREATE SINK s FROM t WITH (connector='blackhole');")

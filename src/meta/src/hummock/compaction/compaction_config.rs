@@ -17,8 +17,6 @@ use risingwave_common::config::CompactionConfig as CompactionConfigOpt;
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::CompactionConfig;
 
-const MAX_LEVEL: u64 = 6;
-
 pub struct CompactionConfigBuilder {
     config: CompactionConfig,
 }
@@ -29,7 +27,7 @@ impl CompactionConfigBuilder {
             config: CompactionConfig {
                 max_bytes_for_level_base: compaction_config::max_bytes_for_level_base(),
                 max_bytes_for_level_multiplier: compaction_config::max_bytes_for_level_multiplier(),
-                max_level: MAX_LEVEL,
+                max_level: compaction_config::max_level() as u64,
                 max_compaction_bytes: compaction_config::max_compaction_bytes(),
                 sub_level_max_compaction_bytes: compaction_config::sub_level_max_compaction_bytes(),
                 level0_tier_compact_file_number: compaction_config::level0_tier_compact_file_number(
@@ -66,6 +64,7 @@ impl CompactionConfigBuilder {
                     compaction_config::level0_overlapping_sub_level_compact_level_count(),
                 tombstone_reclaim_ratio: compaction_config::tombstone_reclaim_ratio(),
                 enable_emergency_picker: compaction_config::enable_emergency_picker(),
+                max_l0_compact_level_count: Some(compaction_config::max_l0_compact_level_count()),
             },
         }
     }
@@ -94,6 +93,7 @@ impl CompactionConfigBuilder {
             .max_space_reclaim_bytes(opt.max_space_reclaim_bytes)
             .level0_max_compact_file_number(opt.level0_max_compact_file_number)
             .tombstone_reclaim_ratio(opt.tombstone_reclaim_ratio)
+            .max_level(opt.max_level as u64)
     }
 
     pub fn build(self) -> CompactionConfig {

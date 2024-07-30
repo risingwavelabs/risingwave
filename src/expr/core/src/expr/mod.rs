@@ -51,7 +51,6 @@ use risingwave_common::types::{DataType, Datum};
 pub use self::build::*;
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
-pub use self::expr_udf::get_or_create_wasm_runtime;
 pub use self::value::{ValueImpl, ValueRef};
 pub use self::wrapper::*;
 pub use super::{ExprError, Result};
@@ -209,4 +208,6 @@ where
 pub struct Context {
     pub arg_types: Vec<DataType>,
     pub return_type: DataType,
+    /// Whether the function is variadic.
+    pub variadic: bool,
 }

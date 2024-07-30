@@ -20,11 +20,11 @@ use bytes::BufMut;
 use educe::Educe;
 use either::{for_both, Either};
 use itertools::Itertools;
+use risingwave_common_estimate_size::EstimateSize;
 use tinyvec::ArrayVec;
 
 use super::{HeapNullBitmap, NullBitmap, XxHash64HashCode};
 use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayResult, DataChunk};
-use crate::estimate_size::EstimateSize;
 use crate::hash::{HashKeyDe, HashKeySer};
 use crate::row::OwnedRow;
 use crate::types::{DataType, Datum, ScalarImpl};
@@ -224,9 +224,8 @@ pub trait HashKey:
     // TODO: rename to `NullBitmap` and note that high bit represents null!
     type Bitmap: NullBitmap;
 
-    // TODO: remove result and rename to `build_many`
     /// Build hash keys from the given `data_chunk` with `column_indices` in a batch.
-    fn build(column_indices: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>>;
+    fn build_many(column_indices: &[usize], data_chunk: &DataChunk) -> Vec<Self>;
 
     /// Deserializes the hash key into a row.
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow>;
@@ -288,7 +287,7 @@ impl<S: KeyStorage, N: NullBitmap> EstimateSize for HashKeyImpl<S, N> {
 impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
     type Bitmap = N;
 
-    fn build(column_indices: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>> {
+    fn build_many(column_indices: &[usize], data_chunk: &DataChunk) -> Vec<Self> {
         let hash_codes = data_chunk.get_hash_values(column_indices, XxHash64Builder);
 
         let mut serializers = {
@@ -319,20 +318,14 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
 
             // Dispatch types once to accelerate the inner call.
             dispatch_array_variants!(array, array, {
-                for ((scalar, visible), serializer) in array
-                    .iter()
-                    .zip_eq_fast(data_chunk.visibility().iter())
-                    .zip_eq_fast(&mut serializers)
-                {
-                    if visible {
-                        serializer.serialize(scalar);
-                    }
+                for i in data_chunk.visibility().iter_ones() {
+                    // SAFETY(value_at_unchecked): the idx is always in bound.
+                    unsafe { serializers[i].serialize(array.value_at_unchecked(i)) }
                 }
             });
         }
 
-        let hash_keys = serializers.into_iter().map(|s| s.finish()).collect();
-        Ok(hash_keys)
+        serializers.into_iter().map(|s| s.finish()).collect()
     }
 
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow> {
@@ -384,22 +377,16 @@ impl DataChunk {
                 }
             })
         }
-
-        let mut sizes = self
-            .visibility()
-            .iter()
-            .map(|visible| if visible { exact_size } else { 0 })
-            .collect_vec();
+        let mut sizes = vec![exact_size; self.capacity()];
 
         for i in estimated_column_indices {
             dispatch_array_variants!(&*self.columns()[i], col, {
-                for ((datum, visible), size) in col
-                    .iter()
-                    .zip_eq_fast(self.visibility().iter())
-                    .zip_eq_fast(&mut sizes)
-                {
-                    if visible && let Some(scalar) = datum {
-                        *size += HashKeySer::estimated_size(scalar);
+                for i in self.visibility().iter_ones() {
+                    // SAFETY(value_at_unchecked): the idx is always in bound.
+                    unsafe {
+                        if let Some(scalar) = col.value_at_unchecked(i) {
+                            sizes[i] += HashKeySer::estimated_size(scalar);
+                        }
                     }
                 }
             })

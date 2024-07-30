@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use thiserror_ext::AsReport;
 use vergen::EmitBuilder;
 
 fn main() {
     if let Err(e) = EmitBuilder::builder().git_sha(true).fail_on_error().emit() {
         // Leave the environment variable unset if error occurs.
-        println!("cargo:warning={}", e)
+        println!("cargo:warning={}", e.as_report())
     }
 }

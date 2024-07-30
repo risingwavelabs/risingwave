@@ -22,7 +22,7 @@ use thiserror_ext::AsReport;
 
 use super::super::{HummockResult, HummockValue};
 use crate::hummock::block_stream::BlockStream;
-use crate::hummock::iterator::{Forward, HummockIterator};
+use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
@@ -292,6 +292,13 @@ impl HummockIterator for SstableIterator {
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         stats.add(&self.stats);
     }
+
+    fn value_meta(&self) -> ValueMeta {
+        ValueMeta {
+            object_id: Some(self.sst.id),
+            block_id: Some(self.cur_idx as _),
+        }
+    }
 }
 
 impl SstableIteratorType for SstableIterator {
@@ -309,11 +316,12 @@ mod tests {
     use std::collections::Bound;
 
     use bytes::Bytes;
+    use foyer::CacheContext;
     use itertools::Itertools;
     use rand::prelude::*;
-    use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::{TableKey, UserKey};
 
     use super::*;
@@ -351,7 +359,7 @@ mod tests {
     #[tokio::test]
     async fn test_table_iterator() {
         // Build remote sstable
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         let sstable =
             gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
                 .await;
@@ -364,7 +372,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_table_seek() {
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         let sstable =
             gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
                 .await;
@@ -405,7 +413,7 @@ mod tests {
                 format!("key_aaaa_{:05}", 0).as_bytes(),
             ]
             .concat(),
-            233,
+            test_epoch(233),
         );
         sstable_iter.seek(smallest_key.to_ref()).await.unwrap();
         let key = sstable_iter.key();
@@ -419,7 +427,7 @@ mod tests {
                 format!("key_zzzz_{:05}", 0).as_bytes(),
             ]
             .concat(),
-            233,
+            test_epoch(233),
         );
         sstable_iter.seek(largest_key.to_ref()).await.unwrap();
         assert!(!sstable_iter.is_valid());
@@ -455,7 +463,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_prefetch_table_read() {
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         // when upload data is successful, but upload meta is fail and delete is fail
         let kv_iter =
             (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
@@ -473,7 +481,7 @@ mod tests {
             TableKey(Bytes::from(end_key.user_key.table_key.0)),
         );
         let options = Arc::new(SstableIteratorReadOptions {
-            cache_policy: CachePolicy::Fill(CachePriority::High),
+            cache_policy: CachePolicy::Fill(CacheContext::Default),
             must_iterated_end_user_key: Some(Bound::Included(uk.clone())),
             max_preload_retry_times: 0,
             prefetch_for_large_query: false,

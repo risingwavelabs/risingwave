@@ -19,8 +19,8 @@ use std::sync::Arc;
 use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
-use risingwave_common::hash::{ActorId, ActorMapping, ParallelUnitId};
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::hash::{ActorId, ActorMapping, WorkerSlotId};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::plan_common::ExprContext;
@@ -33,7 +33,7 @@ use risingwave_pb::stream_plan::{
 
 use super::id::GlobalFragmentIdsExt;
 use super::Locations;
-use crate::manager::{MetaSrvEnv, StreamingClusterInfo, StreamingJob};
+use crate::manager::{IdGenManagerImpl, MetaSrvEnv, StreamingClusterInfo, StreamingJob};
 use crate::model::{DispatcherId, FragmentId};
 use crate::stream::stream_graph::fragment::{
     CompleteStreamFragmentGraph, EdgeId, EitherFragment, StreamFragmentEdge,
@@ -121,8 +121,8 @@ impl ActorBuilder {
     ///
     /// During this process, the following things will be done:
     /// 1. Replace the logical `Exchange` in node's input with `Merge`, which can be executed on the
-    /// compute nodes.
-    /// 2. Fill the upstream mview info of the `Merge` node under the `StreamScan` node.
+    ///    compute nodes.
+    /// 2. Fill the upstream mview info of the `Merge` node under the other "leaf" nodes.
     fn rewrite(&self) -> MetaResult<StreamNode> {
         self.rewrite_inner(&self.nodes, 0)
     }
@@ -210,20 +210,21 @@ impl ActorBuilder {
                 })
             }
 
-            // "Leaf" node `CdcFilter` used in multi-table cdc backfill plan:
+            // "Leaf" node `CdcFilter` and `SourceBackfill`. They both `Merge` an upstream `Source`
             // cdc_filter -> backfill -> mview
-            NodeBody::CdcFilter(node) => {
+            // source_backfill -> mview
+            NodeBody::CdcFilter(_) | NodeBody::SourceBackfill(_) => {
                 let input = stream_node.get_input();
                 assert_eq!(input.len(), 1);
 
                 let merge_node = &input[0];
                 assert_matches!(merge_node.node_body, Some(NodeBody::Merge(_)));
 
-                let upstream_source_id = node.upstream_source_id;
-                tracing::debug!(
-                    "rewrite leaf cdc filter node: upstream source id {}",
-                    upstream_source_id,
-                );
+                let upstream_source_id = match stream_node.get_node_body()? {
+                    NodeBody::CdcFilter(node) => node.upstream_source_id,
+                    NodeBody::SourceBackfill(node) => node.upstream_source_id,
+                    _ => unreachable!(),
+                };
 
                 // Index the upstreams by the an external edge ID.
                 let upstreams = &self.upstreams[&EdgeId::UpstreamExternal {
@@ -231,11 +232,13 @@ impl ActorBuilder {
                     downstream_fragment_id: self.fragment_id,
                 }];
 
-                // Upstream Cdc Source should be singleton.
                 let upstream_actor_id = upstreams.actors.as_global_ids();
+                // Upstream Cdc Source should be singleton.
+                // SourceBackfill is NoShuffle 1-1 correspondence.
+                // So they both should have only one upstream actor.
                 assert_eq!(upstream_actor_id.len(), 1);
 
-                // rewrite the input of `CdcFilter`
+                // rewrite the input
                 let input = vec![
                     // Fill the merge node body with correct upstream info.
                     StreamNode {
@@ -327,8 +330,8 @@ impl ExternalChange {
     }
 }
 
-/// The parallel unit location of actors.
-type ActorLocations = BTreeMap<GlobalActorId, ParallelUnitId>;
+/// The worker slot location of actors.
+type ActorLocations = BTreeMap<GlobalActorId, WorkerSlotId>;
 
 /// The actual mutable state of building an actor graph.
 ///
@@ -366,7 +369,7 @@ impl ActorGraphBuildStateInner {
         &mut self,
         actor_id: GlobalActorId,
         fragment_id: GlobalFragmentId,
-        parallel_unit_id: ParallelUnitId,
+        worker_slot_id: WorkerSlotId,
         vnode_bitmap: Option<Bitmap>,
         node: Arc<StreamNode>,
     ) {
@@ -378,18 +381,14 @@ impl ActorGraphBuildStateInner {
             .unwrap();
 
         self.building_locations
-            .try_insert(actor_id, parallel_unit_id)
+            .try_insert(actor_id, worker_slot_id)
             .unwrap();
     }
 
     /// Record the location of an external actor.
-    fn record_external_location(
-        &mut self,
-        actor_id: GlobalActorId,
-        parallel_unit_id: ParallelUnitId,
-    ) {
+    fn record_external_location(&mut self, actor_id: GlobalActorId, worker_slot_id: WorkerSlotId) {
         self.external_locations
-            .try_insert(actor_id, parallel_unit_id)
+            .try_insert(actor_id, worker_slot_id)
             .unwrap();
     }
 
@@ -463,7 +462,7 @@ impl ActorGraphBuildStateInner {
 
     /// Get the location of an actor. Will look up the location map of both the actors to be built
     /// and the external actors.
-    fn get_location(&self, actor_id: GlobalActorId) -> ParallelUnitId {
+    fn get_location(&self, actor_id: GlobalActorId) -> WorkerSlotId {
         self.building_locations
             .get(&actor_id)
             .copied()
@@ -531,9 +530,9 @@ impl ActorGraphBuildStateInner {
             DispatcherType::Hash | DispatcherType::Broadcast | DispatcherType::Simple => {
                 // Add dispatchers for the upstream actors.
                 let dispatcher = if let DispatcherType::Hash = dt {
-                    // Transform the `ParallelUnitMapping` from the downstream distribution to the
+                    // Transform the `WorkerSlotMapping` from the downstream distribution to the
                     // `ActorMapping`, used for the `HashDispatcher` for the upstream actors.
-                    let downstream_locations: HashMap<ParallelUnitId, ActorId> = downstream
+                    let downstream_locations: HashMap<WorkerSlotId, ActorId> = downstream
                         .actor_ids
                         .iter()
                         .map(|&actor_id| (self.get_location(actor_id), actor_id.as_global_id()))
@@ -670,7 +669,7 @@ impl ActorGraphBuilder {
         // Schedule the distribution of all building fragments.
         let scheduler = schedule::Scheduler::new(
             streaming_job_id,
-            cluster_info.parallel_units.values().cloned(),
+            &cluster_info.worker_nodes,
             default_parallelism,
         )?;
         let distributions = scheduler.schedule(&fragment_graph)?;
@@ -696,12 +695,7 @@ impl ActorGraphBuilder {
     fn build_locations(&self, actor_locations: ActorLocations) -> Locations {
         let actor_locations = actor_locations
             .into_iter()
-            .map(|(id, p)| {
-                (
-                    id.as_global_id(),
-                    self.cluster_info.parallel_units[&p].clone(),
-                )
-            })
+            .map(|(id, worker_slot_id)| (id.as_global_id(), worker_slot_id))
             .collect();
 
         let worker_locations = self.cluster_info.worker_nodes.clone();
@@ -726,10 +720,9 @@ impl ActorGraphBuilder {
             .values()
             .map(|d| d.parallelism())
             .sum::<usize>() as u64;
-        let id_gen = if let Some(sql_id_gen) = env.sql_id_gen_manager_ref() {
-            GlobalActorIdGen::new_v2(&sql_id_gen, actor_len)
-        } else {
-            GlobalActorIdGen::new(env.id_gen_manager(), actor_len).await?
+        let id_gen = match env.id_gen_manager() {
+            IdGenManagerImpl::Kv(mgr) => GlobalActorIdGen::new(mgr, actor_len).await?,
+            IdGenManagerImpl::Sql(mgr) => GlobalActorIdGen::new_v2(mgr, actor_len),
         };
 
         // Build the actor graph and get the final state.
@@ -740,15 +733,15 @@ impl ActorGraphBuilder {
             external_locations,
         } = self.build_actor_graph(id_gen)?;
 
-        for parallel_unit_id in external_locations.values() {
-            if let Some(parallel_unit) = self
+        for worker_slot_id in external_locations.values() {
+            if self
                 .cluster_info
-                .unschedulable_parallel_units
-                .get(parallel_unit_id)
+                .unschedulable_workers
+                .contains(&worker_slot_id.worker_id())
             {
                 bail!(
                     "The worker {} where the associated upstream is located is unscheduable",
-                    parallel_unit.worker_node_id
+                    worker_slot_id.worker_id(),
                 );
             }
         }
@@ -857,15 +850,15 @@ impl ActorGraphBuilder {
                 let bitmaps = distribution.as_hash().map(|m| m.to_bitmaps());
 
                 distribution
-                    .parallel_units()
-                    .map(|parallel_unit_id| {
+                    .worker_slots()
+                    .map(|worker_slot| {
                         let actor_id = state.next_actor_id();
-                        let vnode_bitmap = bitmaps.as_ref().map(|m| &m[&parallel_unit_id]).cloned();
+                        let vnode_bitmap = bitmaps.as_ref().map(|m| &m[&worker_slot]).cloned();
 
                         state.inner.add_actor(
                             actor_id,
                             fragment_id,
-                            parallel_unit_id,
+                            worker_slot,
                             vnode_bitmap,
                             node.clone(),
                         );
@@ -881,8 +874,8 @@ impl ActorGraphBuilder {
                 .iter()
                 .map(|a| {
                     let actor_id = GlobalActorId::new(a.actor_id);
-                    let parallel_unit_id = match &distribution {
-                        Distribution::Singleton(parallel_unit_id) => *parallel_unit_id,
+                    let worker_slot_id = match &distribution {
+                        Distribution::Singleton(worker_slot_id) => *worker_slot_id,
                         Distribution::Hash(mapping) => mapping
                             .get_matched(&Bitmap::from(a.get_vnode_bitmap().unwrap()))
                             .unwrap(),
@@ -890,7 +883,7 @@ impl ActorGraphBuilder {
 
                     state
                         .inner
-                        .record_external_location(actor_id, parallel_unit_id);
+                        .record_external_location(actor_id, worker_slot_id);
 
                     actor_id
                 })

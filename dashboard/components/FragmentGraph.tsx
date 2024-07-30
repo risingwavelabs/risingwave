@@ -479,7 +479,6 @@ export default function FragmentGraph({
         <g className="fragment-edges" />
         <g className="fragments" />
       </svg>
-      {/* <BackPressureTable selectedFragmentIds={includedFragmentIds} /> */}
     </Fragment>
   )
 }

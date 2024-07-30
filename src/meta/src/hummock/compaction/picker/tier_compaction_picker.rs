@@ -14,14 +14,13 @@
 
 use std::sync::Arc;
 
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
+use risingwave_hummock_sdk::level::{InputLevel, Levels, OverlappingLevel};
+use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
     ValidationRuleType,
 };
-use crate::hummock::compaction::picker::MAX_COMPACT_LEVEL_COUNT;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
@@ -56,7 +55,7 @@ impl TierCompactionPicker {
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type() != LevelType::Overlapping {
+            if level.level_type != LevelType::Overlapping {
                 continue;
             }
 
@@ -87,10 +86,7 @@ impl TierCompactionPicker {
             let mut compaction_bytes = level.total_file_size;
             let mut compact_file_count = level.table_infos.len() as u64;
             // Limit sstable file count to avoid using too much memory.
-            let overlapping_max_compact_file_numer = std::cmp::min(
-                self.config.level0_max_compact_file_number,
-                MAX_COMPACT_LEVEL_COUNT as u64,
-            );
+            let overlapping_max_compact_file_numer = self.config.level0_max_compact_file_number;
 
             for other in &l0.sub_levels[idx + 1..] {
                 if compaction_bytes > max_compaction_bytes {
@@ -169,8 +165,8 @@ pub mod tests {
     use std::sync::Arc;
 
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::new_sub_level;
-    use risingwave_pb::hummock::hummock_version::Levels;
-    use risingwave_pb::hummock::{LevelType, OverlappingLevel};
+    use risingwave_hummock_sdk::level::{Levels, OverlappingLevel};
+    use risingwave_pb::hummock::LevelType;
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::picker::{
@@ -295,7 +291,6 @@ pub mod tests {
                 sub_levels: vec![l1, l2],
             }),
             levels: vec![],
-            member_table_ids: vec![1],
             ..Default::default()
         };
         let config = Arc::new(

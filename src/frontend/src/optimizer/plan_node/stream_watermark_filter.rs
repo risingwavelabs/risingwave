@@ -20,7 +20,6 @@ use risingwave_pb::catalog::WatermarkDesc;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
-use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{ExprDisplay, ExprImpl};
@@ -50,6 +49,8 @@ impl StreamWatermarkFilter {
             input.append_only(),
             false, // TODO(rc): decide EOWC property
             watermark_columns,
+            // watermark filter preserves input order and hence monotonicity
+            input.columns_monotonicity().clone(),
         );
         Self::with_base(base, input, watermark_descs)
     }

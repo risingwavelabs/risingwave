@@ -15,15 +15,19 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::error::KafkaResult;
 use rdkafka::{Offset, TopicPartitionList};
+use risingwave_common::bail;
 
+use crate::error::ConnectorResult;
 use crate::source::base::SplitEnumerator;
 use crate::source::kafka::split::KafkaSplit;
-use crate::source::kafka::{KafkaProperties, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL};
+use crate::source::kafka::{
+    KafkaContextCommon, KafkaProperties, RwConsumerContext, KAFKA_ISOLATION_LEVEL,
+};
 use crate::source::SourceEnumeratorContextRef;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -38,7 +42,7 @@ pub struct KafkaSplitEnumerator {
     context: SourceEnumeratorContextRef,
     broker_address: String,
     topic: String,
-    client: BaseConsumer<PrivateLinkConsumerContext>,
+    client: BaseConsumer<RwConsumerContext>,
     start_offset: KafkaEnumeratorOffset,
 
     // maybe used in the future for batch processing
@@ -57,7 +61,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     async fn new(
         properties: KafkaProperties,
         context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<KafkaSplitEnumerator> {
+    ) -> ConnectorResult<KafkaSplitEnumerator> {
         let mut config = rdkafka::ClientConfig::new();
         let common_props = &properties.common;
 
@@ -77,11 +81,9 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             Some("earliest") => KafkaEnumeratorOffset::Earliest,
             Some("latest") => KafkaEnumeratorOffset::Latest,
             None => KafkaEnumeratorOffset::Earliest,
-            _ => {
-                return Err(anyhow!(
-                    "properties `scan_startup_mode` only support earliest and latest or leave it empty"
-                ));
-            }
+            _ => bail!(
+                "properties `scan_startup_mode` only support earliest and latest or leave it empty"
+            ),
         };
 
         if let Some(s) = &properties.time_offset {
@@ -90,9 +92,29 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         }
 
         // don't need kafka metrics from enumerator
-        let client_ctx = PrivateLinkConsumerContext::new(broker_rewrite_map, None, None)?;
-        let client: BaseConsumer<PrivateLinkConsumerContext> =
+        let ctx_common = KafkaContextCommon::new(
+            broker_rewrite_map,
+            None,
+            None,
+            properties.aws_auth_props,
+            common_props.is_aws_msk_iam(),
+        )
+        .await?;
+        let client_ctx = RwConsumerContext::new(ctx_common);
+        let client: BaseConsumer<RwConsumerContext> =
             config.create_with_context(client_ctx).await?;
+
+        // Note that before any SASL/OAUTHBEARER broker connection can succeed the application must call
+        // rd_kafka_oauthbearer_set_token() once – either directly or, more typically, by invoking either
+        // rd_kafka_poll(), rd_kafka_consumer_poll(), rd_kafka_queue_poll(), etc, in order to cause retrieval
+        // of an initial token to occur.
+        // https://docs.confluent.io/platform/current/clients/librdkafka/html/rdkafka_8h.html#a988395722598f63396d7a1bedb22adaf
+        if common_props.is_aws_msk_iam() {
+            #[cfg(not(madsim))]
+            client.poll(Duration::from_secs(10)); // note: this is a blocking call
+            #[cfg(madsim)]
+            client.poll(Duration::from_secs(10)).await;
+        }
 
         Ok(Self {
             context,
@@ -105,13 +127,14 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<KafkaSplit>> {
-        let topic_partitions = self.fetch_topic_partition().await.map_err(|e| {
-            anyhow!(format!(
-                "failed to fetch metadata from kafka ({}), error: {}",
-                self.broker_address, e
-            ))
+    async fn list_splits(&mut self) -> ConnectorResult<Vec<KafkaSplit>> {
+        let topic_partitions = self.fetch_topic_partition().await.with_context(|| {
+            format!(
+                "failed to fetch metadata from kafka ({})",
+                self.broker_address
+            )
         })?;
+
         let watermarks = self.get_watermarks(topic_partitions.as_ref()).await?;
         let mut start_offsets = self
             .fetch_start_offset(topic_partitions.as_ref(), &watermarks)
@@ -128,6 +151,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
                 partition,
                 start_offset: start_offsets.remove(&partition).unwrap(),
                 stop_offset: stop_offsets.remove(&partition).unwrap(),
+                hack_seek_to_latest: false,
             })
             .collect();
 
@@ -153,12 +177,12 @@ impl KafkaSplitEnumerator {
         &mut self,
         expect_start_timestamp_millis: Option<i64>,
         expect_stop_timestamp_millis: Option<i64>,
-    ) -> anyhow::Result<Vec<KafkaSplit>> {
-        let topic_partitions = self.fetch_topic_partition().await.map_err(|e| {
-            anyhow!(format!(
-                "failed to fetch metadata from kafka ({}), error: {}",
-                self.broker_address, e
-            ))
+    ) -> ConnectorResult<Vec<KafkaSplit>> {
+        let topic_partitions = self.fetch_topic_partition().await.with_context(|| {
+            format!(
+                "failed to fetch metadata from kafka ({})",
+                self.broker_address
+            )
         })?;
 
         // here we are getting the start offset and end offset for each partition with the given
@@ -231,6 +255,7 @@ impl KafkaSplitEnumerator {
                     partition: *partition,
                     start_offset: Some(start_offset),
                     stop_offset: Some(stop_offset),
+                    hack_seek_to_latest:false
                 }
             })
             .collect::<Vec<KafkaSplit>>())
@@ -311,7 +336,8 @@ impl KafkaSplitEnumerator {
         for elem in offsets.elements_for_topic(self.topic.as_str()) {
             match elem.offset() {
                 Offset::Offset(offset) => {
-                    result.insert(elem.partition(), Some(offset));
+                    // XXX(rc): currently in RW source, `offset` means the last consumed offset, so we need to subtract 1
+                    result.insert(elem.partition(), Some(offset - 1));
                 }
                 _ => {
                     let (_, high_watermark) = self
@@ -335,7 +361,7 @@ impl KafkaSplitEnumerator {
         self.context
             .metrics
             .high_watermark
-            .with_label_values(&[
+            .with_guarded_label_values(&[
                 &self.context.info.source_id.to_string(),
                 &partition.to_string(),
             ])
@@ -349,7 +375,7 @@ impl KafkaSplitEnumerator {
             .is_ok()
     }
 
-    async fn fetch_topic_partition(&self) -> anyhow::Result<Vec<i32>> {
+    async fn fetch_topic_partition(&self) -> ConnectorResult<Vec<i32>> {
         // for now, we only support one topic
         let metadata = self
             .client
@@ -358,11 +384,11 @@ impl KafkaSplitEnumerator {
 
         let topic_meta = match metadata.topics() {
             [meta] => meta,
-            _ => return Err(anyhow!("topic {} not found", self.topic)),
+            _ => bail!("topic {} not found", self.topic),
         };
 
         if topic_meta.partitions().is_empty() {
-            return Err(anyhow!("topic {} not found", self.topic));
+            bail!("topic {} not found", self.topic);
         }
 
         Ok(topic_meta

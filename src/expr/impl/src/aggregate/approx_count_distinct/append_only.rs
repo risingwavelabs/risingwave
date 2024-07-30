@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::bail;
-use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::Result;
 
 use super::Bucket;

@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::array::{ArrayImpl, DataChunk, ListRef, ListValue, StructRef, StructValue};
 use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{Int256, IntoOrdered, JsonbRef, ToText, F64};
+use risingwave_common::types::{Int256, JsonbRef, ToText, F64};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{build_func, Context, ExpressionBoxExt, InputRefExpression};
 use risingwave_expr::{function, ExprError, Result};
@@ -79,7 +79,6 @@ pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<bool> {
 pub fn jsonb_to_number<T: TryFrom<F64>>(v: JsonbRef<'_>) -> Result<T> {
     v.as_number()
         .map_err(|e| ExprError::Parse(e.into()))?
-        .into_ordered()
         .try_into()
         .map_err(|_| ExprError::NumericOutOfRange)
 }
@@ -87,6 +86,7 @@ pub fn jsonb_to_number<T: TryFrom<F64>>(v: JsonbRef<'_>) -> Result<T> {
 #[function("cast(int4) -> int2")]
 #[function("cast(int8) -> int2")]
 #[function("cast(int8) -> int4")]
+#[function("cast(serial) -> int8")]
 #[function("cast(float4) -> int2")]
 #[function("cast(float8) -> int2")]
 #[function("cast(float4) -> int4")]
@@ -147,8 +147,8 @@ pub fn int_to_bool(input: i32) -> bool {
     input != 0
 }
 
-// For most of the types, cast them to varchar is similar to return their text format.
-// So we use this function to cast type to varchar.
+/// For most of the types, cast them to varchar is the same as their pgwire "TEXT" format.
+/// So we use `ToText` to cast type to varchar.
 #[function("cast(*int) -> varchar")]
 #[function("cast(decimal) -> varchar")]
 #[function("cast(*float) -> varchar")]
@@ -177,7 +177,7 @@ pub fn bool_to_varchar(input: bool, writer: &mut impl Write) {
         .unwrap();
 }
 
-/// `bool_out` is different from `general_to_string<bool>` to produce a single char. `PostgreSQL`
+/// `bool_out` is different from `cast(boolean) -> varchar` to produce a single char. `PostgreSQL`
 /// uses different variants of bool-to-string in different situations.
 #[function("bool_out(boolean) -> varchar")]
 pub fn bool_out(input: bool, writer: &mut impl Write) {
@@ -244,11 +244,9 @@ fn struct_cast(input: StructRef<'_>, ctx: &Context) -> Result<StructValue> {
 #[cfg(test)]
 mod tests {
     use chrono::NaiveDateTime;
-    use itertools::Itertools;
     use risingwave_common::array::*;
     use risingwave_common::types::*;
     use risingwave_expr::expr::build_from_pretty;
-    use risingwave_pb::expr::expr_node::PbType;
 
     use super::*;
 
@@ -301,6 +299,7 @@ mod tests {
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("int[]").unwrap(),
+            variadic: false,
         };
         assert_eq!(
             str_to_list("{}", &ctx).unwrap(),
@@ -313,6 +312,7 @@ mod tests {
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("int[]").unwrap(),
+            variadic: false,
         };
         assert_eq!(str_to_list("{1, 2, 3}", &ctx).unwrap(), list123);
 
@@ -321,6 +321,7 @@ mod tests {
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("int[][]").unwrap(),
+            variadic: false,
         };
         assert_eq!(str_to_list("{{1, 2, 3}}", &ctx).unwrap(), nested_list123);
 
@@ -333,6 +334,7 @@ mod tests {
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("int[][][]").unwrap(),
+            variadic: false,
         };
         assert_eq!(
             str_to_list("{{{1, 2, 3}}, {{44, 55, 66}}}", &ctx).unwrap(),
@@ -343,6 +345,7 @@ mod tests {
         let ctx = Context {
             arg_types: vec![DataType::from_str("int[][]").unwrap()],
             return_type: DataType::from_str("varchar[][]").unwrap(),
+            variadic: false,
         };
         let double_nested_varchar_list123_445566 = ListValue::from_iter([
             list_cast(nested_list123.as_scalar_ref(), &ctx).unwrap(),
@@ -353,6 +356,7 @@ mod tests {
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("varchar[][][]").unwrap(),
+            variadic: false,
         };
         assert_eq!(
             str_to_list("{{{1, 2, 3}}, {{44, 55, 66}}}", &ctx).unwrap(),
@@ -366,6 +370,7 @@ mod tests {
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("int[]").unwrap(),
+            variadic: false,
         };
         assert!(str_to_list("{{}", &ctx).is_err());
         assert!(str_to_list("{}}", &ctx).is_err());
@@ -384,6 +389,7 @@ mod tests {
                 ("a", DataType::Int32),
                 ("b", DataType::Int32),
             ])),
+            variadic: false,
         };
         assert_eq!(
             struct_cast(
@@ -419,6 +425,7 @@ mod tests {
         let ctx_str_to_int16 = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::Int16,
+            variadic: false,
         };
         test_str_to_int16::<I16Array, _>(|x| str_parse(x, &ctx_str_to_int16).unwrap()).await;
     }

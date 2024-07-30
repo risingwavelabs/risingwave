@@ -17,8 +17,8 @@ use std::future::Future;
 
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_hummock_sdk::key::{PointRange, UserKey};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::iterator::concat_delete_range_iterator::ConcatDeleteRangeIterator;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferDeleteRangeIterator;
@@ -266,10 +266,7 @@ impl ForwardMergeRangeIterator {
 }
 
 impl ForwardMergeRangeIterator {
-    pub(super) async fn next_until(
-        &mut self,
-        target_user_key: UserKey<&[u8]>,
-    ) -> HummockResult<()> {
+    pub async fn next_until(&mut self, target_user_key: UserKey<&[u8]>) -> HummockResult<()> {
         let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
         while self.is_valid() && self.next_extended_user_key().le(&target_extended_user_key) {
             self.next().await?;

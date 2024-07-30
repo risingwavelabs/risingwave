@@ -23,20 +23,24 @@ mod manual_selector;
 mod space_reclaim_selector;
 mod tombstone_compaction_selector;
 mod ttl_selector;
+mod vnode_watermark_selector;
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 pub use emergency_selector::EmergencySelector;
 pub use level_selector::{DynamicLevelSelector, DynamicLevelSelectorCore};
 pub use manual_selector::{ManualCompactionOption, ManualCompactionSelector};
-use risingwave_common::catalog::TableOption;
+use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_hummock_sdk::level::Levels;
+use risingwave_hummock_sdk::table_watermark::TableWatermarks;
+use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::compact_task;
-use risingwave_pb::hummock::hummock_version::Levels;
 pub use space_reclaim_selector::SpaceReclaimCompactionSelector;
 pub use tombstone_compaction_selector::TombstoneCompactionSelector;
 pub use ttl_selector::TtlCompactionSelector;
+pub use vnode_watermark_selector::VnodeWatermarkCompactionSelector;
 
 use super::picker::LocalPickerStatistic;
 use super::{
@@ -47,16 +51,23 @@ use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
 
+pub struct CompactionSelectorContext<'a> {
+    pub group: &'a CompactionGroup,
+    pub levels: &'a Levels,
+    pub member_table_ids: &'a BTreeSet<TableId>,
+    pub level_handlers: &'a mut [LevelHandler],
+    pub selector_stats: &'a mut LocalSelectorStatistic,
+    pub table_id_to_options: &'a HashMap<u32, TableOption>,
+    pub developer_config: Arc<CompactionDeveloperConfig>,
+    pub table_watermarks: &'a HashMap<TableId, Arc<TableWatermarks>>,
+    pub state_table_info: &'a HummockVersionStateTableInfo,
+}
+
 pub trait CompactionSelector: Sync + Send {
     fn pick_compaction(
         &mut self,
         task_id: HummockCompactionTaskId,
-        group: &CompactionGroup,
-        levels: &Levels,
-        level_handlers: &mut [LevelHandler],
-        selector_stats: &mut LocalSelectorStatistic,
-        table_id_to_options: HashMap<u32, TableOption>,
-        developer_config: Arc<CompactionDeveloperConfig>,
+        context: CompactionSelectorContext<'_>,
     ) -> Option<CompactionTask>;
 
     fn report_statistic_metrics(&self, _metrics: &MetaMetrics) {}
@@ -116,7 +127,10 @@ pub mod tests {
     use std::ops::Range;
 
     use itertools::Itertools;
-    use risingwave_pb::hummock::{KeyRange, Level, LevelType, OverlappingLevel, SstableInfo};
+    use risingwave_hummock_sdk::key_range::KeyRange;
+    use risingwave_hummock_sdk::level::{Level, OverlappingLevel};
+    use risingwave_hummock_sdk::sstable_info::SstableInfo;
+    use risingwave_pb::hummock::LevelType;
 
     use super::*;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
@@ -125,10 +139,10 @@ pub mod tests {
         levels.l0.as_mut().unwrap().total_file_size += sst.file_size;
         levels.l0.as_mut().unwrap().sub_levels.push(Level {
             level_idx: 0,
-            level_type: LevelType::Overlapping as i32,
+            level_type: LevelType::Overlapping,
             total_file_size: sst.file_size,
             uncompressed_file_size: sst.uncompressed_file_size,
-            sub_level_id: sst.get_sst_id(),
+            sub_level_id: sst.sst_id,
             table_infos: vec![sst],
             ..Default::default()
         });
@@ -143,7 +157,7 @@ pub mod tests {
             .sub_levels
             .last_mut()
             .unwrap()
-            .level_type = LevelType::Nonoverlapping as i32;
+            .level_type = LevelType::Nonoverlapping;
     }
 
     pub fn push_tables_level0_nonoverlapping(levels: &mut Levels, table_infos: Vec<SstableInfo>) {
@@ -152,11 +166,11 @@ pub mod tests {
             .iter()
             .map(|table| table.uncompressed_file_size)
             .sum();
-        let sub_level_id = table_infos[0].get_sst_id();
+        let sub_level_id = table_infos[0].sst_id;
         levels.l0.as_mut().unwrap().total_file_size += total_file_size;
         levels.l0.as_mut().unwrap().sub_levels.push(Level {
             level_idx: 0,
-            level_type: LevelType::Nonoverlapping as i32,
+            level_type: LevelType::Nonoverlapping,
             total_file_size,
             sub_level_id,
             table_infos,
@@ -175,11 +189,11 @@ pub mod tests {
         SstableInfo {
             object_id: id,
             sst_id: id,
-            key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(table_prefix, left, epoch),
-                right: iterator_test_key_of_epoch(table_prefix, right, epoch),
+            key_range: KeyRange {
+                left: iterator_test_key_of_epoch(table_prefix, left, epoch).into(),
+                right: iterator_test_key_of_epoch(table_prefix, right, epoch).into(),
                 right_exclusive: false,
-            }),
+            },
             file_size: (right - left + 1) as u64,
             table_ids: vec![table_prefix as u32],
             uncompressed_file_size: (right - left + 1) as u64,
@@ -202,11 +216,11 @@ pub mod tests {
         SstableInfo {
             object_id: id,
             sst_id: id,
-            key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(table_prefix, left, epoch),
-                right: iterator_test_key_of_epoch(table_prefix, right, epoch),
+            key_range: KeyRange {
+                left: iterator_test_key_of_epoch(table_prefix, left, epoch).into(),
+                right: iterator_test_key_of_epoch(table_prefix, right, epoch).into(),
                 right_exclusive: false,
-            }),
+            },
             file_size: (right - left + 1) as u64,
             table_ids,
             uncompressed_file_size: (right - left + 1) as u64,
@@ -242,7 +256,7 @@ pub mod tests {
             .sum();
         Level {
             level_idx,
-            level_type: LevelType::Nonoverlapping as i32,
+            level_type: LevelType::Nonoverlapping,
             table_infos,
             total_file_size,
             sub_level_id: 0,
@@ -265,7 +279,7 @@ pub mod tests {
                 .enumerate()
                 .map(|(idx, table)| Level {
                     level_idx: 0,
-                    level_type: LevelType::Nonoverlapping as i32,
+                    level_type: LevelType::Nonoverlapping,
                     total_file_size: table.file_size,
                     uncompressed_file_size: table.uncompressed_file_size,
                     sub_level_id: idx as u64,
@@ -287,7 +301,7 @@ pub mod tests {
                 .enumerate()
                 .map(|(idx, table)| Level {
                     level_idx: 0,
-                    level_type: LevelType::Nonoverlapping as i32,
+                    level_type: LevelType::Nonoverlapping,
                     total_file_size: table.iter().map(|table| table.file_size).sum::<u64>(),
                     uncompressed_file_size: table
                         .iter()
@@ -322,7 +336,7 @@ pub mod tests {
                 .enumerate()
                 .map(|(idx, table)| Level {
                     level_idx: 0,
-                    level_type: LevelType::Overlapping as i32,
+                    level_type: LevelType::Overlapping,
                     total_file_size: table.iter().map(|table| table.file_size).sum::<u64>(),
                     sub_level_id: idx as u64,
                     table_infos: table.clone(),
