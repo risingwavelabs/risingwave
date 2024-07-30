@@ -840,25 +840,18 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             if let Some(rows) = &matched_rows {
                 join_matched_join_keys.observe(rows.len() as _);
                 if rows.len() > high_join_amplification_threshold {
-                    static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(|| {
-                        LogSuppresser::new(RateLimiter::direct(Quota::per_minute(
-                            NonZeroU32::new(1).unwrap(),
-                        )))
-                    });
-                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                        let join_key_data_types = side_update.ht.join_key_data_types();
-                        let key = key.deserialize(join_key_data_types)?;
-                        tracing::warn!(target: "high_join_amplification",
-                            suppressed_count,
-                            matched_rows_len = rows.len(),
-                            update_table_id = side_update.ht.table_id(),
-                            match_table_id = side_match.ht.table_id(),
-                            join_key = ?key,
-                            actor_id = ctx.id,
-                            fragment_id = ctx.fragment_id,
-                            "large rows matched for join key"
-                        );
-                    }
+                    let join_key_data_types = side_update.ht.join_key_data_types();
+                    let key = key.deserialize(join_key_data_types)?;
+                    tracing::warn!(target: "high_join_amplification",
+                        suppressed_count,
+                        matched_rows_len = rows.len(),
+                        update_table_id = side_update.ht.table_id(),
+                        match_table_id = side_match.ht.table_id(),
+                        join_key = ?key,
+                        actor_id = ctx.id,
+                        fragment_id = ctx.fragment_id,
+                        "large rows matched for join key"
+                    );
                 }
             } else {
                 join_matched_join_keys.observe(0.0)
