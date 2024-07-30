@@ -34,9 +34,12 @@ public class OpensearchBulkProcessorAdapter implements BulkProcessorAdapter {
     private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
     private final RequestTracker requestTracker;
     BulkProcessor opensearchBulkProcessor;
+    private int retryOnConflict;
 
     public OpensearchBulkProcessorAdapter(
-            RequestTracker requestTracker, OpensearchRestHighLevelClientAdapter client) {
+            RequestTracker requestTracker,
+            OpensearchRestHighLevelClientAdapter client,
+            int retryOnConflict) {
         BulkProcessor.Builder builder =
                 BulkProcessor.builder(
                         (bulkRequest, bulkResponseActionListener) ->
@@ -60,6 +63,7 @@ public class OpensearchBulkProcessorAdapter implements BulkProcessorAdapter {
                 BackoffPolicy.exponentialBackoff(TimeValue.timeValueMillis(100), 3));
         this.opensearchBulkProcessor = builder.build();
         this.requestTracker = requestTracker;
+        this.retryOnConflict = retryOnConflict;
     }
 
     @Override
@@ -75,7 +79,10 @@ public class OpensearchBulkProcessorAdapter implements BulkProcessorAdapter {
     @Override
     public void addRow(String index, String key, String doc) throws InterruptedException {
         UpdateRequest updateRequest;
-        updateRequest = new UpdateRequest(index, key).doc(doc, XContentType.JSON);
+        updateRequest =
+                new UpdateRequest(index, key)
+                        .doc(doc, XContentType.JSON)
+                        .retryOnConflict(this.retryOnConflict);
         updateRequest.docAsUpsert(true);
         this.requestTracker.addWriteTask();
         this.opensearchBulkProcessor.add(updateRequest);

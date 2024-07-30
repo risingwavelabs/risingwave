@@ -34,9 +34,12 @@ public class ElasticBulkProcessorAdapter implements BulkProcessorAdapter {
     private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
     BulkProcessor esBulkProcessor;
     private final RequestTracker requestTracker;
+    private int retryOnConflict;
 
     public ElasticBulkProcessorAdapter(
-            RequestTracker requestTracker, ElasticRestHighLevelClientAdapter client) {
+            RequestTracker requestTracker,
+            ElasticRestHighLevelClientAdapter client,
+            int retryOnConflict) {
         BulkProcessor.Builder builder =
                 BulkProcessor.builder(
                         (bulkRequest, bulkResponseActionListener) ->
@@ -60,6 +63,7 @@ public class ElasticBulkProcessorAdapter implements BulkProcessorAdapter {
                 BackoffPolicy.exponentialBackoff(TimeValue.timeValueMillis(100), 3));
         this.esBulkProcessor = builder.build();
         this.requestTracker = requestTracker;
+        this.retryOnConflict = retryOnConflict;
     }
 
     @Override
@@ -75,7 +79,10 @@ public class ElasticBulkProcessorAdapter implements BulkProcessorAdapter {
     @Override
     public void addRow(String index, String key, String doc) throws InterruptedException {
         UpdateRequest updateRequest;
-        updateRequest = new UpdateRequest(index, "_doc", key).doc(doc, XContentType.JSON);
+        updateRequest =
+                new UpdateRequest(index, "_doc", key)
+                        .doc(doc, XContentType.JSON)
+                        .retryOnConflict(this.retryOnConflict);
         updateRequest.docAsUpsert(true);
         this.requestTracker.addWriteTask();
         this.esBulkProcessor.add(updateRequest);

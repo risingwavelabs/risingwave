@@ -162,16 +162,19 @@ public class EsSink extends SinkWriterBase {
         } else {
             this.requestTracker = new RequestTracker(config.getMaxTaskNum());
         }
-
+        int retryOnConflict = config.getRetryOnConflict() == null ? 3 : config.getRetryOnConflict();
         // ApiCompatibilityMode is enabled to ensure the client can talk to newer version es sever.
         if (config.getConnector().equals("elasticsearch")) {
             ElasticRestHighLevelClientAdapter client =
                     new ElasticRestHighLevelClientAdapter(host, config);
-            this.bulkProcessor = new ElasticBulkProcessorAdapter(this.requestTracker, client);
+            this.bulkProcessor =
+                    new ElasticBulkProcessorAdapter(this.requestTracker, client, retryOnConflict);
         } else if (config.getConnector().equals("opensearch")) {
             OpensearchRestHighLevelClientAdapter client =
                     new OpensearchRestHighLevelClientAdapter(host, config);
-            this.bulkProcessor = new OpensearchBulkProcessorAdapter(this.requestTracker, client);
+            this.bulkProcessor =
+                    new OpensearchBulkProcessorAdapter(
+                            this.requestTracker, client, retryOnConflict);
         } else {
             throw new RuntimeException("Sink type must be elasticsearch or opensearch");
         }
