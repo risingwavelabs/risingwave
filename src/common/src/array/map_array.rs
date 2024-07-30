@@ -15,13 +15,15 @@
 use std::cmp::Ordering;
 use std::fmt::{self, Debug, Display};
 
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{PbArray, PbArrayType};
+use rw_iter_util::ZipEqFast;
 
 use super::{
     Array, ArrayBuilder, ArrayImpl, ArrayResult, DatumRef, ListArray, ListArrayBuilder, ListRef,
-    ListValue, MapType, ScalarRef, ScalarRefImpl, StructArray,
+    ListValue, MapType, ScalarImpl, ScalarRef, ScalarRefImpl, StructArray, StructValue,
+    ToOwnedDatum,
 };
 use crate::bitmap::Bitmap;
 use crate::types::{DataType, Scalar, ToText};
@@ -53,7 +55,12 @@ impl ArrayBuilder for MapArrayBuilder {
     }
 
     fn append_n(&mut self, n: usize, value: Option<MapRef<'_>>) {
-        self.inner.append_n(n, value.map(|v| v.0));
+        match value {
+            Some(MapRef(k, v)) => {
+                todo!("We cannot do it efficiently here.")
+            }
+            None => self.inner.append_n(n, None),
+        }
     }
 
     fn append_array(&mut self, other: &MapArray) {
@@ -79,6 +86,7 @@ impl ArrayBuilder for MapArrayBuilder {
 /// Type:
 /// - `key`'s datatype can only be string & integral types. (See [`MapType::assert_key_type_valid`].)
 /// - `value` can be any type.
+/// - the struct's column names should be "key" and "value", but not strictly enforced.
 ///
 /// Value (for each map value in the array):
 /// - `key`s are non-null and unique.
@@ -108,7 +116,8 @@ impl Array for MapArray {
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
         let list = self.inner.raw_value_at_unchecked(idx);
-        MapRef(list)
+        let (k, v) = list.as_map_kv();
+        MapRef(k, v)
     }
 
     fn len(&self) -> usize {
@@ -263,23 +272,17 @@ impl MapValue {
 /// Currently it's impossible.
 /// <https://github.com/risingwavelabs/risingwave/issues/17863>
 #[derive(Copy, Clone, Eq)]
-pub struct MapRef<'a>(pub(crate) ListRef<'a>);
+pub struct MapRef<'a>(ListRef<'a>, ListRef<'a>);
 
 impl<'a> MapRef<'a> {
     /// Iterates over the elements of the map.
-    pub fn iter(
-        self,
-    ) -> impl DoubleEndedIterator + ExactSizeIterator<Item = (ScalarRefImpl<'a>, DatumRef<'a>)> + 'a
-    {
-        self.0.iter().map(|list_elem| {
-            let list_elem = list_elem.expect("the list element in map should not be null");
-            let struct_ = list_elem.into_struct();
-            let (k, v) = struct_
-                .iter_fields_ref()
-                .next_tuple()
-                .expect("the struct in map should have exactly 2 fields");
-            (k.expect("map key should not be null"), v)
-        })
+    pub fn iter(self) -> impl ExactSizeIterator<Item = (ScalarRefImpl<'a>, DatumRef<'a>)> + 'a {
+        let k = self
+            .0
+            .iter()
+            .map(|k| k.expect("map key should not be null"));
+        let v = self.1.iter();
+        k.zip_eq_fast(v)
     }
 }
 
@@ -287,7 +290,8 @@ impl Scalar for MapValue {
     type ScalarRefType<'a> = MapRef<'a>;
 
     fn as_scalar_ref(&self) -> MapRef<'_> {
-        MapRef(self.0.as_scalar_ref())
+        let (k, v) = self.0.as_scalar_ref().as_map_kv();
+        MapRef(k, v)
     }
 }
 
@@ -295,7 +299,19 @@ impl<'a> ScalarRef<'a> for MapRef<'a> {
     type ScalarType = MapValue;
 
     fn to_owned_scalar(&self) -> MapValue {
-        MapValue(self.0.to_owned_scalar())
+        let k = self.0;
+        let v = self.1;
+        // Note: this is suboptimal. We can't build ListRef from 2 ListRefs.
+        let list = ListValue::from_datum_iter(
+            &DataType::Struct(MapType::struct_type_for_map(k.data_type(), v.data_type())),
+            k.iter().zip_eq_fast(v.iter()).map(|(k, v)| {
+                Some(ScalarImpl::Struct(StructValue::new(vec![
+                    k.to_owned_datum(),
+                    v.to_owned_datum(),
+                ])))
+            }),
+        );
+        MapValue(list)
     }
 
     fn hash_scalar<H: std::hash::Hasher>(&self, _state: &mut H) {
@@ -306,7 +322,7 @@ impl<'a> ScalarRef<'a> for MapRef<'a> {
 
 impl Debug for MapRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_list().entries(self.0.iter()).finish()
+        f.debug_list().entries(self.iter()).finish()
     }
 }
 
