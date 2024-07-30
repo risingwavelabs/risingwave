@@ -18,6 +18,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use more_asserts::{assert_gt, assert_lt};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
 use super::{
     HummockResult, HummockValue, SstableIteratorReadOptions, SstableIteratorType, SstableStoreRef,
@@ -55,7 +56,6 @@ pub use delete_range_iterator::{
     DeleteRangeIterator, ForwardMergeRangeIterator, RangeIteratorTyped,
 };
 use risingwave_common::catalog::TableId;
-use risingwave_pb::hummock::SstableInfo;
 pub use skip_watermark::*;
 
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;

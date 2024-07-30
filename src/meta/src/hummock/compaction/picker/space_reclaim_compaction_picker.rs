@@ -14,8 +14,8 @@
 
 use std::collections::HashSet;
 
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{InputLevel, SstableInfo};
+use risingwave_hummock_sdk::level::{InputLevel, Levels};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
 use super::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
@@ -173,9 +173,10 @@ mod test {
 
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::level::Level;
     use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
     use risingwave_pb::hummock::compact_task;
-    pub use risingwave_pb::hummock::{Level, LevelType};
+    pub use risingwave_pb::hummock::LevelType;
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -213,7 +214,7 @@ mod test {
             ),
             Level {
                 level_idx: 4,
-                level_type: LevelType::Nonoverlapping as i32,
+                level_type: LevelType::Nonoverlapping,
                 table_infos: vec![
                     generate_table_with_ids_and_epochs(2, 1, 0, 100, 1, vec![2], 0, 0),
                     generate_table_with_ids_and_epochs(3, 1, 101, 200, 1, vec![3], 0, 0),
@@ -232,8 +233,8 @@ mod test {
 
         {
             let sst_10 = levels[3].table_infos.get_mut(8).unwrap();
-            assert_eq!(10, sst_10.get_sst_id());
-            sst_10.key_range.as_mut().unwrap().right_exclusive = true;
+            assert_eq!(10, sst_10.sst_id);
+            sst_10.key_range.right_exclusive = true;
         }
 
         assert_eq!(levels.len(), 4);
@@ -294,7 +295,7 @@ mod test {
 
             let mut start_id = 2;
             for sst in &task.input.input_levels[0].table_infos {
-                assert_eq!(start_id, sst.get_sst_id());
+                assert_eq!(start_id, sst.sst_id);
                 start_id += 1;
             }
 
@@ -344,7 +345,7 @@ mod test {
             ));
             let mut start_id = 8;
             for sst in &task.input.input_levels[0].table_infos {
-                assert_eq!(start_id, sst.get_sst_id());
+                assert_eq!(start_id, sst.sst_id);
                 start_id += 1;
             }
 
@@ -476,7 +477,7 @@ mod test {
                 let select_sst = &task.input.input_levels[0]
                     .table_infos
                     .iter()
-                    .map(|sst| sst.get_sst_id())
+                    .map(|sst| sst.sst_id)
                     .collect_vec();
                 assert!(select_sst.is_sorted());
                 assert_eq!(expect_task_sst_id_range[index], *select_sst);
@@ -537,7 +538,7 @@ mod test {
                 let select_sst = &task.input.input_levels[0]
                     .table_infos
                     .iter()
-                    .map(|sst| sst.get_sst_id())
+                    .map(|sst| sst.sst_id)
                     .collect_vec();
                 assert!(select_sst.is_sorted());
                 assert_eq!(expect_task_sst_id_range[index], *select_sst);

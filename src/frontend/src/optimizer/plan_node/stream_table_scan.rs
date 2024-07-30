@@ -320,7 +320,7 @@ impl StreamTableScan {
             table_desc: Some(self.core.table_desc.try_to_protobuf()?),
             state_table: Some(catalog),
             arrangement_table,
-            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+            rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
             ..Default::default()
         });
 

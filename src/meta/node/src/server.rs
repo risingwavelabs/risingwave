@@ -569,7 +569,8 @@ pub async fn start_service_as_election_leader(
         meta_metrics.clone(),
         stream_rpc_manager.clone(),
         scale_controller.clone(),
-    );
+    )
+    .await;
 
     {
         let source_manager = source_manager.clone();

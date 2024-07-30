@@ -354,7 +354,7 @@ impl DdlController {
         tokio::spawn(fut).await.unwrap()
     }
 
-    pub async fn get_ddl_progress(&self) -> Vec<DdlProgress> {
+    pub async fn get_ddl_progress(&self) -> MetaResult<Vec<DdlProgress>> {
         self.barrier_manager.get_ddl_progress().await
     }
 
