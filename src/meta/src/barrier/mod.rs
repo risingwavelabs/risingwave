@@ -55,7 +55,7 @@ use self::notifier::Notifier;
 use crate::barrier::info::InflightActorInfo;
 use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
-use crate::barrier::rpc::ControlStreamManager;
+use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
 use crate::barrier::state::BarrierManagerState;
 use crate::error::MetaErrorInner;
 use crate::hummock::{CommitEpochInfo, HummockManagerRef, NewTableFragmentInfo};
@@ -293,12 +293,10 @@ impl CheckpointControl {
 
     /// Change the state of this `prev_epoch` to `Completed`. Return continuous nodes
     /// with `Completed` starting from first node [`Completed`..`InFlight`) and remove them.
-    fn barrier_collected(
-        &mut self,
-        worker_id: WorkerId,
-        prev_epoch: u64,
-        resp: BarrierCompleteResponse,
-    ) {
+    fn barrier_collected(&mut self, resp: BarrierCompleteResponse) {
+        let worker_id = resp.worker_id;
+        let prev_epoch = resp.epoch;
+        assert_eq!(resp.partial_graph_id, u32::MAX);
         if let Some(node) = self.command_ctx_queue.get_mut(&prev_epoch) {
             assert!(node.state.node_to_collect.remove(&worker_id));
             node.state.resps.push(resp);
@@ -419,10 +417,20 @@ impl CheckpointControl {
         }
         self.create_mview_tracker.abort_all();
     }
+
+    /// Return the earliest command waiting on the `worker_id`.
+    fn command_wait_collect_from_worker(&self, worker_id: WorkerId) -> Option<&CommandContext> {
+        for epoch_node in self.command_ctx_queue.values() {
+            if epoch_node.state.node_to_collect.contains(&worker_id) {
+                return Some(&epoch_node.command_ctx);
+            }
+        }
+        None
+    }
 }
 
 /// The state and message of this barrier, a node for concurrent checkpoint.
-pub struct EpochNode {
+struct EpochNode {
     /// Timer for recording barrier latency, taken after `complete_barriers`.
     enqueue_time: HistogramTimer,
 
@@ -731,14 +739,25 @@ impl GlobalBarrierManager {
                         _ => {}
                     }
                 }
-                resp_result = self.control_stream_manager.next_complete_barrier_response() => {
+                (worker_id, resp_result) = self.control_stream_manager.next_complete_barrier_response() => {
                     match resp_result {
-                        Ok((worker_id, prev_epoch, resp)) => {
-                            self.checkpoint_control.barrier_collected(worker_id, prev_epoch, resp);
+                        Ok(resp) => {
+                            self.checkpoint_control.barrier_collected(resp);
 
                         }
                         Err(e) => {
-                            self.failure_recovery(e).await;
+                            let failed_command = self.checkpoint_control.command_wait_collect_from_worker(worker_id);
+                            if failed_command.is_some()
+                                || self.state.inflight_actor_infos.actor_map.contains_key(&worker_id) {
+                                let errors = self.control_stream_manager.collect_errors(worker_id, e).await;
+                                let err = merge_node_rpc_errors("get error from control stream", errors);
+                                if let Some(failed_command) = failed_command {
+                                    self.context.report_collect_failure(failed_command, &err);
+                                }
+                                self.failure_recovery(err).await;
+                            } else {
+                                warn!(e = ?e.as_report(), worker_id, "no barrier to collect from worker, ignore err");
+                            }
                         }
                     }
                 }
@@ -812,8 +831,9 @@ impl GlobalBarrierManager {
         send_latency_timer.observe_duration();
 
         let node_to_collect = match self.control_stream_manager.inject_barrier(
-            command_ctx.clone(),
-            self.state.inflight_actor_infos.existing_table_ids(),
+            &command_ctx,
+            &command_ctx.info.fragment_infos,
+            Some(&self.state.inflight_actor_infos.fragment_infos),
         ) {
             Ok(node_to_collect) => node_to_collect,
             Err(err) => {
@@ -1262,6 +1282,7 @@ fn collect_commit_epoch_info(
         table_watermarks.push(resp.table_watermarks);
         old_value_ssts.extend(resp.old_value_sstables.into_iter().map(|s| s.into()));
     }
+
     let new_table_fragment_info =
         if let Command::CreateStreamingJob { info, .. } = &command_ctx.command {
             let table_fragments = &info.table_fragments;
@@ -1316,7 +1337,10 @@ fn collect_commit_epoch_info(
         sst_to_worker,
         new_table_fragment_info,
         table_new_change_log,
-        BTreeMap::from_iter([(epoch, command_ctx.info.existing_table_ids())]),
+        BTreeMap::from_iter([(
+            epoch,
+            InflightActorInfo::existing_table_ids(&command_ctx.info.fragment_infos).collect(),
+        )]),
         epoch,
     )
 }

@@ -462,7 +462,7 @@ where
                 // May need to revisit it.
                 // Need to check it after scale-in / scale-out.
                 self.progress.update(
-                    barrier.epoch.curr,
+                    barrier.epoch,
                     snapshot_read_epoch,
                     total_snapshot_processed_rows,
                 );
@@ -577,7 +577,7 @@ where
                     }
 
                     self.progress
-                        .finish(barrier.epoch.curr, total_snapshot_processed_rows);
+                        .finish(barrier.epoch, total_snapshot_processed_rows);
                     yield msg;
                     break;
                 }
