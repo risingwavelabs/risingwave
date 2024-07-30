@@ -13,11 +13,6 @@ start_single_node() {
   mkdir -p "$HOME/.risingwave/state_store"
   mkdir -p "$HOME/.risingwave/meta_store"
   mkdir -p .risingwave/config
-  cat <<EOF > .risingwave/config/risedev-env
-RW_META_ADDR="http://127.0.0.1:5690"
-RISEDEV_RW_FRONTEND_LISTEN_ADDRESS="127.0.0.1"
-RISEDEV_RW_FRONTEND_PORT="4566"
-EOF
   RUST_BACKTRACE=1 "$PREFIX_BIN"/risingwave >"$1" 2>&1
 }
 
