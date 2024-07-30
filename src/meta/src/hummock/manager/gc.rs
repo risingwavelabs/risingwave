@@ -177,7 +177,11 @@ impl HummockManager {
     /// 3. Meta node decides which SSTs to delete. See `HummockManager::complete_full_gc`.
     ///
     /// Returns Ok(false) if there is no worker available.
-    pub fn start_full_gc(&self, sst_retention_time: Duration) -> Result<bool> {
+    pub fn start_full_gc(
+        &self,
+        sst_retention_time: Duration,
+        prefix: Option<String>,
+    ) -> Result<bool> {
         self.metrics.full_gc_trigger_count.inc();
         // Set a minimum sst_retention_time to avoid deleting SSTs of on-going write op.
         let sst_retention_time = cmp::max(
@@ -185,8 +189,9 @@ impl HummockManager {
             Duration::from_secs(self.env.opts.min_sst_retention_time_sec),
         );
         tracing::info!(
-            "run full GC with sst_retention_time = {} secs",
-            sst_retention_time.as_secs()
+            retention_sec = sst_retention_time.as_secs(),
+            prefix = prefix.as_ref().unwrap_or(&String::from("")),
+            "run full GC"
         );
         let compactor = match self.compactor_manager.next_compactor() {
             None => {
@@ -198,6 +203,7 @@ impl HummockManager {
         compactor
             .send_event(ResponseEvent::FullScanTask(FullScanTask {
                 sst_retention_time_sec: sst_retention_time.as_secs(),
+                prefix,
             }))
             .map_err(|_| Error::CompactorUnreachable(compactor.context_id()))?;
         Ok(true)
@@ -216,23 +222,33 @@ impl HummockManager {
         let watermark =
             collect_global_gc_watermark(self.metadata_manager().clone(), spin_interval).await?;
         metrics.full_gc_last_object_id_watermark.set(watermark as _);
-        let candidate_sst_number = object_ids.len();
+        let candidate_object_number = object_ids.len();
         metrics
             .full_gc_candidate_object_count
-            .observe(candidate_sst_number as _);
+            .observe(candidate_object_number as _);
+        let pinned_object_ids = self
+            .all_object_ids_in_time_travel()
+            .await?
+            .collect::<HashSet<_>>();
         // 1. filter by watermark
         let object_ids = object_ids
             .into_iter()
             .filter(|s| *s < watermark)
             .collect_vec();
-        // 2. filter by version
-        let selected_sst_number = self.extend_objects_to_delete_from_scan(&object_ids).await;
+        let after_watermark = object_ids.len();
+        // 2. filter by time travel archive
+        let object_ids = object_ids
+            .into_iter()
+            .filter(|s| !pinned_object_ids.contains(s))
+            .collect_vec();
+        let after_time_travel = object_ids.len();
+        // 3. filter by version
+        let selected_object_number = self.extend_objects_to_delete_from_scan(&object_ids).await;
         metrics
             .full_gc_selected_object_count
-            .observe(selected_sst_number as _);
-        tracing::info!("GC watermark is {}. SST full scan returns {} SSTs. {} remains after filtered by GC watermark. {} remains after filtered by hummock version.",
-            watermark, candidate_sst_number, object_ids.len(), selected_sst_number);
-        Ok(selected_sst_number)
+            .observe(selected_object_number as _);
+        tracing::info!("GC watermark is {watermark}. Object full scan returns {candidate_object_number} objects. {after_watermark} remains after filtered by GC watermark. {after_time_travel} remains after filtered by time travel archives. {selected_object_number} remains after filtered by hummock version.");
+        Ok(selected_object_number)
     }
 }
 
@@ -334,17 +350,19 @@ mod tests {
 
         // No task scheduled because no available worker.
         assert!(!hummock_manager
-            .start_full_gc(Duration::from_secs(
-                hummock_manager.env.opts.min_sst_retention_time_sec - 1
-            ))
+            .start_full_gc(
+                Duration::from_secs(hummock_manager.env.opts.min_sst_retention_time_sec - 1,),
+                None
+            )
             .unwrap());
 
         let mut receiver = compactor_manager.add_compactor(context_id);
 
         assert!(hummock_manager
-            .start_full_gc(Duration::from_secs(
-                hummock_manager.env.opts.min_sst_retention_time_sec - 1
-            ))
+            .start_full_gc(
+                Duration::from_secs(hummock_manager.env.opts.min_sst_retention_time_sec - 1),
+                None
+            )
             .unwrap());
         let full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
             ResponseEvent::FullScanTask(task) => task,
@@ -359,9 +377,10 @@ mod tests {
         );
 
         assert!(hummock_manager
-            .start_full_gc(Duration::from_secs(
-                hummock_manager.env.opts.min_sst_retention_time_sec + 1
-            ))
+            .start_full_gc(
+                Duration::from_secs(hummock_manager.env.opts.min_sst_retention_time_sec + 1),
+                None
+            )
             .unwrap());
         let full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
             ResponseEvent::FullScanTask(task) => task,
@@ -411,7 +430,7 @@ mod tests {
         let committed_object_ids = sst_infos
             .into_iter()
             .flatten()
-            .map(|s| s.get_object_id())
+            .map(|s| s.object_id)
             .sorted()
             .collect_vec();
         assert!(!committed_object_ids.is_empty());

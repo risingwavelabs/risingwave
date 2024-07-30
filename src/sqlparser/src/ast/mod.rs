@@ -52,8 +52,8 @@ pub use self::query::{
 };
 pub use self::statement::*;
 pub use self::value::{
-    CstyleEscapedString, DateTimeField, DollarQuotedString, JsonPredicateType, TrimWhereField,
-    Value,
+    CstyleEscapedString, DateTimeField, DollarQuotedString, JsonPredicateType, SecretRef,
+    SecretRefAsType, TrimWhereField, Value,
 };
 pub use crate::ast::ddl::{
     AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterSubscriptionOperation,
@@ -2481,6 +2481,8 @@ impl fmt::Display for FunctionArg {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Function {
+    /// Whether the function is prefixed with `aggregate:`
+    pub aggregate: bool,
     pub name: ObjectName,
     pub args: Vec<FunctionArg>,
     /// whether the last argument is variadic, e.g. `foo(a, b, variadic c)`
@@ -2497,6 +2499,7 @@ pub struct Function {
 impl Function {
     pub fn no_arg(name: ObjectName) -> Self {
         Self {
+            aggregate: false,
             name,
             args: vec![],
             variadic: false,
@@ -2511,6 +2514,9 @@ impl Function {
 
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.aggregate {
+            write!(f, "aggregate:")?;
+        }
         write!(
             f,
             "{}({}",
@@ -2885,6 +2891,7 @@ impl fmt::Display for FunctionBehavior {
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FunctionDefinition {
+    Identifier(String),
     SingleQuotedDef(String),
     DoubleDollarDef(String),
 }
@@ -2892,6 +2899,7 @@ pub enum FunctionDefinition {
 impl fmt::Display for FunctionDefinition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            FunctionDefinition::Identifier(s) => write!(f, "{s}")?,
             FunctionDefinition::SingleQuotedDef(s) => write!(f, "'{s}'")?,
             FunctionDefinition::DoubleDollarDef(s) => write!(f, "$${s}$$")?,
         }
@@ -2903,6 +2911,7 @@ impl FunctionDefinition {
     /// Returns the function definition as a string slice.
     pub fn as_str(&self) -> &str {
         match self {
+            FunctionDefinition::Identifier(s) => s,
             FunctionDefinition::SingleQuotedDef(s) => s,
             FunctionDefinition::DoubleDollarDef(s) => s,
         }
@@ -2911,6 +2920,7 @@ impl FunctionDefinition {
     /// Returns the function definition as a string.
     pub fn into_string(self) -> String {
         match self {
+            FunctionDefinition::Identifier(s) => s,
             FunctionDefinition::SingleQuotedDef(s) => s,
             FunctionDefinition::DoubleDollarDef(s) => s,
         }
@@ -3149,6 +3159,8 @@ impl fmt::Display for SetVariableValueSingle {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AsOf {
     ProcessTime,
+    // used by time travel
+    ProcessTimeWithInterval((String, DateTimeField)),
     // the number of seconds that have elapsed since the Unix epoch, which is January 1, 1970 at 00:00:00 Coordinated Universal Time (UTC).
     TimestampNum(i64),
     TimestampString(String),
@@ -3161,6 +3173,11 @@ impl fmt::Display for AsOf {
         use AsOf::*;
         match self {
             ProcessTime => write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()"),
+            ProcessTimeWithInterval((value, leading_field)) => write!(
+                f,
+                " FOR SYSTEM_TIME AS OF NOW() - {} {}",
+                value, leading_field
+            ),
             TimestampNum(ts) => write!(f, " FOR SYSTEM_TIME AS OF {}", ts),
             TimestampString(ts) => write!(f, " FOR SYSTEM_TIME AS OF '{}'", ts),
             VersionNum(v) => write!(f, " FOR SYSTEM_VERSION AS OF {}", v),

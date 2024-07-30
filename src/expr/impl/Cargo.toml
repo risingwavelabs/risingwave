@@ -36,6 +36,7 @@ arrow-udf-python = { workspace = true, optional = true }
 arrow-udf-wasm = { workspace = true, optional = true }
 async-trait = "0.1"
 auto_enums = { workspace = true }
+bytes = "1"
 chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",

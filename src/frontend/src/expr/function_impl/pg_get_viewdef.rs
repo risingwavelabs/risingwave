@@ -39,7 +39,7 @@ fn pg_get_viewdef_impl(
     if let Ok(view) = catalog_reader.get_view_by_id(db_name, oid as u32) {
         write!(writer, "{}", view.sql).unwrap();
         Ok(())
-    } else if let Ok(mv) = catalog_reader.get_table_by_id_with_db(db_name, oid as u32) {
+    } else if let Ok(mv) = catalog_reader.get_created_table_by_id_with_db(db_name, oid as u32) {
         let stmts = Parser::parse_sql(&mv.definition).map_err(|e| anyhow!(e))?;
         let [stmt]: [_; 1] = stmts.try_into().unwrap();
 

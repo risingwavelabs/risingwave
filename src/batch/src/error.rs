@@ -17,6 +17,7 @@
 use std::sync::Arc;
 
 pub use anyhow::anyhow;
+use parquet::errors::ParquetError;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::BoxedError;
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
@@ -116,7 +117,14 @@ pub enum BatchError {
     Iceberg(
         #[from]
         #[backtrace]
-        icelake::Error,
+        iceberg::Error,
+    ),
+
+    #[error(transparent)]
+    Parquet(
+        #[from]
+        #[backtrace]
+        ParquetError,
     ),
 
     // Make the ref-counted type to be a variant for easier code structuring.
@@ -145,6 +153,13 @@ pub enum BatchError {
         #[from]
         #[backtrace]
         opendal::Error,
+    ),
+
+    #[error("Failed to execute time travel query")]
+    TimeTravel(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
     ),
 }
 

@@ -25,7 +25,7 @@ use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayImplBuilder, ArrayRef, DataChunk, Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     get_dist_key_in_pk_indices, ColumnDesc, ColumnId, TableId, TableOption,
 };
@@ -39,8 +39,8 @@ use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, prefixed_range_with_vnode, range_of_prefix,
-    start_bound_of_excluded_prefix, TableKey, TableKeyRange,
+    end_bound_of_prefix, prefixed_range_with_vnode, start_bound_of_excluded_prefix, TableKey,
+    TableKeyRange,
 };
 use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
 use risingwave_pb::catalog::Table;
@@ -57,7 +57,9 @@ use risingwave_storage::store::{
     ReadLogOptions, ReadOptions, SealCurrentEpochOptions, StateStoreIter, StateStoreIterExt,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
-use risingwave_storage::table::{deserialize_log_stream, KeyedRow, TableDistribution};
+use risingwave_storage::table::{
+    deserialize_log_stream, ChangeLogRow, KeyedRow, TableDistribution,
+};
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tracing::{trace, Instrument};
@@ -1567,51 +1569,6 @@ where
             .map_err(StreamExecutorError::from)
     }
 
-    /// Returns:
-    /// false: the provided pk prefix is absent in state store.
-    /// true: the provided pk prefix may or may not be present in state store.
-    pub async fn may_exist(&self, pk_prefix: impl Row) -> StreamExecutorResult<bool> {
-        let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
-        let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
-        let encoded_key_range = range_of_prefix(&encoded_prefix);
-
-        // We assume that all usages of iterating the state table only access a single vnode.
-        // If this assertion fails, then something must be wrong with the operator implementation or
-        // the distribution derivation from the optimizer.
-        let vnode = self.compute_prefix_vnode(&pk_prefix);
-        let table_key_range = prefixed_range_with_vnode(encoded_key_range, vnode);
-
-        // Construct prefix hint for prefix bloom filter.
-        if self.prefix_hint_len != 0 {
-            debug_assert_eq!(self.prefix_hint_len, pk_prefix.len());
-        }
-        let prefix_hint = {
-            if self.prefix_hint_len == 0 || self.prefix_hint_len > pk_prefix.len() {
-                panic!();
-            } else {
-                let encoded_prefix_len = self
-                    .pk_serde
-                    .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
-
-                Some(Bytes::copy_from_slice(
-                    &encoded_prefix[..encoded_prefix_len],
-                ))
-            }
-        };
-
-        let read_options = ReadOptions {
-            prefix_hint,
-            table_id: self.table_id,
-            cache_policy: CachePolicy::Fill(CacheContext::Default),
-            ..Default::default()
-        };
-
-        self.local_store
-            .may_exist(table_key_range, read_options)
-            .await
-            .map_err(Into::into)
-    }
-
     #[cfg(test)]
     pub fn get_watermark_cache(&self) -> &StateTableWatermarkCache {
         &self.watermark_cache
@@ -1634,7 +1591,7 @@ where
         vnode: VirtualNode,
         epoch_range: (u64, u64),
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
-    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<(Op, OwnedRow)>> + '_> {
+    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<ChangeLogRow>> + '_> {
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
         let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
         Ok(deserialize_log_stream(

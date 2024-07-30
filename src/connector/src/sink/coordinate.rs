@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_rpc_client::CoordinatorStreamHandle;
 use tracing::warn;

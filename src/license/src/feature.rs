@@ -44,6 +44,9 @@ macro_rules! for_all_features {
         $macro! {
             // name                 min tier    doc
             { TestPaid,             Paid,       "A dummy feature that's only available on paid tier for testing purposes." },
+            { TimeTravel,           Paid,       "Query historical data within the retention period."},
+            { GlueSchemaRegistry,   Paid,       "Use Schema Registry from AWS Glue rather than Confluent." },
+            { SecretManagement,     Paid,       "Secret management." },
         }
     };
 }

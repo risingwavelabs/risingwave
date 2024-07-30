@@ -19,7 +19,7 @@ use std::sync::Arc;
 use risingwave_pb::task_service::permits;
 use tokio::sync::{mpsc, AcquireError, Semaphore, SemaphorePermit};
 
-use crate::executor::Message;
+use crate::executor::DispatcherMessage as Message;
 
 /// Message with its required permits.
 ///
@@ -214,7 +214,7 @@ mod tests {
     use futures::FutureExt;
 
     use super::*;
-    use crate::executor::Barrier;
+    use crate::executor::DispatcherBarrier as Barrier;
 
     #[test]
     fn test_channel_close() {

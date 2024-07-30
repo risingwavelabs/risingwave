@@ -31,7 +31,7 @@ use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, ExprVisitor, FunctionCall};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
-use crate::optimizer::property::{Distribution, DistributionDisplay};
+use crate::optimizer::property::{Distribution, DistributionDisplay, MonotonicityMap};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
@@ -74,6 +74,7 @@ impl StreamTableScan {
             core.append_only(),
             false,
             core.watermark_columns(),
+            MonotonicityMap::new(),
         );
         Self {
             base,
@@ -319,7 +320,7 @@ impl StreamTableScan {
             table_desc: Some(self.core.table_desc.try_to_protobuf()?),
             state_table: Some(catalog),
             arrangement_table,
-            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+            rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
             ..Default::default()
         });
 

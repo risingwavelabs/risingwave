@@ -29,6 +29,8 @@ use futures_async_stream::try_stream;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::row::OwnedRow;
+use risingwave_common::secret::LocalSecretManager;
+use risingwave_pb::secret::PbSecretRef;
 use serde_derive::{Deserialize, Serialize};
 
 use crate::error::{ConnectorError, ConnectorResult};
@@ -71,14 +73,13 @@ impl CdcTableType {
         config: ExternalTableConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
-        scan_limit: u32,
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
             Self::MySql => Ok(ExternalTableReaderImpl::MySql(
                 MySqlExternalTableReader::new(config, schema).await?,
             )),
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
-                PostgresExternalTableReader::new(config, schema, pk_indices, scan_limit).await?,
+                PostgresExternalTableReader::new(config, schema, pk_indices).await?,
             )),
             _ => bail!("invalid external table type: {:?}", *self),
         }
@@ -97,7 +98,7 @@ pub const SCHEMA_NAME_KEY: &str = "schema.name";
 pub const DATABASE_NAME_KEY: &str = "database.name";
 
 impl SchemaTableName {
-    pub fn from_properties(properties: &HashMap<String, String>) -> Self {
+    pub fn from_properties(properties: &BTreeMap<String, String>) -> Self {
         let table_type = CdcTableType::from_properties(properties);
         let table_name = properties.get(TABLE_NAME_KEY).cloned().unwrap_or_default();
 
@@ -215,8 +216,11 @@ pub struct ExternalTableConfig {
 impl ExternalTableConfig {
     pub fn try_from_btreemap(
         connect_properties: BTreeMap<String, String>,
+        secret_refs: BTreeMap<String, PbSecretRef>,
     ) -> ConnectorResult<Self> {
-        let json_value = serde_json::to_value(connect_properties)?;
+        let options_with_secret =
+            LocalSecretManager::global().fill_secrets(connect_properties, secret_refs)?;
+        let json_value = serde_json::to_value(options_with_secret)?;
         let config = serde_json::from_value::<ExternalTableConfig>(json_value)?;
         Ok(config)
     }
