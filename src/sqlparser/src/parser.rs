@@ -1812,9 +1812,11 @@ impl Parser<'_> {
         self.expected(expected)
     }
 
+    /// Check if the expected match is the next token.
+    /// The equality check is case-insensitive.
     pub fn parse_word(&mut self, expected: &str) -> bool {
         match self.peek_token().token {
-            Token::Word(w) if w.value == expected => {
+            Token::Word(w) if w.value.to_uppercase() == expected => {
                 self.next_token();
                 true
             }
