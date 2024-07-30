@@ -24,7 +24,7 @@ use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
-use crate::barrier::{CreateStreamingJobCommandInfo, ReplaceTablePlan};
+use crate::barrier::{Command, CreateStreamingJobCommandInfo, EpochNode, ReplaceTablePlan};
 use crate::manager::{
     DdlType, MetadataManager, MetadataManagerV1, MetadataManagerV2, StreamingJob,
 };
@@ -406,6 +406,45 @@ impl CreateMviewProgressTracker {
                 (table_id, ddl_progress)
             })
             .collect()
+    }
+
+    /// Apply a collected epoch node command to the tracker
+    /// Return the finished jobs when the barrier kind is `Checkpoint`
+    pub(super) fn apply_collected_command(
+        &mut self,
+        epoch_node: &EpochNode,
+        version_stats: &HummockVersionStats,
+    ) -> Vec<TrackingJob> {
+        let command_ctx = &epoch_node.command_ctx;
+        let new_tracking_job_info = if let Command::CreateStreamingJob {
+            info,
+            replace_table,
+        } = &command_ctx.command
+        {
+            Some((info, replace_table.as_ref()))
+        } else {
+            None
+        };
+        assert!(epoch_node.state.node_to_collect.is_empty());
+        self.update_tracking_jobs(
+            new_tracking_job_info,
+            epoch_node
+                .state
+                .resps
+                .iter()
+                .flat_map(|resp| resp.create_mview_progress.iter()),
+            version_stats,
+        );
+        if let Some(table_id) = command_ctx.command.table_to_cancel() {
+            // the cancelled command is possibly stashed in `finished_commands` and waiting
+            // for checkpoint, we should also clear it.
+            self.cancel_command(table_id);
+        }
+        if command_ctx.kind.is_checkpoint() {
+            self.take_finished_jobs()
+        } else {
+            vec![]
+        }
     }
 
     /// Stash a command to finish later.

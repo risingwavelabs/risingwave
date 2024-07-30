@@ -387,7 +387,9 @@ impl CheckpointControl {
                     node.command_ctx.prev_epoch.value().0,
                     node.command_ctx.curr_epoch.value().0,
                 );
-                let (_, finished_jobs) = self.apply_command_to_tracker(&node);
+                let finished_jobs = self
+                    .create_mview_tracker
+                    .apply_collected_command(&node, &self.hummock_version_stats);
                 if let Err(e) = self
                     .context
                     .clone()
@@ -1068,40 +1070,6 @@ struct BarrierCompleteOutput {
 }
 
 impl CheckpointControl {
-    fn apply_command_to_tracker(&mut self, epoch_node: &EpochNode) -> (bool, Vec<TrackingJob>) {
-        let command_ctx = &epoch_node.command_ctx;
-        let tracker = &mut self.create_mview_tracker;
-        let new_tracking_job_info = if let Command::CreateStreamingJob {
-            info,
-            replace_table,
-        } = &command_ctx.command
-        {
-            Some((info, replace_table.as_ref()))
-        } else {
-            None
-        };
-        assert!(epoch_node.state.node_to_collect.is_empty());
-        tracker.update_tracking_jobs(
-            new_tracking_job_info,
-            epoch_node
-                .state
-                .resps
-                .iter()
-                .flat_map(|resp| resp.create_mview_progress.iter()),
-            &self.hummock_version_stats,
-        );
-        if let Some(table_id) = command_ctx.command.table_to_cancel() {
-            // the cancelled command is possibly stashed in `finished_commands` and waiting
-            // for checkpoint, we should also clear it.
-            tracker.cancel_command(table_id);
-        }
-        if command_ctx.kind.is_checkpoint() {
-            (false, tracker.take_finished_jobs())
-        } else {
-            (tracker.has_pending_finished_jobs(), vec![])
-        }
-    }
-
     pub(super) async fn next_completed_barrier(&mut self) -> MetaResult<BarrierCompleteOutput> {
         if matches!(&self.completing_command, CompletingCommand::None) {
             // If there is no completing barrier, try to start completing the earliest barrier if
@@ -1110,17 +1078,20 @@ impl CheckpointControl {
                 && !state.is_inflight()
             {
                 let (_, node) = self.command_ctx_queue.pop_first().expect("non-empty");
-                let (has_remaining, finished_jobs) = self.apply_command_to_tracker(&node);
+                let finished_jobs = self
+                    .create_mview_tracker
+                    .apply_collected_command(&node, &self.hummock_version_stats);
                 let command_ctx = node.command_ctx.clone();
                 let join_handle =
                     tokio::spawn(self.context.clone().complete_barrier(node, finished_jobs));
-                let require_next_checkpoint = if has_remaining {
-                    self.command_ctx_queue
-                        .values()
-                        .all(|node| !node.command_ctx.kind.is_checkpoint())
-                } else {
-                    false
-                };
+                let require_next_checkpoint =
+                    if self.create_mview_tracker.has_pending_finished_jobs() {
+                        self.command_ctx_queue
+                            .values()
+                            .all(|node| !node.command_ctx.kind.is_checkpoint())
+                    } else {
+                        false
+                    };
                 self.completing_command = CompletingCommand::Completing {
                     command_ctx,
                     require_next_checkpoint,
