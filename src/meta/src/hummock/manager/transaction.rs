@@ -123,7 +123,6 @@ impl<'a> HummockVersionTransaction<'a> {
         change_log_delta: HashMap<TableId, ChangeLogDelta>,
         batch_commit_for_new_cg: Option<(
             HashMap<CompactionGroupId, BTreeMap<u64, Vec<LocalSstableInfo>>>,
-            u64,
             CompactionConfig,
         )>,
     ) -> HummockVersionDelta {
@@ -132,11 +131,9 @@ impl<'a> HummockVersionTransaction<'a> {
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
 
-        if let Some((batch_commit_for_new_cg, start_sst_id, compaction_group_config)) =
+        if let Some((batch_commit_for_new_cg, compaction_group_config)) =
             batch_commit_for_new_cg
         {
-            let mut start_sst_id = start_sst_id;
-
             for (compaction_group_id, batch_commit_sst) in batch_commit_for_new_cg {
                 let group_deltas = &mut new_version_delta
                     .group_deltas
@@ -150,13 +147,12 @@ impl<'a> HummockVersionTransaction<'a> {
                     group_id: compaction_group_id,
                     parent_group_id: StaticCompactionGroupId::NewCompactionGroup
                         as CompactionGroupId,
-                    new_sst_start_id: start_sst_id,
+                    new_sst_start_id: 0, // No need to set it when `NewCompactionGroup`
                     table_ids: vec![],
                     version: CompatibilityVersion::NoMemberTableIds as i32,
                 }));
 
                 for (epoch, insert_ssts) in batch_commit_sst {
-                    start_sst_id += insert_ssts.len() as u64;
                     let l0_sub_level_id = epoch;
                     let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
                         0,

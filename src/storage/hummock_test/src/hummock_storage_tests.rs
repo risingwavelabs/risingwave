@@ -2500,7 +2500,7 @@ async fn test_commit_multi_epoch() {
 
     let epoch1 = initial_epoch.next_epoch();
     let sst1_epoch1 = SstableInfo {
-        sst_id: 1,
+        sst_id: 11,
         object_id: 1,
         table_ids: vec![existing_table_id.table_id],
         ..Default::default()
@@ -2537,7 +2537,7 @@ async fn test_commit_multi_epoch() {
         let sub_level = &sub_levels[0];
         assert_eq!(sub_level.sub_level_id, epoch1);
         assert_eq!(sub_level.table_infos.len(), 1);
-        assert_eq!(sub_level.table_infos[0], sst1_epoch1);
+        assert_eq!(sub_level.table_infos[0].object_id, sst1_epoch1.object_id);
         old_version.levels.keys().cloned().collect()
     };
 
@@ -2546,14 +2546,14 @@ async fn test_commit_multi_epoch() {
     let batch_commit_table_id = TableId::new(2);
 
     let sst_epoch2 = SstableInfo {
-        sst_id: 2,
+        sst_id: 22,
         object_id: 2,
         table_ids: vec![existing_table_id.table_id, batch_commit_table_id.table_id],
         ..Default::default()
     };
 
     let sst2_epoch1 = SstableInfo {
-        sst_id: 3,
+        sst_id: 33,
         object_id: 3,
         table_ids: vec![batch_commit_table_id.table_id],
         ..Default::default()
@@ -2599,7 +2599,7 @@ async fn test_commit_multi_epoch() {
     let sub_level1 = &sub_levels[0];
     assert_eq!(sub_level1.sub_level_id, epoch1);
     assert_eq!(sub_level1.table_infos.len(), 1);
-    assert_eq!(sub_level1.table_infos[0], sst1_epoch1);
+    assert_eq!(sub_level1.table_infos[0].object_id, sst1_epoch1.object_id);
     let sub_level2 = &sub_levels[1];
     assert_eq!(sub_level2.sub_level_id, epoch2);
     assert_eq!(sub_level2.table_infos.len(), 1);
@@ -2616,7 +2616,7 @@ async fn test_commit_multi_epoch() {
     let sub_level1 = &sub_levels[0];
     assert_eq!(sub_level1.sub_level_id, epoch1);
     assert_eq!(sub_level1.table_infos.len(), 1);
-    assert_eq!(sub_level1.table_infos[0], sst2_epoch1);
+    assert_eq!(sub_level1.table_infos[0].object_id, sst2_epoch1.object_id);
     let sub_level2 = &sub_levels[1];
     assert_eq!(sub_level2.sub_level_id, epoch2);
     assert_eq!(sub_level2.table_infos.len(), 1);

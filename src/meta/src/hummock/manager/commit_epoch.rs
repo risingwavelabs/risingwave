@@ -219,7 +219,6 @@ impl HummockManager {
                     CompactionGroupManager::start_owned_compaction_groups_txn(
                         compaction_group_manager_guard,
                     );
-                let mut new_id_count = 0;
                 let mut batch_commit_info = HashMap::new();
                 for BatchCommitForNewCg {
                     epoch_to_ssts,
@@ -235,8 +234,6 @@ impl HummockManager {
                         },
                     );
 
-                    new_id_count += epoch_to_ssts.values().map(|ssts| ssts.len()).sum::<usize>();
-
                     on_handle_add_new_table(
                         state_table_info,
                         &table_ids,
@@ -247,13 +244,8 @@ impl HummockManager {
 
                     batch_commit_info.insert(new_compaction_group_id, epoch_to_ssts);
                 }
-                let start_sst_id = next_sstable_object_id(&self.env, new_id_count).await?;
                 (
-                    Some((
-                        batch_commit_info,
-                        start_sst_id,
-                        (*compaction_group_config).clone(),
-                    )),
+                    Some((batch_commit_info, (*compaction_group_config).clone())),
                     Some(compaction_group_manager),
                 )
             } else {
