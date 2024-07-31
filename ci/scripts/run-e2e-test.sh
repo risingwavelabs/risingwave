@@ -27,6 +27,7 @@ if [[ $mode == "standalone" ]]; then
 fi
 
 if [[ $mode == "single-node" ]]; then
+  export RUST_MIN_STACK=4194304
   source ci/scripts/single-node-utils.sh
 fi
 
