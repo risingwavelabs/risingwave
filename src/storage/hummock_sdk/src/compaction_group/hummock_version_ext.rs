@@ -146,16 +146,9 @@ impl HummockVersion {
     }
 
     pub fn get_combined_levels(&self) -> impl Iterator<Item = &'_ Level> + '_ {
-        self.levels.values().flat_map(|level| {
-            level
-                .l0
-                .as_ref()
-                .unwrap()
-                .sub_levels
-                .iter()
-                .rev()
-                .chain(level.levels.iter())
-        })
+        self.levels
+            .values()
+            .flat_map(|level| level.l0.sub_levels.iter().rev().chain(level.levels.iter()))
     }
 
     pub fn get_object_ids(&self) -> HashSet<HummockSstableObjectId> {
@@ -195,16 +188,7 @@ impl HummockVersion {
                     None
                 }
             })
-            .flat_map(|level| {
-                level
-                    .l0
-                    .as_ref()
-                    .unwrap()
-                    .sub_levels
-                    .iter()
-                    .rev()
-                    .chain(level.levels.iter())
-            })
+            .flat_map(|level| level.l0.sub_levels.iter().rev().chain(level.levels.iter()))
             .flat_map(|level| level.table_infos.iter())
             .chain(self.table_change_log.values().flat_map(|change_log| {
                 // TODO: optimization: strip table change log
@@ -223,7 +207,7 @@ impl HummockVersion {
         mut f: F,
     ) {
         if let Some(levels) = self.levels.get(&compaction_group_id) {
-            for sub_level in &levels.l0.as_ref().unwrap().sub_levels {
+            for sub_level in &levels.l0.sub_levels {
                 if !f(sub_level) {
                     return;
                 }
@@ -348,8 +332,8 @@ impl HummockVersion {
             .map_or(0, |parent_levels| {
                 parent_levels
                     .l0
+                    .sub_levels
                     .iter()
-                    .flat_map(|l0| &l0.sub_levels)
                     .chain(parent_levels.levels.iter())
                     .flat_map(|level| &level.table_infos)
                     .map(|sst_info| {
@@ -382,9 +366,10 @@ impl HummockVersion {
             .levels
             .get_many_mut([&parent_group_id, &group_id])
             .unwrap();
-        if let Some(ref mut l0) = parent_levels.l0 {
+        let l0 = &mut parent_levels.l0;
+        {
             for sub_level in &mut l0.sub_levels {
-                let target_l0 = cur_levels.l0.as_mut().unwrap();
+                let target_l0 = &mut cur_levels.l0;
                 // When `insert_hint` is `Ok(idx)`, it means that the sub level `idx` in `target_l0`
                 // will extend these SSTs. When `insert_hint` is `Err(idx)`, it
                 // means that we will add a new sub level `idx` into `target_l0`.
@@ -673,7 +658,7 @@ impl HummockVersion {
                 );
                 if !insert_table_infos.is_empty() {
                     insert_new_sub_level(
-                        levels.l0.as_mut().unwrap(),
+                        &mut levels.l0,
                         insert_sub_level_id,
                         PbLevelType::Overlapping,
                         insert_table_infos,
@@ -802,7 +787,7 @@ impl HummockVersion {
         let mut ret: BTreeMap<_, _> = BTreeMap::new();
         for (compaction_group_id, group) in &self.levels {
             let mut levels = vec![];
-            levels.extend(group.l0.as_ref().unwrap().sub_levels.iter());
+            levels.extend(group.l0.sub_levels.iter());
             levels.extend(group.levels.iter());
             for level in levels {
                 for table_info in &level.table_infos {
@@ -860,7 +845,7 @@ impl Levels {
         }
         for level_idx in &delete_sst_levels {
             if *level_idx == 0 {
-                for level in &mut self.l0.as_mut().unwrap().sub_levels {
+                for level in &mut self.l0.sub_levels {
                     level_delete_ssts(level, &delete_sst_ids_set);
                 }
             } else {
@@ -871,7 +856,7 @@ impl Levels {
 
         if !insert_table_infos.is_empty() {
             if insert_sst_level_id == 0 {
-                let l0 = self.l0.as_mut().unwrap();
+                let l0 = &mut self.l0;
                 let index = l0
                     .sub_levels
                     .partition_point(|level| level.sub_level_id < insert_sub_level_id);
@@ -912,22 +897,16 @@ impl Levels {
         }
         if delete_sst_levels.iter().any(|level_id| *level_id == 0) {
             self.l0
-                .as_mut()
-                .unwrap()
                 .sub_levels
                 .retain(|level| !level.table_infos.is_empty());
-            self.l0.as_mut().unwrap().total_file_size = self
+            self.l0.total_file_size = self
                 .l0
-                .as_mut()
-                .unwrap()
                 .sub_levels
                 .iter()
                 .map(|level| level.total_file_size)
                 .sum::<u64>();
-            self.l0.as_mut().unwrap().uncompressed_file_size = self
+            self.l0.uncompressed_file_size = self
                 .l0
-                .as_mut()
-                .unwrap()
                 .sub_levels
                 .iter()
                 .map(|level| level.uncompressed_file_size)
@@ -942,7 +921,7 @@ impl Levels {
     ) -> bool {
         for level_idx in delete_sst_levels {
             if *level_idx == 0 {
-                for level in &self.l0.as_ref().unwrap().sub_levels {
+                for level in &self.l0.sub_levels {
                     level.table_infos.iter().for_each(|table| {
                         delete_sst_ids_set.remove(&table.sst_id);
                     });
@@ -977,11 +956,11 @@ pub fn build_initial_compaction_group_levels(
     #[expect(deprecated)] // for backward-compatibility of previous hummock version delta
     Levels {
         levels,
-        l0: Some(OverlappingLevel {
+        l0: OverlappingLevel {
             sub_levels: vec![],
             total_file_size: 0,
             uncompressed_file_size: 0,
-        }),
+        },
         group_id,
         parent_group_id: StaticCompactionGroupId::NewCompactionGroup as _,
         member_table_ids: vec![],
@@ -1037,8 +1016,6 @@ pub fn get_compaction_group_ssts(
     let group_levels = version.get_compaction_group_levels(group_id);
     group_levels
         .l0
-        .as_ref()
-        .unwrap()
         .sub_levels
         .iter()
         .rev()
@@ -1298,22 +1275,19 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
             }
         };
 
-        if let Some(l0) = &levels.l0 {
-            let mut prev_sub_level_id = u64::MAX;
-            for sub_level in &l0.sub_levels {
-                // Ensure sub_level_id is sorted and unique
-                if sub_level.sub_level_id >= prev_sub_level_id {
-                    res.push(format!(
-                        "GROUP {} LEVEL 0: sub_level_id {} >= prev_sub_level {}",
-                        group_id, sub_level.level_idx, prev_sub_level_id
-                    ));
-                }
-                prev_sub_level_id = sub_level.sub_level_id;
-
-                validate_level(*group_id, 0, sub_level, &mut res);
+        let l0 = &levels.l0;
+        let mut prev_sub_level_id = u64::MAX;
+        for sub_level in &l0.sub_levels {
+            // Ensure sub_level_id is sorted and unique
+            if sub_level.sub_level_id >= prev_sub_level_id {
+                res.push(format!(
+                    "GROUP {} LEVEL 0: sub_level_id {} >= prev_sub_level {}",
+                    group_id, sub_level.level_idx, prev_sub_level_id
+                ));
             }
-        } else {
-            res.push(format!("GROUP {}: level0 not exist", group_id));
+            prev_sub_level_id = sub_level.sub_level_id;
+
+            validate_level(*group_id, 0, sub_level, &mut res);
         }
 
         for idx in 1..=levels.levels.len() {
@@ -1353,11 +1327,11 @@ mod tests {
             0,
             Levels {
                 levels: vec![],
-                l0: Some(OverlappingLevel {
+                l0: OverlappingLevel {
                     sub_levels: vec![],
                     total_file_size: 0,
                     uncompressed_file_size: 0,
-                }),
+                },
                 ..Default::default()
             },
         )]);
@@ -1369,8 +1343,6 @@ mod tests {
             .get_mut(&0)
             .unwrap()
             .l0
-            .as_mut()
-            .unwrap()
             .sub_levels
             .push(Level {
                 table_infos: vec![SstableInfo {
