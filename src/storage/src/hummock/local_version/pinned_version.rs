@@ -140,8 +140,6 @@ impl PinnedVersion {
                 let levels = self.levels_by_compaction_groups_id(compaction_group_id);
                 levels
                     .l0
-                    .as_ref()
-                    .unwrap()
                     .sub_levels
                     .iter()
                     .rev()

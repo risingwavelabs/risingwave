@@ -131,9 +131,7 @@ impl<'a> HummockVersionTransaction<'a> {
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
 
-        if let Some((batch_commit_for_new_cg, compaction_group_config)) =
-            batch_commit_for_new_cg
-        {
+        if let Some((batch_commit_for_new_cg, compaction_group_config)) = batch_commit_for_new_cg {
             for (compaction_group_id, batch_commit_sst) in batch_commit_for_new_cg {
                 let group_deltas = &mut new_version_delta
                     .group_deltas

@@ -2532,7 +2532,7 @@ async fn test_commit_multi_epoch() {
             .levels
             .get(&(StaticCompactionGroupId::StateDefault as _))
             .unwrap();
-        let sub_levels = &cg.l0.as_ref().unwrap().sub_levels;
+        let sub_levels = &cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 1);
         let sub_level = &sub_levels[0];
         assert_eq!(sub_level.sub_level_id, epoch1);
@@ -2594,7 +2594,7 @@ async fn test_commit_multi_epoch() {
         .levels
         .get(&(StaticCompactionGroupId::StateDefault as _))
         .unwrap();
-    let sub_levels = &old_cg.l0.as_ref().unwrap().sub_levels;
+    let sub_levels = &old_cg.l0.sub_levels;
     assert_eq!(sub_levels.len(), 2);
     let sub_level1 = &sub_levels[0];
     assert_eq!(sub_level1.sub_level_id, epoch1);
@@ -2611,7 +2611,7 @@ async fn test_commit_multi_epoch() {
     let new_cg_id = added_cg_id_set.into_iter().next().unwrap();
 
     let new_cg = new_version.levels.get(&new_cg_id).unwrap();
-    let sub_levels = &new_cg.l0.as_ref().unwrap().sub_levels;
+    let sub_levels = &new_cg.l0.sub_levels;
     assert_eq!(sub_levels.len(), 2);
     let sub_level1 = &sub_levels[0];
     assert_eq!(sub_level1.sub_level_id, epoch1);

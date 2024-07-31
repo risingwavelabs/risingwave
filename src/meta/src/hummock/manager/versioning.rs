@@ -406,7 +406,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_hummock_sdk::key_range::KeyRange;
-    use risingwave_hummock_sdk::level::{Level, Levels, OverlappingLevel};
+    use risingwave_hummock_sdk::level::{Level, Levels};
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
@@ -443,12 +443,7 @@ mod tests {
     #[test]
     fn test_calc_new_write_limits() {
         let add_level_to_l0 = |levels: &mut Levels| {
-            levels
-                .l0
-                .as_mut()
-                .unwrap()
-                .sub_levels
-                .push(Level::default());
+            levels.l0.sub_levels.push(Level::default());
         };
         let set_sub_level_number_threshold_for_group_1 =
             |target_groups: &mut HashMap<CompactionGroupId, CompactionGroup>,
@@ -481,13 +476,7 @@ mod tests {
         .collect();
         let mut version: HummockVersion = Default::default();
         for group_id in 1..=3 {
-            version.levels.insert(
-                group_id,
-                Levels {
-                    l0: Some(OverlappingLevel::default()),
-                    ..Default::default()
-                },
-            );
+            version.levels.insert(group_id, Levels::default());
         }
         let new_write_limits =
             calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
@@ -574,7 +563,6 @@ mod tests {
                         table_infos: vec![sst.clone()],
                         ..Default::default()
                     }],
-                    l0: Some(Default::default()),
                     ..Default::default()
                 },
             );
