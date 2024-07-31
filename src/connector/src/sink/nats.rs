@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use core::fmt::Debug;
+use core::future::IntoFuture;
 use std::collections::BTreeMap;
 
 use anyhow::{anyhow, Context as _};
 use async_nats::jetstream::context::Context;
+use futures::prelude::TryFuture;
+use futures::FutureExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
@@ -25,7 +28,9 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 use with_options::WithOptions;
 
-use super::encoder::{DateHandlingMode, TimeHandlingMode, TimestamptzHandlingMode};
+use super::encoder::{
+    DateHandlingMode, JsonbHandlingMode, TimeHandlingMode, TimestamptzHandlingMode,
+};
 use super::utils::chunk_to_json;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::connector_common::NatsCommon;
@@ -38,6 +43,7 @@ use crate::sink::writer::{
 use crate::sink::{Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY};
 
 pub const NATS_SINK: &str = "nats";
+const NATS_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 65536;
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
@@ -63,6 +69,8 @@ pub struct NatsSinkWriter {
     schema: Schema,
     json_encoder: JsonEncoder,
 }
+
+pub type NatsSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
 
 /// Basic data types for use with the nats interface
 impl NatsConfig {
@@ -122,7 +130,7 @@ impl Sink for NatsSink {
         Ok(
             NatsSinkWriter::new(self.config.clone(), self.schema.clone())
                 .await?
-                .into_log_sinker(usize::MAX),
+                .into_log_sinker(NATS_SEND_FUTURE_BUFFER_MAX_SIZE),
         )
     }
 }
@@ -145,37 +153,43 @@ impl NatsSinkWriter {
                 TimestampHandlingMode::Milli,
                 TimestamptzHandlingMode::UtcWithoutSuffix,
                 TimeHandlingMode::Milli,
+                JsonbHandlingMode::String,
             ),
         })
-    }
-
-    async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        Retry::spawn(
-            ExponentialBackoff::from_millis(100).map(jitter).take(3),
-            || async {
-                let data = chunk_to_json(chunk.clone(), &self.json_encoder).unwrap();
-                for item in data {
-                    self.context
-                        .publish(self.config.common.subject.clone(), item.into())
-                        .await
-                        .context("nats sink error")
-                        .map_err(SinkError::Nats)?;
-                }
-                Ok::<_, SinkError>(())
-            },
-        )
-        .await
-        .context("nats sink error")
-        .map_err(SinkError::Nats)
     }
 }
 
 impl AsyncTruncateSinkWriter for NatsSinkWriter {
+    type DeliveryFuture = NatsSinkDeliveryFuture;
+
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,
-        _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
+        mut add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        self.append_only(chunk).await
+        let mut data = chunk_to_json(chunk, &self.json_encoder)?;
+        for item in &mut data {
+            let publish_ack_future = Retry::spawn(
+                ExponentialBackoff::from_millis(100).map(jitter).take(3),
+                || async {
+                    self.context
+                        .publish(self.config.common.subject.clone(), item.clone().into())
+                        .await
+                        .context("nats sink error")
+                        .map_err(SinkError::Nats)
+                },
+            )
+            .await
+            .context("nats sink error")
+            .map_err(SinkError::Nats)?;
+            let future = publish_ack_future.into_future().map(|result| {
+                result
+                    .context("Nats sink error")
+                    .map_err(SinkError::Nats)
+                    .map(|_| ())
+            });
+            add_future.add_future_may_await(future).await?;
+        }
+        Ok(())
     }
 }

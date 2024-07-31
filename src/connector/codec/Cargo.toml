@@ -16,12 +16,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
-apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
-    "snappy",
-    "zstandard",
-    "bzip",
-    "xz",
-] }
+apache-avro = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
@@ -29,14 +24,20 @@ chrono = { version = "0.4", default-features = false, features = [
 easy-ext = "1"
 itertools = { workspace = true }
 jsonbb = { workspace = true }
+jst = { package = 'jsonschema-transpiler', git = "https://github.com/mozilla/jsonschema-transpiler", rev = "c1a89d720d118843d8bcca51084deb0ed223e4b4" }
 num-bigint = "0.4"
 risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
 rust_decimal = "1"
+serde_json = "1.0"
 thiserror = "1"
 thiserror-ext = { workspace = true }
 time = "0.3.30"
 tracing = "0.1"
+
+[dev-dependencies]
+expect-test = "1"
+hex = "0.4"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

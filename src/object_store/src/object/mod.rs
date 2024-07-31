@@ -339,6 +339,10 @@ impl ObjectStoreImpl {
     pub fn support_streaming_upload(&self) -> bool {
         dispatch_object_store_enum!(self, |store| store.inner.support_streaming_upload())
     }
+
+    pub fn media_type(&self) -> &'static str {
+        object_store_impl_method_body!(self, media_type())
+    }
 }
 
 fn try_update_failure_metric<T>(
@@ -391,12 +395,11 @@ impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
         let operation_type_str = operation_type.as_str();
         let data_len = data.len();
 
-        let res =
-            // TODO: we should avoid this special case after fully migrating to opeandal for s3.
-            self.inner
-                .write_bytes(data)
-                .verbose_instrument_await(operation_type_str)
-                .await;
+        let res = self
+            .inner
+            .write_bytes(data)
+            .verbose_instrument_await(operation_type_str)
+            .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
 

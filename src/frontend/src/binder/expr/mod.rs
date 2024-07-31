@@ -23,7 +23,7 @@ use risingwave_sqlparser::ast::{
     ObjectName, Query, StructField, TrimWhereField, UnaryOperator,
 };
 
-use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
+use crate::binder::expr::function::is_sys_function_without_args;
 use crate::binder::Binder;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
@@ -72,10 +72,7 @@ impl Binder {
             Expr::Row(exprs) => self.bind_row(exprs),
             // input ref
             Expr::Identifier(ident) => {
-                if SYS_FUNCTION_WITHOUT_ARGS
-                    .iter()
-                    .any(|e| ident.real_value().as_str() == *e && ident.quote_style().is_none())
-                {
+                if is_sys_function_without_args(&ident) {
                     // Rewrite a system variable to a function call, e.g. `SELECT current_schema;`
                     // will be rewritten to `SELECT current_schema();`.
                     // NOTE: Here we don't 100% follow the behavior of Postgres, as it doesn't
@@ -175,7 +172,7 @@ impl Binder {
             Expr::AtTimeZone {
                 timestamp,
                 time_zone,
-            } => self.bind_at_time_zone(*timestamp, time_zone),
+            } => self.bind_at_time_zone(*timestamp, *time_zone),
             // special syntax for string
             Expr::Trim {
                 expr,
@@ -219,9 +216,9 @@ impl Binder {
         .into())
     }
 
-    pub(super) fn bind_at_time_zone(&mut self, input: Expr, time_zone: String) -> Result<ExprImpl> {
+    pub(super) fn bind_at_time_zone(&mut self, input: Expr, time_zone: Expr) -> Result<ExprImpl> {
         let input = self.bind_expr_inner(input)?;
-        let time_zone = self.bind_string(time_zone)?.into();
+        let time_zone = self.bind_expr_inner(time_zone)?;
         FunctionCall::new(ExprType::AtTimeZone, vec![input, time_zone]).map(Into::into)
     }
 

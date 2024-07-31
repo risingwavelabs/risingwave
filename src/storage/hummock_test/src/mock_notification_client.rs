@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverError};
+use risingwave_common_service::{Channel, NotificationClient, ObserverError};
 use risingwave_meta::hummock::{HummockManager, HummockManagerRef};
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_pb::backup_service::MetaBackupManifestId;
@@ -62,7 +62,7 @@ impl NotificationClient for MockNotificationClient {
 
         let hummock_version = self.hummock_manager.get_current_version().await;
         let meta_snapshot = MetaSnapshot {
-            hummock_version: Some(hummock_version.to_protobuf()),
+            hummock_version: Some(hummock_version.into()),
             version: Some(Default::default()),
             meta_backup_manifest_id: Some(MetaBackupManifestId { id: 0 }),
             hummock_write_limits: Some(WriteLimits {

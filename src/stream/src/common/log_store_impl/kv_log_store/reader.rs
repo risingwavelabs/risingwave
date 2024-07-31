@@ -25,7 +25,7 @@ use foyer::CacheContext;
 use futures::future::{try_join_all, BoxFuture};
 use futures::{FutureExt, TryFutureExt};
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
@@ -68,8 +68,8 @@ fn initial_rewind_backoff_policy() -> RewindBackoffPolicy {
 struct RewindDelay {
     last_rewind_truncate_offset: Option<TruncateOffset>,
     backoff_policy: RewindBackoffPolicy,
-    rewind_count: LabelGuardedIntCounter<3>,
-    rewind_delay: LabelGuardedHistogram<3>,
+    rewind_count: LabelGuardedIntCounter<4>,
+    rewind_delay: LabelGuardedHistogram<4>,
 }
 
 impl RewindDelay {

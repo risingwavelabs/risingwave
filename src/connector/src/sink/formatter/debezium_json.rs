@@ -21,8 +21,8 @@ use tracing::warn;
 
 use super::{Result, SinkFormatter, StreamChunk};
 use crate::sink::encoder::{
-    DateHandlingMode, JsonEncoder, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
-    TimestamptzHandlingMode,
+    DateHandlingMode, JsonEncoder, JsonbHandlingMode, RowEncoder, TimeHandlingMode,
+    TimestampHandlingMode, TimestamptzHandlingMode,
 };
 use crate::tri;
 
@@ -69,6 +69,7 @@ impl DebeziumJsonFormatter {
             TimestampHandlingMode::Milli,
             TimestamptzHandlingMode::UtcString,
             TimeHandlingMode::Milli,
+            JsonbHandlingMode::String,
         );
         let val_encoder = JsonEncoder::new(
             schema.clone(),
@@ -77,6 +78,7 @@ impl DebeziumJsonFormatter {
             TimestampHandlingMode::Milli,
             TimestamptzHandlingMode::UtcString,
             TimeHandlingMode::Milli,
+            JsonbHandlingMode::String,
         );
         Self {
             schema,
@@ -400,6 +402,7 @@ mod tests {
             TimestampHandlingMode::Milli,
             TimestamptzHandlingMode::UtcString,
             TimeHandlingMode::Milli,
+            JsonbHandlingMode::String,
         );
         let json_chunk = chunk_to_json(chunk, &encoder).unwrap();
         let schema_json = schema_to_json(&schema, "test_db", "test_table");

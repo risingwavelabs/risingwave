@@ -27,11 +27,13 @@ use tracing_subscriber::Layer;
 
 mod error_metrics;
 mod guarded_metrics;
+mod metrics;
 pub mod monitor;
 mod relabeled_metric;
 
 pub use error_metrics::*;
 pub use guarded_metrics::*;
+pub use metrics::*;
 pub use relabeled_metric::*;
 
 #[derive(Debug)]

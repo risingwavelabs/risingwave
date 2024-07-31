@@ -26,12 +26,12 @@ use itertools::Itertools;
 use rand::seq::{IteratorRandom, SliceRandom};
 use rand::{thread_rng, Rng};
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::ParallelUnitId;
-use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
+use risingwave_common::hash::WorkerSlotId;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
-use risingwave_pb::meta::{GetClusterInfoResponse, GetReschedulePlanResponse};
+use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::stream_plan::StreamNode;
 use serde::de::IntoDeserializer;
 
@@ -142,20 +142,53 @@ impl Fragment {
     /// Generate a reschedule plan for the fragment.
     pub fn reschedule(
         &self,
-        remove: impl AsRef<[ParallelUnitId]>,
-        add: impl AsRef<[ParallelUnitId]>,
+        remove: impl AsRef<[WorkerSlotId]>,
+        add: impl AsRef<[WorkerSlotId]>,
     ) -> String {
         let remove = remove.as_ref();
         let add = add.as_ref();
 
+        let mut worker_decreased = HashMap::new();
+        for worker_slot in remove {
+            let worker_id = worker_slot.worker_id();
+            *worker_decreased.entry(worker_id).or_insert(0) += 1;
+        }
+
+        let mut worker_increased = HashMap::new();
+        for worker_slot in add {
+            let worker_id = worker_slot.worker_id();
+            *worker_increased.entry(worker_id).or_insert(0) += 1;
+        }
+
+        let worker_ids: HashSet<_> = worker_increased
+            .keys()
+            .chain(worker_decreased.keys())
+            .cloned()
+            .collect();
+
+        let mut worker_actor_diff = HashMap::new();
+
+        for worker_id in worker_ids {
+            let increased = worker_increased.remove(&worker_id).unwrap_or(0);
+            let decreased = worker_decreased.remove(&worker_id).unwrap_or(0);
+            let diff = increased - decreased;
+            if diff != 0 {
+                worker_actor_diff.insert(worker_id, diff);
+            }
+        }
+
         let mut f = String::new();
-        write!(f, "{}", self.id()).unwrap();
-        if !remove.is_empty() {
-            write!(f, " -{:?}", remove).unwrap();
+
+        if !worker_actor_diff.is_empty() {
+            let worker_diff_str = worker_actor_diff
+                .into_iter()
+                .map(|(k, v)| format!("{}:{}", k, v))
+                .join(", ");
+
+            write!(f, "{}", self.id()).unwrap();
+            write!(f, ":[{}]", worker_diff_str).unwrap();
         }
-        if !add.is_empty() {
-            write!(f, " +{:?}", add).unwrap();
-        }
+
         f
     }
 
@@ -163,61 +196,81 @@ impl Fragment {
     ///
     /// Consumes `self` as the actor info will be stale after rescheduling.
     pub fn random_reschedule(self) -> String {
-        let (all_parallel_units, current_parallel_units) = self.parallel_unit_usage();
+        let all_worker_slots = self.all_worker_slots();
+        let used_worker_slots = self.used_worker_slots();
 
         let rng = &mut thread_rng();
-        let target_parallel_unit_count = match self.inner.distribution_type() {
+        let target_worker_slot_count = match self.inner.distribution_type() {
             FragmentDistributionType::Unspecified => unreachable!(),
             FragmentDistributionType::Single => 1,
-            FragmentDistributionType::Hash => rng.gen_range(1..=all_parallel_units.len()),
+            FragmentDistributionType::Hash => rng.gen_range(1..=all_worker_slots.len()),
         };
-        let target_parallel_units: HashSet<_> = all_parallel_units
-            .choose_multiple(rng, target_parallel_unit_count)
-            .copied()
+
+        let target_worker_slots: HashSet<_> = all_worker_slots
+            .into_iter()
+            .choose_multiple(rng, target_worker_slot_count)
+            .into_iter()
             .collect();
 
-        let remove = current_parallel_units
-            .difference(&target_parallel_units)
+        let remove = used_worker_slots
+            .difference(&target_worker_slots)
             .copied()
             .collect_vec();
-        let add = target_parallel_units
-            .difference(&current_parallel_units)
+
+        let add = target_worker_slots
+            .difference(&used_worker_slots)
             .copied()
             .collect_vec();
 
         self.reschedule(remove, add)
     }
 
-    pub fn parallel_unit_usage(&self) -> (Vec<ParallelUnitId>, HashSet<ParallelUnitId>) {
-        let actor_to_parallel_unit: HashMap<_, _> = self
+    pub fn all_worker_count(&self) -> HashMap<u32, usize> {
+        self.r
+            .worker_nodes
+            .iter()
+            .map(|w| (w.id, w.parallelism as usize))
+            .collect()
+    }
+
+    pub fn all_worker_slots(&self) -> HashSet<WorkerSlotId> {
+        self.all_worker_count()
+            .into_iter()
+            .flat_map(|(k, v)| (0..v).map(move |idx| WorkerSlotId::new(k, idx as _)))
+            .collect()
+    }
+
+    pub fn parallelism(&self) -> usize {
+        self.inner.actors.len()
+    }
+
+    pub fn used_worker_count(&self) -> HashMap<u32, usize> {
+        let actor_to_worker: HashMap<_, _> = self
             .r
             .table_fragments
             .iter()
             .flat_map(|tf| {
-                tf.actor_status.iter().map(|(&actor_id, status)| {
-                    (
-                        actor_id,
-                        status.get_parallel_unit().unwrap().id as ParallelUnitId,
-                    )
-                })
+                tf.actor_status
+                    .iter()
+                    .map(|(&actor_id, status)| (actor_id, status.worker_id()))
             })
             .collect();
 
-        let all_parallel_units = self
-            .r
-            .worker_nodes
-            .iter()
-            .flat_map(|n| n.parallel_units.iter())
-            .map(|p| p.id as ParallelUnitId)
-            .collect_vec();
-        let current_parallel_units: HashSet<_> = self
-            .inner
+        self.inner
             .actors
             .iter()
-            .map(|a| actor_to_parallel_unit[&a.actor_id] as ParallelUnitId)
-            .collect();
+            .map(|a| actor_to_worker[&a.actor_id])
+            .fold(HashMap::<u32, usize>::new(), |mut acc, num| {
+                *acc.entry(num).or_insert(0) += 1;
+                acc
+            })
+    }
 
-        (all_parallel_units, current_parallel_units)
+    pub fn used_worker_slots(&self) -> HashSet<WorkerSlotId> {
+        self.used_worker_count()
+            .into_iter()
+            .flat_map(|(k, v)| (0..v).map(move |idx| WorkerSlotId::new(k, idx as _)))
+            .collect()
     }
 }
 
@@ -434,34 +487,47 @@ impl Cluster {
     }
 
     #[cfg_or_panic(madsim)]
-    pub async fn get_reschedule_plan(&self, policy: PbPolicy) -> Result<GetReschedulePlanResponse> {
-        let revision = self
-            .ctl
+    pub async fn split_compaction_group(
+        &mut self,
+        compaction_group_id: CompactionGroupId,
+        table_id: HummockSstableId,
+    ) -> Result<()> {
+        self.ctl
             .spawn(async move {
-                let r = risingwave_ctl::cmd_impl::meta::get_cluster_info(
-                    &risingwave_ctl::common::CtlContext::default(),
-                )
-                .await?;
-
-                Ok::<_, anyhow::Error>(r.revision)
+                let mut command: Vec<String> = vec![
+                    "hummock".into(),
+                    "split-compaction-group".into(),
+                    "--compaction-group-id".into(),
+                    compaction_group_id.to_string(),
+                    "--table-ids".into(),
+                    table_id.to_string(),
+                ];
+                start_ctl(command).await
             })
             .await??;
+        Ok(())
+    }
 
-        let resp = self
-            .ctl
+    #[cfg_or_panic(madsim)]
+    pub async fn trigger_manual_compaction(
+        &mut self,
+        compaction_group_id: CompactionGroupId,
+        level_id: u32,
+    ) -> Result<()> {
+        self.ctl
             .spawn(async move {
-                let r = risingwave_ctl::cmd_impl::meta::get_reschedule_plan(
-                    &risingwave_ctl::common::CtlContext::default(),
-                    policy,
-                    revision,
-                )
-                .await?;
-
-                Ok::<_, anyhow::Error>(r)
+                let mut command: Vec<String> = vec![
+                    "hummock".into(),
+                    "trigger-manual-compaction".into(),
+                    "--compaction-group-id".into(),
+                    compaction_group_id.to_string(),
+                    "--level".into(),
+                    level_id.to_string(),
+                ];
+                start_ctl(command).await
             })
             .await??;
-
-        Ok(resp)
+        Ok(())
     }
 }
 
@@ -473,5 +539,6 @@ where
 {
     let args = std::iter::once("ctl".into()).chain(args.into_iter().map(|s| s.into()));
     let opts = risingwave_ctl::CliOpts::parse_from(args);
-    risingwave_ctl::start_fallible(opts).await
+    let context = risingwave_ctl::common::CtlContext::default();
+    risingwave_ctl::start_fallible(opts, &context).await
 }

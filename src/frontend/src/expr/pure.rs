@@ -135,6 +135,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::Cot
             | Type::Asin
             | Type::Acos
+            | Type::Acosd
             | Type::Atan
             | Type::Atan2
             | Type::Sqrt
@@ -258,6 +259,7 @@ impl ExprVisitor for ImpureAnalyzer {
             }
             // expression output is not deterministic
             Type::Vnode
+            | Type::TestPaidTier
             | Type::Proctime
             | Type::PgSleep
             | Type::PgSleepFor
@@ -274,7 +276,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::HasTablePrivilege
             | Type::HasAnyColumnPrivilege
             | Type::HasSchemaPrivilege
-            | Type::MakeTimestamptz => self.impure = true,
+            | Type::MakeTimestamptz
+            | Type::PgIsInRecovery
+            | Type::RwRecoveryStatus => self.impure = true,
         }
     }
 }

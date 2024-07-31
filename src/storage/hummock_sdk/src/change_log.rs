@@ -15,12 +15,69 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::TableId;
-use risingwave_pb::hummock::hummock_version_delta::ChangeLogDelta;
-use risingwave_pb::hummock::{EpochNewChangeLog, SstableInfo, TableChangeLog as PbTableChangeLog};
+use risingwave_pb::hummock::hummock_version_delta::PbChangeLogDelta;
+use risingwave_pb::hummock::{PbEpochNewChangeLog, PbTableChangeLog};
 use tracing::warn;
+
+use crate::sstable_info::SstableInfo;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableChangeLog(pub Vec<EpochNewChangeLog>);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EpochNewChangeLog {
+    pub new_value: Vec<SstableInfo>,
+    pub old_value: Vec<SstableInfo>,
+    pub epochs: Vec<u64>,
+}
+
+impl From<&EpochNewChangeLog> for PbEpochNewChangeLog {
+    fn from(val: &EpochNewChangeLog) -> Self {
+        Self {
+            new_value: val.new_value.iter().map(|a| a.clone().into()).collect(),
+            old_value: val.old_value.iter().map(|a| a.clone().into()).collect(),
+            epochs: val.epochs.clone(),
+        }
+    }
+}
+
+impl From<&PbEpochNewChangeLog> for EpochNewChangeLog {
+    fn from(value: &PbEpochNewChangeLog) -> Self {
+        Self {
+            new_value: value.new_value.iter().map(|a| a.into()).collect(),
+            old_value: value.old_value.iter().map(|a| a.into()).collect(),
+            epochs: value.epochs.clone(),
+        }
+    }
+}
+
+impl From<EpochNewChangeLog> for PbEpochNewChangeLog {
+    fn from(val: EpochNewChangeLog) -> Self {
+        Self {
+            new_value: val
+                .new_value
+                .into_iter()
+                .map(|a| a.clone().into())
+                .collect(),
+            old_value: val
+                .old_value
+                .into_iter()
+                .map(|a| a.clone().into())
+                .collect(),
+            epochs: val.epochs.clone(),
+        }
+    }
+}
+
+impl From<PbEpochNewChangeLog> for EpochNewChangeLog {
+    fn from(value: PbEpochNewChangeLog) -> Self {
+        Self {
+            new_value: value.new_value.into_iter().map(|a| a.into()).collect(),
+            old_value: value.old_value.into_iter().map(|a| a.into()).collect(),
+            epochs: value.epochs.clone(),
+        }
+    }
+}
 
 impl TableChangeLog {
     pub fn filter_epoch(&self, (min_epoch, max_epoch): (u64, u64)) -> &[EpochNewChangeLog] {
@@ -56,12 +113,12 @@ impl TableChangeLog {
 impl TableChangeLog {
     pub fn to_protobuf(&self) -> PbTableChangeLog {
         PbTableChangeLog {
-            change_logs: self.0.clone(),
+            change_logs: self.0.iter().map(|a| a.into()).collect(),
         }
     }
 
     pub fn from_protobuf(val: &PbTableChangeLog) -> Self {
-        Self(val.change_logs.clone())
+        Self(val.change_logs.clone().iter().map(|a| a.into()).collect())
     }
 }
 
@@ -106,6 +163,48 @@ pub fn build_table_change_log_delta<'a>(
         }
     }
     table_change_log
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct ChangeLogDelta {
+    pub truncate_epoch: u64,
+    pub new_log: Option<EpochNewChangeLog>,
+}
+
+impl From<&ChangeLogDelta> for PbChangeLogDelta {
+    fn from(val: &ChangeLogDelta) -> Self {
+        Self {
+            truncate_epoch: val.truncate_epoch,
+            new_log: val.new_log.as_ref().map(|a| a.into()),
+        }
+    }
+}
+
+impl From<&PbChangeLogDelta> for ChangeLogDelta {
+    fn from(val: &PbChangeLogDelta) -> Self {
+        Self {
+            truncate_epoch: val.truncate_epoch,
+            new_log: val.new_log.as_ref().map(|a| a.into()),
+        }
+    }
+}
+
+impl From<ChangeLogDelta> for PbChangeLogDelta {
+    fn from(val: ChangeLogDelta) -> Self {
+        Self {
+            truncate_epoch: val.truncate_epoch,
+            new_log: val.new_log.map(|a| a.into()),
+        }
+    }
+}
+
+impl From<PbChangeLogDelta> for ChangeLogDelta {
+    fn from(val: PbChangeLogDelta) -> Self {
+        Self {
+            truncate_epoch: val.truncate_epoch,
+            new_log: val.new_log.map(|a| a.into()),
+        }
+    }
 }
 
 #[cfg(test)]

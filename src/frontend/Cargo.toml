@@ -18,6 +18,7 @@ normal = ["workspace-hack"]
 anyhow = "1"
 arc-swap = "1"
 arrow-schema = { workspace = true }
+arrow-schema-iceberg = { workspace = true }
 async-recursion = "1.1.0"
 async-trait = "0.1"
 auto_enums = { workspace = true }
@@ -25,6 +26,7 @@ auto_impl = "1"
 base64 = "0.22"
 bk-tree = "0.5.0"
 bytes = "1"
+chrono = { version = "0.4", default-features = false }
 clap = { workspace = true }
 downcast-rs = "1.2"
 dyn-clone = "1.0.14"
@@ -37,6 +39,7 @@ fixedbitset = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 iana-time-zone = "0.1"
+iceberg = { workspace = true }
 icelake = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }

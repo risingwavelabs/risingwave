@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use parking_lot::{RwLock, RwLockReadGuard};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
+use risingwave_hummock_sdk::HummockEpoch;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 
@@ -36,6 +36,7 @@ use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 
 use super::store::version::HummockReadVersion;
 use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
+use crate::hummock::event_handler::uploader::SyncedData;
 
 #[derive(Debug)]
 pub struct BufferWriteRequest {
@@ -59,7 +60,8 @@ pub enum HummockEvent {
     /// handle sender.
     SyncEpoch {
         new_sync_epoch: HummockEpoch,
-        sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
+        sync_result_sender: oneshot::Sender<HummockResult<SyncedData>>,
+        table_ids: HashSet<TableId>,
     },
 
     /// Clear shared buffer and reset all states
@@ -70,6 +72,11 @@ pub enum HummockEvent {
     ImmToUploader {
         instance_id: SharedBufferBatchId,
         imm: ImmutableMemtable,
+    },
+
+    StartEpoch {
+        epoch: HummockEpoch,
+        table_ids: HashSet<TableId>,
     },
 
     InitEpoch {
@@ -108,11 +115,16 @@ impl HummockEvent {
             HummockEvent::SyncEpoch {
                 new_sync_epoch,
                 sync_result_sender: _,
-            } => format!("AwaitSyncEpoch epoch {} ", new_sync_epoch),
+                table_ids,
+            } => format!("AwaitSyncEpoch epoch {} {:?}", new_sync_epoch, table_ids),
 
             HummockEvent::Clear(_, prev_epoch) => format!("Clear {:?}", prev_epoch),
 
             HummockEvent::Shutdown => "Shutdown".to_string(),
+
+            HummockEvent::StartEpoch { epoch, table_ids } => {
+                format!("StartEpoch {} {:?}", epoch, table_ids)
+            }
 
             HummockEvent::InitEpoch {
                 instance_id,
@@ -205,7 +217,7 @@ impl Drop for LocalInstanceGuard {
                     instance_id: self.instance_id,
                 })
                 .unwrap_or_else(|err| {
-                    tracing::error!(
+                    tracing::debug!(
                         error = %err.as_report(),
                         table_id = %self.table_id,
                         instance_id = self.instance_id,

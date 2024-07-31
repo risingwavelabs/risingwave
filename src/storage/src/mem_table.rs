@@ -24,9 +24,9 @@ use bytes::Bytes;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common_estimate_size::{EstimateSize, KvSize};
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::WatermarkDirection;
@@ -433,6 +433,7 @@ pub(crate) async fn merge_stream<'a>(
     inner_stream: impl Stream<Item = StorageResult<StateStoreIterItem>> + 'static,
     table_id: TableId,
     epoch: u64,
+    rev: bool,
 ) {
     let inner_stream = inner_stream.peekable();
     pin_mut!(inner_stream);
@@ -459,7 +460,11 @@ pub(crate) async fn merge_stream<'a>(
             }
             (Some(Ok((inner_key, _))), Some((mem_table_key, _))) => {
                 debug_assert_eq!(inner_key.user_key.table_id, table_id);
-                match inner_key.user_key.table_key.cmp(mem_table_key) {
+                let mut ret = inner_key.user_key.table_key.cmp(mem_table_key);
+                if rev {
+                    ret = ret.reverse();
+                }
+                match ret {
                     Ordering::Less => {
                         // yield data from storage
                         let (key, value) = inner_stream.next().await.unwrap()?;
@@ -541,15 +546,6 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
 
-    #[allow(clippy::unused_async)]
-    async fn may_exist(
-        &self,
-        _key_range: TableKeyRange,
-        _read_options: ReadOptions,
-    ) -> StorageResult<bool> {
-        Ok(true)
-    }
-
     async fn get(
         &self,
         key: TableKey<Bytes>,
@@ -580,6 +576,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                 iter.into_stream(to_owned_item),
                 self.table_id,
                 self.epoch(),
+                false,
             ))))
         }
     }
@@ -600,6 +597,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                 iter.into_stream(to_owned_item),
                 self.table_id,
                 self.epoch(),
+                true,
             ))))
         }
     }
@@ -762,6 +760,11 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
 
     fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
         std::mem::replace(&mut self.vnodes, vnodes)
+    }
+
+    fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
+        // TODO: may store the written table watermark and have a correct implementation
+        None
     }
 }
 

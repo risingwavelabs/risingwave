@@ -43,6 +43,15 @@ pub struct RestoreOpts {
     pub meta_store_type: MetaBackend,
     #[clap(long, default_value_t = String::from(""))]
     pub sql_endpoint: String,
+    /// Username of sql backend, required when meta backend set to MySQL or PostgreSQL.
+    #[clap(long, default_value = "")]
+    pub sql_username: String,
+    /// Password of sql backend, required when meta backend set to MySQL or PostgreSQL.
+    #[clap(long, default_value = "")]
+    pub sql_password: String,
+    /// Database of sql backend, required when meta backend set to MySQL or PostgreSQL.
+    #[clap(long, default_value = "")]
+    pub sql_database: String,
     /// Etcd endpoints.
     #[clap(long, default_value_t = String::from(""))]
     pub etcd_endpoints: String,
@@ -88,7 +97,7 @@ async fn restore_hummock_version(
     );
     let checkpoint_path = version_checkpoint_path(hummock_storage_directory);
     let checkpoint = PbHummockVersionCheckpoint {
-        version: Some(hummock_version.to_protobuf()),
+        version: Some(hummock_version.into()),
         // Ignore stale objects. Full GC will clear them.
         stale_objects: Default::default(),
     };
@@ -230,6 +239,9 @@ mod tests {
             meta_snapshot_id: 1,
             meta_store_type: MetaBackend::Mem,
             sql_endpoint: "".to_string(),
+            sql_username: "".to_string(),
+            sql_password: "".to_string(),
+            sql_database: "".to_string(),
             etcd_endpoints: "".to_string(),
             etcd_auth: false,
             etcd_username: "".to_string(),

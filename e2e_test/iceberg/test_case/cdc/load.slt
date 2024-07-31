@@ -28,7 +28,7 @@ CREATE SINK s1 AS select * from products WITH (
     database.name = 'demo_db',
     table.name = 'demo_table',
     catalog.type = 'storage',
-    warehouse.path = 's3://icebergdata/demo',
+    warehouse.path = 's3a://icebergdata/demo',
     s3.endpoint = 'http://127.0.0.1:9301',
     s3.region = 'us-east-1',
     s3.access.key = 'hummockadmin',

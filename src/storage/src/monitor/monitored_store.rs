@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use futures::{Future, TryFutureExt};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use thiserror_ext::AsReport;
@@ -204,26 +206,6 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
 
-    async fn may_exist(
-        &self,
-        key_range: TableKeyRange,
-        read_options: ReadOptions,
-    ) -> StorageResult<bool> {
-        let table_id_label = read_options.table_id.to_string();
-        let timer = self
-            .storage_metrics
-            .may_exist_duration
-            .with_label_values(&[table_id_label.as_str()])
-            .start_timer();
-        let res = self
-            .inner
-            .may_exist(key_range, read_options)
-            .verbose_instrument_await("store_may_exist")
-            .await;
-        timer.observe_duration();
-        res
-    }
-
     fn get(
         &self,
         key: TableKey<Bytes>,
@@ -304,6 +286,10 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
     fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
         self.inner.update_vnode_bitmap(vnodes)
     }
+
+    fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+        self.inner.get_table_watermark(vnode)
+    }
 }
 
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
@@ -319,8 +305,11 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
             .inspect_err(|e| error!(error = %e.as_report(), "Failed in wait_epoch"))
     }
 
-    fn sync(&self, epoch: u64) -> impl SyncFuture {
-        let future = self.inner.sync(epoch).instrument_await("store_sync");
+    fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
+        let future = self
+            .inner
+            .sync(epoch, table_ids)
+            .instrument_await("store_sync");
         let timer = self.storage_metrics.sync_duration.start_timer();
         let sync_size = self.storage_metrics.sync_size.clone();
         async move {

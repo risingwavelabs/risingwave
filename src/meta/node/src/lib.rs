@@ -21,11 +21,13 @@ mod server;
 use std::time::Duration;
 
 use clap::Parser;
+use educe::Educe;
 pub use error::{MetaError, MetaResult};
 use redact::Secret;
 use risingwave_common::config::OverrideConfig;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_meta::*;
@@ -36,7 +38,8 @@ pub use server::started::get as is_server_started;
 
 use crate::manager::MetaOpts;
 
-#[derive(Debug, Clone, Parser, OverrideConfig)]
+#[derive(Educe, Clone, Parser, OverrideConfig)]
+#[educe(Debug)]
 #[command(version, about = "The central metadata management service")]
 pub struct MetaNodeOpts {
     // TODO: use `SocketAddr`
@@ -77,6 +80,18 @@ pub struct MetaNodeOpts {
     /// Endpoint of the SQL service, make it non-option when SQL service is required.
     #[clap(long, hide = true, env = "RW_SQL_ENDPOINT")]
     pub sql_endpoint: Option<Secret<String>>,
+
+    /// Username of sql backend, required when meta backend set to MySQL or PostgreSQL.
+    #[clap(long, hide = true, env = "RW_SQL_USERNAME", default_value = "")]
+    pub sql_username: String,
+
+    /// Password of sql backend, required when meta backend set to MySQL or PostgreSQL.
+    #[clap(long, hide = true, env = "RW_SQL_PASSWORD", default_value = "")]
+    pub sql_password: Secret<String>,
+
+    /// Database of sql backend, required when meta backend set to MySQL or PostgreSQL.
+    #[clap(long, hide = true, env = "RW_SQL_DATABASE", default_value = "")]
+    pub sql_database: String,
 
     /// The HTTP REST-API address of the Prometheus instance associated to this cluster.
     /// This address is used to serve `PromQL` queries to Prometheus.
@@ -171,6 +186,20 @@ pub struct MetaNodeOpts {
     #[deprecated = "connector node has been deprecated."]
     #[clap(long, hide = true, env = "RW_CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
+
+    /// 128-bit AES key for secret store in HEX format.
+    #[educe(Debug(ignore))]
+    #[clap(long, hide = true, env = "RW_SECRET_STORE_PRIVATE_KEY_HEX")]
+    pub secret_store_private_key_hex: Option<String>,
+
+    /// The path of the temp secret file directory.
+    #[clap(
+        long,
+        hide = true,
+        env = "RW_TEMP_SECRET_FILE_DIR",
+        default_value = "./secrets"
+    )]
+    pub temp_secret_file_dir: String,
 }
 
 impl risingwave_common::opts::Opts for MetaNodeOpts {
@@ -192,7 +221,10 @@ use risingwave_common::config::{load_config, MetaBackend, RwConfig};
 use tracing::info;
 
 /// Start meta node
-pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+pub fn start(
+    opts: MetaNodeOpts,
+    shutdown: CancellationToken,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
@@ -227,6 +259,36 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .expose_secret()
                     .to_string(),
             },
+            MetaBackend::Sqlite => MetaStoreBackend::Sql {
+                endpoint: format!(
+                    "sqlite://{}?mode=rwc",
+                    opts.sql_endpoint
+                        .expect("sql endpoint is required")
+                        .expose_secret()
+                ),
+            },
+            MetaBackend::Postgres => MetaStoreBackend::Sql {
+                endpoint: format!(
+                    "postgres://{}:{}@{}/{}",
+                    opts.sql_username,
+                    opts.sql_password.expose_secret(),
+                    opts.sql_endpoint
+                        .expect("sql endpoint is required")
+                        .expose_secret(),
+                    opts.sql_database
+                ),
+            },
+            MetaBackend::Mysql => MetaStoreBackend::Sql {
+                endpoint: format!(
+                    "mysql://{}:{}@{}/{}",
+                    opts.sql_username,
+                    opts.sql_password.expose_secret(),
+                    opts.sql_endpoint
+                        .expect("sql endpoint is required")
+                        .expose_secret(),
+                    opts.sql_database
+                ),
+            },
         };
 
         validate_config(&config);
@@ -237,6 +299,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         // Run a background heap profiler
         heap_profiler.start();
 
+        let secret_store_private_key = opts
+            .secret_store_private_key_hex
+            .map(|key| hex::decode(key).unwrap());
         let max_heartbeat_interval =
             Duration::from_secs(config.meta.max_heartbeat_interval_secs as u64);
         let max_idle_ms = config.meta.dangerous_max_idle_secs.unwrap_or(0) * 1000;
@@ -282,7 +347,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             max_timeout_ms / 1000
         } + MIN_TIMEOUT_INTERVAL_SEC;
 
-        let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
+        rpc_serve(
             add_info,
             backend,
             max_heartbeat_interval,
@@ -309,6 +374,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .meta
                     .hummock_version_checkpoint_interval_sec,
                 enable_hummock_data_archive: config.meta.enable_hummock_data_archive,
+                hummock_time_travel_snapshot_interval: config
+                    .meta
+                    .hummock_time_travel_snapshot_interval,
                 min_delta_log_num_for_hummock_version_checkpoint: config
                     .meta
                     .min_delta_log_num_for_hummock_version_checkpoint,
@@ -379,49 +447,18 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .developer
                     .max_trivial_move_task_count_per_loop,
                 max_get_task_probe_times: config.meta.developer.max_get_task_probe_times,
-                secret_store_private_key: config.meta.secret_store_private_key,
+                secret_store_private_key,
+                temp_secret_file_dir: opts.temp_secret_file_dir,
                 table_info_statistic_history_times: config
                     .storage
                     .table_info_statistic_history_times,
             },
             config.system.into_init_system_params(),
             Default::default(),
+            shutdown,
         )
         .await
         .unwrap();
-
-        tracing::info!("Meta server listening at {}", listen_addr);
-
-        match leader_lost_handle {
-            None => {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {
-                        tracing::info!("receive ctrl+c");
-                        shutdown_send.send(()).unwrap();
-                        join_handle.await.unwrap()
-                    }
-                    res = &mut join_handle => res.unwrap(),
-                };
-            }
-            Some(mut handle) => {
-                tokio::select! {
-                    _ = &mut handle => {
-                        tracing::info!("receive leader lost signal");
-                        // When we lose leadership, we will exit as soon as possible.
-                    }
-                    _ = tokio::signal::ctrl_c() => {
-                        tracing::info!("receive ctrl+c");
-                        shutdown_send.send(()).unwrap();
-                        join_handle.await.unwrap();
-                        handle.abort();
-                    }
-                    res = &mut join_handle => {
-                        res.unwrap();
-                        handle.abort();
-                    },
-                };
-            }
-        };
     })
 }
 

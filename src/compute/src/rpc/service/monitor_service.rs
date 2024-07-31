@@ -18,37 +18,52 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
+use foyer::HybridCache;
 use itertools::Itertools;
 use prometheus::core::Collector;
 use risingwave_common::config::{MetricLevel, ServerConfig};
 use risingwave_common_heap_profiling::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX};
+use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, BackPressureInfo, GetBackPressureRequest,
     GetBackPressureResponse, HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
     ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
-    StackTraceResponse,
+    StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
+use risingwave_storage::hummock::{Block, Sstable, SstableBlockIndex};
 use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::await_tree_key::{Actor, BarrierAwait};
 use risingwave_stream::task::LocalStreamManager;
 use thiserror_ext::AsReport;
 use tonic::{Code, Request, Response, Status};
 
+type MetaCache = HybridCache<HummockSstableObjectId, Box<Sstable>>;
+type BlockCache = HybridCache<SstableBlockIndex, Box<Block>>;
+
 #[derive(Clone)]
 pub struct MonitorServiceImpl {
     stream_mgr: LocalStreamManager,
     server_config: ServerConfig,
+    meta_cache: Option<MetaCache>,
+    block_cache: Option<BlockCache>,
 }
 
 impl MonitorServiceImpl {
-    pub fn new(stream_mgr: LocalStreamManager, server_config: ServerConfig) -> Self {
+    pub fn new(
+        stream_mgr: LocalStreamManager,
+        server_config: ServerConfig,
+        meta_cache: Option<MetaCache>,
+        block_cache: Option<BlockCache>,
+    ) -> Self {
         Self {
             stream_mgr,
             server_config,
+            meta_cache,
+            block_cache,
         }
     }
 }
@@ -302,6 +317,66 @@ impl MonitorService for MonitorServiceImpl {
         Ok(Response::new(GetBackPressureResponse {
             back_pressure_infos,
         }))
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn tiered_cache_tracing(
+        &self,
+        request: Request<TieredCacheTracingRequest>,
+    ) -> Result<Response<TieredCacheTracingResponse>, Status> {
+        let req = request.into_inner();
+
+        tracing::info!("Update tiered cache tracing config: {req:?}");
+
+        if let Some(cache) = &self.meta_cache {
+            if req.enable {
+                cache.enable_tracing();
+            } else {
+                cache.disable_tracing();
+            }
+            let config = cache.tracing_config();
+            if let Some(threshold) = req.record_hybrid_insert_threshold_ms {
+                config.set_record_hybrid_insert_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_get_threshold_ms {
+                config.set_record_hybrid_get_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_obtain_threshold_ms {
+                config.set_record_hybrid_obtain_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_remove_threshold_ms {
+                config.set_record_hybrid_remove_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_fetch_threshold_ms {
+                config.set_record_hybrid_fetch_threshold(Duration::from_millis(threshold as _));
+            }
+        }
+
+        if let Some(cache) = &self.block_cache {
+            if req.enable {
+                cache.enable_tracing();
+            } else {
+                cache.disable_tracing();
+            }
+            let config = cache.tracing_config();
+            if let Some(threshold) = req.record_hybrid_insert_threshold_ms {
+                config.set_record_hybrid_insert_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_get_threshold_ms {
+                config.set_record_hybrid_get_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_obtain_threshold_ms {
+                config.set_record_hybrid_obtain_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_remove_threshold_ms {
+                config.set_record_hybrid_remove_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_fetch_threshold_ms {
+                config.set_record_hybrid_fetch_threshold(Duration::from_millis(threshold as _));
+            }
+        }
+
+        Ok(Response::new(TieredCacheTracingResponse::default()))
     }
 }
 

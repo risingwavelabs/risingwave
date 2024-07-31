@@ -14,6 +14,8 @@
 
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime};
@@ -51,6 +53,7 @@ use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
+use risingwave_pb::ddl_service::create_materialized_view_request::PbBackfillType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
@@ -65,7 +68,6 @@ use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
-use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -115,6 +117,8 @@ pub struct MetaClient {
     host_addr: HostAddr,
     inner: GrpcMetaClient,
     meta_config: MetaConfig,
+    cluster_id: String,
+    shutting_down: Arc<AtomicBool>,
 }
 
 impl MetaClient {
@@ -128,6 +132,10 @@ impl MetaClient {
 
     pub fn worker_type(&self) -> WorkerType {
         self.worker_type
+    }
+
+    pub fn cluster_id(&self) -> &str {
+        &self.cluster_id
     }
 
     /// Subscribe to notification from meta.
@@ -271,6 +279,8 @@ impl MetaClient {
             host_addr: addr.clone(),
             inner: grpc_meta_client,
             meta_config: meta_config.to_owned(),
+            cluster_id: add_worker_resp.cluster_id,
+            shutting_down: Arc::new(false.into()),
         };
 
         static REPORT_PANIC: std::sync::Once = std::sync::Once::new();
@@ -317,8 +327,12 @@ impl MetaClient {
         let resp = self.inner.heartbeat(request).await?;
         if let Some(status) = resp.status {
             if status.code() == risingwave_pb::common::status::Code::UnknownWorker {
-                tracing::error!("worker expired: {}", status.message);
-                std::process::exit(1);
+                // Ignore the error if we're already shutting down.
+                // Otherwise, exit the process.
+                if !self.shutting_down.load(Relaxed) {
+                    tracing::error!(message = status.message, "worker expired");
+                    std::process::exit(1);
+                }
             }
         }
         Ok(())
@@ -348,6 +362,7 @@ impl MetaClient {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
+            backfill: PbBackfillType::Regular as _,
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -528,6 +543,7 @@ impl MetaClient {
         table: PbTable,
         graph: StreamFragmentGraph,
         table_col_index_mapping: ColIndexMapping,
+        job_type: PbTableJobType,
     ) -> Result<CatalogVersion> {
         let request = ReplaceTablePlanRequest {
             plan: Some(ReplaceTablePlan {
@@ -535,6 +551,7 @@ impl MetaClient {
                 table: Some(table),
                 fragment_graph: Some(graph),
                 table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
+                job_type: job_type as _,
             }),
         };
         let resp = self.inner.replace_table_plan(request).await?;
@@ -732,13 +749,33 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    /// Unregister the current node to the cluster.
-    pub async fn unregister(&self, addr: HostAddr) -> Result<()> {
+    /// Unregister the current node from the cluster.
+    pub async fn unregister(&self) -> Result<()> {
         let request = DeleteWorkerNodeRequest {
-            host: Some(addr.to_protobuf()),
+            host: Some(self.host_addr.to_protobuf()),
         };
         self.inner.delete_worker_node(request).await?;
+        self.shutting_down.store(true, Relaxed);
         Ok(())
+    }
+
+    /// Try to unregister the current worker from the cluster with best effort. Log the result.
+    pub async fn try_unregister(&self) {
+        match self.unregister().await {
+            Ok(_) => {
+                tracing::info!(
+                    worker_id = self.worker_id(),
+                    "successfully unregistered from meta service",
+                )
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e.as_report(),
+                    worker_id = self.worker_id(),
+                    "failed to unregister from meta service",
+                );
+            }
+        }
     }
 
     pub async fn update_schedulability(
@@ -920,6 +957,14 @@ impl MetaClient {
         Ok(resp)
     }
 
+    pub async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {
+        let resp = self
+            .inner
+            .get_cluster_recovery_status(GetClusterRecoveryStatusRequest {})
+            .await?;
+        Ok(resp.get_status().unwrap())
+    }
+
     pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
         let request = GetClusterInfoRequest {};
         let resp = self.inner.get_cluster_info(request).await?;
@@ -928,30 +973,17 @@ impl MetaClient {
 
     pub async fn reschedule(
         &self,
-        reschedules: HashMap<u32, PbReschedule>,
+        worker_reschedules: HashMap<u32, PbWorkerReschedule>,
         revision: u64,
         resolve_no_shuffle_upstream: bool,
     ) -> Result<(bool, u64)> {
         let request = RescheduleRequest {
-            reschedules,
             revision,
             resolve_no_shuffle_upstream,
+            worker_reschedules,
         };
         let resp = self.inner.reschedule(request).await?;
         Ok((resp.success, resp.revision))
-    }
-
-    pub async fn get_reschedule_plan(
-        &self,
-        policy: PbPolicy,
-        revision: u64,
-    ) -> Result<GetReschedulePlanResponse> {
-        let request = GetReschedulePlanRequest {
-            revision,
-            policy: Some(policy),
-        };
-        let resp = self.inner.get_reschedule_plan(request).await?;
-        Ok(resp)
     }
 
     pub async fn risectl_get_pinned_versions_summary(
@@ -1011,7 +1043,7 @@ impl MetaClient {
         version_delta: HummockVersionDelta,
     ) -> Result<(HummockVersion, Vec<CompactionGroupId>)> {
         let req = ReplayVersionDeltaRequest {
-            version_delta: Some(version_delta.to_protobuf()),
+            version_delta: Some(version_delta.into()),
         };
         let resp = self.inner.replay_version_delta(req).await?;
         Ok((
@@ -1364,6 +1396,12 @@ impl MetaClient {
         let resp = self.inner.cancel_compact_task(req).await?;
         Ok(resp.ret)
     }
+
+    pub async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion> {
+        let req = GetVersionByEpochRequest { epoch };
+        let resp = self.inner.get_version_by_epoch(req).await?;
+        Ok(resp.version.unwrap())
+    }
 }
 
 #[async_trait]
@@ -1485,10 +1523,15 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()> {
+    async fn trigger_full_gc(
+        &self,
+        sst_retention_time_sec: u64,
+        prefix: Option<String>,
+    ) -> Result<()> {
         self.inner
             .trigger_full_gc(TriggerFullGcRequest {
                 sst_retention_time_sec,
+                prefix,
             })
             .await?;
         Ok(())
@@ -1524,6 +1567,10 @@ impl HummockMetaClient for MetaClient {
             .await?;
 
         Ok((request_sender, Box::pin(stream)))
+    }
+
+    async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion> {
+        self.get_version_by_epoch(epoch).await
     }
 }
 
@@ -1745,9 +1792,9 @@ impl GrpcMetaClient {
     // See `Endpoint::keep_alive_timeout`
     const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
     // Retry base interval in ms for connecting to meta server.
-    const INIT_RETRY_BASE_INTERVAL_MS: u64 = 50;
+    const INIT_RETRY_BASE_INTERVAL_MS: u64 = 10;
     // Max retry times for connecting to meta server.
-    const INIT_RETRY_MAX_INTERVAL_MS: u64 = 5000;
+    const INIT_RETRY_MAX_INTERVAL_MS: u64 = 2000;
 
     fn start_meta_member_monitor(
         &self,
@@ -1934,6 +1981,7 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
             ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
+            ,{ cluster_client, get_cluster_recovery_status, GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, pause, PauseRequest, PauseResponse }
@@ -2019,6 +2067,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, list_compact_task_progress, ListCompactTaskProgressRequest, ListCompactTaskProgressResponse }
             ,{ hummock_client, cancel_compact_task, CancelCompactTaskRequest, CancelCompactTaskResponse}
             ,{ hummock_client, list_change_log_epochs, ListChangeLogEpochsRequest, ListChangeLogEpochsResponse }
+            ,{ hummock_client, get_version_by_epoch, GetVersionByEpochRequest, GetVersionByEpochResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
@@ -2026,7 +2075,6 @@ macro_rules! for_all_meta_rpc {
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
-            ,{ scale_client, get_reschedule_plan, GetReschedulePlanRequest, GetReschedulePlanResponse }
             ,{ notification_client, subscribe, SubscribeRequest, Streaming<SubscribeResponse> }
             ,{ backup_client, backup_meta, BackupMetaRequest, BackupMetaResponse }
             ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }

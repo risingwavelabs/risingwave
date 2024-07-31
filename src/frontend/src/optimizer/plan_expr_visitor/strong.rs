@@ -188,6 +188,7 @@ impl Strong {
             | ExprType::Cot
             | ExprType::Asin
             | ExprType::Acos
+            | ExprType::Acosd
             | ExprType::Atan
             | ExprType::Atan2
             | ExprType::Sind
@@ -291,6 +292,7 @@ impl Strong {
             | ExprType::JsonbToRecord
             | ExprType::JsonbSet
             | ExprType::Vnode
+            | ExprType::TestPaidTier
             | ExprType::Proctime
             | ExprType::PgSleep
             | ExprType::PgSleepFor
@@ -304,6 +306,8 @@ impl Strong {
             | ExprType::PgRelationSize
             | ExprType::PgGetSerialSequence
             | ExprType::PgIndexColumnHasProperty
+            | ExprType::PgIsInRecovery
+            | ExprType::RwRecoveryStatus
             | ExprType::IcebergTransform
             | ExprType::HasTablePrivilege
             | ExprType::HasAnyColumnPrivilege

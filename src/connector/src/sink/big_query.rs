@@ -16,9 +16,13 @@ use core::time::Duration;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
+use gcp_bigquery_client::error::BQError;
 use gcp_bigquery_client::model::query_request::QueryRequest;
+use gcp_bigquery_client::model::table::Table;
+use gcp_bigquery_client::model::table_field_schema::TableFieldSchema;
+use gcp_bigquery_client::model::table_schema::TableSchema;
 use gcp_bigquery_client::Client;
 use google_cloud_bigquery::grpc::apiv1::bigquery_client::StreamingWriteClient;
 use google_cloud_bigquery::grpc::apiv1::conn_pool::{WriteConnectionManager, DOMAIN};
@@ -38,11 +42,12 @@ use prost_types::{
     FileDescriptorSet,
 };
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
+use simd_json::prelude::ArrayTrait;
 use url::Url;
 use uuid::Uuid;
 use with_options::WithOptions;
@@ -83,6 +88,9 @@ pub struct BigQueryCommon {
     #[serde(rename = "bigquery.retry_times", default = "default_retry_times")]
     #[serde_as(as = "DisplayFromStr")]
     pub retry_times: usize,
+    #[serde(default)] // default false
+    #[serde_as(as = "DisplayFromStr")]
+    pub auto_create: bool,
 }
 
 fn default_max_batch_rows() -> usize {
@@ -255,6 +263,79 @@ impl BigQuerySink {
             ))),
         }
     }
+
+    fn map_field(rw_field: &Field) -> Result<TableFieldSchema> {
+        let tfs = match &rw_field.data_type {
+            DataType::Boolean => TableFieldSchema::bool(&rw_field.name),
+            DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Serial => {
+                TableFieldSchema::integer(&rw_field.name)
+            }
+            DataType::Float32 => {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "Bigquery cannot support real"
+                )))
+            }
+            DataType::Float64 => TableFieldSchema::float(&rw_field.name),
+            DataType::Decimal => TableFieldSchema::numeric(&rw_field.name),
+            DataType::Date => TableFieldSchema::date(&rw_field.name),
+            DataType::Varchar => TableFieldSchema::string(&rw_field.name),
+            DataType::Time => TableFieldSchema::time(&rw_field.name),
+            DataType::Timestamp => TableFieldSchema::date_time(&rw_field.name),
+            DataType::Timestamptz => TableFieldSchema::timestamp(&rw_field.name),
+            DataType::Interval => {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "Bigquery cannot support Interval"
+                )))
+            }
+            DataType::Struct(_) => {
+                let mut sub_fields = Vec::with_capacity(rw_field.sub_fields.len());
+                for rw_field in &rw_field.sub_fields {
+                    let field = Self::map_field(rw_field)?;
+                    sub_fields.push(field)
+                }
+                TableFieldSchema::record(&rw_field.name, sub_fields)
+            }
+            DataType::List(dt) => {
+                let inner_field = Self::map_field(&Field::with_name(*dt.clone(), &rw_field.name))?;
+                TableFieldSchema {
+                    mode: Some("REPEATED".to_string()),
+                    ..inner_field
+                }
+            }
+
+            DataType::Bytea => TableFieldSchema::bytes(&rw_field.name),
+            DataType::Jsonb => TableFieldSchema::json(&rw_field.name),
+            DataType::Int256 => {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "Bigquery cannot support Int256"
+                )))
+            }
+        };
+        Ok(tfs)
+    }
+
+    async fn create_table(
+        &self,
+        client: &Client,
+        project_id: &str,
+        dataset_id: &str,
+        table_id: &str,
+        fields: &Vec<Field>,
+    ) -> Result<Table> {
+        let dataset = client
+            .dataset()
+            .get(project_id, dataset_id)
+            .await
+            .map_err(|e| SinkError::BigQuery(e.into()))?;
+        let fields: Vec<_> = fields.iter().map(Self::map_field).collect::<Result<_>>()?;
+        let table = Table::from_dataset(&dataset, table_id, TableSchema::new(fields));
+
+        client
+            .table()
+            .create(table)
+            .await
+            .map_err(|e| SinkError::BigQuery(e.into()))
+    }
 }
 
 impl Sink for BigQuerySink {
@@ -284,16 +365,47 @@ impl Sink for BigQuerySink {
             .common
             .build_client(&self.config.aws_auth_props)
             .await?;
+        let BigQueryCommon {
+            project: project_id,
+            dataset: dataset_id,
+            table: table_id,
+            ..
+        } = &self.config.common;
+
+        if self.config.common.auto_create {
+            match client
+                .table()
+                .get(project_id, dataset_id, table_id, None)
+                .await
+            {
+                Err(BQError::RequestError(_)) => {
+                    // early return: no need to query schema to check column and type
+                    return self
+                        .create_table(
+                            &client,
+                            project_id,
+                            dataset_id,
+                            table_id,
+                            &self.schema.fields,
+                        )
+                        .await
+                        .map(|_| ());
+                }
+                Err(e) => return Err(SinkError::BigQuery(e.into())),
+                _ => {}
+            }
+        }
+
         let mut rs = client
-        .job()
-        .query(
-            &self.config.common.project,
-            QueryRequest::new(format!(
-                "SELECT column_name, data_type FROM `{}.{}.INFORMATION_SCHEMA.COLUMNS` WHERE table_name = '{}'"
-                ,self.config.common.project,self.config.common.dataset,self.config.common.table,
-            )),
-        )
-        .await.map_err(|e| SinkError::BigQuery(e.into()))?;
+            .job()
+            .query(
+                &self.config.common.project,
+                QueryRequest::new(format!(
+                    "SELECT column_name, data_type FROM `{}.{}.INFORMATION_SCHEMA.COLUMNS` WHERE table_name = '{}'",
+                    project_id, dataset_id, table_id,
+                )),
+            ).await.map_err(|e| SinkError::BigQuery(e.into()))?;
+
         let mut big_query_schema = HashMap::default();
         while rs.next_row() {
             big_query_schema.insert(
@@ -377,7 +489,7 @@ impl BigQuerySinkWriter {
             descriptor_proto.field.push(field);
         }
 
-        let descriptor_pool = build_protobuf_descriptor_pool(&descriptor_proto);
+        let descriptor_pool = build_protobuf_descriptor_pool(&descriptor_proto)?;
         let message_descriptor = descriptor_pool
             .get_message_by_name(&config.common.table)
             .ok_or_else(|| {
@@ -621,7 +733,7 @@ impl StorageWriterClient {
     }
 }
 
-fn build_protobuf_descriptor_pool(desc: &DescriptorProto) -> prost_reflect::DescriptorPool {
+fn build_protobuf_descriptor_pool(desc: &DescriptorProto) -> Result<prost_reflect::DescriptorPool> {
     let file_descriptor = FileDescriptorProto {
         message_type: vec![desc.clone()],
         name: Some("bigquery".to_string()),
@@ -631,7 +743,8 @@ fn build_protobuf_descriptor_pool(desc: &DescriptorProto) -> prost_reflect::Desc
     prost_reflect::DescriptorPool::from_file_descriptor_set(FileDescriptorSet {
         file: vec![file_descriptor],
     })
-    .unwrap()
+    .context("failed to build descriptor pool")
+    .map_err(SinkError::BigQuery)
 }
 
 fn build_protobuf_schema<'a>(
@@ -764,7 +877,7 @@ mod test {
             .iter()
             .map(|f| (f.name.as_str(), &f.data_type));
         let desc = build_protobuf_schema(fields, "t1".to_string()).unwrap();
-        let pool = build_protobuf_descriptor_pool(&desc);
+        let pool = build_protobuf_descriptor_pool(&desc).unwrap();
         let t1_message = pool.get_message_by_name("t1").unwrap();
         assert_matches!(
             t1_message.get_field_by_name("v1").unwrap().kind(),

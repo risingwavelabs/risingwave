@@ -63,7 +63,7 @@ pub mod array;
 #[macro_use]
 pub mod util;
 pub mod acl;
-pub mod buffer;
+pub mod bitmap;
 pub mod cache;
 pub mod cast;
 pub mod catalog;
@@ -73,11 +73,14 @@ pub mod field_generator;
 pub mod hash;
 pub mod log;
 pub mod memory;
-pub use risingwave_common_metrics as metrics;
 pub use risingwave_common_metrics::{
     monitor, register_guarded_gauge_vec_with_registry,
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
     register_guarded_int_gauge_vec_with_registry,
+};
+pub use {
+    risingwave_common_metrics as metrics, risingwave_common_secret as secret,
+    risingwave_license as license,
 };
 pub mod lru;
 pub mod opts;

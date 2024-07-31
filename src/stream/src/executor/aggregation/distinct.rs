@@ -18,7 +18,7 @@ use std::sync::atomic::AtomicU64;
 
 use itertools::Itertools;
 use risingwave_common::array::{ArrayRef, Op};
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::row::{self, CompactedRow, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
 

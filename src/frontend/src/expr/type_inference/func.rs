@@ -18,8 +18,9 @@ use risingwave_common::bail_no_function;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::aggregate::AggKind;
 pub use risingwave_expr::sig::*;
+use risingwave_pb::expr::agg_call::PbType as PbAggKind;
+use risingwave_pb::expr::table_function::PbType as PbTableFuncType;
 
 use super::{align_types, cast_ok_base, CastContext};
 use crate::error::{ErrorCode, Result};
@@ -36,13 +37,24 @@ pub fn infer_type_with_sigmap(
     sig_map: &FunctionRegistry,
 ) -> Result<DataType> {
     // special cases
-    if let FuncName::Scalar(func_type) = func_name
-        && let Some(res) = infer_type_for_special(func_type, inputs).transpose()
-    {
-        return res;
-    }
-    if let FuncName::Aggregate(AggKind::Grouping) = func_name {
-        return Ok(DataType::Int32);
+    match &func_name {
+        FuncName::Scalar(func_type) => {
+            if let Some(res) = infer_type_for_special(*func_type, inputs).transpose() {
+                return res;
+            }
+        }
+        FuncName::Table(func_type) => {
+            if let Some(res) = infer_type_for_special_table_function(*func_type, inputs).transpose()
+            {
+                return res;
+            }
+        }
+        FuncName::Aggregate(agg_kind) => {
+            if *agg_kind == PbAggKind::Grouping {
+                return Ok(DataType::Int32);
+            }
+        }
+        _ => {}
     }
 
     let actuals = inputs
@@ -629,6 +641,34 @@ fn infer_type_for_special(
                 input.cast_implicit_mut(DataType::Varchar)?;
             }
             Ok(Some(DataType::Varchar))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn infer_type_for_special_table_function(
+    func_type: PbTableFuncType,
+    inputs: &mut [ExprImpl],
+) -> Result<Option<DataType>> {
+    match func_type {
+        PbTableFuncType::GenerateSeries => {
+            if inputs.len() < 3 {
+                // let signature map handle this
+                return Ok(None);
+            }
+            match (
+                inputs[0].return_type(),
+                inputs[1].return_type(),
+                inputs[2].return_type(),
+            ) {
+                (DataType::Timestamptz, DataType::Timestamptz, DataType::Interval) => {
+                    // This is to allow `generate_series('2024-06-20 00:00:00'::timestamptz, now(), interval '1 day')`,
+                    // which in streaming mode will be further converted to `StreamNow`.
+                    Ok(Some(DataType::Timestamptz))
+                }
+                // let signature map handle the rest
+                _ => Ok(None),
+            }
         }
         _ => Ok(None),
     }

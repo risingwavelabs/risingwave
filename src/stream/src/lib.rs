@@ -39,6 +39,7 @@
 #![feature(btree_cursors)]
 #![feature(assert_matches)]
 #![feature(try_blocks)]
+#![feature(result_flattening)] // required by `capture_context`
 
 use std::sync::Arc;
 
@@ -53,6 +54,7 @@ pub mod error;
 pub mod executor;
 mod from_proto;
 pub mod task;
+pub mod telemetry;
 
 #[cfg(test)]
 risingwave_expr_impl::enable!();
