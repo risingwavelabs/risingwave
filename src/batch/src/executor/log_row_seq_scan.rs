@@ -206,21 +206,24 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             .batch_iter_log_with_pk_bounds(old_epoch, new_epoch)
             .await?
             .flat_map(|r| {
-                futures::stream::iter(std::iter::from_coroutine(move || {
-                    match r {
-                        Ok(change_log_row) => {
-                            fn with_op(op: Op, row: impl Row) -> impl Row {
-                                row.chain([Some(ScalarImpl::Int16(op.to_i16()))])
+                futures::stream::iter(std::iter::from_coroutine(
+                    #[coroutine]
+                    move || {
+                        match r {
+                            Ok(change_log_row) => {
+                                fn with_op(op: Op, row: impl Row) -> impl Row {
+                                    row.chain([Some(ScalarImpl::Int16(op.to_i16()))])
+                                }
+                                for (op, row) in change_log_row.into_op_value_iter() {
+                                    yield Ok(with_op(op, row));
+                                }
                             }
-                            for (op, row) in change_log_row.into_op_value_iter() {
-                                yield Ok(with_op(op, row));
+                            Err(e) => {
+                                yield Err(e);
                             }
-                        }
-                        Err(e) => {
-                            yield Err(e);
-                        }
-                    };
-                }))
+                        };
+                    },
+                ))
             });
 
         pin_mut!(iter);
