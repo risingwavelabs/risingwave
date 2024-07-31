@@ -446,7 +446,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                     }
 
                     if let Some(watermark) = staging_state_watermark.take() {
-                        self.left_table.update_watermark(watermark, false);
+                        self.left_table.update_watermark(watermark);
                     };
 
                     if let Some(watermark) = watermark_to_propagate.take() {
@@ -1295,11 +1295,8 @@ mod tests {
         tx_r.push_barrier(test_epoch(6), false);
         // Get the barrier
         dynamic_filter.next_unwrap_ready_barrier()?;
-        // This part test need change the `DefaultWatermarkBufferStrategy` to `super::watermark::WatermarkNoBuffer`
-        // clean is the Bound::Exclude
-        // TODO: https://github.com/risingwavelabs/risingwave/issues/14014
-        // assert!(!in_table(&table, 4).await);
-        // assert!(in_table(&table, 5).await);
+        assert!(!in_table(&table, 4).await);
+        assert!(in_table(&table, 5).await);
         Ok(())
     }
 }
