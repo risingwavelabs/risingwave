@@ -283,7 +283,6 @@ pub async fn pg_serve(
     #[cfg(madsim)]
     let worker_runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
 
-    // let session_mgr = Arc::new(session_mgr);
     let session_mgr_clone = session_mgr.clone();
     let f = async move {
         loop {
