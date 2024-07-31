@@ -413,7 +413,7 @@ impl FrontendEnv {
 
         // Clean up the spill directory.
         #[cfg(not(madsim))]
-        if config.batch.enable_spill{
+        if config.batch.enable_spill {
             SpillOp::clean_spill_directory()
                 .await
                 .map_err(|err| anyhow!(err))?;
