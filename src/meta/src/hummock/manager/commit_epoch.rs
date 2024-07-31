@@ -33,7 +33,6 @@ use sea_orm::TransactionTrait;
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
-use crate::hummock::manager::time_travel::require_sql_meta_store_err;
 use crate::hummock::manager::transaction::{
     HummockVersionStatsTransaction, HummockVersionTransaction,
 };
@@ -167,6 +166,13 @@ impl HummockManager {
                 &mut table_stats_change,
                 &to_prost_table_stats_map(std::mem::take(&mut s.table_stats)),
             );
+        }
+
+        let previous_time_travel_toggle_check = versioning.time_travel_toggle_check;
+        versioning.time_travel_toggle_check = self.time_travel_enabled().await;
+        if !previous_time_travel_toggle_check && versioning.time_travel_toggle_check {
+            // Take a snapshot for the first commit epoch after enabling time travel.
+            versioning.mark_next_time_travel_version_snapshot();
         }
 
         let mut version = HummockVersionTransaction::new(
@@ -317,7 +323,9 @@ impl HummockManager {
             );
             table_metrics.inc_write_throughput(stats_value as u64);
         }
-        if self.env.opts.enable_hummock_time_travel {
+        if versioning.time_travel_toggle_check
+            && let Some(sql_store) = self.sql_store()
+        {
             let mut time_travel_version = None;
             if versioning.time_travel_snapshot_interval_counter
                 >= self.env.opts.hummock_time_travel_snapshot_interval
@@ -335,7 +343,6 @@ impl HummockManager {
                 .values()
                 .map(|g| (g.group_id, g.parent_group_id))
                 .collect();
-            let sql_store = self.sql_store().ok_or_else(require_sql_meta_store_err)?;
             let mut txn = sql_store.conn.begin().await?;
             let version_snapshot_sst_ids = self
                 .write_time_travel_metadata(

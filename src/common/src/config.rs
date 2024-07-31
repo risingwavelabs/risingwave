@@ -223,14 +223,6 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::enable_hummock_data_archive")]
     pub enable_hummock_data_archive: bool,
 
-    /// If enabled, time travel query is available.
-    #[serde(default = "default::meta::enable_hummock_time_travel")]
-    pub enable_hummock_time_travel: bool,
-
-    /// The data retention period for time travel.
-    #[serde(default = "default::meta::hummock_time_travel_retention_ms")]
-    pub hummock_time_travel_retention_ms: u64,
-
     /// The interval at which a Hummock version snapshot is taken for time travel.
     ///
     /// Larger value indicates less storage overhead but worse query performance.
@@ -1344,14 +1336,6 @@ pub mod default {
 
         pub fn enable_hummock_data_archive() -> bool {
             false
-        }
-
-        pub fn enable_hummock_time_travel() -> bool {
-            false
-        }
-
-        pub fn hummock_time_travel_retention_ms() -> u64 {
-            24 * 3600 * 1000
         }
 
         pub fn hummock_time_travel_snapshot_interval() -> u64 {

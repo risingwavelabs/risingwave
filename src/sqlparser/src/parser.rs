@@ -815,7 +815,7 @@ impl Parser<'_> {
     /// Parse a function call.
     pub fn parse_function(&mut self) -> PResult<Expr> {
         // [aggregate:]
-        let aggregate = if self.parse_keyword(Keyword::AGGREGATE) {
+        let scalar_as_agg = if self.parse_keyword(Keyword::AGGREGATE) {
             self.expect_token(&Token::Colon)?;
             true
         } else {
@@ -877,7 +877,7 @@ impl Parser<'_> {
         };
 
         Ok(Expr::Function(Function {
-            aggregate,
+            scalar_as_agg,
             name,
             args,
             variadic,
