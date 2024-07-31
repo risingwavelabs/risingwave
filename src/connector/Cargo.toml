@@ -136,7 +136,6 @@ sea-schema = { version = "0.14", default-features = false, features = [
     "discovery",
     "sqlx-postgres",
     "sqlx-mysql",
-    "sqlx-sqlite",
 ] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"

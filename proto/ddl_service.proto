@@ -449,6 +449,8 @@ message TableSchemaChange {
   enum TableChangeType {
     UNSPECIFIED = 0;
     ALTER = 1;
+    CREATE = 2;
+    DROP = 3;
   }
 
   TableChangeType change_type = 1;

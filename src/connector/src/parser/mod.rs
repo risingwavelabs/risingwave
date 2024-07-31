@@ -834,7 +834,9 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                     }
                 },
 
-                Ok(ParseResult::SchemaChange(_)) => todo!(),
+                Ok(ParseResult::SchemaChange(_)) => {
+                    // TODO
+                }
             }
         }
 
