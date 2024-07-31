@@ -486,9 +486,7 @@ impl DiagnoseCommand {
                     top_k_sstables(top_k, &mut top_tombstone_delete_sst, e);
                 }
             };
-            let Some(ref l0) = compaction_group.l0 else {
-                continue;
-            };
+            let l0 = &compaction_group.l0;
             // FIXME: why chaining levels iter leads to segmentation fault?
             for level in &l0.sub_levels {
                 visit_level(level);

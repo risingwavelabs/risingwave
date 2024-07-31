@@ -288,7 +288,7 @@ async fn compaction_test(
         version.id, remote_version.id
     );
     for (group, levels) in &version.levels {
-        let l0 = levels.l0.as_ref().unwrap();
+        let l0 = &levels.l0;
         println!(
             "group-{}: l0 sz: {}, count: {}",
             group,

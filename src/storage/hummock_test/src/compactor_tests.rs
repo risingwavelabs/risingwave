@@ -345,8 +345,6 @@ pub(crate) mod tests {
             .chain(
                 group
                     .l0
-                    .as_ref()
-                    .unwrap()
                     .sub_levels
                     .iter()
                     .flat_map(|level| level.table_infos.clone()),
