@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_pb::stream_plan::{DispatcherType, MergeNode};
 
 use super::*;
@@ -76,6 +77,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
                 params.shared_context.clone(),
                 params.operator_id,
                 params.executor_stats.clone(),
+                Schema::from_iter(node.fields.iter().map(|f| Field::from(f))),
             )
             .boxed()
         };

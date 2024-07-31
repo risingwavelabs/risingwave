@@ -22,9 +22,9 @@ use prometheus::{
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
-    LabelGuardedGauge, LabelGuardedGaugeVec, LabelGuardedHistogramVec, LabelGuardedIntCounter,
-    LabelGuardedIntCounterVec, LabelGuardedIntGauge, LabelGuardedIntGaugeVec,
-    RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
+    LabelGuardedGauge, LabelGuardedGaugeVec, LabelGuardedHistogram, LabelGuardedHistogramVec,
+    LabelGuardedIntCounter, LabelGuardedIntCounterVec, LabelGuardedIntGauge,
+    LabelGuardedIntGaugeVec, RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
@@ -64,6 +64,7 @@ pub struct StreamingMetrics {
     #[expect(dead_code)]
     actor_memory_usage: LabelGuardedIntGaugeVec<2>,
     actor_in_record_cnt: LabelGuardedIntCounterVec<3>,
+    pub actor_in_chunk_rows: LabelGuardedHistogramVec<3>,
     pub actor_out_record_cnt: LabelGuardedIntCounterVec<2>,
 
     // Source
@@ -385,6 +386,18 @@ impl StreamingMetrics {
         let actor_in_record_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_in_record_cnt",
             "Total number of rows actor received",
+            &["actor_id", "fragment_id", "upstream_fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let opts = histogram_opts!(
+            "stream_actor_in_chunk_rows",
+            "Input chunk rows of actor received",
+            exponential_buckets(1.0, 2.0, 10).unwrap(), // 1 to 1024
+        );
+        let actor_in_chunk_rows = register_guarded_histogram_vec_with_registry!(
+            opts,
             &["actor_id", "fragment_id", "upstream_fragment_id"],
             registry
         )
@@ -1117,6 +1130,7 @@ impl StreamingMetrics {
             actor_idle_cnt,
             actor_memory_usage,
             actor_in_record_cnt,
+            actor_in_chunk_rows,
             actor_out_record_cnt,
             source_output_row_count,
             source_split_change_count,
@@ -1345,6 +1359,11 @@ impl StreamingMetrics {
         let upstream_fragment_id_str = upstream_fragment_id.to_string();
         ActorInputMetrics {
             actor_in_record_cnt: self.actor_in_record_cnt.with_guarded_label_values(&[
+                &actor_id_str,
+                &fragment_id_str,
+                &upstream_fragment_id_str,
+            ]),
+            actor_in_chunk_rows: self.actor_in_chunk_rows.with_guarded_label_values(&[
                 &actor_id_str,
                 &fragment_id_str,
                 &upstream_fragment_id_str,
@@ -1630,6 +1649,7 @@ impl StreamingMetrics {
 
 pub(crate) struct ActorInputMetrics {
     pub(crate) actor_in_record_cnt: LabelGuardedIntCounter<3>,
+    pub(crate) actor_in_chunk_rows: LabelGuardedHistogram<3>,
     pub(crate) actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounter<3>,
 }
 

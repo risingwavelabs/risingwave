@@ -1090,6 +1090,16 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Actor Input Chunk Rows",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(irate({metric('stream_actor_in_chunk_rows_sum')}[$__rate_interval])) by (fragment_id, upstream_fragment_id) / sum(irate({metric('stream_actor_in_chunk_rows_count')}[$__rate_interval])) by (fragment_id, upstream_fragment_id) > 0",
+                            "stream_actor_in_chunk_rows - fragment {{fragment_id}}<-{{upstream_fragment_id}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_rowsps(
                     "Actor Output Throughput (rows/s)",
                     "",
