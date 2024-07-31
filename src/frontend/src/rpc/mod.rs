@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use pgwire::pg_server::{BoxedError, SessionManager};
-use risingwave_pb::ddl_service::{ReplaceTablePlan, SchemaChangeEnvelope, TableSchemaChange};
+use risingwave_pb::ddl_service::{ReplaceTablePlan, TableSchemaChange};
 use risingwave_pb::frontend_service::frontend_service_server::FrontendService;
 use risingwave_pb::frontend_service::{GetTableReplacePlanRequest, GetTableReplacePlanResponse};
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_sqlparser::ast::ObjectName;
-use tonic::{Request as RpcRequest, Response as RpcResponse, Response, Status};
+use tonic::{Request as RpcRequest, Response as RpcResponse, Status};
 
 use crate::error::RwError;
 use crate::handler::{get_new_table_definition_for_cdc_table, get_replace_table_plan};

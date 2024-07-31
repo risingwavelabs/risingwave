@@ -15,7 +15,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::monitor::{EndpointExt, TcpConfig};
@@ -24,7 +23,7 @@ use risingwave_pb::frontend_service::frontend_service_client::FrontendServiceCli
 use risingwave_pb::frontend_service::{GetTableReplacePlanRequest, GetTableReplacePlanResponse};
 use tonic::transport::Endpoint;
 
-use crate::error::{Result, RpcError};
+use crate::error::Result;
 use crate::tracing::{Channel, TracingInjectedChannelExt};
 use crate::{frontend_rpc_client_method_impl, RpcClient, RpcClientPool};
 

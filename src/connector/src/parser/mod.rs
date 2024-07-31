@@ -27,9 +27,7 @@ pub use parquet_parser::ParquetParser;
 pub use protobuf::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::bail;
-use risingwave_common::catalog::{
-    ColumnCatalog, KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME,
-};
+use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::secret::LocalSecretManager;

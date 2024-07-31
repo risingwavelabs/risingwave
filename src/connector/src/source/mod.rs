@@ -42,7 +42,6 @@ pub mod test_source;
 
 pub use manager::{SourceColumnDesc, SourceColumnType};
 use risingwave_common::array::{Array, ArrayRef};
-use risingwave_pb::ddl_service::SchemaChangeEnvelope;
 use thiserror_ext::AsReport;
 
 pub use crate::source::filesystem::opendal_source::{

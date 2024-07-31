@@ -23,20 +23,13 @@ pub struct SchemaChangeEnvelope {
     pub table_changes: Vec<TableSchemaChange>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum TableChangeType {
     Unspecified,
     Alter,
 }
 
 impl TableChangeType {
-    pub fn from_proto(value: PbTableChangeType) -> Self {
-        match value {
-            PbTableChangeType::Alter => TableChangeType::Alter,
-            PbTableChangeType::Unspecified => TableChangeType::Unspecified,
-        }
-    }
-
     pub fn to_proto(self) -> PbTableChangeType {
         match self {
             TableChangeType::Alter => PbTableChangeType::Alter,

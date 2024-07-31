@@ -87,8 +87,8 @@ impl SessionManager for LocalFrontend {
 
     fn get_session(
         &self,
-        database_id: u32,
-        user_name: u32,
+        _database_id: u32,
+        _user_name: u32,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         todo!()
     }

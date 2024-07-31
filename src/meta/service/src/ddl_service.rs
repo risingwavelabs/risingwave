@@ -20,7 +20,6 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_meta::error::MetaErrorInner;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::rpc::ddl_controller::fill_table_stream_graph_info;
 use risingwave_pb::catalog::connection::private_link_service::{
@@ -946,7 +945,7 @@ impl DdlService for DdlServiceImpl {
             .frontend_client_pool()
             .get(worker)
             .await
-            .map_err(|err| MetaError::from(err))?;
+            .map_err(MetaError::from)?;
 
         let Some(schema_change) = req.schema_change else {
             return Err(Status::invalid_argument(
@@ -976,7 +975,7 @@ impl DdlService for DdlServiceImpl {
                         table_change: Some(table_change.clone()),
                     })
                     .await
-                    .map_err(|err| MetaError::from(err))?;
+                    .map_err(MetaError::from)?;
 
                 if let Some(plan) = resp.replace_plan.as_ref() {
                     plan.table
