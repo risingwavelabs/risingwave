@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_common::util::stream_graph_visitor::visit_fragment;
+use risingwave_common::util::stream_graph_visitor::{visit_fragment, visit_stream_node};
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::ObjectId;
 use risingwave_pb::catalog::CreateType;
@@ -337,6 +337,7 @@ impl DdlController {
                             None,
                             None,
                             Some(sink_id),
+                            vec![],
                         )
                         .await?;
                     Ok(version)
@@ -443,8 +444,10 @@ impl DdlController {
             .await?;
 
         tracing::debug!(id = streaming_job.id(), "building replace streaming job");
+        let mut updated_sink_catalogs = vec![];
+
         let result: MetaResult<Vec<PbMergeUpdate>> = try {
-            let (ctx, table_fragments) = self
+            let (mut ctx, mut table_fragments) = self
                 .build_replace_table(
                     ctx,
                     &streaming_job,
@@ -453,6 +456,59 @@ impl DdlController {
                     dummy_id as _,
                 )
                 .await?;
+
+            let mut union_fragment_id = None;
+
+            for (fragment_id, fragment) in &mut table_fragments.fragments {
+                for actor in &mut fragment.actors {
+                    if let Some(node) = &mut actor.nodes {
+                        visit_stream_node(node, |body| {
+                            if let NodeBody::Union(_) = body {
+                                if let Some(union_fragment_id) = union_fragment_id.as_mut() {
+                                    // The union fragment should be unique.
+                                    assert_eq!(*union_fragment_id, *fragment_id);
+                                } else {
+                                    union_fragment_id = Some(*fragment_id);
+                                }
+                            }
+                        })
+                    };
+                }
+            }
+
+            let target_fragment_id =
+                union_fragment_id.expect("fragment of placeholder merger not found");
+
+            let catalogs = self
+                .metadata_manager
+                .get_sink_catalog_by_ids(&table.incoming_sinks)
+                .await?;
+
+            for sink in catalogs {
+                let sink_id = &sink.id;
+
+                let sink_table_fragments = self
+                    .metadata_manager
+                    .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(*sink_id))
+                    .await?;
+
+                let sink_fragment = sink_table_fragments.sink_fragment().unwrap();
+
+                Self::inject_replace_table_plan_for_sink(
+                    Some(*sink_id),
+                    &sink_fragment,
+                    table,
+                    &mut ctx,
+                    &mut table_fragments,
+                    target_fragment_id,
+                    Some(&sink.unique_identity()),
+                );
+
+                if sink.original_target_columns.is_empty() {
+                    updated_sink_catalogs.push(sink.id);
+                }
+            }
+
             let merge_updates = ctx.merge_updates.clone();
 
             mgr.catalog_controller
@@ -476,6 +532,7 @@ impl DdlController {
                         table_col_index_mapping,
                         None,
                         None,
+                        updated_sink_catalogs,
                     )
                     .await?;
                 Ok(version)
