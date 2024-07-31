@@ -74,6 +74,7 @@ impl FrontendService for FrontendServiceImpl {
     }
 }
 
+/// Get the new table plan for the given table schema change
 async fn get_new_table_plan(
     table_change: TableSchemaChange,
     table_name: String,
@@ -87,7 +88,6 @@ async fn get_new_table_plan(
     // get a session object for the corresponding user and database
     let session = session_mgr.get_session(database_id, owner)?;
 
-    // call the handle alter method
     let new_columns = table_change.columns.into_iter().map(|c| c.into()).collect();
     let table_name = ObjectName::from(vec![table_name.as_str().into()]);
     let (new_table_definition, original_catalog) =
@@ -105,7 +105,7 @@ async fn get_new_table_plan(
         table: Some(table),
         fragment_graph: Some(graph),
         table_col_index_mapping: Some(col_index_mapping.to_protobuf()),
-        source: None,
+        source: None, // none for cdc table
         job_type: job_type as _,
     })
 }

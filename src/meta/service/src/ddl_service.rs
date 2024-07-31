@@ -930,6 +930,7 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<AutoSchemaChangeResponse>, Status> {
         let req = request.into_inner();
 
+        // randomly select a frontend worker to get the replace table plan
         let mut workers = self
             .metadata_manager
             .list_worker_node(Some(WorkerType::Frontend), Some(State::Running))
@@ -939,7 +940,6 @@ impl DdlService for DdlServiceImpl {
             .first()
             .ok_or_else(|| MetaError::from(anyhow!("no frontend worker available")))?;
 
-        tracing::info!(">> get client for frontend {:?}", worker);
         let client = self
             .env
             .frontend_client_pool()
@@ -955,16 +955,16 @@ impl DdlService for DdlServiceImpl {
 
         for table_change in schema_change.table_changes {
             let cdc_table_name = table_change.cdc_table_name.clone();
-
-            tracing::info!(">> auto schema change cdc table: {}", cdc_table_name);
-
             // get the table catalog corresponding to the cdc table
             let tables: Vec<Table> = self
                 .metadata_manager
                 .get_table_catalog_by_cdc_table_name(cdc_table_name)
                 .await?;
-            tracing::info!(">> number of table to replace: {}", tables.len());
 
+            tracing::info!(
+                "Table jobs to replace: {:?}",
+                tables.iter().map(|t| t.id).collect::<Vec<_>>()
+            );
             for table in tables {
                 // send a request to the frontend to get the ReplaceTablePlan
                 let resp = client
@@ -977,20 +977,17 @@ impl DdlService for DdlServiceImpl {
                     .await
                     .map_err(MetaError::from)?;
 
-                if let Some(plan) = resp.replace_plan.as_ref() {
+                if let Some(plan) = resp.replace_plan {
                     plan.table
                         .as_ref()
-                        .inspect(|t| tracing::info!("Table to replace: {}", t.name));
-                }
-
-                if let Some(plan) = resp.replace_plan {
+                        .inspect(|t| tracing::info!("Table job to replace: {}", t.id));
                     // start the schema change procedure
                     self.ddl_controller
                         .run_command(DdlCommand::ReplaceTable(Self::extract_replace_table_info(
                             plan,
                         )))
                         .await?;
-                    tracing::info!(">> replace table {} success", table.id);
+                    tracing::info!("Table replaced {} success", table.id);
                 }
             }
         }

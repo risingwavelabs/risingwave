@@ -263,6 +263,8 @@ impl FrontendEnv {
 
         let frontend_rpc_addr = opts.health_check_listener_addr.parse().unwrap();
         // Register in meta by calling `AddWorkerNode` RPC.
+        // Use the rpc server address as the frontend address, since Meta needs to get frontend rpc
+        // client based on this address.
         let (meta_client, system_params_reader) = MetaClient::register_new(
             opts.meta_addr,
             WorkerType::Frontend,
@@ -344,7 +346,6 @@ impl FrontendEnv {
         let observer_join_handle = observer_manager.start().await;
         join_handles.push(observer_join_handle);
 
-        // meta_client.activate(&frontend_address).await?;
         meta_client.activate(&frontend_rpc_addr).await?;
 
         let frontend_metrics = Arc::new(GLOBAL_FRONTEND_METRICS.clone());

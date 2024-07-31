@@ -118,7 +118,6 @@ impl PlainParser {
                     };
                 }
                 CdcMessageType::SchemaChange => {
-                    tracing::info!("got schema change message");
                     let accessor = self
                         .schema_change_builder
                         .as_mut()

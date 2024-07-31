@@ -75,4 +75,11 @@ impl SchemaChangeEnvelope {
 
         PbSchemaChangeEnvelope { table_changes }
     }
+
+    pub fn table_names(&self) -> Vec<String> {
+        self.table_changes
+            .iter()
+            .map(|table_change| table_change.cdc_table_name.clone())
+            .collect()
+    }
 }

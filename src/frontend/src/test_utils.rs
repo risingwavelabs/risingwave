@@ -90,7 +90,7 @@ impl SessionManager for LocalFrontend {
         _database_id: u32,
         _user_name: u32,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
-        todo!()
+        unreachable!()
     }
 
     fn connect(
