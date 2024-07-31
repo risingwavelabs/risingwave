@@ -721,7 +721,7 @@ impl GlobalBarrierManagerContext {
         } else {
             let (reschedule_fragment, _) = self
                 .scale_controller
-                .prepare_reschedule_command(
+                .analyze_reschedule_plan(
                     plan,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: true,
@@ -871,7 +871,7 @@ impl GlobalBarrierManagerContext {
 
             let (reschedule_fragment, applied_reschedules) = self
                 .scale_controller
-                .prepare_reschedule_command(
+                .analyze_reschedule_plan(
                     plan,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: true,
