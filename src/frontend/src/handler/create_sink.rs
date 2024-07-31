@@ -33,7 +33,7 @@ use risingwave_connector::sink::iceberg::{IcebergConfig, ICEBERG_SINK};
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_WITHOUT_BACKFILL,
 };
-use risingwave_pb::catalog::{PbSource, Table};
+use risingwave_pb::catalog::{PbSink, PbSource, Table};
 use risingwave_pb::ddl_service::{ReplaceTablePlan, TableJobType};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
@@ -713,7 +713,9 @@ pub(crate) fn insert_merger_to_union_with_project(
                 })),
                 ..Default::default()
             }],
-            identity: uniq_identity.unwrap_or("").to_string(),
+            identity: uniq_identity
+                .unwrap_or(PbSink::UNIQUE_IDENTITY_FOR_CREATING_TABLE_SINK)
+                .to_string(),
             fields: node.fields.clone(),
             node_body: Some(project_node.clone()),
             ..Default::default()

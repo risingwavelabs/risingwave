@@ -46,8 +46,8 @@ use risingwave_pb::catalog::connection::PrivateLinkService;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    connection, Comment, Connection, CreateType, Database, Function, PbSource, PbTable, Schema,
-    Secret, Sink, Source, Subscription, Table, View,
+    connection, Comment, Connection, CreateType, Database, Function, PbSink, PbSource, PbTable,
+    Schema, Secret, Sink, Source, Subscription, Table, View,
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
@@ -1253,7 +1253,8 @@ impl DdlController {
 
                                 // we need to align nodes here
                                 if input_project_node.identity.as_str()
-                                    != unique_identity.unwrap_or("")
+                                    != unique_identity
+                                        .unwrap_or(PbSink::UNIQUE_IDENTITY_FOR_CREATING_TABLE_SINK)
                                 {
                                     continue;
                                 }
