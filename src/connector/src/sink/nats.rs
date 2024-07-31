@@ -153,7 +153,7 @@ impl NatsSinkWriter {
         Retry::spawn(
             ExponentialBackoff::from_millis(100).map(jitter).take(3),
             || async {
-                let data = chunk_to_json(chunk.clone(), &self.json_encoder).unwrap();
+                let data = chunk_to_json(chunk.clone(), &self.json_encoder)?;
                 for item in data {
                     self.context
                         .publish(self.config.common.subject.clone(), item.into())
