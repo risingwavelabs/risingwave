@@ -81,6 +81,7 @@ message GroupConstruct {
   uint64 group_id = 4;
   uint64 new_sst_start_id = 5;
   CompatibilityVersion version = 6;
+  optional bytes split_key = 7;
 }
 
 message GroupMetaChange {

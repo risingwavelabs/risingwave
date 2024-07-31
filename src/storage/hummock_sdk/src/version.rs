@@ -54,7 +54,7 @@ impl HummockVersionStateTableInfo {
         }
     }
 
-    fn build_compaction_group_member_tables(
+    pub fn build_compaction_group_member_tables(
         state_table_info: &HashMap<TableId, PbStateTableInfo>,
     ) -> HashMap<CompactionGroupId, BTreeSet<TableId>> {
         let mut ret: HashMap<_, BTreeSet<_>> = HashMap::new();

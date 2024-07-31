@@ -372,6 +372,7 @@ impl HummockVersion {
         group_id: CompactionGroupId,
         member_table_ids: HashSet<StateTableId>,
         new_sst_start_id: u64,
+        split_key: Option<Bytes>,
     ) {
         let mut new_sst_id = new_sst_start_id;
         if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId
@@ -405,11 +406,21 @@ impl HummockVersion {
                 }
                 // Remove SST from sub level may result in empty sub level. It will be purged
                 // whenever another compaction task is finished.
-                let insert_table_infos =
-                    split_sst_info_for_level(&member_table_ids, sub_level, &mut new_sst_id);
+                let insert_table_infos = if let Some(split_key) = &split_key {
+                    HummockVersion::split_sst_info_for_level_v2(
+                        // &member_table_ids,
+                        sub_level,
+                        &mut new_sst_id,
+                        split_key,
+                    )
+                } else {
+                    split_sst_info_for_level(&member_table_ids, sub_level, &mut new_sst_id)
+                };
                 sub_level
                     .table_infos
-                    .extract_if(|sst_info| sst_info.table_ids.is_empty())
+                    .extract_if(|sst_info| {
+                        sst_info.table_ids.is_empty() || is_drop_sst_info(sst_info)
+                    })
                     .for_each(|sst_info| {
                         let sstable_file_size = sst_info.estimated_sst_size;
                         sub_level.total_file_size -= sstable_file_size;
@@ -456,7 +467,7 @@ impl HummockVersion {
             assert!(can_concat(&cur_levels.levels[idx].table_infos));
             level
                 .table_infos
-                .extract_if(|sst_info| sst_info.table_ids.is_empty())
+                .extract_if(|sst_info| sst_info.table_ids.is_empty() || is_drop_sst_info(sst_info))
                 .for_each(|sst_info| {
                     level.total_file_size -= sst_info.estimated_sst_size;
                     level.uncompressed_file_size -= sst_info.uncompressed_file_size;
@@ -566,6 +577,12 @@ impl HummockVersion {
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
             let summary = summarize_group_deltas(group_deltas);
             if let Some(group_construct) = &summary.group_construct {
+                let split_key = if group_construct.split_key.is_some() {
+                    Some(Bytes::from(group_construct.split_key.clone().unwrap()))
+                } else {
+                    None
+                };
+
                 let mut new_levels = build_initial_compaction_group_levels(
                     *compaction_group_id,
                     group_construct.get_group_config().unwrap(),
@@ -596,6 +613,7 @@ impl HummockVersion {
                     *compaction_group_id,
                     member_table_ids,
                     group_construct.get_new_sst_start_id(),
+                    split_key.clone(),
                 );
             } else if let Some(group_change) = &summary.group_table_change {
                 // TODO: may deprecate this branch? This enum variant is not created anywhere
@@ -610,6 +628,7 @@ impl HummockVersion {
                     group_change.target_group_id,
                     HashSet::from_iter(group_change.table_ids.clone()),
                     group_change.new_sst_start_id,
+                    None,
                 );
 
                 let levels = self
