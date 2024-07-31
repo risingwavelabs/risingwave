@@ -106,7 +106,7 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendI
 
 pub async fn get_backup_store(opts: RestoreOpts) -> BackupResult<MetaSnapshotStorageRef> {
    
-    let config = ObjectStoreConfig::default();
+    let mut config = ObjectStoreConfig::default();
     config.retry.read_attempt_timeout_ms = 600000;
     config.retry.read_retry_attempts = 10;
     config.retry.streaming_read_attempt_timeout_ms = 600000;
