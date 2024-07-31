@@ -30,6 +30,8 @@ labels:
   title: "^cherry-pick.*"
 - label: "cherry-pick"
   title: "^cherry pick.*"
+- label: "cherry-pick"
+  title: "^cherrypick.*"
 
 # Match body
 - label: "breaking-change"
