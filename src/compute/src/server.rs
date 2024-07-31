@@ -400,7 +400,9 @@ pub async fn compute_node_serve(
 
     // Clean up the spill directory.
     #[cfg(not(madsim))]
-    SpillOp::clean_spill_directory().await.unwrap();
+    if config.batch.enable_spill {
+        SpillOp::clean_spill_directory().await.unwrap();
+    }
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
