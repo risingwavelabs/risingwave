@@ -117,7 +117,7 @@ impl Binder {
             .try_collect()?;
 
         // `aggregate:` on a scalar function
-        if f.aggregate {
+        if f.scalar_as_agg {
             let mut scalar_inputs = inputs
                 .iter()
                 .enumerate()
