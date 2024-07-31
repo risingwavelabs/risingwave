@@ -891,9 +891,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76cb6d108605c5489fff1ef9c520656946ad05ed0de3ea6d26d56bcb34bdb8c5"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-buffer 52.0.0",
+ "arrow-schema 52.0.0",
  "atomic-time",
  "rquickjs",
 ]
@@ -905,10 +905,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4506efc6fbc200c083add2a7ed4e3616a859941a745e922320ae7051d90d12ec"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-ipc 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-buffer 52.0.0",
+ "arrow-ipc 52.0.0",
+ "arrow-schema 52.0.0",
  "lazy_static",
  "pyo3",
  "pyo3-build-config",
@@ -921,9 +921,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb829e25925161d93617d4b053bae03fe51e708f2cce088d85df856011d4f369"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-ipc 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-ipc 52.0.0",
+ "arrow-schema 52.0.0",
  "async-trait",
  "base64 0.22.0",
  "genawaiter",
@@ -1751,7 +1751,7 @@ dependencies = [
  "http 1.1.0",
  "http-body 1.0.0",
  "http-body-util",
- "hyper 1.1.0",
+ "hyper 1.4.1",
  "hyper-util",
  "itoa",
  "matchit",
@@ -3212,7 +3212,7 @@ dependencies = [
  "bitflags 1.3.2",
  "crossterm_winapi",
  "libc",
- "mio",
+ "mio 0.8.11",
  "parking_lot 0.12.1",
  "signal-hook",
  "signal-hook-mio",
@@ -3757,24 +3757,6 @@ dependencies = [
  "datafusion-expr",
  "log",
  "sqlparser",
-]
-
-[[package]]
-name = "datasize"
-version = "0.2.15"
-source = "git+https://github.com/BugenZhao/datasize-rs?rev=8192cf2d751119a6a30e2ef67e5eb252f8e5b3e5#8192cf2d751119a6a30e2ef67e5eb252f8e5b3e5"
-dependencies = [
- "datasize_derive",
-]
-
-[[package]]
-name = "datasize_derive"
-version = "0.2.15"
-source = "git+https://github.com/BugenZhao/datasize-rs?rev=8192cf2d751119a6a30e2ef67e5eb252f8e5b3e5#8192cf2d751119a6a30e2ef67e5eb252f8e5b3e5"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -4500,15 +4482,15 @@ dependencies = [
 
 [[package]]
 name = "etcd-client"
-version = "0.12.4"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ae697f3928e8c89ae6f4dcf788059f49fd01a76dc53e63628f5a33881f5715e"
+checksum = "39bde3ce50a626efeb1caa9ab1083972d178bebb55ca627639c8ded507dfcbde"
 dependencies = [
- "http 0.2.9",
- "prost 0.12.1",
+ "http 1.1.0",
+ "prost 0.13.1",
  "tokio",
  "tokio-stream",
- "tonic 0.10.2",
+ "tonic 0.12.1",
  "tonic-build",
  "tower",
  "tower-service",
@@ -5179,7 +5161,7 @@ name = "futures-timer"
 version = "3.0.2"
 source = "git+https://github.com/madsim-rs/futures-timer.git?rev=05b33b4#05b33b4ede22b0517f49da59404d6e6d2848a192"
 dependencies = [
- "madsim",
+ "madsim 0.2.30 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -5339,7 +5321,7 @@ dependencies = [
  "http 0.2.9",
  "thiserror",
  "tokio",
- "tonic 0.10.2",
+ "tonic 0.11.0",
  "tower",
  "tracing",
  "trust-dns-resolver 0.23.2",
@@ -5659,9 +5641,9 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hermit-abi"
-version = "0.3.2"
+version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "443144c8cdadd93ebf52ddb4056d257f5b52c04d3c804e657d19eb73fc33668b"
+checksum = "d231dfb89cfffdbc30e7fc41579ed6066ad03abda9e567ccafae602b97ec5024"
 
 [[package]]
 name = "hex"
@@ -5824,9 +5806,9 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "1.1.0"
+version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb5aa53871fc917b1a9ed87b683a5d86db645e23acb32c2e0785a353e522fb75"
+checksum = "50dfd22e0e76d0f662d429a5f80fcaf3855009297eab6a0a9f8543834744ba05"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -5838,6 +5820,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
+ "smallvec",
  "tokio",
  "want",
 ]
@@ -5867,7 +5850,7 @@ checksum = "a0bea761b46ae2b24eb4aef630d8d1c398157b6fc29e6350ecf090a0b70c952c"
 dependencies = [
  "futures-util",
  "http 1.1.0",
- "hyper 1.1.0",
+ "hyper 1.4.1",
  "hyper-util",
  "rustls 0.22.4",
  "rustls-pki-types",
@@ -5886,6 +5869,19 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "tokio-io-timeout",
+]
+
+[[package]]
+name = "hyper-timeout"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3203a961e5c83b6f5498933e78b6b263e208c197b63e9c6c53cc82ffd3f63793"
+dependencies = [
+ "hyper 1.4.1",
+ "hyper-util",
+ "pin-project-lite",
+ "tokio",
+ "tower-service",
 ]
 
 [[package]]
@@ -5909,7 +5905,7 @@ checksum = "70206fc6890eaca9fde8a0bf71caa2ddfc9fe045ac9e5c70df101a7dbde866e0"
 dependencies = [
  "bytes",
  "http-body-util",
- "hyper 1.1.0",
+ "hyper 1.4.1",
  "hyper-util",
  "native-tls",
  "tokio",
@@ -5919,16 +5915,16 @@ dependencies = [
 
 [[package]]
 name = "hyper-util"
-version = "0.1.3"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca38ef113da30126bbff9cd1705f9273e15d45498615d138b0c20279ac7a76aa"
+checksum = "3ab92f4f49ee4fb4f997c784b7a2e0fa70050211e0b6a287f898c3c9785ca956"
 dependencies = [
  "bytes",
  "futures-channel",
  "futures-util",
  "http 1.1.0",
  "http-body 1.0.0",
- "hyper 1.1.0",
+ "hyper 1.4.1",
  "pin-project-lite",
  "socket2 0.5.6",
  "tokio",
@@ -6843,7 +6839,37 @@ dependencies = [
  "futures-util",
  "lazy_static",
  "libc",
- "madsim-macros",
+ "madsim-macros 0.2.12 (registry+https://github.com/rust-lang/crates.io-index)",
+ "naive-timer",
+ "panic-message",
+ "rand",
+ "rand_xoshiro",
+ "rustversion",
+ "serde",
+ "spin 0.9.8",
+ "tokio",
+ "tokio-util",
+ "toml 0.8.12",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "madsim"
+version = "0.2.30"
+source = "git+https://github.com/BugenZhao/madsim?rev=6eb6876#6eb68764f1c0996986c0aafc06b82a06f43f777c"
+dependencies = [
+ "ahash 0.8.11",
+ "async-channel 2.2.1",
+ "async-stream",
+ "async-task",
+ "bincode 1.3.3",
+ "bytes",
+ "downcast-rs",
+ "futures-util",
+ "lazy_static",
+ "libc",
+ "madsim-macros 0.2.12 (git+https://github.com/BugenZhao/madsim?rev=6eb6876)",
  "naive-timer",
  "panic-message",
  "rand",
@@ -6871,28 +6897,27 @@ dependencies = [
  "aws-types",
  "bytes",
  "http 1.1.0",
- "madsim",
+ "madsim 0.2.30 (registry+https://github.com/rust-lang/crates.io-index)",
  "spin 0.9.8",
  "tracing",
 ]
 
 [[package]]
 name = "madsim-etcd-client"
-version = "0.4.0+0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02b4b5de48bb7f3f7eae0bca62b3ed0b7d714b1b273d7347329b92c3a2eef113"
+version = "0.6.0+0.14.0"
+source = "git+https://github.com/BugenZhao/madsim?rev=6eb6876#6eb68764f1c0996986c0aafc06b82a06f43f777c"
 dependencies = [
  "etcd-client",
  "futures-util",
- "http 0.2.9",
- "madsim",
+ "http 1.1.0",
+ "madsim 0.2.30 (git+https://github.com/BugenZhao/madsim?rev=6eb6876)",
  "serde",
  "serde_with 3.8.0",
  "spin 0.9.8",
  "thiserror",
  "tokio",
  "toml 0.8.12",
- "tonic 0.10.2",
+ "tonic 0.12.1",
  "tracing",
 ]
 
@@ -6901,6 +6926,17 @@ name = "madsim-macros"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3d248e97b1a48826a12c3828d921e8548e714394bf17274dd0a93910dc946e1"
+dependencies = [
+ "darling 0.14.4",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "madsim-macros"
+version = "0.2.12"
+source = "git+https://github.com/BugenZhao/madsim?rev=6eb6876#6eb68764f1c0996986c0aafc06b82a06f43f777c"
 dependencies = [
  "darling 0.14.4",
  "proc-macro2",
@@ -6920,7 +6956,7 @@ dependencies = [
  "futures-util",
  "libc",
  "log",
- "madsim",
+ "madsim 0.2.30 (registry+https://github.com/rust-lang/crates.io-index)",
  "rdkafka-sys",
  "serde",
  "serde_derive",
@@ -6938,36 +6974,34 @@ version = "0.2.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "569929c869275edc1e2c1f1381a688a6e5a4200302b58caff819e07414ccddb9"
 dependencies = [
- "madsim",
+ "madsim 0.2.30 (registry+https://github.com/rust-lang/crates.io-index)",
  "spin 0.9.8",
  "tokio",
 ]
 
 [[package]]
 name = "madsim-tonic"
-version = "0.4.1+0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "813977c7870103e113a0332d97731f961bc48aaa8860edd318ef7d7754214436"
+version = "0.5.0+0.12.0"
+source = "git+https://github.com/BugenZhao/madsim?rev=6eb6876#6eb68764f1c0996986c0aafc06b82a06f43f777c"
 dependencies = [
  "async-stream",
  "chrono",
  "futures-util",
- "madsim",
+ "madsim 0.2.30 (git+https://github.com/BugenZhao/madsim?rev=6eb6876)",
  "tokio",
- "tonic 0.10.2",
+ "tonic 0.12.1",
  "tower",
  "tracing",
 ]
 
 [[package]]
 name = "madsim-tonic-build"
-version = "0.4.2+0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a2ad2776ba20221ccbe4e136e2fa0f7ab90eebd608373177f3e74a198a288ec"
+version = "0.5.0+0.12.0"
+source = "git+https://github.com/BugenZhao/madsim?rev=6eb6876#6eb68764f1c0996986c0aafc06b82a06f43f777c"
 dependencies = [
  "prettyplease 0.2.15",
  "proc-macro2",
- "prost-build 0.12.1",
+ "prost-build 0.13.1",
  "quote",
  "syn 2.0.66",
  "tonic-build",
@@ -7205,6 +7239,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mio"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4569e456d394deccd22ce1c1913e6ea0e54519f577285001215d33557431afe4"
+dependencies = [
+ "hermit-abi",
+ "libc",
+ "wasi",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "mirai-annotations"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7368,7 +7414,7 @@ dependencies = [
  "keyed_priority_queue",
  "lazy_static",
  "lru 0.12.0",
- "mio",
+ "mio 0.8.11",
  "mysql_common",
  "native-tls",
  "once_cell",
@@ -8038,26 +8084,6 @@ checksum = "57119c3b893986491ec9aa85056780d3a0f3cf4da7cc09dd3650dbd6c6738fb9"
 dependencies = [
  "libc",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "otlp-embedded"
-version = "0.0.1"
-source = "git+https://github.com/risingwavelabs/otlp-embedded?rev=492c244e0be91feb659c0cd48a624bbd96045a33#492c244e0be91feb659c0cd48a624bbd96045a33"
-dependencies = [
- "axum 0.7.4",
- "datasize",
- "hex",
- "itertools 0.12.1",
- "madsim-tonic",
- "madsim-tonic-build",
- "prost 0.12.1",
- "rust-embed",
- "schnellru",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -8994,6 +9020,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "prost"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e13db3d3fde688c61e2446b4d843bc27a7e8af269a69440c0308021dc92333cc"
+dependencies = [
+ "bytes",
+ "prost-derive 0.13.1",
+]
+
+[[package]]
 name = "prost-build"
 version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9038,6 +9074,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "prost-build"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5bb182580f71dd070f88d01ce3de9f4da5021db7115d2e1c3605a754153b77c1"
+dependencies = [
+ "bytes",
+ "heck 0.5.0",
+ "itertools 0.13.0",
+ "log",
+ "multimap 0.10.0",
+ "once_cell",
+ "petgraph",
+ "prettyplease 0.2.15",
+ "prost 0.13.1",
+ "prost-types 0.13.1",
+ "regex",
+ "syn 2.0.66",
+ "tempfile",
+]
+
+[[package]]
 name = "prost-derive"
 version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9058,6 +9115,19 @@ checksum = "265baba7fabd416cf5078179f7d2cbeca4ce7a9041111900675ea7c4cb8a4c32"
 dependencies = [
  "anyhow",
  "itertools 0.11.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.66",
+]
+
+[[package]]
+name = "prost-derive"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18bec9b0adc4eba778b33684b7ba3e7137789434769ee3ce3930463ef904cfca"
+dependencies = [
+ "anyhow",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.66",
@@ -9099,6 +9169,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e081b29f63d83a4bc75cfc9f3fe424f9156cf92d8a4f0c9407cce9a1b67327cf"
 dependencies = [
  "prost 0.12.1",
+]
+
+[[package]]
+name = "prost-types"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cee5168b05f49d4b0ca581206eb14a7b22fafd963efe729ac48eb03266e25cc2"
+dependencies = [
+ "prost 0.13.1",
 ]
 
 [[package]]
@@ -9218,7 +9297,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.1",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -9681,7 +9760,7 @@ dependencies = [
  "http 1.1.0",
  "http-body 1.0.0",
  "http-body-util",
- "hyper 1.1.0",
+ "hyper 1.4.1",
  "hyper-rustls 0.26.0",
  "hyper-tls 0.6.0",
  "hyper-util",
@@ -9871,7 +9950,7 @@ dependencies = [
  "bytes",
  "itertools 0.12.1",
  "parking_lot 0.12.1",
- "prost 0.12.1",
+ "prost 0.13.1",
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_meta_model_v2",
@@ -10108,7 +10187,7 @@ dependencies = [
  "pretty_assertions",
  "procfs 0.16.0",
  "prometheus",
- "prost 0.12.1",
+ "prost 0.13.1",
  "rand",
  "regex",
  "reqwest 0.12.4",
@@ -10238,7 +10317,7 @@ dependencies = [
  "anyhow",
  "bincode 1.3.3",
  "parking_lot 0.12.1",
- "prost 0.12.1",
+ "prost 0.13.1",
  "risingwave_pb",
  "serde",
  "thiserror",
@@ -10307,7 +10386,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.1",
- "prost 0.12.1",
+ "prost 0.13.1",
  "risingwave_common",
  "risingwave_common_heap_profiling",
  "risingwave_common_service",
@@ -10340,7 +10419,7 @@ dependencies = [
  "maplit",
  "pprof",
  "prometheus",
- "prost 0.12.1",
+ "prost 0.13.1",
  "rand",
  "risingwave_batch",
  "risingwave_common",
@@ -10547,7 +10626,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
- "prost 0.12.1",
+ "prost 0.13.1",
  "regex",
  "risingwave_common",
  "risingwave_connector",
@@ -10787,7 +10866,7 @@ dependencies = [
  "pretty-xmlish",
  "pretty_assertions",
  "prometheus",
- "prost 0.12.1",
+ "prost 0.13.1",
  "rand",
  "risingwave_batch",
  "risingwave_common",
@@ -10839,7 +10918,7 @@ dependencies = [
  "hex",
  "itertools 0.12.1",
  "parse-display",
- "prost 0.12.1",
+ "prost 0.13.1",
  "risingwave_common",
  "risingwave_common_estimate_size",
  "risingwave_pb",
@@ -10897,7 +10976,7 @@ dependencies = [
  "madsim-tokio",
  "mockall",
  "parking_lot 0.12.1",
- "prost 0.12.1",
+ "prost 0.13.1",
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_pb",
@@ -10916,7 +10995,7 @@ dependencies = [
  "futures",
  "jni",
  "madsim-tokio",
- "prost 0.12.1",
+ "prost 0.13.1",
  "risingwave_common",
  "risingwave_expr",
  "risingwave_hummock_sdk",
@@ -10946,7 +11025,7 @@ dependencies = [
  "jni",
  "madsim-tokio",
  "paste",
- "prost 0.12.1",
+ "prost 0.13.1",
  "risingwave_common",
  "risingwave_expr",
  "risingwave_hummock_sdk",
@@ -11024,11 +11103,10 @@ dependencies = [
  "mime_guess",
  "num-integer",
  "num-traits",
- "otlp-embedded",
  "parking_lot 0.12.1",
  "prometheus",
  "prometheus-http-query",
- "prost 0.12.1",
+ "prost 0.13.1",
  "rand",
  "risingwave_backup",
  "risingwave_common",
@@ -11099,7 +11177,7 @@ dependencies = [
 name = "risingwave_meta_model_v2"
 version = "1.11.0-alpha"
 dependencies = [
- "prost 0.12.1",
+ "prost 0.13.1",
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_pb",
@@ -11122,7 +11200,6 @@ dependencies = [
  "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
- "otlp-embedded",
  "prometheus-http-query",
  "redact",
  "regex",
@@ -11153,7 +11230,7 @@ dependencies = [
  "itertools 0.12.1",
  "madsim-tokio",
  "madsim-tonic",
- "prost 0.12.1",
+ "prost 0.13.1",
  "rand",
  "regex",
  "risingwave_common",
@@ -11192,7 +11269,7 @@ dependencies = [
  "hyper-rustls 0.24.2",
  "hyper-tls 0.5.0",
  "itertools 0.12.1",
- "madsim",
+ "madsim 0.2.30 (registry+https://github.com/rust-lang/crates.io-index)",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
  "opendal",
@@ -11218,7 +11295,7 @@ dependencies = [
  "madsim-tonic-build",
  "pbjson",
  "pbjson-build",
- "prost 0.12.1",
+ "prost 0.13.1",
  "prost-helpers",
  "risingwave_error",
  "serde",
@@ -11343,7 +11420,7 @@ dependencies = [
  "glob",
  "itertools 0.12.1",
  "lru 0.7.6",
- "madsim",
+ "madsim 0.2.30 (registry+https://github.com/rust-lang/crates.io-index)",
  "madsim-aws-sdk-s3",
  "madsim-etcd-client",
  "madsim-rdkafka",
@@ -11491,7 +11568,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "procfs 0.16.0",
  "prometheus",
- "prost 0.12.1",
+ "prost 0.13.1",
  "rand",
  "risingwave_backup",
  "risingwave_common",
@@ -11560,7 +11637,7 @@ dependencies = [
  "pin-project",
  "prehash",
  "prometheus",
- "prost 0.12.1",
+ "prost 0.13.1",
  "rand",
  "risingwave_common",
  "risingwave_common_estimate_size",
@@ -12139,17 +12216,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c3733bf4cf7ea0880754e19cb5a462007c4a8c1914bff372ccc95b464f1df88"
 dependencies = [
  "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "schnellru"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "772575a524feeb803e5b0fcbc6dd9f367e579488197c94c6e4023aad2305774d"
-dependencies = [
- "ahash 0.8.11",
- "cfg-if",
- "hashbrown 0.13.2",
 ]
 
 [[package]]
@@ -12806,7 +12872,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29ad2e15f37ec9a6cc544097b78a1ec90001e9f71b81338ca39f430adaca99af"
 dependencies = [
  "libc",
- "mio",
+ "mio 0.8.11",
  "signal-hook",
 ]
 
@@ -13892,22 +13958,21 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.37.0"
+version = "1.39.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1adbebffeca75fcfd058afa480fb6c0b81e165a0323f9c9d39c9697e37c46787"
+checksum = "daa4fb1bc778bd6f04cbfc4bb2d06a7396a8f299dc33ea1900cedaa316f467b1"
 dependencies = [
  "backtrace",
  "bytes",
  "libc",
- "mio",
- "num_cpus",
+ "mio 1.0.1",
  "parking_lot 0.12.1",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2 0.5.6",
  "tokio-macros",
  "tracing",
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -13922,9 +13987,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-macros"
-version = "2.2.0"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b8a1e28f2deaa14e508979454cb3a223b10b938b45af148bc0986de36f1923b"
+checksum = "693d596312e88961bc67d7f1f97af8a70227d9f90c31bba5806eec004978d752"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -14045,12 +14110,13 @@ dependencies = [
 
 [[package]]
 name = "tokio-stream"
-version = "0.1.14"
-source = "git+https://github.com/madsim-rs/tokio.git?rev=fe39bb8e#fe39bb8e8ab0ed96ee1b4477ab5508c20ce017fb"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "267ac89e0bec6e691e5813911606935d77c476ff49024f98abcea3e7b15e37af"
 dependencies = [
  "futures-core",
- "madsim-tokio",
  "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]
@@ -14154,7 +14220,7 @@ dependencies = [
  "http 0.2.9",
  "http-body 0.4.5",
  "hyper 0.14.27",
- "hyper-timeout",
+ "hyper-timeout 0.4.1",
  "percent-encoding",
  "pin-project",
  "prost 0.12.1",
@@ -14185,10 +14251,43 @@ dependencies = [
  "http 0.2.9",
  "http-body 0.4.5",
  "hyper 0.14.27",
- "hyper-timeout",
+ "hyper-timeout 0.4.1",
  "percent-encoding",
  "pin-project",
  "prost 0.12.1",
+ "rustls-pemfile 2.1.1",
+ "rustls-pki-types",
+ "tokio",
+ "tokio-rustls 0.25.0",
+ "tokio-stream",
+ "tower",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "tonic"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38659f4a91aba8598d27821589f5db7dddd94601e7a01b1e485a50e5484c7401"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "axum 0.7.4",
+ "base64 0.22.0",
+ "bytes",
+ "h2 0.4.4",
+ "http 1.1.0",
+ "http-body 1.0.0",
+ "http-body-util",
+ "hyper 1.4.1",
+ "hyper-timeout 0.5.1",
+ "hyper-util",
+ "percent-encoding",
+ "pin-project",
+ "prost 0.13.1",
+ "socket2 0.5.6",
  "tokio",
  "tokio-stream",
  "tower",
@@ -14199,13 +14298,13 @@ dependencies = [
 
 [[package]]
 name = "tonic-build"
-version = "0.10.2"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d021fc044c18582b9a2408cd0dd05b1596e3ecdb5c4df822bb0183545683889"
+checksum = "568392c5a2bd0020723e3f387891176aabafe36fd9fcd074ad309dfa0c8eb964"
 dependencies = [
  "prettyplease 0.2.15",
  "proc-macro2",
- "prost-build 0.12.1",
+ "prost-build 0.13.1",
  "quote",
  "syn 2.0.66",
 ]

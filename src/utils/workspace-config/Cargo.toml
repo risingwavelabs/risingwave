@@ -29,7 +29,13 @@ dynamic-zstd-sys = { package = "zstd-sys", version = "2", optional = true, defau
 # workspace-hack = { path = "../../workspace-hack" }
 # Don't add workspace-hack into this crate!
 
+# Specify versions for indirect dependencies
+# tonic = "0.12"
+
 [build-dependencies]
+
+# Specify versions for indirect dependencies
+# tonic-build = "0.12"
 
 [lints]
 workspace = true

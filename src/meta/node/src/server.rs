@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use etcd_client::ConnectOptions;
-use otlp_embedded::TraceServiceServer;
+// use otlp_embedded::TraceServiceServer;
 use regex::Regex;
 use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::secret::LocalSecretManager;
@@ -482,11 +482,11 @@ pub async fn start_service_as_election_leader(
         prometheus_selector.clone(),
     ));
 
-    let trace_state = otlp_embedded::State::new(otlp_embedded::Config {
-        max_length: opts.cached_traces_num,
-        max_memory_usage: opts.cached_traces_memory_limit_bytes,
-    });
-    let trace_srv = otlp_embedded::TraceServiceImpl::new(trace_state.clone());
+    // let trace_state = otlp_embedded::State::new(otlp_embedded::Config {
+    //     max_length: opts.cached_traces_num,
+    //     max_memory_usage: opts.cached_traces_memory_limit_bytes,
+    // });
+    // let trace_srv = otlp_embedded::TraceServiceImpl::new(trace_state.clone());
 
     #[cfg(not(madsim))]
     let _dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
@@ -795,7 +795,7 @@ pub async fn start_service_as_election_leader(
         .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
         .add_service(EventLogServiceServer::new(event_log_srv))
-        .add_service(TraceServiceServer::new(trace_srv))
+        // .add_service(TraceServiceServer::new(trace_srv))
         .monitored_serve_with_shutdown(
             address_info.listen_addr,
             "grpc-meta-leader-service",

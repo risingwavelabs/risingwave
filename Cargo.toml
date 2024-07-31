@@ -121,7 +121,7 @@ aws-smithy-types = { version = "1", default-features = false, features = [
 aws-endpoint = "0.60"
 aws-types = "1"
 axum = "=0.7.4" # TODO: 0.7.5+ does not work with current toolchain
-etcd-client = { package = "madsim-etcd-client", version = "0.4" }
+etcd-client = { package = "madsim-etcd-client", git = "https://github.com/BugenZhao/madsim", rev = "6eb6876" }
 futures-async-stream = "0.2.9"
 hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "0.4.1", features = [
@@ -129,10 +129,10 @@ rdkafka = { package = "madsim-rdkafka", version = "0.4.1", features = [
 ] }
 hashbrown = { version = "0.14", features = ["ahash", "inline-more", "nightly"] }
 criterion = { version = "0.5", features = ["async_futures"] }
-tonic = { package = "madsim-tonic", version = "0.4.1" }
-tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
+tonic = { package = "madsim-tonic", git = "https://github.com/BugenZhao/madsim", rev = "6eb6876" }
+tonic-build = { package = "madsim-tonic-build", git = "https://github.com/BugenZhao/madsim", rev = "6eb6876" }
 otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "492c244e0be91feb659c0cd48a624bbd96045a33" }
-prost = { version = "0.12" }
+prost = { version = "0.13" }
 icelake = { git = "https://github.com/icelake-io/icelake", rev = "07d53893d7788b4e41fc11efad8a6be828405c31", features = [
     "prometheus",
 ] }
@@ -329,7 +329,7 @@ opt-level = 2
 # Patch third-party crates for deterministic simulation.
 quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "948bdc3" }
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
-tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e" }
+# tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e" } # unused
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }

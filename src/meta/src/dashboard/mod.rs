@@ -43,7 +43,7 @@ pub struct DashboardService {
     pub metadata_manager: MetadataManager,
     pub compute_clients: ComputeClientPool,
     pub diagnose_command: DiagnoseCommandRef,
-    pub trace_state: otlp_embedded::StateRef,
+    // pub trace_state: otlp_embedded::StateRef,
 }
 
 pub type Service = Arc<DashboardService>;
@@ -465,13 +465,13 @@ impl DashboardService {
             )
             .layer(cors_layer);
 
-        let trace_ui_router = otlp_embedded::ui_app(srv.trace_state.clone(), "/trace/");
+        // let trace_ui_router = otlp_embedded::ui_app(srv.trace_state.clone(), "/trace/");
         let dashboard_router = risingwave_meta_dashboard::router();
 
         let app = Router::new()
             .fallback_service(dashboard_router)
             .nest("/api", api_router)
-            .nest("/trace", trace_ui_router)
+            // .nest("/trace", trace_ui_router)
             .layer(CompressionLayer::new());
 
         let listener = TcpListener::bind(&srv.dashboard_addr)
