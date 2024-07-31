@@ -23,15 +23,8 @@ use crate::manager::{ActiveStreamingWorkerNodes, ActorInfos, InflightFragmentInf
 use crate::model::{ActorId, FragmentId};
 
 #[derive(Debug, Clone)]
-pub(crate) struct CommandNewFragmentInfo {
-    pub new_actors: HashMap<ActorId, WorkerId>,
-    pub table_ids: HashSet<TableId>,
-    pub is_injectable: bool,
-}
-
-#[derive(Debug, Clone)]
 pub(crate) enum CommandFragmentChanges {
-    NewFragment(CommandNewFragmentInfo),
+    NewFragment(InflightFragmentInfo),
     Reschedule {
         new_actors: HashMap<ActorId, WorkerId>,
         to_remove: HashSet<ActorId>,
@@ -65,9 +58,6 @@ pub struct InflightActorInfo {
     /// `node_id` => actors
     pub actor_map: HashMap<WorkerId, HashSet<ActorId>>,
 
-    /// `node_id` => barrier inject actors
-    pub actor_map_to_send: HashMap<WorkerId, HashSet<ActorId>>,
-
     /// `actor_id` => `WorkerId`
     pub actor_location_map: HashMap<ActorId, WorkerId>,
 
@@ -96,20 +86,6 @@ impl InflightActorInfo {
             map
         };
 
-        let actor_map_to_send = {
-            let mut map: HashMap<_, HashSet<_>> = HashMap::new();
-            for info in actor_infos
-                .fragment_infos
-                .values()
-                .filter(|info| info.is_injectable)
-            {
-                for (actor_id, worker_id) in &info.actors {
-                    map.entry(*worker_id).or_default().insert(*actor_id);
-                }
-            }
-            map
-        };
-
         let actor_location_map = actor_infos
             .fragment_infos
             .values()
@@ -124,7 +100,6 @@ impl InflightActorInfo {
         Self {
             node_map,
             actor_map,
-            actor_map_to_send,
             actor_location_map,
             mv_depended_subscriptions,
             fragment_infos: actor_infos.fragment_infos,
@@ -167,28 +142,11 @@ impl InflightActorInfo {
             let mut to_add = HashMap::new();
             for (fragment_id, change) in fragment_changes {
                 match change {
-                    CommandFragmentChanges::NewFragment(CommandNewFragmentInfo {
-                        new_actors,
-                        table_ids,
-                        is_injectable,
-                        ..
-                    }) => {
-                        for (actor_id, node_id) in &new_actors {
-                            assert!(to_add
-                                .insert(*actor_id, (*node_id, is_injectable))
-                                .is_none());
+                    CommandFragmentChanges::NewFragment(info) => {
+                        for (actor_id, node_id) in &info.actors {
+                            assert!(to_add.insert(*actor_id, *node_id).is_none());
                         }
-                        assert!(self
-                            .fragment_infos
-                            .insert(
-                                fragment_id,
-                                InflightFragmentInfo {
-                                    actors: new_actors,
-                                    state_table_ids: table_ids,
-                                    is_injectable,
-                                }
-                            )
-                            .is_none());
+                        assert!(self.fragment_infos.insert(fragment_id, info).is_none());
                     }
                     CommandFragmentChanges::Reschedule { new_actors, .. } => {
                         let info = self
@@ -197,30 +155,19 @@ impl InflightActorInfo {
                             .expect("should exist");
                         let actors = &mut info.actors;
                         for (actor_id, node_id) in new_actors {
-                            assert!(to_add
-                                .insert(actor_id, (node_id, info.is_injectable))
-                                .is_none());
+                            assert!(to_add.insert(actor_id, node_id).is_none());
                             assert!(actors.insert(actor_id, node_id).is_none());
                         }
                     }
                     CommandFragmentChanges::RemoveFragment => {}
                 }
             }
-            for (actor_id, (node_id, is_injectable)) in to_add {
+            for (actor_id, node_id) in to_add {
                 assert!(self.node_map.contains_key(&node_id));
                 assert!(
                     self.actor_map.entry(node_id).or_default().insert(actor_id),
                     "duplicate actor in command changes"
                 );
-                if is_injectable {
-                    assert!(
-                        self.actor_map_to_send
-                            .entry(node_id)
-                            .or_default()
-                            .insert(actor_id),
-                        "duplicate actor in command changes"
-                    );
-                }
                 assert!(
                     self.actor_location_map.insert(actor_id, node_id).is_none(),
                     "duplicate actor in command changes"
@@ -280,13 +227,8 @@ impl InflightActorInfo {
                     .expect("actor not found");
                 let actor_ids = self.actor_map.get_mut(&node_id).expect("node not found");
                 assert!(actor_ids.remove(&actor_id), "actor not found");
-                self.actor_map_to_send
-                    .get_mut(&node_id)
-                    .map(|actor_ids| actor_ids.remove(&actor_id));
             }
             self.actor_map.retain(|_, actor_ids| !actor_ids.is_empty());
-            self.actor_map_to_send
-                .retain(|_, actor_ids| !actor_ids.is_empty());
         }
         if let Command::DropSubscription {
             subscription_id,
@@ -310,27 +252,49 @@ impl InflightActorInfo {
     }
 
     /// Returns actor list to collect in the target worker node.
-    pub fn actor_ids_to_collect(&self, node_id: &WorkerId) -> impl Iterator<Item = ActorId> {
-        self.actor_map
-            .get(node_id)
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
+    pub fn actor_ids_to_collect(
+        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+        node_id: WorkerId,
+    ) -> impl Iterator<Item = ActorId> + '_ {
+        fragment_infos.values().flat_map(move |info| {
+            info.actors
+                .iter()
+                .filter_map(move |(actor_id, actor_node_id)| {
+                    if *actor_node_id == node_id {
+                        Some(*actor_id)
+                    } else {
+                        None
+                    }
+                })
+        })
     }
 
     /// Returns actor list to send in the target worker node.
-    pub fn actor_ids_to_send(&self, node_id: &WorkerId) -> impl Iterator<Item = ActorId> {
-        self.actor_map_to_send
-            .get(node_id)
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
+    pub fn actor_ids_to_send(
+        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+        node_id: WorkerId,
+    ) -> impl Iterator<Item = ActorId> + '_ {
+        fragment_infos
+            .values()
+            .filter(|info| info.is_injectable)
+            .flat_map(move |info| {
+                info.actors
+                    .iter()
+                    .filter_map(move |(actor_id, actor_node_id)| {
+                        if *actor_node_id == node_id {
+                            Some(*actor_id)
+                        } else {
+                            None
+                        }
+                    })
+            })
     }
 
-    pub fn existing_table_ids(&self) -> HashSet<TableId> {
-        self.fragment_infos
+    pub fn existing_table_ids(
+        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+    ) -> impl Iterator<Item = TableId> + '_ {
+        fragment_infos
             .values()
             .flat_map(|info| info.state_table_ids.iter().cloned())
-            .collect()
     }
 }
