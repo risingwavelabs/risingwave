@@ -99,12 +99,11 @@ impl CommitEpochInfo {
 
 impl HummockManager {
     #[cfg(any(test, feature = "test"))]
-    pub async fn commit_epoch_with_batch_cg_for_test(
+    pub async fn commit_epoch_for_test(
         &self,
         epoch: HummockEpoch,
         sstables: Vec<impl Into<LocalSstableInfo>>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
-        batch_commit_for_new_cg: Vec<BatchCommitForNewCg>,
     ) -> Result<()> {
         let tables = self
             .versioning
@@ -124,21 +123,10 @@ impl HummockManager {
             HashMap::new(),
             BTreeMap::from_iter([(epoch, tables)]),
             epoch,
-            batch_commit_for_new_cg,
+            vec![],
         );
         self.commit_epoch(info).await?;
         Ok(())
-    }
-
-    #[cfg(any(test, feature = "test"))]
-    pub async fn commit_epoch_for_test(
-        &self,
-        epoch: HummockEpoch,
-        sstables: Vec<impl Into<LocalSstableInfo>>,
-        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
-    ) -> Result<()> {
-        self.commit_epoch_with_batch_cg_for_test(epoch, sstables, sst_to_context, vec![])
-            .await
     }
 
     /// Caller should ensure `epoch` > `max_committed_epoch`
@@ -188,7 +176,7 @@ impl HummockManager {
             &self.metrics,
         );
 
-        let state_table_info = version.latest_version().state_table_info.clone();
+        let state_table_info = &version.latest_version().state_table_info;
 
         let mut table_compaction_group_mapping = state_table_info.build_table_compaction_group_id();
 
@@ -197,7 +185,7 @@ impl HummockManager {
         if let Some(new_fragment_table_info) = new_table_fragment_info {
             if !new_fragment_table_info.internal_table_ids.is_empty() {
                 on_handle_add_new_table(
-                    &state_table_info,
+                    state_table_info,
                     &new_fragment_table_info.internal_table_ids,
                     StaticCompactionGroupId::StateDefault as u64,
                     &mut table_compaction_group_mapping,
@@ -207,7 +195,7 @@ impl HummockManager {
 
             if let Some(mv_table_id) = new_fragment_table_info.mv_table_id {
                 on_handle_add_new_table(
-                    &state_table_info,
+                    state_table_info,
                     &[mv_table_id],
                     StaticCompactionGroupId::MaterializedView as u64,
                     &mut table_compaction_group_mapping,
@@ -244,7 +232,7 @@ impl HummockManager {
                     new_id_count += epoch_to_ssts.values().map(|ssts| ssts.len()).sum::<usize>();
 
                     on_handle_add_new_table(
-                        &state_table_info,
+                        state_table_info,
                         &table_ids,
                         new_compaction_group_id,
                         &mut table_compaction_group_mapping,

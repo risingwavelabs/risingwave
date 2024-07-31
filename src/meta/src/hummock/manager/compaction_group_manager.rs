@@ -46,7 +46,10 @@ use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
 use crate::manager::{MetaSrvEnv, MetaStoreImpl};
-use crate::model::{BTreeMapTransaction, BTreeMapTransactionInner, DerefMutForward, MetadataModel, MetadataModelError};
+use crate::model::{
+    BTreeMapTransaction, BTreeMapTransactionInner, DerefMutForward, MetadataModel,
+    MetadataModelError,
+};
 
 type CompactionGroupTransaction<'a> = BTreeMapTransaction<'a, CompactionGroupId, CompactionGroup>;
 
