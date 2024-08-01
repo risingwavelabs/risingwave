@@ -891,9 +891,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76cb6d108605c5489fff1ef9c520656946ad05ed0de3ea6d26d56bcb34bdb8c5"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-buffer 52.0.0",
+ "arrow-schema 52.0.0",
  "atomic-time",
  "rquickjs",
 ]
@@ -905,10 +905,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4506efc6fbc200c083add2a7ed4e3616a859941a745e922320ae7051d90d12ec"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-ipc 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-buffer 52.0.0",
+ "arrow-ipc 52.0.0",
+ "arrow-schema 52.0.0",
  "lazy_static",
  "pyo3",
  "pyo3-build-config",
@@ -921,9 +921,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb829e25925161d93617d4b053bae03fe51e708f2cce088d85df856011d4f369"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-ipc 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-ipc 52.0.0",
+ "arrow-schema 52.0.0",
  "async-trait",
  "base64 0.22.0",
  "genawaiter",
@@ -5368,10 +5368,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "google-cloud-bigquery"
-version = "0.9.0"
+name = "google-cloud-auth"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e321c127945bb44a5cf5129c37530e2494b97afefe7f334a983ac754e40914e"
+checksum = "1112c453c2e155b3e683204ffff52bcc6d6495d04b68d9e90cd24161270c5058"
+dependencies = [
+ "async-trait",
+ "base64 0.21.7",
+ "google-cloud-metadata",
+ "google-cloud-token",
+ "home",
+ "jsonwebtoken",
+ "reqwest 0.12.4",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "time",
+ "tokio",
+ "tracing",
+ "urlencoding",
+]
+
+[[package]]
+name = "google-cloud-bigquery"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "305cb7214d11b719e9f00f982c1ee1304c674f7a8dfc44a43b8bad3c909750c2"
 dependencies = [
  "anyhow",
  "arrow 50.0.0",
@@ -5379,9 +5401,9 @@ dependencies = [
  "backon",
  "base64 0.21.7",
  "bigdecimal 0.4.5",
- "google-cloud-auth",
- "google-cloud-gax",
- "google-cloud-googleapis",
+ "google-cloud-auth 0.16.0",
+ "google-cloud-gax 0.19.0",
+ "google-cloud-googleapis 0.15.0",
  "google-cloud-token",
  "num-bigint",
  "reqwest 0.12.4",
@@ -5411,6 +5433,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "google-cloud-gax"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c3eaaad103912825594d674a4b1e556ccbb05a13a6cac17dcfd871997fb760a"
+dependencies = [
+ "google-cloud-token",
+ "http 1.1.0",
+ "thiserror",
+ "tokio",
+ "tokio-retry",
+ "tonic 0.12.1",
+ "tower",
+ "tracing",
+]
+
+[[package]]
 name = "google-cloud-googleapis"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5419,6 +5457,17 @@ dependencies = [
  "prost 0.12.1",
  "prost-types 0.12.1",
  "tonic 0.10.2",
+]
+
+[[package]]
+name = "google-cloud-googleapis"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ae8ab26ef7c7c3f7dfb9cc3982293d031d8e78c85d00ddfb704b5c35aeff7c8"
+dependencies = [
+ "prost 0.13.1",
+ "prost-types 0.13.1",
+ "tonic 0.12.1",
 ]
 
 [[package]]
@@ -5440,9 +5489,9 @@ checksum = "0a35e4a008db5cf01a5c03d3c67bd90b3cad77427ca949f3c8eddd90c4a3c932"
 dependencies = [
  "async-channel 1.9.0",
  "async-stream",
- "google-cloud-auth",
- "google-cloud-gax",
- "google-cloud-googleapis",
+ "google-cloud-auth 0.15.0",
+ "google-cloud-gax 0.17.0",
+ "google-cloud-googleapis 0.13.0",
  "google-cloud-token",
  "prost-types 0.12.1",
  "thiserror",
@@ -5452,10 +5501,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "google-cloud-token"
-version = "0.1.1"
+name = "google-cloud-pubsub"
+version = "0.28.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fcd62eb34e3de2f085bcc33a09c3e17c4f65650f36d53eb328b00d63bcb536a"
+checksum = "55ef73601dcec5ea144e59969e921d35d66000211603fee8023b7947af09248f"
+dependencies = [
+ "async-channel 1.9.0",
+ "async-stream",
+ "google-cloud-auth 0.16.0",
+ "google-cloud-gax 0.19.0",
+ "google-cloud-googleapis 0.15.0",
+ "google-cloud-token",
+ "prost-types 0.13.1",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "google-cloud-token"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f49c12ba8b21d128a2ce8585955246977fbce4415f680ebf9199b6f9d6d725f"
 dependencies = [
  "async-trait",
 ]
@@ -9144,13 +9212,13 @@ dependencies = [
 
 [[package]]
 name = "prost-reflect"
-version = "0.13.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ae9372e3227f3685376a0836e5c248611eafc95a0be900d44bc6cdf225b700f"
+checksum = "55a6a9143ae25c25fa7b6a48d6cc08b10785372060009c25140a4e7c340e95af"
 dependencies = [
  "once_cell",
- "prost 0.12.1",
- "prost-types 0.12.1",
+ "prost 0.13.1",
+ "prost-types 0.13.1",
 ]
 
 [[package]]
@@ -9895,7 +9963,7 @@ dependencies = [
  "console",
  "fs-err",
  "glob",
- "google-cloud-pubsub",
+ "google-cloud-pubsub 0.25.0",
  "indicatif",
  "itertools 0.12.1",
  "madsim-rdkafka",
@@ -9992,7 +10060,6 @@ dependencies = [
  "parquet 52.0.0",
  "paste",
  "prometheus",
- "prost 0.12.1",
  "rand",
  "risingwave_common",
  "risingwave_common_estimate_size",
@@ -10334,7 +10401,7 @@ dependencies = [
  "async-trait",
  "axum 0.7.4",
  "futures",
- "hyper 0.14.27",
+ "http 1.1.0",
  "madsim-tokio",
  "madsim-tonic",
  "prometheus",
@@ -10414,7 +10481,9 @@ dependencies = [
  "foyer",
  "futures",
  "futures-async-stream",
+ "http 1.1.0",
  "hyper 0.14.27",
+ "hyper 1.4.1",
  "itertools 0.12.1",
  "madsim-tokio",
  "madsim-tonic",
@@ -10496,9 +10565,9 @@ dependencies = [
  "gcp-bigquery-client",
  "glob",
  "google-cloud-bigquery",
- "google-cloud-gax",
- "google-cloud-googleapis",
- "google-cloud-pubsub",
+ "google-cloud-gax 0.19.0",
+ "google-cloud-googleapis 0.15.0",
+ "google-cloud-pubsub 0.28.1",
  "http 0.2.9",
  "iceberg",
  "iceberg-catalog-rest",
@@ -10527,10 +10596,10 @@ dependencies = [
  "postgres-openssl",
  "pretty_assertions",
  "prometheus",
- "prost 0.12.1",
+ "prost 0.13.1",
  "prost-build 0.12.1",
  "prost-reflect",
- "prost-types 0.12.1",
+ "prost-types 0.13.1",
  "protobuf-native",
  "protobuf-src",
  "pulsar",
@@ -11094,7 +11163,7 @@ dependencies = [
  "function_name",
  "futures",
  "hex",
- "hyper 0.14.27",
+ "http 1.1.0",
  "itertools 0.12.1",
  "jsonbb",
  "madsim-etcd-client",
@@ -14279,6 +14348,7 @@ dependencies = [
  "axum 0.7.4",
  "base64 0.22.0",
  "bytes",
+ "flate2",
  "h2 0.4.4",
  "http 1.1.0",
  "http-body 1.0.0",
@@ -14289,13 +14359,16 @@ dependencies = [
  "percent-encoding",
  "pin-project",
  "prost 0.13.1",
+ "rustls-pemfile 2.1.1",
  "socket2 0.5.6",
  "tokio",
+ "tokio-rustls 0.26.0",
  "tokio-stream",
  "tower",
  "tower-layer",
  "tower-service",
  "tracing",
+ "webpki-roots 0.26.1",
 ]
 
 [[package]]

@@ -497,7 +497,7 @@ pub async fn start_service_as_election_leader(
             metadata_manager: metadata_manager.clone(),
             compute_clients: ComputeClientPool::new(1), // typically no need for plural clients
             diagnose_command,
-            trace_state,
+            // trace_state,
         };
         let task = tokio::spawn(dashboard_service.serve());
         Some(task)

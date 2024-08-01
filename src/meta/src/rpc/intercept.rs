@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use futures::Future;
-use hyper::Body;
+use tonic::body::BoxBody;
 use tower::{Layer, Service};
 
 use crate::rpc::metrics::MetaMetrics;
@@ -49,9 +49,9 @@ pub struct MetricsMiddleware<S> {
     metrics: Arc<MetaMetrics>,
 }
 
-impl<S> Service<hyper::Request<Body>> for MetricsMiddleware<S>
+impl<S> Service<http::Request<BoxBody>> for MetricsMiddleware<S>
 where
-    S: Service<hyper::Request<Body>> + Clone + Send + 'static,
+    S: Service<http::Request<BoxBody>> + Clone + Send + 'static,
     S::Future: Send + 'static,
 {
     type Error = S::Error;
@@ -63,7 +63,7 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: hyper::Request<Body>) -> Self::Future {
+    fn call(&mut self, req: http::Request<BoxBody>) -> Self::Future {
         // This is necessary because tonic internally uses `tower::buffer::Buffer`.
         // See https://github.com/tower-rs/tower/issues/547#issuecomment-767629149
         // for details on why this is necessary

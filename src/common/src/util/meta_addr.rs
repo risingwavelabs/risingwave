@@ -24,8 +24,8 @@ const META_ADDRESS_LOAD_BALANCE_MODE_PREFIX: &str = "load-balance+";
 /// Used in the command line argument `--meta-address`.
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum MetaAddressStrategy {
-    LoadBalance(http::Uri),
-    List(Vec<http::Uri>),
+    LoadBalance(http_1::Uri),
+    List(Vec<http_1::Uri>),
 }
 
 /// Error type for parsing meta address strategy.
@@ -36,7 +36,7 @@ pub enum MetaAddressStrategyParseError {
     #[error("there should be only one load balance address")]
     MultipleLoadBalance,
     #[error("failed to parse meta address `{1}`: {0}")]
-    UrlParse(#[source] http::uri::InvalidUri, String),
+    UrlParse(#[source] http_1::uri::InvalidUri, String),
 }
 
 impl FromStr for MetaAddressStrategy {
@@ -84,7 +84,7 @@ impl fmt::Display for MetaAddressStrategy {
 
 impl MetaAddressStrategy {
     /// Returns `Some` if there's exactly one address.
-    pub fn exactly_one(&self) -> Option<&http::Uri> {
+    pub fn exactly_one(&self) -> Option<&http_1::Uri> {
         match self {
             MetaAddressStrategy::LoadBalance(lb) => Some(lb),
             MetaAddressStrategy::List(list) => {

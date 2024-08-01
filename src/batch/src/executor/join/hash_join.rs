@@ -20,7 +20,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use prost::Message;
+use risingwave_pb::Message;
 use risingwave_common::array::{Array, DataChunk, RowRef};
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;

@@ -643,7 +643,7 @@ impl S3ObjectStore {
             .enable_all_versions()
             .wrap_connector(http);
 
-        let conn = monitor_connector(conn, "S3");
+        // let conn = monitor_connector(conn, "S3");
 
         HyperClientBuilder::new().build(conn)
     }

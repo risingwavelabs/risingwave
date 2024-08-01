@@ -37,7 +37,6 @@ parking_lot = { workspace = true }
 parquet = { workspace = true }
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
-prost = "0.12"
 rand = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }

@@ -20,7 +20,7 @@ use bytes::Bytes;
 use futures_async_stream::try_stream;
 use hashbrown::hash_map::Entry;
 use itertools::Itertools;
-use prost::Message;
+use risingwave_pb::Message;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{Field, Schema};

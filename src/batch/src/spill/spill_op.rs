@@ -22,7 +22,7 @@ use futures_util::AsyncReadExt;
 use opendal::layers::RetryLayer;
 use opendal::services::{Fs, Memory};
 use opendal::Operator;
-use prost::Message;
+use risingwave_pb::Message;
 use risingwave_common::array::DataChunk;
 use risingwave_pb::data::DataChunk as PbDataChunk;
 use thiserror_ext::AsReport;
