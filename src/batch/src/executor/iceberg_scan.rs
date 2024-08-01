@@ -99,9 +99,9 @@ impl IcebergScanExecutor {
         #[for_await]
         for record_batch in record_batch_stream {
             let record_batch = record_batch.map_err(BatchError::Iceberg)?;
-            // let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
-            // debug_assert_eq!(chunk.data_types(), data_types);
-            // yield chunk;
+            let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+            debug_assert_eq!(chunk.data_types(), data_types);
+            yield chunk;
             cnt += record_batch.num_rows();
         }
         println!("Total rows: {}, load_elapsed {:?},  elapsed {:?} for task len {}", cnt, load_elapsed, start.elapsed(), tasks_len);
