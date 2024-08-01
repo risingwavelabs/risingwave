@@ -144,7 +144,7 @@ impl fmt::Display for SetOperator {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-/// CORRESPONDING [ BY <left paren> <corresponding column list> <right paren> ]
+/// `CORRESPONDING [ BY <left paren> <corresponding column list> <right paren> ]`
 pub struct Corresponding {
     pub corresponding: bool,
     pub column_list: Option<Vec<Ident>>,
