@@ -16,6 +16,7 @@ use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
+use risingwave_pb::stream_plan::LocalApproxPercentileNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use crate::expr::{ExprRewriter, ExprVisitor, InputRef, InputRefDisplay, Literal};
@@ -108,7 +109,15 @@ impl_plan_tree_node_for_unary! {StreamLocalApproxPercentile}
 
 impl StreamNode for StreamLocalApproxPercentile {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        todo!()
+        let relative_error = self.relative_error.get_data().as_ref().unwrap();
+        let relative_error = relative_error.as_float64().into_inner();
+        let base = (1.0 + relative_error) / (1.0 - relative_error);
+        let percentile_index = self.percentile_col.index() as u32;
+        let body = LocalApproxPercentileNode {
+            base,
+            percentile_index,
+        };
+        PbNodeBody::LocalApproxPercentile(body)
     }
 }
 
