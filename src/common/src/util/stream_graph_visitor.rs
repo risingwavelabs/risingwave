@@ -133,12 +133,7 @@ pub fn visit_stream_node_tables_inner<F>(
                 optional!(node.memo_table, "TemporalJoinMemo");
             }
             NodeBody::DynamicFilter(node) => {
-                if node.condition_always_relax {
-                    always!(node.left_table, "DynamicFilterLeftNotSatisfy");
-                } else {
-                    always!(node.left_table, "DynamicFilterLeft");
-                }
-
+                always!(node.left_table, "DynamicFilterLeft");
                 always!(node.right_table, "DynamicFilterRight");
             }
 
