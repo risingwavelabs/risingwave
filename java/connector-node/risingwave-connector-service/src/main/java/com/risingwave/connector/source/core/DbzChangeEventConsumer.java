@@ -200,21 +200,15 @@ public class DbzChangeEventConsumer
 
                         // upstream event time
                         long sourceTsMs = sourceStruct.getInt64("ts_ms");
-                        // concat full table name, right now we only support MySQL schema change
-                        // event
-                        var fullTableName =
-                                String.format(
-                                        "%s.%s",
-                                        sourceStruct.getString("db"),
-                                        sourceStruct.getString("table"));
                         byte[] payload =
                                 payloadConverter.fromConnectData(
                                         record.topic(), record.valueSchema(), record.value());
 
+                        // We intentionally don't set the fullTableName for schema change event,
+                        // since it doesn't need to be routed to a specific cdc table
                         var message =
                                 msgBuilder
                                         .setMsgType(CdcMessage.CdcMessageType.SCHEMA_CHANGE)
-                                        .setFullTableName(fullTableName)
                                         .setPayload(new String(payload, StandardCharsets.UTF_8))
                                         .setSourceTsMs(sourceTsMs)
                                         .build();
