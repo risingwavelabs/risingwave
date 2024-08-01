@@ -61,6 +61,38 @@ impl<K, V> EstimatedBTreeMap<K, V> {
     }
 }
 
+impl<K, V> EstimatedBTreeMap<K, V>
+where
+    K: Ord,
+{
+    pub fn first_key_value(&self) -> Option<(&K, &V)> {
+        self.inner.first_key_value()
+    }
+
+    pub fn last_key_value(&self) -> Option<(&K, &V)> {
+        self.inner.last_key_value()
+    }
+}
+
+#[easy_ext::ext(BTreeMapAccessExt)]
+impl<K: Ord, V> EstimatedBTreeMap<K, V> {
+    pub fn first_key(&self) -> Option<&K> {
+        self.first_key_value().map(|(k, _)| k)
+    }
+
+    pub fn first_value(&self) -> Option<&V> {
+        self.first_key_value().map(|(_, v)| v)
+    }
+
+    pub fn last_key(&self) -> Option<&K> {
+        self.last_key_value().map(|(k, _)| k)
+    }
+
+    pub fn last_value(&self) -> Option<&V> {
+        self.last_key_value().map(|(_, v)| v)
+    }
+}
+
 impl<K, V> Default for EstimatedBTreeMap<K, V> {
     fn default() -> Self {
         Self::new()
@@ -72,14 +104,6 @@ where
     K: EstimateSize + Ord,
     V: EstimateSize,
 {
-    pub fn first_key_value(&self) -> Option<(&K, &V)> {
-        self.inner.first_key_value()
-    }
-
-    pub fn last_key_value(&self) -> Option<(&K, &V)> {
-        self.inner.last_key_value()
-    }
-
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
         let key_size = self.heap_size.add_val(&key);
         self.heap_size.add_val(&value);
