@@ -144,7 +144,8 @@ impl<S: StateStore> ManagedTopNState<S> {
         start_key: Option<CacheKey>,
         cache_size_limit: usize,
     ) -> StreamExecutorResult<()> {
-        let cache = &mut topn_cache.high;
+        let high_cache = &mut topn_cache.high;
+        assert!(high_cache.is_empty());
 
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let state_table_iter = self
@@ -172,8 +173,8 @@ impl<S: StateStore> ManagedTopNState<S> {
             {
                 continue;
             }
-            cache.insert(topn_row.cache_key, (&topn_row.row).into());
-            if cache.len() == cache_size_limit {
+            high_cache.insert(topn_row.cache_key, (&topn_row.row).into());
+            if high_cache.len() == cache_size_limit {
                 break;
             }
         }
