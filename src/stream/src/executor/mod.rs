@@ -457,6 +457,7 @@ impl Barrier {
             Some(
                   Mutation::Update { .. } // new actors for scaling
                 | Mutation::Add(AddMutation { pause: true, .. }) // new streaming job, or recovery
+                | Mutation::AddAndUpdate(AddMutation { pause: true, .. }, _) // new actors for replacing table
             ) => true,
             _ => false,
         }
