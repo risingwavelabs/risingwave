@@ -3761,6 +3761,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "datasize"
+version = "0.2.15"
+source = "git+https://github.com/BugenZhao/datasize-rs?rev=8192cf2d751119a6a30e2ef67e5eb252f8e5b3e5#8192cf2d751119a6a30e2ef67e5eb252f8e5b3e5"
+dependencies = [
+ "datasize_derive",
+]
+
+[[package]]
+name = "datasize_derive"
+version = "0.2.15"
+source = "git+https://github.com/BugenZhao/datasize-rs?rev=8192cf2d751119a6a30e2ef67e5eb252f8e5b3e5#8192cf2d751119a6a30e2ef67e5eb252f8e5b3e5"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "debugid"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8088,6 +8106,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "otlp-embedded"
+version = "0.0.1"
+source = "git+https://github.com/risingwavelabs/otlp-embedded?rev=e6cd165b9bc85783b42c106e99186b86b73e3507#e6cd165b9bc85783b42c106e99186b86b73e3507"
+dependencies = [
+ "axum 0.7.4",
+ "datasize",
+ "hex",
+ "itertools 0.13.0",
+ "prost 0.13.1",
+ "rust-embed",
+ "schnellru",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tonic 0.12.1",
+ "tonic-build",
+ "tracing",
+]
+
+[[package]]
 name = "ouroboros"
 version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11105,6 +11143,7 @@ dependencies = [
  "mime_guess",
  "num-integer",
  "num-traits",
+ "otlp-embedded",
  "parking_lot 0.12.1",
  "prometheus",
  "prometheus-http-query",
@@ -11202,6 +11241,7 @@ dependencies = [
  "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
+ "otlp-embedded",
  "prometheus-http-query",
  "redact",
  "regex",
@@ -12218,6 +12258,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c3733bf4cf7ea0880754e19cb5a462007c4a8c1914bff372ccc95b464f1df88"
 dependencies = [
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "schnellru"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9a8ef13a93c54d20580de1e5c413e624e53121d42fc7e2c11d10ef7f8b02367"
+dependencies = [
+ "ahash 0.8.11",
+ "cfg-if",
+ "hashbrown 0.13.2",
 ]
 
 [[package]]
