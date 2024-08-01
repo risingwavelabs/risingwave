@@ -13,7 +13,5 @@
 // limitations under the License.
 
 mod state_cache;
-mod top_n_cache;
 
 pub use state_cache::*;
-pub use top_n_cache::*;

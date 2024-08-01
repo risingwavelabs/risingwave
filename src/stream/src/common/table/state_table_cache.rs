@@ -125,7 +125,7 @@ impl StateTableWatermarkCache {
     }
 
     pub fn capacity(&self) -> usize {
-        self.inner.capacity_inner()
+        self.inner.capacity()
     }
 
     pub fn len(&self) -> usize {

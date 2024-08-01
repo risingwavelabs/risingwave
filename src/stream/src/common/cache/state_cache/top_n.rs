@@ -13,17 +13,18 @@
 // limitations under the License.
 
 use risingwave_common::array::Op;
+use risingwave_common_estimate_size::collections::btreemap::BTreeMapAccessExt;
+use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
 use risingwave_common_estimate_size::EstimateSize;
 
 use super::{StateCache, StateCacheFiller};
-use crate::common::cache::TopNCache;
 
-/// An implementation of [`StateCache`] that uses a [`TopNCache`] as the underlying cache, with
-/// limited capacity.
+/// An implementation of [`StateCache`] that keeps a limited number of entries in an ordered in-memory map.
 #[derive(Clone, EstimateSize)]
 pub struct TopNStateCache<K: Ord + EstimateSize, V: EstimateSize> {
     table_row_count: Option<usize>,
-    cache: TopNCache<K, V>,
+    cache: EstimatedBTreeMap<K, V>,
+    capacity: usize,
     synced: bool,
 }
 
@@ -31,7 +32,8 @@ impl<K: Ord + EstimateSize, V: EstimateSize> TopNStateCache<K, V> {
     pub fn new(capacity: usize) -> Self {
         Self {
             table_row_count: None,
-            cache: TopNCache::new(capacity),
+            cache: Default::default(),
+            capacity,
             synced: false,
         }
     }
@@ -39,7 +41,8 @@ impl<K: Ord + EstimateSize, V: EstimateSize> TopNStateCache<K, V> {
     pub fn with_table_row_count(capacity: usize, table_row_count: usize) -> Self {
         Self {
             table_row_count: Some(table_row_count),
-            cache: TopNCache::new(capacity),
+            cache: Default::default(),
+            capacity,
             synced: false,
         }
     }
@@ -65,7 +68,12 @@ impl<K: Ord + EstimateSize, V: EstimateSize> TopNStateCache<K, V> {
             || self.cache.is_empty()
             || &key <= self.cache.last_key().unwrap()
         {
-            self.cache.insert(key, value)
+            let old_v = self.cache.insert(key, value);
+            // evict if capacity is reached
+            while self.cache.len() > self.capacity {
+                self.cache.pop_last();
+            }
+            old_v
         } else {
             None
         };
@@ -87,8 +95,8 @@ impl<K: Ord + EstimateSize, V: EstimateSize> TopNStateCache<K, V> {
         old_val
     }
 
-    pub fn capacity_inner(&self) -> usize {
-        self.cache.capacity()
+    pub fn capacity(&self) -> usize {
+        self.capacity
     }
 
     pub fn len(&self) -> usize {
@@ -170,7 +178,7 @@ impl<K: Ord + EstimateSize, V: EstimateSize> StateCacheFiller for &mut TopNState
     type Value = V;
 
     fn capacity(&self) -> Option<usize> {
-        Some(self.capacity_inner())
+        Some(TopNStateCache::capacity(self))
     }
 
     fn insert_unchecked(&mut self, key: Self::Key, value: Self::Value) {
