@@ -25,7 +25,7 @@ itertools = { workspace = true }
 libc = "0.2"
 opentelemetry = { workspace = true, optional = true }
 parking_lot = { workspace = true }
-plotlib = "0.5.1"
+plotters = "0.3.3"
 prometheus = { version = "0.13", features = ["process"] }
 rand = { workspace = true }
 risingwave_common = { workspace = true }
