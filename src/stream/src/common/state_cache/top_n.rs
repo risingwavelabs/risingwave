@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::array::Op;
-use risingwave_common_estimate_size::collections::btreemap::BTreeMapAccessExt;
 use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
 use risingwave_common_estimate_size::EstimateSize;
 

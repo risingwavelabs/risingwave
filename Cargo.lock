@@ -10193,7 +10193,6 @@ name = "risingwave_common_estimate_size"
 version = "1.11.0-alpha"
 dependencies = [
  "bytes",
- "easy-ext",
  "educe",
  "ethnum",
  "fixedbitset 0.5.0",

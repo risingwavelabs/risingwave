@@ -16,7 +16,6 @@ normal = ["workspace-hack"]
 
 [dependencies]
 bytes = "1"
-easy-ext = "1"
 educe = "0.6"
 ethnum = { version = "1", features = ["serde"] }
 fixedbitset = "0.5"

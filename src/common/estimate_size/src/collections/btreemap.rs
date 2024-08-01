@@ -69,19 +69,16 @@ where
         self.inner.first_key_value()
     }
 
-    pub fn last_key_value(&self) -> Option<(&K, &V)> {
-        self.inner.last_key_value()
-    }
-}
-
-#[easy_ext::ext(BTreeMapAccessExt)]
-impl<K: Ord, V> EstimatedBTreeMap<K, V> {
     pub fn first_key(&self) -> Option<&K> {
         self.first_key_value().map(|(k, _)| k)
     }
 
     pub fn first_value(&self) -> Option<&V> {
         self.first_key_value().map(|(_, v)| v)
+    }
+
+    pub fn last_key_value(&self) -> Option<(&K, &V)> {
+        self.inner.last_key_value()
     }
 
     pub fn last_key(&self) -> Option<&K> {
