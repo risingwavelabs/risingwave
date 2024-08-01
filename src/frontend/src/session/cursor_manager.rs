@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::mem;
 use core::time::Duration;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
@@ -25,6 +26,7 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::StatementType;
 use pgwire::types::{Format, Row};
 use risingwave_common::catalog::Field;
+use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
@@ -33,18 +35,70 @@ use super::SessionImpl;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result};
-use crate::handler::declare_cursor::create_stream_for_cursor_stmt;
-use crate::handler::query::{create_stream, gen_batch_plan_fragmenter, BatchQueryPlanResult};
+use crate::handler::declare_cursor::{
+    create_chunk_stream_for_cursor, create_stream_for_cursor_stmt,
+};
+use crate::handler::query::{gen_batch_plan_fragmenter, BatchQueryPlanResult};
 use crate::handler::util::{
     convert_logstore_u64_to_unix_millis, gen_query_from_table_name, pg_value_format, to_pg_field,
-    StaticSessionData,
+    DataChunkToRowSetAdapter, StaticSessionData,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{generic, BatchLogSeqScan};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
+use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::{OptimizerContext, OptimizerContextRef, PgResponseStream, PlanRef, TableCatalog};
 
+pub enum CursorDataChunkStream {
+    LocalDataChunk(Option<LocalQueryStream>),
+    DistributedDataChunk(Option<DistributedQueryStream>),
+    PgResponse(PgResponseStream),
+}
+
+impl CursorDataChunkStream {
+    pub fn init_row_stream(
+        &mut self,
+        fields: &Vec<Field>,
+        formats: &Vec<Format>,
+        session: Arc<SessionImpl>,
+    ) {
+        let columns_type = fields.iter().map(|f| f.data_type().clone()).collect();
+        match self {
+            CursorDataChunkStream::LocalDataChunk(data_chunk) => {
+                let data_chunk = mem::take(data_chunk).unwrap();
+                let row_stream = PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
+                    data_chunk,
+                    columns_type,
+                    formats.clone(),
+                    session,
+                ));
+                *self = CursorDataChunkStream::PgResponse(row_stream);
+            }
+            CursorDataChunkStream::DistributedDataChunk(data_chunk) => {
+                let data_chunk = mem::take(data_chunk).unwrap();
+                let row_stream = PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
+                    data_chunk,
+                    columns_type,
+                    formats.clone(),
+                    session,
+                ));
+                *self = CursorDataChunkStream::PgResponse(row_stream);
+            }
+            _ => {}
+        }
+    }
+
+    pub async fn next(&mut self) -> Result<Option<std::result::Result<Vec<Row>, BoxedError>>> {
+        match self {
+            CursorDataChunkStream::PgResponse(row_stream) => Ok(row_stream.next().await),
+            _ => Err(ErrorCode::InternalError(
+                "Only 'CursorDataChunkStream' can call next and return rows".to_string(),
+            )
+            .into()),
+        }
+    }
+}
 pub enum Cursor {
     Subscription(SubscriptionCursor),
     Query(QueryCursor),
@@ -58,7 +112,7 @@ impl Cursor {
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         match self {
             Cursor::Subscription(cursor) => cursor.next(count, handle_args, formats).await,
-            Cursor::Query(cursor) => cursor.next(count, formats).await,
+            Cursor::Query(cursor) => cursor.next(count, formats, handle_args).await,
         }
     }
 
@@ -71,15 +125,15 @@ impl Cursor {
 }
 
 pub struct QueryCursor {
-    row_stream: PgResponseStream,
+    chunk_stream: CursorDataChunkStream,
     fields: Vec<Field>,
     remaining_rows: VecDeque<Row>,
 }
 
 impl QueryCursor {
-    pub fn new(row_stream: PgResponseStream, fields: Vec<Field>) -> Result<Self> {
+    pub fn new(chunk_stream: CursorDataChunkStream, fields: Vec<Field>) -> Result<Self> {
         Ok(Self {
-            row_stream,
+            chunk_stream,
             fields,
             remaining_rows: VecDeque::<Row>::new(),
         })
@@ -87,7 +141,7 @@ impl QueryCursor {
 
     pub async fn next_once(&mut self) -> Result<Option<Row>> {
         while self.remaining_rows.is_empty() {
-            let rows = self.row_stream.next().await;
+            let rows = self.chunk_stream.next().await?;
             let rows = match rows {
                 None => return Ok(None),
                 Some(row) => row?,
@@ -102,13 +156,16 @@ impl QueryCursor {
         &mut self,
         count: u32,
         formats: &Vec<Format>,
+        handle_args: HandlerArgs,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         // `FETCH NEXT` is equivalent to `FETCH 1`.
         // min with 100 to avoid allocating too many memory at once.
+        let session = handle_args.session;
         let mut ans = Vec::with_capacity(std::cmp::min(100, count) as usize);
         let mut cur = 0;
         let desc = self.fields.iter().map(to_pg_field).collect();
-        self.row_stream.set_formats(formats.clone());
+        self.chunk_stream
+            .init_row_stream(&self.fields, formats, session);
         while cur < count
             && let Some(row) = self.next_once().await?
         {
@@ -138,7 +195,7 @@ enum State {
 
         // The row stream to from the batch query read.
         // It is returned from the batch execution.
-        row_stream: PgResponseStream,
+        chunk_stream: CursorDataChunkStream,
 
         // A cache to store the remaining rows from the row stream.
         remaining_rows: VecDeque<Row>,
@@ -155,7 +212,7 @@ pub struct SubscriptionCursor {
     cursor_need_drop_time: Instant,
     state: State,
     // fields will be set in the table's catalog when the cursor is created,
-    // and will be reset each time it is created row_stream, this is to avoid changes in the catalog due to alter.
+    // and will be reset each time it is created chunk_stream, this is to avoid changes in the catalog due to alter.
     fields: Vec<Field>,
 }
 
@@ -188,7 +245,7 @@ impl SubscriptionCursor {
             // future fetch on the cursor starts from the snapshot when the cursor is declared.
             //
             // TODO: is this the right behavior? Should we delay the query stream initiation till the first fetch?
-            let (row_stream, fields) =
+            let (chunk_stream, fields) =
                 Self::initiate_query(None, &dependent_table_id, handle_args.clone()).await?;
             let pinned_epoch = handle_args
                 .session
@@ -209,7 +266,7 @@ impl SubscriptionCursor {
                 State::Fetch {
                     from_snapshot: true,
                     rw_timestamp: start_timestamp,
-                    row_stream,
+                    chunk_stream,
                     remaining_rows: VecDeque::new(),
                     expected_timestamp: None,
                 },
@@ -253,24 +310,30 @@ impl SubscriptionCursor {
                     .await
                     {
                         Ok((Some(rw_timestamp), expected_timestamp)) => {
-                            let (mut row_stream, fields) = Self::initiate_query(
+                            let (mut chunk_stream, fields) = Self::initiate_query(
                                 Some(rw_timestamp),
                                 &self.dependent_table_id,
                                 handle_args.clone(),
                             )
                             .await?;
-                            Self::set_formats(&mut row_stream, formats, &from_snapshot);
+                            Self::init_row_stream(
+                                &mut chunk_stream,
+                                formats,
+                                &from_snapshot,
+                                &self.fields,
+                                handle_args.session.clone(),
+                            );
 
                             self.cursor_need_drop_time = Instant::now()
                                 + Duration::from_secs(self.subscription.retention_seconds);
                             let mut remaining_rows = VecDeque::new();
-                            Self::try_refill_remaining_rows(&mut row_stream, &mut remaining_rows)
+                            Self::try_refill_remaining_rows(&mut chunk_stream, &mut remaining_rows)
                                 .await?;
                             // Transition to the Fetch state
                             self.state = State::Fetch {
                                 from_snapshot,
                                 rw_timestamp,
-                                row_stream,
+                                chunk_stream,
                                 remaining_rows,
                                 expected_timestamp,
                             };
@@ -289,7 +352,7 @@ impl SubscriptionCursor {
                 State::Fetch {
                     from_snapshot,
                     rw_timestamp,
-                    row_stream,
+                    chunk_stream,
                     remaining_rows,
                     expected_timestamp,
                 } => {
@@ -300,7 +363,7 @@ impl SubscriptionCursor {
                     let rw_timestamp = *rw_timestamp;
 
                     // Try refill remaining rows
-                    Self::try_refill_remaining_rows(row_stream, remaining_rows).await?;
+                    Self::try_refill_remaining_rows(chunk_stream, remaining_rows).await?;
 
                     if let Some(row) = remaining_rows.pop_front() {
                         // 1. Fetch the next row
@@ -365,11 +428,17 @@ impl SubscriptionCursor {
         let desc = self.fields.iter().map(to_pg_field).collect();
         if let State::Fetch {
             from_snapshot,
-            row_stream,
+            chunk_stream,
             ..
         } = &mut self.state
         {
-            Self::set_formats(row_stream, formats, from_snapshot);
+            Self::init_row_stream(
+                chunk_stream,
+                formats,
+                from_snapshot,
+                &self.fields,
+                handle_args.session.clone(),
+            );
         }
         while cur < count {
             let row = self.next_row(&handle_args, formats).await?;
@@ -424,10 +493,10 @@ impl SubscriptionCursor {
         rw_timestamp: Option<u64>,
         dependent_table_id: &TableId,
         handle_args: HandlerArgs,
-    ) -> Result<(PgResponseStream, Vec<Field>)> {
+    ) -> Result<(CursorDataChunkStream, Vec<Field>)> {
         let session = handle_args.clone().session;
         let table_catalog = session.get_table_by_id(dependent_table_id)?;
-        let (row_stream, fields) = if let Some(rw_timestamp) = rw_timestamp {
+        let (chunk_stream, fields) = if let Some(rw_timestamp) = rw_timestamp {
             let context = OptimizerContext::from_handler_args(handle_args);
             let plan_fragmenter_result = gen_batch_plan_fragmenter(
                 &session,
@@ -439,9 +508,7 @@ impl SubscriptionCursor {
                     rw_timestamp,
                 )?,
             )?;
-            let fields = plan_fragmenter_result.schema.fields.clone();
-            let (row_stream, _) = create_stream(session, plan_fragmenter_result, vec![]).await?;
-            (row_stream, fields)
+            create_chunk_stream_for_cursor(session, plan_fragmenter_result).await?
         } else {
             let subscription_from_table_name =
                 ObjectName(vec![Ident::from(table_catalog.name.as_ref())]);
@@ -450,15 +517,18 @@ impl SubscriptionCursor {
             )));
             create_stream_for_cursor_stmt(handle_args, query_stmt).await?
         };
-        Ok((row_stream, Self::build_desc(fields, rw_timestamp.is_none())))
+        Ok((
+            chunk_stream,
+            Self::build_desc(fields, rw_timestamp.is_none()),
+        ))
     }
 
     async fn try_refill_remaining_rows(
-        row_stream: &mut PgResponseStream,
+        chunk_stream: &mut CursorDataChunkStream,
         remaining_rows: &mut VecDeque<Row>,
     ) -> Result<()> {
         if remaining_rows.is_empty()
-            && let Some(row_set) = row_stream.next().await
+            && let Some(row_set) = chunk_stream.next().await?
         {
             remaining_rows.extend(row_set?);
         }
@@ -561,17 +631,19 @@ impl SubscriptionCursor {
 
     // In the beginning (declare cur), we will give it an empty formats,
     // this formats is not a real, when we fetch, We fill it with the formats returned from the pg client.
-    pub fn set_formats(
-        row_stream: &mut PgResponseStream,
+    pub fn init_row_stream(
+        chunk_stream: &mut CursorDataChunkStream,
         formats: &Vec<Format>,
         from_snapshot: &bool,
+        fields: &Vec<Field>,
+        session: Arc<SessionImpl>,
     ) {
         let mut formats = formats.clone();
         formats.pop();
         if *from_snapshot {
             formats.pop();
         }
-        row_stream.set_formats(formats);
+        chunk_stream.init_row_stream(fields, &formats, session);
     }
 }
 
@@ -618,10 +690,10 @@ impl CursorManager {
     pub async fn add_query_cursor(
         &self,
         cursor_name: ObjectName,
-        row_stream: PgResponseStream,
+        chunk_stream: CursorDataChunkStream,
         fields: Vec<Field>,
     ) -> Result<()> {
-        let cursor = QueryCursor::new(row_stream, fields)?;
+        let cursor = QueryCursor::new(chunk_stream, fields)?;
         self.cursor_map
             .lock()
             .await

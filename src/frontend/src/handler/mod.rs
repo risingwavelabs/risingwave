@@ -147,15 +147,6 @@ pub enum PgResponseStream {
     DistributedQuery(DataChunkToRowSetAdapter<DistributedQueryStream>),
     Rows(BoxStream<'static, RowSetResult>),
 }
-impl PgResponseStream {
-    pub fn set_formats(&mut self, formats: Vec<Format>) {
-        match self {
-            PgResponseStream::LocalQuery(inner) => inner.set_formats(formats),
-            PgResponseStream::DistributedQuery(inner) => inner.set_formats(formats),
-            PgResponseStream::Rows(_) => {}
-        }
-    }
-}
 
 impl Stream for PgResponseStream {
     type Item = std::result::Result<Vec<Row>, BoxedError>;

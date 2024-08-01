@@ -12,18 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::Field;
+use risingwave_common::session_config::QueryMode;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_sqlparser::ast::{DeclareCursorStatement, ObjectName, Query, Since, Statement};
 
-use super::query::{gen_batch_plan_by_statement, gen_batch_plan_fragmenter};
+use super::query::{
+    gen_batch_plan_by_statement, gen_batch_plan_fragmenter, BatchPlanFragmenterResult,
+};
 use super::util::convert_unix_millis_to_logstore_u64;
 use super::RwPgResponse;
 use crate::error::{ErrorCode, Result};
-use crate::handler::query::create_stream;
+use crate::handler::query::{distribute_execute, local_execute};
 use crate::handler::HandlerArgs;
-use crate::{Binder, OptimizerContext, PgResponseStream};
+use crate::session::cursor_manager::CursorDataChunkStream;
+use crate::session::SessionImpl;
+use crate::{Binder, OptimizerContext};
 
 pub async fn handle_declare_cursor(
     handle_args: HandlerArgs,
@@ -111,12 +118,12 @@ async fn handle_declare_query_cursor(
     cursor_name: ObjectName,
     query: Box<Query>,
 ) -> Result<RwPgResponse> {
-    let (row_stream, pg_descs) =
+    let (chunk_stream, fields) =
         create_stream_for_cursor_stmt(handle_args.clone(), Statement::Query(query)).await?;
     handle_args
         .session
         .get_cursor_manager()
-        .add_query_cursor(cursor_name, row_stream, pg_descs)
+        .add_query_cursor(cursor_name, chunk_stream, fields)
         .await?;
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }
@@ -124,14 +131,42 @@ async fn handle_declare_query_cursor(
 pub async fn create_stream_for_cursor_stmt(
     handle_args: HandlerArgs,
     stmt: Statement,
-) -> Result<(PgResponseStream, Vec<Field>)> {
+) -> Result<(CursorDataChunkStream, Vec<Field>)> {
     let session = handle_args.session.clone();
     let plan_fragmenter_result = {
         let context = OptimizerContext::from_handler_args(handle_args);
         let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
         gen_batch_plan_fragmenter(&session, plan_result)?
     };
-    let fields = plan_fragmenter_result.schema.fields.clone();
-    let (row_stream, _) = create_stream(session, plan_fragmenter_result, vec![]).await?;
-    Ok((row_stream, fields))
+    create_chunk_stream_for_cursor(session, plan_fragmenter_result).await
+}
+
+pub async fn create_chunk_stream_for_cursor(
+    session: Arc<SessionImpl>,
+    plan_fragmenter_result: BatchPlanFragmenterResult,
+) -> Result<(CursorDataChunkStream, Vec<Field>)> {
+    let BatchPlanFragmenterResult {
+        plan_fragmenter,
+        query_mode,
+        schema,
+        ..
+    } = plan_fragmenter_result;
+
+    let can_timeout_cancel = true;
+
+    let query = plan_fragmenter.generate_complete_query().await?;
+    tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
+
+    Ok((
+        match query_mode {
+            QueryMode::Auto => unreachable!(),
+            QueryMode::Local => CursorDataChunkStream::LocalDataChunk(Some(
+                local_execute(session.clone(), query, can_timeout_cancel).await?,
+            )),
+            QueryMode::Distributed => CursorDataChunkStream::DistributedDataChunk(Some(
+                distribute_execute(session.clone(), query, can_timeout_cancel).await?,
+            )),
+        },
+        schema.fields.clone(),
+    ))
 }
