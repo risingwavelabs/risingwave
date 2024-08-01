@@ -42,6 +42,7 @@ use tracing::{debug, info, warn};
 use crate::monitor::GLOBAL_METRICS_REGISTRY;
 use crate::{register_guarded_int_counter_vec_with_registry, LabelGuardedIntCounterVec};
 
+#[auto_impl::auto_impl(&mut)]
 pub trait MonitorAsyncReadWrite {
     fn on_read(&mut self, _size: usize) {}
     fn on_eof(&mut self) {}
@@ -56,7 +57,7 @@ pub trait MonitorAsyncReadWrite {
 pin_project! {
     pub struct MonitoredConnection<C, M> {
         #[pin]
-        inner: TokioIo<C>,
+        inner: C,
         monitor: M,
     }
 }
@@ -64,18 +65,26 @@ pin_project! {
 impl<C, M> MonitoredConnection<C, M> {
     pub fn new(connector: C, monitor: M) -> Self {
         Self {
-            inner: TokioIo::new(connector),
+            inner: connector,
             monitor,
         }
     }
 
-    fn project_into(this: Pin<&mut Self>) -> (Pin<&mut TokioIo<C>>, &mut M) {
+    fn project_into(this: Pin<&mut Self>) -> (Pin<&mut C>, &mut M) {
         let this = this.project();
         (this.inner, this.monitor)
     }
+
+    /// Delegate async read/write traits between tokio and hyper.
+    fn hyper_tokio_delegate(
+        self: Pin<&mut Self>,
+    ) -> TokioIo<MonitoredConnection<TokioIo<Pin<&mut C>>, &mut M>> {
+        let (inner, monitor) = MonitoredConnection::project_into(self);
+        TokioIo::new(MonitoredConnection::new(TokioIo::new(inner), monitor))
+    }
 }
 
-impl<C: hyper::rt::Read, M: MonitorAsyncReadWrite> AsyncRead for MonitoredConnection<C, M> {
+impl<C: AsyncRead, M: MonitorAsyncReadWrite> AsyncRead for MonitoredConnection<C, M> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -111,7 +120,17 @@ impl<C: hyper::rt::Read, M: MonitorAsyncReadWrite> AsyncRead for MonitoredConnec
     }
 }
 
-impl<C: hyper::rt::Write, M: MonitorAsyncReadWrite> AsyncWrite for MonitoredConnection<C, M> {
+impl<C: hyper::rt::Read, M: MonitorAsyncReadWrite> hyper::rt::Read for MonitoredConnection<C, M> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: hyper::rt::ReadBufCursor<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        hyper::rt::Read::poll_read(std::pin::pin!(self.hyper_tokio_delegate()), cx, buf)
+    }
+}
+
+impl<C: AsyncWrite, M: MonitorAsyncReadWrite> AsyncWrite for MonitoredConnection<C, M> {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -185,6 +204,39 @@ impl<C: hyper::rt::Write, M: MonitorAsyncReadWrite> AsyncWrite for MonitoredConn
     }
 }
 
+impl<C: hyper::rt::Write, M: MonitorAsyncReadWrite> hyper::rt::Write for MonitoredConnection<C, M> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        hyper::rt::Write::poll_write(std::pin::pin!(self.hyper_tokio_delegate()), cx, buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
+        hyper::rt::Write::poll_flush(std::pin::pin!(self.hyper_tokio_delegate()), cx)
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        hyper::rt::Write::poll_shutdown(std::pin::pin!(self.hyper_tokio_delegate()), cx)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.inner.is_write_vectored()
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[std::io::IoSlice<'_>],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        hyper::rt::Write::poll_write_vectored(std::pin::pin!(self.hyper_tokio_delegate()), cx, bufs)
+    }
+}
+
 impl<C: Connection, M> Connection for MonitoredConnection<C, M> {
     fn connected(&self) -> Connected {
         self.inner.connected()
@@ -198,7 +250,7 @@ impl<C: tonic::transport::server::Connected, M> tonic::transport::server::Connec
     type ConnectInfo = C::ConnectInfo;
 
     fn connect_info(&self) -> Self::ConnectInfo {
-        self.inner.inner().connect_info()
+        self.inner.connect_info()
     }
 }
 
@@ -215,12 +267,12 @@ where
     C::Future: 'static,
 {
     type Error = C::Error;
-    type Response = TokioIo<MonitoredConnection<C::Response, M::ConnectionMonitor>>;
+    type Response = MonitoredConnection<C::Response, M::ConnectionMonitor>;
 
     type Future = impl Future<Output = Result<Self::Response, Self::Error>> + 'static;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let ret = self.inner.inner_mut().poll_ready(cx);
+        let ret = self.inner.poll_ready(cx);
         if let Poll::Ready(Err(_)) = &ret {
             self.monitor.on_err("<poll_ready>".to_string());
         }
@@ -231,13 +283,12 @@ where
         let endpoint = format!("{:?}", uri.host());
         let monitor = self.monitor.clone();
         self.inner
-            .inner_mut()
             .call(uri)
             .map(move |result: Result<_, _>| match result {
-                Ok(resp) => Ok(TokioIo::new(MonitoredConnection::new(
+                Ok(resp) => Ok(MonitoredConnection::new(
                     resp,
                     monitor.new_connection_monitor(endpoint),
-                ))),
+                )),
                 Err(e) => {
                     monitor.on_err(endpoint);
                     Err(e)
@@ -253,11 +304,10 @@ where
     Con:
         tonic::transport::server::Connected<ConnectInfo = tonic::transport::server::TcpConnectInfo>,
 {
-    type Item = Result<TokioIo<MonitoredConnection<Con, M::ConnectionMonitor>>, E>;
+    type Item = Result<MonitoredConnection<Con, M::ConnectionMonitor>, E>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let (inner, monitor) = MonitoredConnection::project_into(self);
-        let inner = unsafe { inner.map_unchecked_mut(|t| t.inner_mut()) };
         inner.poll_next(cx).map(|opt| {
             opt.map(|result| {
                 result.map(|conn| {
@@ -265,17 +315,14 @@ where
                     let endpoint = remote_addr
                         .map(|remote_addr| format!("{}", remote_addr.ip()))
                         .unwrap_or("unknown".to_string());
-                    TokioIo::new(MonitoredConnection::new(
-                        conn,
-                        monitor.new_connection_monitor(endpoint),
-                    ))
+                    MonitoredConnection::new(conn, monitor.new_connection_monitor(endpoint))
                 })
             })
         })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.inner().size_hint()
+        self.inner.size_hint()
     }
 }
 
@@ -567,14 +614,10 @@ impl<L> tonic::transport::server::Router<L> {
         let incoming =
             MonitoredConnection::new(incoming, MonitorNewConnectionImpl { connection_type });
 
-        // async move {
-        //     self.serve_with_incoming_shutdown(incoming, signal)
-        //         .await
-        //         .unwrap()
-        // }
-
         async move {
-            todo!()
+            self.serve_with_incoming_shutdown(incoming, signal)
+                .await
+                .unwrap()
         }
     }
 }
