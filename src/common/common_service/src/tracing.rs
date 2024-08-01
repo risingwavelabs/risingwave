@@ -72,7 +72,7 @@ where
 
         async move {
             let span =
-                if let Some(tracing_context) = TracingContext::from_http_1_headers(req.headers()) {
+                if let Some(tracing_context) = TracingContext::from_http_headers(req.headers()) {
                     let span = tracing::info_span!(
                         "grpc_serve",
                         "otel.name" = req.uri().path(),

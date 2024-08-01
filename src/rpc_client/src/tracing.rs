@@ -46,7 +46,7 @@ impl Service<http::Request<BoxBody>> for TracingInjectChannel {
         let mut inner = std::mem::replace(&mut self.inner, clone);
 
         async move {
-            let headers = TracingContext::from_current_span().to_http_1_headers();
+            let headers = TracingContext::from_current_span().to_http_headers();
             req.headers_mut().extend(headers);
             inner.call(req).await
         }
