@@ -186,6 +186,7 @@ aho-corasick v1.1.1
 │   │   │       │           ├── console-api v0.8.0
 │   │   │       │           │   └── console-subscriber v0.4.0
 │   │   │       │           │       └── risingwave_rt v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/runtime)
+│   │   │       │           │           ├── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
 │   │   │       │           │           ├── risingwave_cmd v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/cmd) (*)
 │   │   │       │           │           ├── risingwave_cmd_all v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/cmd_all)
 │   │   │       │           │           ├── risingwave_compaction_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/compaction_test)
@@ -200,6 +201,7 @@ aho-corasick v1.1.1
 │   │   │       │           ├── google-cloud-gax v0.19.0
 │   │   │       │           │   ├── google-cloud-bigquery v0.12.0 (*)
 │   │   │       │           │   ├── google-cloud-pubsub v0.28.1
+│   │   │       │           │   │   ├── risedev v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/risedevtool)
 │   │   │       │           │   │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
 │   │   │       │           │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
 │   │   │       │           ├── google-cloud-googleapis v0.15.0
@@ -250,7 +252,8 @@ aho-corasick v1.1.1
 │   │   │       │               │       │   └── risingwave_jni_core v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/jni_core)
 │   │   │       │               │       │       ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
 │   │   │       │               │       │       ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-│   │   │       │               │       │       └── risingwave_java_binding v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/java_binding)
+│   │   │       │               │       │       ├── risingwave_java_binding v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/java_binding)
+│   │   │       │               │       │       └── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
 │   │   │       │               │       ├── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
 │   │   │       │               │       ├── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
 │   │   │       │               │       ├── risingwave_hummock_sdk v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_sdk)
@@ -376,15 +379,11 @@ aho-corasick v1.1.1
 │   │   │           ├── rustls v0.22.4
 │   │   │           │   ├── hyper-rustls v0.26.0
 │   │   │           │   │   └── reqwest v0.12.4
-│   │   │           │   │       ├── google-cloud-auth v0.15.0
-│   │   │           │   │       │   └── google-cloud-pubsub v0.25.0
-│   │   │           │   │       │       └── risedev v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/risedevtool)
 │   │   │           │   │       ├── google-cloud-auth v0.16.0
 │   │   │           │   │       │   ├── google-cloud-bigquery v0.12.0 (*)
 │   │   │           │   │       │   └── google-cloud-pubsub v0.28.1 (*)
 │   │   │           │   │       ├── google-cloud-bigquery v0.12.0 (*)
 │   │   │           │   │       ├── google-cloud-metadata v0.5.0
-│   │   │           │   │       │   ├── google-cloud-auth v0.15.0 (*)
 │   │   │           │   │       │   └── google-cloud-auth v0.16.0 (*)
 │   │   │           │   │       ├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
 │   │   │           │   │       ├── iceberg-catalog-rest v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
@@ -582,820 +581,27 @@ aho-corasick v1.1.1
 └── regex-automata v0.4.5
     └── regex v1.10.3 (*)
 
-allocator-api2 v0.2.16
-└── hashbrown v0.14.3
-    └── indexmap v2.2.6
-        ├── toml_edit v0.19.15
-        │   └── proc-macro-crate v1.3.1
-        │       └── num_enum_derive v0.5.11 (proc-macro)
-        │           └── num_enum v0.5.11
-        │               └── rdkafka-sys v4.7.0+2.3.0
-        │                   └── madsim-rdkafka v0.4.2+0.34.0
-        │                       ├── risedev v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/risedevtool)
-        │                       ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-        │                       └── risingwave_simulation v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/simulation)
-        └── toml_edit v0.21.1
-            └── proc-macro-crate v3.1.0
-                └── mysql-common-derive v0.31.0 (proc-macro)
-                    └── mysql_common v0.32.1 (*)
-
-allocator-api2 v0.2.16
-├── foyer-storage v0.9.1
-│   └── foyer v0.10.1
-│       ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
-│       ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-│       ├── risingwave_compaction_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/compaction_test)
-│       ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
-│       ├── risingwave_ctl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/ctl) (*)
-│       ├── risingwave_hummock_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_test) (*)
-│       ├── risingwave_hummock_trace v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_trace) (*)
-│       ├── risingwave_java_binding v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/java_binding)
-│       ├── risingwave_jni_core v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/jni_core) (*)
-│       ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
-│       └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
-└── hashbrown v0.14.3
-    ├── arrow-array v48.0.1 (*)
-    ├── arrow-array v50.0.0
-    │   ├── arrow v50.0.0 (*)
-    │   ├── arrow-arith v50.0.0
-    │   │   └── arrow v50.0.0 (*)
-    │   ├── arrow-cast v50.0.0
-    │   │   ├── arrow v50.0.0 (*)
-    │   │   ├── arrow-ipc v50.0.0
-    │   │   │   └── arrow v50.0.0 (*)
-    │   │   └── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-    │   ├── arrow-ipc v50.0.0 (*)
-    │   ├── arrow-ord v50.0.0
-    │   │   └── arrow v50.0.0 (*)
-    │   ├── arrow-row v50.0.0
-    │   │   ├── arrow v50.0.0 (*)
-    │   │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   ├── arrow-select v50.0.0
-    │   │   ├── arrow v50.0.0 (*)
-    │   │   ├── arrow-cast v50.0.0 (*)
-    │   │   ├── arrow-ord v50.0.0 (*)
-    │   │   ├── arrow-string v50.0.0 (*)
-    │   │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   ├── arrow-string v50.0.0 (*)
-    │   ├── arrow-udf-js v0.3.1
-    │   │   └── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
-    │   ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
-    │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-    │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   ├── risingwave_expr v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/core) (*)
-    │   └── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
-    ├── arrow-array v52.0.0
-    │   ├── arrow-arith v52.0.0
-    │   │   ├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
-    │   │   └── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
-    │   ├── arrow-cast v52.0.0
-    │   │   ├── arrow-ipc v52.0.0
-    │   │   │   └── parquet v52.0.0
-    │   │   │       ├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
-    │   │   │       ├── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
-    │   │   │       ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
-    │   │   │       └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   ├── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
-    │   │   ├── parquet v52.0.0 (*)
-    │   │   └── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-    │   ├── arrow-ipc v52.0.0 (*)
-    │   ├── arrow-ord v52.0.0
-    │   │   ├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
-    │   │   └── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
-    │   ├── arrow-row v52.0.0
-    │   │   └── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
-    │   ├── arrow-select v52.0.0
-    │   │   ├── arrow-cast v52.0.0 (*)
-    │   │   ├── arrow-ord v52.0.0 (*)
-    │   │   ├── arrow-string v52.0.0 (*)
-    │   │   ├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
-    │   │   ├── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
-    │   │   └── parquet v52.0.0 (*)
-    │   ├── arrow-string v52.0.0 (*)
-    │   ├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
-    │   ├── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
-    │   ├── parquet v52.0.0 (*)
-    │   ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
-    │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-    │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    ├── arrow-row v48.0.1 (*)
-    ├── arrow-row v50.0.0 (*)
-    ├── arrow-row v52.0.0 (*)
-    ├── dashmap v5.5.3
-    │   ├── datafusion v33.0.0 (*)
-    │   ├── datafusion-execution v33.0.0 (*)
-    │   ├── deltalake-core v0.17.0 (https://github.com/risingwavelabs/delta-rs?rev=5c2dccd4640490202ffe98adbd13b09cef8e007b#5c2dccd4) (*)
-    │   ├── governor v0.6.0
-    │   │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-    │   │   └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
-    │   └── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
-    ├── datafusion v33.0.0 (*)
-    ├── datafusion-execution v33.0.0 (*)
-    ├── datafusion-optimizer v33.0.0 (*)
-    ├── datafusion-physical-expr v33.0.0 (*)
-    ├── datafusion-physical-plan v33.0.0 (*)
-    ├── foyer-common v0.8.1
-    │   ├── foyer v0.10.1 (*)
-    │   ├── foyer-intrusive v0.8.1
-    │   │   └── foyer-memory v0.6.1
-    │   │       ├── foyer v0.10.1 (*)
-    │   │       └── foyer-storage v0.9.1 (*)
-    │   ├── foyer-memory v0.6.1 (*)
-    │   └── foyer-storage v0.9.1 (*)
-    ├── foyer-memory v0.6.1 (*)
-    ├── hashlink v0.8.4
-    │   └── sqlx-core v0.7.1
-    │       ├── sqlx v0.7.1
-    │       │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │       │   ├── sea-orm v0.12.14
-    │       │   │   ├── risingwave_ctl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/ctl) (*)
-    │       │   │   ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
-    │       │   │   ├── risingwave_meta_model_v2 v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/model_v2) (*)
-    │       │   │   ├── risingwave_meta_node v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/node) (*)
-    │       │   │   ├── risingwave_meta_service v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/service) (*)
-    │       │   │   └── sea-orm-migration v0.12.14 (*)
-    │       │   ├── sea-query-binder v0.5.0
-    │       │   │   ├── sea-orm v0.12.14 (*)
-    │       │   │   └── sea-schema v0.14.2
-    │       │   │       ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │       │   │       ├── sea-orm-cli v0.12.14 (*)
-    │       │   │       └── sea-orm-migration v0.12.14 (*)
-    │       │   └── sea-schema v0.14.2 (*)
-    │       ├── sqlx-macros v0.7.1 (proc-macro)
-    │       │   └── sqlx v0.7.1 (*)
-    │       ├── sqlx-macros-core v0.7.1
-    │       │   └── sqlx-macros v0.7.1 (proc-macro) (*)
-    │       ├── sqlx-mysql v0.7.1
-    │       │   └── sqlx v0.7.1 (*)
-    │       ├── sqlx-mysql v0.7.1
-    │       │   └── sqlx-macros-core v0.7.1 (*)
-    │       ├── sqlx-postgres v0.7.1
-    │       │   └── sqlx v0.7.1 (*)
-    │       ├── sqlx-postgres v0.7.1
-    │       │   └── sqlx-macros-core v0.7.1 (*)
-    │       ├── sqlx-sqlite v0.7.1
-    │       │   └── sqlx v0.7.1 (*)
-    │       └── sqlx-sqlite v0.7.1
-    │           └── sqlx-macros-core v0.7.1 (*)
-    ├── indexmap v2.2.6
-    │   ├── arrow-json v48.0.1 (*)
-    │   ├── bson v2.11.0 (https://github.com/risingwavelabs/bson-rust?rev=e5175ec#e5175ecf)
-    │   │   └── mongodb v2.8.2
-    │   │       └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   ├── datafusion v33.0.0 (*)
-    │   ├── datafusion-physical-expr v33.0.0 (*)
-    │   ├── datafusion-physical-plan v33.0.0 (*)
-    │   ├── h2 v0.3.26
-    │   │   ├── aws-smithy-runtime v1.1.3
-    │   │   │   ├── aws-config v1.0.1 (*)
-    │   │   │   ├── aws-sdk-dynamodb v1.3.0 (*)
-    │   │   │   ├── aws-sdk-glue v1.4.0 (*)
-    │   │   │   ├── aws-sdk-kinesis v1.3.0 (*)
-    │   │   │   ├── aws-sdk-s3 v1.1.0 (*)
-    │   │   │   ├── aws-sdk-sts v1.3.1 (*)
-    │   │   │   ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
-    │   │   │   └── rw-aws-sdk-ec2 v1.2.0 (*)
-    │   │   ├── hyper v0.14.27
-    │   │   │   ├── aws-config v1.0.1 (*)
-    │   │   │   ├── aws-smithy-runtime v1.1.3 (*)
-    │   │   │   ├── aws-smithy-types v1.2.0
-    │   │   │   │   ├── aws-config v1.0.1 (*)
-    │   │   │   │   ├── aws-credential-types v1.2.0
-    │   │   │   │   │   ├── aws-config v1.0.1 (*)
-    │   │   │   │   │   ├── aws-msk-iam-sasl-signer v1.0.0 (*)
-    │   │   │   │   │   ├── aws-runtime v1.0.1
-    │   │   │   │   │   │   ├── aws-config v1.0.1 (*)
-    │   │   │   │   │   │   ├── aws-sdk-dynamodb v1.3.0 (*)
-    │   │   │   │   │   │   ├── aws-sdk-glue v1.4.0 (*)
-    │   │   │   │   │   │   ├── aws-sdk-kinesis v1.3.0 (*)
-    │   │   │   │   │   │   ├── aws-sdk-s3 v1.1.0 (*)
-    │   │   │   │   │   │   ├── aws-sdk-sts v1.3.1 (*)
-    │   │   │   │   │   │   └── rw-aws-sdk-ec2 v1.2.0 (*)
-    │   │   │   │   │   ├── aws-sdk-dynamodb v1.3.0 (*)
-    │   │   │   │   │   ├── aws-sdk-glue v1.4.0 (*)
-    │   │   │   │   │   ├── aws-sdk-kinesis v1.3.0 (*)
-    │   │   │   │   │   ├── aws-sdk-s3 v1.1.0 (*)
-    │   │   │   │   │   ├── aws-sdk-sts v1.3.1 (*)
-    │   │   │   │   │   ├── aws-sigv4 v1.1.1
-    │   │   │   │   │   │   ├── aws-msk-iam-sasl-signer v1.0.0 (*)
-    │   │   │   │   │   │   ├── aws-runtime v1.0.1 (*)
-    │   │   │   │   │   │   └── aws-sdk-s3 v1.1.0 (*)
-    │   │   │   │   │   ├── aws-types v1.3.0
-    │   │   │   │   │   │   ├── aws-config v1.0.1 (*)
-    │   │   │   │   │   │   ├── aws-http v0.60.0
-    │   │   │   │   │   │   │   ├── aws-config v1.0.1 (*)
-    │   │   │   │   │   │   │   ├── aws-runtime v1.0.1 (*)
-    │   │   │   │   │   │   │   ├── aws-sdk-dynamodb v1.3.0 (*)
-    │   │   │   │   │   │   │   ├── aws-sdk-glue v1.4.0 (*)
-    │   │   │   │   │   │   │   ├── aws-sdk-kinesis v1.3.0 (*)
-    │   │   │   │   │   │   │   ├── aws-sdk-s3 v1.1.0 (*)
-    │   │   │   │   │   │   │   ├── aws-sdk-sts v1.3.1 (*)
-    │   │   │   │   │   │   │   └── rw-aws-sdk-ec2 v1.2.0 (*)
-    │   │   │   │   │   │   ├── aws-msk-iam-sasl-signer v1.0.0 (*)
-    │   │   │   │   │   │   ├── aws-runtime v1.0.1 (*)
-    │   │   │   │   │   │   ├── aws-sdk-dynamodb v1.3.0 (*)
-    │   │   │   │   │   │   ├── aws-sdk-glue v1.4.0 (*)
-    │   │   │   │   │   │   ├── aws-sdk-kinesis v1.3.0 (*)
-    │   │   │   │   │   │   ├── aws-sdk-s3 v1.1.0 (*)
-    │   │   │   │   │   │   ├── aws-sdk-sts v1.3.1 (*)
-    │   │   │   │   │   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │   │   │   │   └── rw-aws-sdk-ec2 v1.2.0 (*)
-    │   │   │   │   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │   │   │   ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
-    │   │   │   │   │   └── rw-aws-sdk-ec2 v1.2.0 (*)
-    │   │   │   │   ├── aws-http v0.60.0 (*)
-    │   │   │   │   ├── aws-runtime v1.0.1 (*)
-    │   │   │   │   ├── aws-sdk-dynamodb v1.3.0 (*)
-    │   │   │   │   ├── aws-sdk-glue v1.4.0 (*)
-    │   │   │   │   ├── aws-sdk-kinesis v1.3.0 (*)
-    │   │   │   │   ├── aws-sdk-s3 v1.1.0 (*)
-    │   │   │   │   ├── aws-sdk-sts v1.3.1 (*)
-    │   │   │   │   ├── aws-sigv4 v1.1.1 (*)
-    │   │   │   │   ├── aws-smithy-checksums v0.60.0
-    │   │   │   │   │   └── aws-sdk-s3 v1.1.0 (*)
-    │   │   │   │   ├── aws-smithy-eventstream v0.60.3
-    │   │   │   │   │   ├── aws-runtime v1.0.1 (*)
-    │   │   │   │   │   ├── aws-sdk-s3 v1.1.0 (*)
-    │   │   │   │   │   ├── aws-sigv4 v1.1.1 (*)
-    │   │   │   │   │   └── aws-smithy-http v0.60.3
-    │   │   │   │   │       ├── aws-config v1.0.1 (*)
-    │   │   │   │   │       ├── aws-runtime v1.0.1 (*)
-    │   │   │   │   │       ├── aws-sdk-dynamodb v1.3.0 (*)
-    │   │   │   │   │       ├── aws-sdk-glue v1.4.0 (*)
-    │   │   │   │   │       ├── aws-sdk-kinesis v1.3.0 (*)
-    │   │   │   │   │       ├── aws-sdk-s3 v1.1.0 (*)
-    │   │   │   │   │       ├── aws-sdk-sts v1.3.1 (*)
-    │   │   │   │   │       ├── aws-sigv4 v1.1.1 (*)
-    │   │   │   │   │       ├── aws-smithy-checksums v0.60.0 (*)
-    │   │   │   │   │       ├── aws-smithy-runtime v1.1.3 (*)
-    │   │   │   │   │       ├── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
-    │   │   │   │   │       ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │   │   │       ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
-    │   │   │   │   │       └── rw-aws-sdk-ec2 v1.2.0 (*)
-    │   │   │   │   ├── aws-smithy-http v0.60.3 (*)
-    │   │   │   │   ├── aws-smithy-json v0.60.0
-    │   │   │   │   │   ├── aws-config v1.0.1 (*)
-    │   │   │   │   │   ├── aws-sdk-dynamodb v1.3.0 (*)
-    │   │   │   │   │   ├── aws-sdk-glue v1.4.0 (*)
-    │   │   │   │   │   ├── aws-sdk-kinesis v1.3.0 (*)
-    │   │   │   │   │   ├── aws-sdk-s3 v1.1.0 (*)
-    │   │   │   │   │   ├── aws-sdk-sts v1.3.1 (*)
-    │   │   │   │   │   └── rw-aws-sdk-ec2 v1.2.0 (*)
-    │   │   │   │   ├── aws-smithy-query v0.60.0
-    │   │   │   │   │   ├── aws-sdk-sts v1.3.1 (*)
-    │   │   │   │   │   └── rw-aws-sdk-ec2 v1.2.0 (*)
-    │   │   │   │   ├── aws-smithy-runtime v1.1.3 (*)
-    │   │   │   │   ├── aws-smithy-runtime-api v1.7.1
-    │   │   │   │   │   ├── aws-config v1.0.1 (*)
-    │   │   │   │   │   ├── aws-credential-types v1.2.0 (*)
-    │   │   │   │   │   ├── aws-http v0.60.0 (*)
-    │   │   │   │   │   ├── aws-runtime v1.0.1 (*)
-    │   │   │   │   │   ├── aws-sdk-dynamodb v1.3.0 (*)
-    │   │   │   │   │   ├── aws-sdk-glue v1.4.0 (*)
-    │   │   │   │   │   ├── aws-sdk-kinesis v1.3.0 (*)
-    │   │   │   │   │   ├── aws-sdk-s3 v1.1.0 (*)
-    │   │   │   │   │   ├── aws-sdk-sts v1.3.1 (*)
-    │   │   │   │   │   ├── aws-sigv4 v1.1.1 (*)
-    │   │   │   │   │   ├── aws-smithy-http v0.60.3 (*)
-    │   │   │   │   │   ├── aws-smithy-runtime v1.1.3 (*)
-    │   │   │   │   │   ├── aws-types v1.3.0 (*)
-    │   │   │   │   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │   │   │   ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
-    │   │   │   │   │   └── rw-aws-sdk-ec2 v1.2.0 (*)
-    │   │   │   │   ├── aws-smithy-types-convert v0.60.1
-    │   │   │   │   │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │   │   ├── aws-types v1.3.0 (*)
-    │   │   │   │   ├── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
-    │   │   │   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │   │   ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
-    │   │   │   │   └── rw-aws-sdk-ec2 v1.2.0 (*)
-    │   │   │   ├── axum v0.6.20
-    │   │   │   │   ├── tonic v0.10.2
-    │   │   │   │   │   ├── google-cloud-gax v0.17.0
-    │   │   │   │   │   │   └── google-cloud-pubsub v0.25.0 (*)
-    │   │   │   │   │   └── google-cloud-googleapis v0.13.0
-    │   │   │   │   │       └── google-cloud-pubsub v0.25.0 (*)
-    │   │   │   │   └── tonic v0.11.0 (*)
-    │   │   │   ├── clickhouse v0.11.5 (https://github.com/risingwavelabs/clickhouse.rs?rev=d38c8b6391af098b724c114e5a4746aedab6ab8e#d38c8b63)
-    │   │   │   │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │   ├── gcp-bigquery-client v0.18.0
-    │   │   │   │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │   ├── hyper-rustls v0.24.2
-    │   │   │   │   ├── aws-smithy-runtime v1.1.3 (*)
-    │   │   │   │   ├── gcp-bigquery-client v0.18.0 (*)
-    │   │   │   │   ├── reqwest v0.11.20
-    │   │   │   │   │   ├── gcp-bigquery-client v0.18.0 (*)
-    │   │   │   │   │   ├── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
-    │   │   │   │   │   ├── oauth2 v4.4.2
-    │   │   │   │   │   │   ├── openidconnect v3.4.0
-    │   │   │   │   │   │   │   └── pulsar v6.3.0 (*)
-    │   │   │   │   │   │   └── pulsar v6.3.0 (*)
-    │   │   │   │   │   ├── object_store v0.7.1
-    │   │   │   │   │   │   ├── datafusion v33.0.0 (*)
-    │   │   │   │   │   │   ├── datafusion-common v33.0.0 (*)
-    │   │   │   │   │   │   ├── datafusion-execution v33.0.0 (*)
-    │   │   │   │   │   │   ├── datafusion-proto v33.0.0 (*)
-    │   │   │   │   │   │   ├── deltalake-core v0.17.0 (https://github.com/risingwavelabs/delta-rs?rev=5c2dccd4640490202ffe98adbd13b09cef8e007b#5c2dccd4) (*)
-    │   │   │   │   │   │   └── parquet v48.0.1 (*)
-    │   │   │   │   │   └── prometheus-http-query v0.8.0
-    │   │   │   │   │       ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
-    │   │   │   │   │       └── risingwave_meta_node v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/node) (*)
-    │   │   │   │   ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
-    │   │   │   │   └── yup-oauth2 v8.3.0
-    │   │   │   │       ├── gcp-bigquery-client v0.18.0 (*)
-    │   │   │   │       └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │   ├── hyper-timeout v0.4.1
-    │   │   │   │   ├── tonic v0.10.2 (*)
-    │   │   │   │   └── tonic v0.11.0 (*)
-    │   │   │   ├── hyper-tls v0.5.0
-    │   │   │   │   ├── clickhouse v0.11.5 (https://github.com/risingwavelabs/clickhouse.rs?rev=d38c8b6391af098b724c114e5a4746aedab6ab8e#d38c8b63) (*)
-    │   │   │   │   ├── reqwest v0.11.20 (*)
-    │   │   │   │   └── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
-    │   │   │   ├── object_store v0.7.1 (*)
-    │   │   │   ├── reqwest v0.11.20 (*)
-    │   │   │   ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
-    │   │   │   ├── tonic v0.10.2 (*)
-    │   │   │   ├── tonic v0.11.0 (*)
-    │   │   │   └── yup-oauth2 v8.3.0 (*)
-    │   │   ├── reqwest v0.11.20 (*)
-    │   │   ├── tonic v0.10.2 (*)
-    │   │   └── tonic v0.11.0 (*)
-    │   ├── h2 v0.4.4
-    │   │   ├── hyper v1.4.1
-    │   │   │   ├── axum v0.7.4
-    │   │   │   │   ├── risingwave_common_service v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/common_service) (*)
-    │   │   │   │   ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
-    │   │   │   │   ├── risingwave_meta_dashboard v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/dashboard) (*)
-    │   │   │   │   └── tonic v0.12.1 (*)
-    │   │   │   ├── hyper-rustls v0.26.0 (*)
-    │   │   │   ├── hyper-timeout v0.5.1
-    │   │   │   │   └── tonic v0.12.1 (*)
-    │   │   │   ├── hyper-tls v0.6.0
-    │   │   │   │   └── reqwest v0.12.4 (*)
-    │   │   │   ├── hyper-util v0.1.6
-    │   │   │   │   ├── axum v0.7.4 (*)
-    │   │   │   │   ├── console-subscriber v0.4.0 (*)
-    │   │   │   │   ├── hyper-rustls v0.26.0 (*)
-    │   │   │   │   ├── hyper-timeout v0.5.1 (*)
-    │   │   │   │   ├── hyper-tls v0.6.0 (*)
-    │   │   │   │   ├── reqwest v0.12.4 (*)
-    │   │   │   │   ├── risingwave_common_metrics v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/metrics) (*)
-    │   │   │   │   └── tonic v0.12.1 (*)
-    │   │   │   ├── reqwest v0.12.4 (*)
-    │   │   │   ├── risingwave_common_metrics v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/metrics) (*)
-    │   │   │   ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
-    │   │   │   ├── risingwave_rpc_client v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/rpc_client) (*)
-    │   │   │   └── tonic v0.12.1 (*)
-    │   │   ├── reqwest v0.12.4 (*)
-    │   │   └── tonic v0.12.1 (*)
-    │   ├── inferno v0.11.16
-    │   │   └── pprof v0.13.0
-    │   │       ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
-    │   │       └── risingwave_rt v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/runtime) (*)
-    │   ├── petgraph v0.6.4
-    │   │   ├── crepe v0.1.8 (proc-macro)
-    │   │   │   └── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
-    │   │   ├── datafusion-physical-expr v33.0.0 (*)
-    │   │   ├── parking_lot_core v0.9.8
-    │   │   │   ├── dashmap v5.5.3 (*)
-    │   │   │   └── parking_lot v0.12.1
-    │   │   │       ├── await-tree v0.2.1
-    │   │   │       │   ├── risingwave_compactor v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/compactor) (*)
-    │   │   │       │   ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
-    │   │   │       │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │       │   ├── risingwave_expr v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/core) (*)
-    │   │   │       │   ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
-    │   │   │       │   ├── risingwave_rt v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/runtime) (*)
-    │   │   │       │   ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
-    │   │   │       │   └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
-    │   │   │       ├── crossterm v0.25.0
-    │   │   │       │   └── inquire v0.7.0
-    │   │   │       │       └── risingwave_ctl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/ctl) (*)
-    │   │   │       ├── crossterm v0.27.0
-    │   │   │       │   └── comfy-table v7.1.0
-    │   │   │       │       ├── arrow-cast v48.0.1 (*)
-    │   │   │       │       ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-    │   │   │       │       ├── risingwave_ctl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/ctl) (*)
-    │   │   │       │       └── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
-    │   │   │       ├── datafusion v33.0.0 (*)
-    │   │   │       ├── datafusion-execution v33.0.0 (*)
-    │   │   │       ├── datafusion-physical-plan v33.0.0 (*)
-    │   │   │       ├── deltalake-core v0.17.0 (https://github.com/risingwavelabs/delta-rs?rev=5c2dccd4640490202ffe98adbd13b09cef8e007b#5c2dccd4) (*)
-    │   │   │       ├── foyer-common v0.8.1 (*)
-    │   │   │       ├── foyer-memory v0.6.1 (*)
-    │   │   │       ├── foyer-storage v0.9.1 (*)
-    │   │   │       ├── futures-intrusive v0.5.0
-    │   │   │       │   ├── sqlx-core v0.7.1 (*)
-    │   │   │       │   ├── sqlx-sqlite v0.7.1 (*)
-    │   │   │       │   └── sqlx-sqlite v0.7.1 (*)
-    │   │   │       ├── governor v0.6.0 (*)
-    │   │   │       ├── minitrace v0.6.7
-    │   │   │       │   ├── foyer v0.10.1 (*)
-    │   │   │       │   ├── foyer-common v0.8.1 (*)
-    │   │   │       │   ├── foyer-memory v0.6.1 (*)
-    │   │   │       │   ├── foyer-storage v0.9.1 (*)
-    │   │   │       │   ├── minitrace-opentelemetry v0.6.7
-    │   │   │       │   │   └── risingwave_rt v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/runtime) (*)
-    │   │   │       │   └── risingwave_rt v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/runtime) (*)
-    │   │   │       ├── moka v0.12.0
-    │   │   │       │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │       │   ├── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
-    │   │   │       │   ├── risingwave_rpc_client v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/rpc_client) (*)
-    │   │   │       │   └── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
-    │   │   │       ├── object_store v0.7.1 (*)
-    │   │   │       ├── pgwire v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/pgwire) (*)
-    │   │   │       ├── pprof v0.13.0 (*)
-    │   │   │       ├── prometheus v0.13.3
-    │   │   │       │   ├── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
-    │   │   │       │   ├── metrics-prometheus v0.7.0
-    │   │   │       │   │   └── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
-    │   │   │       │   ├── opendal v0.47.2 (*)
-    │   │   │       │   ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
-    │   │   │       │   ├── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
-    │   │   │       │   ├── risingwave_cmd v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/cmd) (*)
-    │   │   │       │   ├── risingwave_cmd_all v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/cmd_all)
-    │   │   │       │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-    │   │   │       │   ├── risingwave_common_metrics v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/metrics) (*)
-    │   │   │       │   ├── risingwave_common_service v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/common_service) (*)
-    │   │   │       │   ├── risingwave_compaction_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/compaction_test)
-    │   │   │       │   ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
-    │   │   │       │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │       │   ├── risingwave_expr v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/core) (*)
-    │   │   │       │   ├── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
-    │   │   │       │   ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
-    │   │   │       │   ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
-    │   │   │       │   ├── risingwave_simulation v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/simulation)
-    │   │   │       │   ├── risingwave_state_cleaning_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/state_cleaning_test)
-    │   │   │       │   ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
-    │   │   │       │   └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
-    │   │   │       ├── risingwave_backup v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/backup) (*)
-    │   │   │       ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
-    │   │   │       ├── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
-    │   │   │       ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-    │   │   │       ├── risingwave_common_heap_profiling v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/heap_profiling) (*)
-    │   │   │       ├── risingwave_common_metrics v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/metrics) (*)
-    │   │   │       ├── risingwave_common_secret v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/secret) (*)
-    │   │   │       ├── risingwave_compactor v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/compactor) (*)
-    │   │   │       ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │       ├── risingwave_dml v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/dml) (*)
-    │   │   │       ├── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
-    │   │   │       ├── risingwave_hummock_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_test) (*)
-    │   │   │       ├── risingwave_hummock_trace v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_trace) (*)
-    │   │   │       ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
-    │   │   │       ├── risingwave_rt v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/runtime) (*)
-    │   │   │       ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
-    │   │   │       ├── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
-    │   │   │       ├── serial_test v3.1.0
-    │   │   │       │   [dev-dependencies]
-    │   │   │       │   └── risingwave_hummock_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_test) (*)
-    │   │   │       ├── tokio v1.39.2
-    │   │   │       │   ├── async-compression v0.4.5
-    │   │   │       │   │   ├── datafusion v33.0.0 (*)
-    │   │   │       │   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │       │   │   └── tower-http v0.5.2
-    │   │   │       │   │       ├── risingwave_common_service v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/common_service) (*)
-    │   │   │       │   │       └── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
-    │   │   │       │   ├── async-global-executor v2.3.1
-    │   │   │       │   │   └── async-std v1.12.0
-    │   │   │       │   │       ├── redis v0.25.1
-    │   │   │       │   │       │   ├── risedev v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/risedevtool)
-    │   │   │       │   │       │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │       │   │       └── risingwave_meta_model_migration v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/model_v2/migration) (*)
-    │   │   │       │   ├── async-nats v0.35.0 (*)
-    │   │   │       │   ├── await-tree v0.2.1 (*)
-    │   │   │       │   ├── aws-config v1.0.1 (*)
-    │   │   │       │   ├── aws-smithy-async v1.2.1
-    │   │   │       │   │   ├── aws-config v1.0.1 (*)
-    │   │   │       │   │   ├── aws-credential-types v1.2.0 (*)
-    │   │   │       │   │   ├── aws-runtime v1.0.1 (*)
-    │   │   │       │   │   ├── aws-sdk-dynamodb v1.3.0 (*)
-    │   │   │       │   │   ├── aws-sdk-glue v1.4.0 (*)
-    │   │   │       │   │   ├── aws-sdk-kinesis v1.3.0 (*)
-    │   │   │       │   │   ├── aws-sdk-s3 v1.1.0 (*)
-    │   │   │       │   │   ├── aws-sdk-sts v1.3.1 (*)
-    │   │   │       │   │   ├── aws-smithy-runtime v1.1.3 (*)
-    │   │   │       │   │   ├── aws-smithy-runtime-api v1.7.1 (*)
-    │   │   │       │   │   ├── aws-types v1.3.0 (*)
-    │   │   │       │   │   └── rw-aws-sdk-ec2 v1.2.0 (*)
-    │   │   │       │   ├── aws-smithy-runtime v1.1.3 (*)
-    │   │   │       │   ├── aws-smithy-runtime-api v1.7.1 (*)
-    │   │   │       │   ├── aws-smithy-types v1.2.0 (*)
-    │   │   │       │   ├── axum v0.7.4 (*)
-    │   │   │       │   ├── backon v0.4.4
-    │   │   │       │   │   ├── google-cloud-bigquery v0.12.0 (*)
-    │   │   │       │   │   └── opendal v0.47.2 (*)
-    │   │   │       │   ├── clickhouse v0.11.5 (https://github.com/risingwavelabs/clickhouse.rs?rev=d38c8b6391af098b724c114e5a4746aedab6ab8e#d38c8b63) (*)
-    │   │   │       │   ├── combine v4.6.6
-    │   │   │       │   │   ├── jni v0.21.1
-    │   │   │       │   │   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │       │   │   │   ├── risingwave_java_binding v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/java_binding)
-    │   │   │       │   │   │   └── risingwave_jni_core v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/jni_core) (*)
-    │   │   │       │   │   └── redis v0.25.1 (*)
-    │   │   │       │   ├── console-subscriber v0.4.0 (*)
-    │   │   │       │   ├── criterion v0.5.1 (*)
-    │   │   │       │   ├── datafusion v33.0.0 (*)
-    │   │   │       │   ├── datafusion-physical-plan v33.0.0 (*)
-    │   │   │       │   ├── deltalake-core v0.17.0 (https://github.com/risingwavelabs/delta-rs?rev=5c2dccd4640490202ffe98adbd13b09cef8e007b#5c2dccd4) (*)
-    │   │   │       │   ├── etcd-client v0.14.0 (*)
-    │   │   │       │   ├── gcp-bigquery-client v0.18.0 (*)
-    │   │   │       │   ├── ginepro v0.7.2 (*)
-    │   │   │       │   ├── google-cloud-auth v0.15.0 (*)
-    │   │   │       │   ├── google-cloud-auth v0.16.0 (*)
-    │   │   │       │   ├── google-cloud-bigquery v0.12.0 (*)
-    │   │   │       │   ├── google-cloud-gax v0.17.0 (*)
-    │   │   │       │   ├── google-cloud-gax v0.19.0 (*)
-    │   │   │       │   ├── google-cloud-metadata v0.5.0 (*)
-    │   │   │       │   ├── google-cloud-pubsub v0.25.0 (*)
-    │   │   │       │   ├── google-cloud-pubsub v0.28.1 (*)
-    │   │   │       │   ├── h2 v0.3.26 (*)
-    │   │   │       │   ├── h2 v0.4.4 (*)
-    │   │   │       │   ├── hyper v0.14.27 (*)
-    │   │   │       │   ├── hyper v1.4.1 (*)
-    │   │   │       │   ├── hyper-rustls v0.24.2 (*)
-    │   │   │       │   ├── hyper-rustls v0.26.0 (*)
-    │   │   │       │   ├── hyper-timeout v0.4.1 (*)
-    │   │   │       │   ├── hyper-timeout v0.5.1 (*)
-    │   │   │       │   ├── hyper-tls v0.5.0 (*)
-    │   │   │       │   ├── hyper-tls v0.6.0 (*)
-    │   │   │       │   ├── hyper-util v0.1.6 (*)
-    │   │   │       │   ├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
-    │   │   │       │   ├── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
-    │   │   │       │   ├── madsim v0.2.30 (*)
-    │   │   │       │   ├── madsim-rdkafka v0.4.2+0.34.0 (*)
-    │   │   │       │   ├── madsim-tokio v0.2.28
-    │   │   │       │   │   ├── foyer v0.10.1 (*)
-    │   │   │       │   │   ├── foyer-common v0.8.1 (*)
-    │   │   │       │   │   ├── foyer-memory v0.6.1 (*)
-    │   │   │       │   │   ├── foyer-storage v0.9.1 (*)
-    │   │   │       │   │   ├── pgwire v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/pgwire) (*)
-    │   │   │       │   │   ├── risedev v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/risedevtool)
-    │   │   │       │   │   ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
-    │   │   │       │   │   ├── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
-    │   │   │       │   │   ├── risingwave_cmd v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/cmd) (*)
-    │   │   │       │   │   ├── risingwave_cmd_all v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/cmd_all)
-    │   │   │       │   │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-    │   │   │       │   │   ├── risingwave_common_heap_profiling v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/heap_profiling) (*)
-    │   │   │       │   │   ├── risingwave_common_metrics v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/metrics) (*)
-    │   │   │       │   │   ├── risingwave_common_service v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/common_service) (*)
-    │   │   │       │   │   ├── risingwave_compaction_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/compaction_test)
-    │   │   │       │   │   ├── risingwave_compactor v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/compactor) (*)
-    │   │   │       │   │   ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
-    │   │   │       │   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │       │   │   ├── risingwave_ctl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/ctl) (*)
-    │   │   │       │   │   ├── risingwave_dml v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/dml) (*)
-    │   │   │       │   │   ├── risingwave_e2e_extended_mode_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/e2e_extended_mode) (*)
-    │   │   │       │   │   ├── risingwave_expr v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/core) (*)
-    │   │   │       │   │   ├── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
-    │   │   │       │   │   ├── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
-    │   │   │       │   │   ├── risingwave_hummock_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_test) (*)
-    │   │   │       │   │   ├── risingwave_hummock_trace v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_trace) (*)
-    │   │   │       │   │   ├── risingwave_java_binding v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/java_binding)
-    │   │   │       │   │   ├── risingwave_jni_core v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/jni_core) (*)
-    │   │   │       │   │   ├── risingwave_mem_table_spill_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream/spill_test)
-    │   │   │       │   │   ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
-    │   │   │       │   │   ├── risingwave_meta_node v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/node) (*)
-    │   │   │       │   │   ├── risingwave_meta_service v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/service) (*)
-    │   │   │       │   │   ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
-    │   │   │       │   │   ├── risingwave_planner_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend/planner_test)
-    │   │   │       │   │   ├── risingwave_regress_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/regress)
-    │   │   │       │   │   ├── risingwave_rpc_client v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/rpc_client) (*)
-    │   │   │       │   │   ├── risingwave_rt v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/runtime) (*)
-    │   │   │       │   │   ├── risingwave_simulation v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/simulation)
-    │   │   │       │   │   ├── risingwave_sqlparser v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/sqlparser) (*)
-    │   │   │       │   │   ├── risingwave_sqlsmith v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/sqlsmith) (*)
-    │   │   │       │   │   ├── risingwave_state_cleaning_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/state_cleaning_test)
-    │   │   │       │   │   ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
-    │   │   │       │   │   ├── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
-    │   │   │       │   │   ├── sync-point v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/sync-point)
-    │   │   │       │   │   │   ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
-    │   │   │       │   │   │   ├── risingwave_meta_service v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/service) (*)
-    │   │   │       │   │   │   ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
-    │   │   │       │   │   │   └── risingwave_test_runner v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/test_runner)
-    │   │   │       │   │   │       [dev-dependencies]
-    │   │   │       │   │   │       ├── risingwave_hummock_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_test) (*)
-    │   │   │       │   │   │       ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
-    │   │   │       │   │   │       └── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
-    │   │   │       │   │   │   [dev-dependencies]
-    │   │   │       │   │   │   └── risingwave_hummock_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_test) (*)
-    │   │   │       │   │   ├── tokio-postgres v0.7.10 (https://github.com/madsim-rs/rust-postgres.git?rev=ac00d88#ac00d886)
-    │   │   │       │   │   │   ├── postgres-openssl v0.5.0
-    │   │   │       │   │   │   │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │       │   │   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │       │   │   │   ├── risingwave_e2e_extended_mode_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/e2e_extended_mode) (*)
-    │   │   │       │   │   │   ├── risingwave_simulation v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/simulation)
-    │   │   │       │   │   │   ├── risingwave_sqlsmith v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/sqlsmith) (*)
-    │   │   │       │   │   │   └── risingwave_state_cleaning_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/state_cleaning_test)
-    │   │   │       │   │   │   [dev-dependencies]
-    │   │   │       │   │   │   └── pgwire v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/pgwire) (*)
-    │   │   │       │   │   └── tokio-retry v0.3.0 (https://github.com/madsim-rs/rust-tokio-retry.git?rev=95e2fd3#95e2fd3c)
-    │   │   │       │   │       ├── google-cloud-gax v0.17.0 (*)
-    │   │   │       │   │       ├── google-cloud-gax v0.19.0 (*)
-    │   │   │       │   │       ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-    │   │   │       │   │       ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │       │   │       ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
-    │   │   │       │   │       ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
-    │   │   │       │   │       ├── risingwave_rpc_client v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/rpc_client) (*)
-    │   │   │       │   │       ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
-    │   │   │       │   │       └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
-    │   │   │       │   │   [dev-dependencies]
-    │   │   │       │   │   └── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
-    │   │   │       │   ├── mongodb v2.8.2 (*)
-    │   │   │       │   ├── mysql_async v0.34.1 (*)
-    │   │   │       │   ├── object_store v0.7.1 (*)
-    │   │   │       │   ├── opendal v0.47.2 (*)
-    │   │   │       │   ├── opentelemetry-otlp v0.16.0 (*)
-    │   │   │       │   ├── opentelemetry_sdk v0.23.0
-    │   │   │       │   │   ├── minitrace-opentelemetry v0.6.7 (*)
-    │   │   │       │   │   ├── opentelemetry-otlp v0.16.0 (*)
-    │   │   │       │   │   ├── opentelemetry-proto v0.6.0 (*)
-    │   │   │       │   │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-    │   │   │       │   │   ├── risingwave_rt v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/runtime) (*)
-    │   │   │       │   │   └── tracing-opentelemetry v0.24.0 (*)
-    │   │   │       │   ├── parquet v48.0.1 (*)
-    │   │   │       │   ├── parquet v52.0.0 (*)
-    │   │   │       │   ├── postgres-openssl v0.5.0 (*)
-    │   │   │       │   ├── pulsar v6.3.0 (*)
-    │   │   │       │   ├── redis v0.25.1 (*)
-    │   │   │       │   ├── reqwest v0.11.20 (*)
-    │   │   │       │   ├── reqwest v0.12.4 (*)
-    │   │   │       │   ├── rumqttc v0.24.0 (*)
-    │   │   │       │   ├── sqlx-core v0.7.1 (*)
-    │   │   │       │   ├── tokio-io-timeout v1.2.0
-    │   │   │       │   │   └── hyper-timeout v0.4.1 (*)
-    │   │   │       │   ├── tokio-metrics v0.3.1
-    │   │   │       │   │   ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
-    │   │   │       │   │   └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
-    │   │   │       │   ├── tokio-native-tls v0.3.1
-    │   │   │       │   │   ├── hyper-tls v0.5.0 (*)
-    │   │   │       │   │   ├── hyper-tls v0.6.0 (*)
-    │   │   │       │   │   ├── mysql_async v0.34.1 (*)
-    │   │   │       │   │   ├── pulsar v6.3.0 (*)
-    │   │   │       │   │   ├── reqwest v0.11.20 (*)
-    │   │   │       │   │   └── reqwest v0.12.4 (*)
-    │   │   │       │   ├── tokio-openssl v0.6.3
-    │   │   │       │   │   ├── pgwire v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/pgwire) (*)
-    │   │   │       │   │   └── postgres-openssl v0.5.0 (*)
-    │   │   │       │   ├── tokio-rustls v0.23.4
-    │   │   │       │   │   └── tiberius v0.12.2
-    │   │   │       │   │       └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │       │   ├── tokio-rustls v0.24.1
-    │   │   │       │   │   ├── hyper-rustls v0.24.2 (*)
-    │   │   │       │   │   ├── mongodb v2.8.2 (*)
-    │   │   │       │   │   ├── reqwest v0.11.20 (*)
-    │   │   │       │   │   └── tonic v0.10.2 (*)
-    │   │   │       │   ├── tokio-rustls v0.25.0 (*)
-    │   │   │       │   ├── tokio-rustls v0.26.0 (*)
-    │   │   │       │   ├── tokio-stream v0.1.15
-    │   │   │       │   │   ├── console-subscriber v0.4.0 (*)
-    │   │   │       │   │   ├── etcd-client v0.14.0 (*)
-    │   │   │       │   │   ├── gcp-bigquery-client v0.18.0 (*)
-    │   │   │       │   │   ├── opentelemetry_sdk v0.23.0 (*)
-    │   │   │       │   │   ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
-    │   │   │       │   │   ├── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
-    │   │   │       │   │   ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
-    │   │   │       │   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │       │   │   ├── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
-    │   │   │       │   │   ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
-    │   │   │       │   │   ├── risingwave_meta_service v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/service) (*)
-    │   │   │       │   │   ├── risingwave_rpc_client v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/rpc_client) (*)
-    │   │   │       │   │   ├── risingwave_simulation v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/simulation)
-    │   │   │       │   │   ├── risingwave_state_cleaning_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/state_cleaning_test)
-    │   │   │       │   │   ├── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
-    │   │   │       │   │   ├── sqlx-core v0.7.1 (*)
-    │   │   │       │   │   ├── tokio-metrics v0.3.1 (*)
-    │   │   │       │   │   ├── tonic v0.10.2 (*)
-    │   │   │       │   │   ├── tonic v0.11.0 (*)
-    │   │   │       │   │   └── tonic v0.12.1 (*)
-    │   │   │       │   ├── tokio-util v0.7.9
-    │   │   │       │   │   ├── aws-smithy-types v1.2.0 (*)
-    │   │   │       │   │   ├── combine v4.6.6 (*)
-    │   │   │       │   │   ├── datafusion v33.0.0 (*)
-    │   │   │       │   │   ├── google-cloud-pubsub v0.25.0 (*)
-    │   │   │       │   │   ├── google-cloud-pubsub v0.28.1 (*)
-    │   │   │       │   │   ├── h2 v0.3.26 (*)
-    │   │   │       │   │   ├── h2 v0.4.4 (*)
-    │   │   │       │   │   ├── madsim v0.2.30 (*)
-    │   │   │       │   │   ├── mongodb v2.8.2 (*)
-    │   │   │       │   │   ├── mysql_async v0.34.1 (*)
-    │   │   │       │   │   ├── pulsar v6.3.0 (*)
-    │   │   │       │   │   ├── redis v0.25.1 (*)
-    │   │   │       │   │   ├── reqwest v0.11.20 (*)
-    │   │   │       │   │   ├── reqwest v0.12.4 (*)
-    │   │   │       │   │   ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
-    │   │   │       │   │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-    │   │   │       │   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │       │   │   ├── tiberius v0.12.2 (*)
-    │   │   │       │   │   ├── tokio-postgres v0.7.10 (https://github.com/madsim-rs/rust-postgres.git?rev=ac00d88#ac00d886) (*)
-    │   │   │       │   │   ├── tower v0.4.13
-    │   │   │       │   │   │   ├── axum v0.6.20 (*)
-    │   │   │       │   │   │   ├── axum v0.7.4 (*)
-    │   │   │       │   │   │   ├── etcd-client v0.14.0 (*)
-    │   │   │       │   │   │   ├── ginepro v0.7.2 (*)
-    │   │   │       │   │   │   ├── google-cloud-gax v0.17.0 (*)
-    │   │   │       │   │   │   ├── google-cloud-gax v0.19.0 (*)
-    │   │   │       │   │   │   ├── hyper-util v0.1.6 (*)
-    │   │   │       │   │   │   ├── risingwave_common_service v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/common_service) (*)
-    │   │   │       │   │   │   ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
-    │   │   │       │   │   │   ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
-    │   │   │       │   │   │   ├── risingwave_rpc_client v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/rpc_client) (*)
-    │   │   │       │   │   │   ├── tonic v0.10.2 (*)
-    │   │   │       │   │   │   ├── tonic v0.11.0 (*)
-    │   │   │       │   │   │   └── tonic v0.12.1 (*)
-    │   │   │       │   │   └── tower-http v0.5.2 (*)
-    │   │   │       │   ├── tonic v0.10.2 (*)
-    │   │   │       │   ├── tonic v0.11.0 (*)
-    │   │   │       │   ├── tonic v0.12.1 (*)
-    │   │   │       │   ├── tower v0.4.13 (*)
-    │   │   │       │   ├── tower-http v0.5.2 (*)
-    │   │   │       │   ├── trust-dns-proto v0.21.2
-    │   │   │       │   │   ├── mongodb v2.8.2 (*)
-    │   │   │       │   │   └── trust-dns-resolver v0.21.2
-    │   │   │       │   │       └── mongodb v2.8.2 (*)
-    │   │   │       │   ├── trust-dns-proto v0.23.2
-    │   │   │       │   │   └── trust-dns-resolver v0.23.2
-    │   │   │       │   │       └── ginepro v0.7.2 (*)
-    │   │   │       │   ├── trust-dns-resolver v0.21.2 (*)
-    │   │   │       │   ├── trust-dns-resolver v0.23.2 (*)
-    │   │   │       │   ├── tryhard v0.5.1
-    │   │   │       │   │   └── async-nats v0.35.0 (*)
-    │   │   │       │   └── yup-oauth2 v8.3.0 (*)
-    │   │   │       │   [dev-dependencies]
-    │   │   │       │   ├── risingwave_meta_dashboard v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/dashboard) (*)
-    │   │   │       │   └── rw_futures_util v0.0.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/futures_util)
-    │   │   │       │       ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
-    │   │   │       │       ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   │       │       ├── risingwave_dml v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/dml) (*)
-    │   │   │       │       ├── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
-    │   │   │       │       ├── risingwave_java_binding v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/java_binding)
-    │   │   │       │       ├── risingwave_jni_core v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/jni_core) (*)
-    │   │   │       │       ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
-    │   │   │       │       ├── risingwave_rpc_client v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/rpc_client) (*)
-    │   │   │       │       └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
-    │   │   │       ├── tokio-postgres v0.7.10 (https://github.com/madsim-rs/rust-postgres.git?rev=ac00d88#ac00d886) (*)
-    │   │   │       ├── tracing-subscriber v0.3.17 (*)
-    │   │   │       ├── trust-dns-resolver v0.21.2 (*)
-    │   │   │       └── trust-dns-resolver v0.23.2 (*)
-    │   │   ├── prost-build v0.11.9 (*)
-    │   │   ├── prost-build v0.12.1 (*)
-    │   │   ├── prost-build v0.13.1 (*)
-    │   │   └── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
-    │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   ├── serde_yaml v0.9.25
-    │   │   ├── risedev v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/risedevtool)
-    │   │   ├── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
-    │   │   ├── risingwave_ctl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/ctl) (*)
-    │   │   └── risingwave_planner_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend/planner_test)
-    │   │   [dev-dependencies]
-    │   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   ├── risingwave_sqlparser v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/sqlparser) (*)
-    │   │   └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
-    │   ├── sqlx-core v0.7.1 (*)
-    │   ├── toml_edit v0.19.15
-    │   │   └── toml v0.7.8
-    │   │       └── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
-    │   └── toml_edit v0.22.9
-    │       └── toml v0.8.12
-    │           ├── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
-    │           ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-    │           └── risingwave_state_cleaning_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/state_cleaning_test)
-    ├── libflate_lz77 v2.1.0
-    │   └── libflate v2.1.0
-    │       ├── apache-avro v0.16.0 (https://github.com/risingwavelabs/avro?rev=25113ba88234a9ae23296e981d8302c290fdaa4b#25113ba8)
-    │       │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │       │   └── risingwave_connector_codec v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector/codec) (*)
-    │       └── apache-avro v0.17.0 (https://github.com/apache/avro.git#fdab5db0)
-    │           ├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
-    │           └── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
-    ├── lru v0.7.6 (https://github.com/risingwavelabs/lru-rs.git?rev=2682b85#2682b855)
-    │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-    │   ├── risingwave_common_estimate_size v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/estimate_size)
-    │   │   ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
-    │   │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-    │   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    │   │   ├── risingwave_expr v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/core) (*)
-    │   │   ├── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
-    │   │   ├── risingwave_hummock_sdk v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_sdk) (*)
-    │   │   ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
-    │   │   └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
-    │   ├── risingwave_rpc_client v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/rpc_client) (*)
-    │   ├── risingwave_simulation v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/simulation)
-    │   └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
-    ├── lru v0.12.0
-    │   └── mysql_async v0.34.1 (*)
-    ├── metrics-util v0.17.0
-    │   └── metrics-prometheus v0.7.0 (*)
-    ├── ordered-multimap v0.7.1
-    │   └── rust-ini v0.21.0
-    │       └── reqsign v0.15.2 (*)
-    ├── parquet v48.0.1 (*)
-    ├── parquet v52.0.0 (*)
-    ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
-    └── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-
 anyhow v1.0.86
-├── arrow-udf-js v0.3.1 (*)
-├── foyer v0.10.1 (*)
-├── foyer-storage v0.9.1 (*)
+├── arrow-udf-js v0.3.1
+│   └── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
+├── arrow-udf-python v0.2.0
+│   └── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
+├── arrow-udf-wasm v0.2.2
+│   └── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
+├── foyer v0.10.1
+│   ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
+│   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+│   ├── risingwave_compaction_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/compaction_test)
+│   ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
+│   ├── risingwave_ctl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/ctl) (*)
+│   ├── risingwave_hummock_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_test) (*)
+│   ├── risingwave_hummock_trace v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_trace) (*)
+│   ├── risingwave_java_binding v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/java_binding)
+│   ├── risingwave_jni_core v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/jni_core) (*)
+│   ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
+│   └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
+├── foyer-storage v0.9.1
+│   └── foyer v0.10.1 (*)
 ├── ginepro v0.7.2 (*)
 ├── google-cloud-bigquery v0.12.0 (*)
 ├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
@@ -1437,7 +643,33 @@ anyhow v1.0.86
 ├── risingwave_state_cleaning_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/state_cleaning_test)
 ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
 ├── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
-└── yup-oauth2 v8.3.0 (*)
+├── wasi-common v20.0.0
+│   └── arrow-udf-wasm v0.2.2 (*)
+├── wasmprinter v0.202.0
+│   └── wasmtime-environ v20.0.0
+│       ├── wasmtime v20.0.0
+│       │   ├── arrow-udf-wasm v0.2.2 (*)
+│       │   ├── wasi-common v20.0.0 (*)
+│       │   └── wiggle v20.0.0
+│       │       └── wasi-common v20.0.0 (*)
+│       ├── wasmtime-cranelift v20.0.0
+│       │   └── wasmtime v20.0.0 (*)
+│       └── wasmtime-runtime v20.0.0
+│           └── wasmtime v20.0.0 (*)
+├── wasmtime v20.0.0 (*)
+├── wasmtime-cache v20.0.0
+│   └── wasmtime v20.0.0 (*)
+├── wasmtime-cranelift v20.0.0 (*)
+├── wasmtime-environ v20.0.0 (*)
+├── wasmtime-fiber v20.0.0
+│   ├── wasmtime v20.0.0 (*)
+│   └── wasmtime-runtime v20.0.0 (*)
+├── wasmtime-runtime v20.0.0 (*)
+├── wiggle v20.0.0 (*)
+└── yup-oauth2 v8.3.0
+    ├── gcp-bigquery-client v0.18.0
+    │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+    └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
 [dev-dependencies]
 └── risingwave_sqlparser v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/sqlparser) (*)
 
@@ -1455,14 +687,17 @@ anyhow v1.0.86
 │   └── pulsar v6.3.0 (*)
 ├── prost-derive v0.12.1 (proc-macro)
 │   ├── prost v0.12.1
+│   │   ├── arrow-flight v50.0.0
+│   │   │   ├── arrow-udf-flight v0.1.0
+│   │   │   │   └── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
+│   │   │   └── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
 │   │   ├── datafusion-proto v33.0.0 (*)
-│   │   ├── google-cloud-googleapis v0.13.0 (*)
 │   │   ├── opentelemetry-otlp v0.16.0 (*)
 │   │   ├── opentelemetry-proto v0.6.0 (*)
-│   │   ├── prost-types v0.12.1
-│   │   │   ├── google-cloud-googleapis v0.13.0 (*)
-│   │   │   └── google-cloud-pubsub v0.25.0 (*)
-│   │   ├── tonic v0.10.2 (*)
+│   │   ├── tonic v0.10.2
+│   │   │   ├── arrow-flight v50.0.0 (*)
+│   │   │   ├── arrow-udf-flight v0.1.0 (*)
+│   │   │   └── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
 │   │   └── tonic v0.11.0 (*)
 │   └── prost v0.12.1
 │       ├── prost-build v0.12.1 (*)
@@ -1506,15 +741,31 @@ anyhow v1.0.86
 │       ├── prost-build v0.13.1 (*)
 │       └── prost-types v0.13.1
 │           └── prost-build v0.13.1 (*)
-└── vergen v8.3.0
-    [build-dependencies]
-    └── risingwave_cmd_all v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/cmd_all)
+├── vergen v8.3.0
+│   [build-dependencies]
+│   └── risingwave_cmd_all v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/cmd_all)
+├── wasmtime-component-macro v20.0.0 (proc-macro)
+│   └── wasmtime v20.0.0 (*)
+├── wasmtime-wit-bindgen v20.0.0
+│   └── wasmtime-component-macro v20.0.0 (proc-macro) (*)
+├── wiggle-generate v20.0.0
+│   └── wiggle-macro v20.0.0 (proc-macro)
+│       └── wiggle v20.0.0 (*)
+├── wit-parser v0.202.0
+│   ├── wasmtime-component-macro v20.0.0 (proc-macro) (*)
+│   └── wasmtime-wit-bindgen v20.0.0 (*)
+└── witx v0.9.1
+    └── wiggle-generate v20.0.0 (*)
 [build-dependencies]
 └── risingwave_meta_dashboard v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/dashboard) (*)
 
-apache-avro v0.16.0 (https://github.com/risingwavelabs/avro?rev=25113ba88234a9ae23296e981d8302c290fdaa4b#25113ba8) (*)
+apache-avro v0.16.0 (https://github.com/risingwavelabs/avro?rev=25113ba88234a9ae23296e981d8302c290fdaa4b#25113ba8)
+├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+└── risingwave_connector_codec v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector/codec) (*)
 
-apache-avro v0.17.0 (https://github.com/apache/avro.git#fdab5db0) (*)
+apache-avro v0.17.0 (https://github.com/apache/avro.git#fdab5db0)
+├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
+└── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
 
 arrayvec v0.7.4
 ├── array-util v1.0.1
@@ -1522,7 +773,10 @@ arrayvec v0.7.4
 ├── blake3 v1.5.0
 │   └── datafusion-physical-expr v33.0.0 (*)
 ├── num-format v0.4.4
-│   └── inferno v0.11.16 (*)
+│   └── inferno v0.11.16
+│       └── pprof v0.13.0
+│           ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
+│           └── risingwave_rt v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/runtime) (*)
 └── rust_decimal v1.35.0
     ├── duration-str v0.11.2
     │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
@@ -1538,21 +792,62 @@ arrayvec v0.7.4
     │   └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
     ├── mysql_common v0.32.1 (*)
     ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-    ├── risingwave_common_estimate_size v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/estimate_size) (*)
+    ├── risingwave_common_estimate_size v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/estimate_size)
+    │   ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
+    │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+    │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+    │   ├── risingwave_expr v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/core) (*)
+    │   ├── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
+    │   ├── risingwave_hummock_sdk v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_sdk) (*)
+    │   ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
+    │   └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
     ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
     ├── risingwave_connector_codec v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector/codec) (*)
     ├── risingwave_e2e_extended_mode_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/e2e_extended_mode) (*)
     ├── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
-    ├── sea-orm v0.12.14 (*)
+    ├── sea-orm v0.12.14
+    │   ├── risingwave_ctl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/ctl) (*)
+    │   ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
+    │   ├── risingwave_meta_model_v2 v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/model_v2) (*)
+    │   ├── risingwave_meta_node v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/node) (*)
+    │   ├── risingwave_meta_service v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/service) (*)
+    │   └── sea-orm-migration v0.12.14 (*)
     ├── sea-query v0.30.7
     │   ├── sea-orm v0.12.14 (*)
-    │   ├── sea-query-binder v0.5.0 (*)
+    │   ├── sea-query-binder v0.5.0
+    │   │   ├── sea-orm v0.12.14 (*)
+    │   │   └── sea-schema v0.14.2
+    │   │       ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+    │   │       ├── sea-orm-cli v0.12.14 (*)
+    │   │       └── sea-orm-migration v0.12.14 (*)
     │   └── sea-schema v0.14.2 (*)
     ├── sea-query-binder v0.5.0 (*)
-    ├── sqlx-core v0.7.1 (*)
+    ├── sqlx-core v0.7.1
+    │   ├── sqlx v0.7.1
+    │   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+    │   │   ├── sea-orm v0.12.14 (*)
+    │   │   ├── sea-query-binder v0.5.0 (*)
+    │   │   └── sea-schema v0.14.2 (*)
+    │   ├── sqlx-macros v0.7.1 (proc-macro)
+    │   │   └── sqlx v0.7.1 (*)
+    │   ├── sqlx-macros-core v0.7.1
+    │   │   └── sqlx-macros v0.7.1 (proc-macro) (*)
+    │   ├── sqlx-mysql v0.7.1
+    │   │   └── sqlx v0.7.1 (*)
+    │   ├── sqlx-mysql v0.7.1
+    │   │   └── sqlx-macros-core v0.7.1 (*)
+    │   ├── sqlx-postgres v0.7.1
+    │   │   └── sqlx v0.7.1 (*)
+    │   ├── sqlx-postgres v0.7.1
+    │   │   └── sqlx-macros-core v0.7.1 (*)
+    │   ├── sqlx-sqlite v0.7.1
+    │   │   └── sqlx v0.7.1 (*)
+    │   └── sqlx-sqlite v0.7.1
+    │       └── sqlx-macros-core v0.7.1 (*)
     ├── sqlx-mysql v0.7.1 (*)
     ├── sqlx-postgres v0.7.1 (*)
-    └── tiberius v0.12.2 (*)
+    └── tiberius v0.12.2
+        └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
 
 arrayvec v0.7.4
 └── rust_decimal v1.35.0
@@ -1565,15 +860,84 @@ arrow v50.0.0 (*)
 
 arrow-arith v48.0.1 (*)
 
-arrow-arith v50.0.0 (*)
+arrow-arith v50.0.0
+└── arrow v50.0.0 (*)
 
-arrow-arith v52.0.0 (*)
+arrow-arith v52.0.0
+├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
+└── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
 
 arrow-array v48.0.1 (*)
 
-arrow-array v50.0.0 (*)
+arrow-array v50.0.0
+├── arrow v50.0.0 (*)
+├── arrow-arith v50.0.0 (*)
+├── arrow-cast v50.0.0
+│   ├── arrow v50.0.0 (*)
+│   ├── arrow-flight v50.0.0 (*)
+│   ├── arrow-ipc v50.0.0
+│   │   ├── arrow v50.0.0 (*)
+│   │   ├── arrow-flight v50.0.0 (*)
+│   │   ├── arrow-udf-python v0.2.0 (*)
+│   │   └── arrow-udf-wasm v0.2.2 (*)
+│   └── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+├── arrow-flight v50.0.0 (*)
+├── arrow-ipc v50.0.0 (*)
+├── arrow-ord v50.0.0
+│   └── arrow v50.0.0 (*)
+├── arrow-row v50.0.0
+│   ├── arrow v50.0.0 (*)
+│   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+├── arrow-select v50.0.0
+│   ├── arrow v50.0.0 (*)
+│   ├── arrow-cast v50.0.0 (*)
+│   ├── arrow-ord v50.0.0 (*)
+│   ├── arrow-string v50.0.0 (*)
+│   ├── arrow-udf-flight v0.1.0 (*)
+│   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+├── arrow-string v50.0.0 (*)
+├── arrow-udf-flight v0.1.0 (*)
+├── arrow-udf-js v0.3.1 (*)
+├── arrow-udf-python v0.2.0 (*)
+├── arrow-udf-wasm v0.2.2 (*)
+├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
+├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+├── risingwave_expr v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/core) (*)
+└── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
 
-arrow-array v52.0.0 (*)
+arrow-array v52.0.0
+├── arrow-arith v52.0.0 (*)
+├── arrow-cast v52.0.0
+│   ├── arrow-ipc v52.0.0
+│   │   └── parquet v52.0.0
+│   │       ├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
+│   │       ├── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
+│   │       ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
+│   │       └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   ├── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
+│   ├── parquet v52.0.0 (*)
+│   └── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+├── arrow-ipc v52.0.0 (*)
+├── arrow-ord v52.0.0
+│   ├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
+│   └── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
+├── arrow-row v52.0.0
+│   └── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
+├── arrow-select v52.0.0
+│   ├── arrow-cast v52.0.0 (*)
+│   ├── arrow-ord v52.0.0 (*)
+│   ├── arrow-string v52.0.0 (*)
+│   ├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
+│   ├── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
+│   └── parquet v52.0.0 (*)
+├── arrow-string v52.0.0 (*)
+├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
+├── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
+├── parquet v52.0.0 (*)
+├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
+├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+└── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
 
 arrow-buffer v48.0.1
 ├── arrow v48.0.1 (*)
@@ -1622,12 +986,14 @@ arrow-buffer v50.0.0
 │   ├── arrow-row v50.0.0 (*)
 │   ├── arrow-select v50.0.0 (*)
 │   └── arrow-string v50.0.0 (*)
+├── arrow-flight v50.0.0 (*)
 ├── arrow-ipc v50.0.0 (*)
 ├── arrow-ord v50.0.0 (*)
 ├── arrow-row v50.0.0 (*)
 ├── arrow-select v50.0.0 (*)
 ├── arrow-string v50.0.0 (*)
 ├── arrow-udf-js v0.3.1 (*)
+├── arrow-udf-python v0.2.0 (*)
 └── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
 
 arrow-buffer v52.0.0
@@ -1711,12 +1077,16 @@ arrow-schema v50.0.0
 ├── arrow-array v50.0.0 (*)
 ├── arrow-cast v50.0.0 (*)
 ├── arrow-data v50.0.0 (*)
+├── arrow-flight v50.0.0 (*)
 ├── arrow-ipc v50.0.0 (*)
 ├── arrow-ord v50.0.0 (*)
 ├── arrow-row v50.0.0 (*)
 ├── arrow-select v50.0.0 (*)
 ├── arrow-string v50.0.0 (*)
+├── arrow-udf-flight v0.1.0 (*)
 ├── arrow-udf-js v0.3.1 (*)
+├── arrow-udf-python v0.2.0 (*)
+├── arrow-udf-wasm v0.2.2 (*)
 ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
 ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
 ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
@@ -1755,19 +1125,29 @@ arrow-string v50.0.0 (*)
 arrow-string v52.0.0 (*)
 
 async-channel v1.9.0
-├── async-global-executor v2.3.1 (*)
+├── async-global-executor v2.3.1
+│   └── async-std v1.12.0
+│       ├── redis v0.25.1
+│       │   ├── risedev v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/risedevtool)
+│       │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│       └── risingwave_meta_model_migration v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/model_v2/migration) (*)
 ├── async-std v1.12.0 (*)
 ├── blocking v1.3.1
 │   └── async-global-executor v2.3.1 (*)
-├── google-cloud-pubsub v0.25.0 (*)
 └── google-cloud-pubsub v0.28.1 (*)
 
 async-channel v2.2.1
 └── foyer-storage v0.9.1 (*)
 
-axum v0.6.20 (*)
+axum v0.6.20
+├── tonic v0.10.2 (*)
+└── tonic v0.11.0 (*)
 
-axum v0.7.4 (*)
+axum v0.7.4
+├── risingwave_common_service v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/common_service) (*)
+├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
+├── risingwave_meta_dashboard v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/dashboard) (*)
+└── tonic v0.12.1 (*)
 
 axum-core v0.3.4
 └── axum v0.6.20 (*)
@@ -1781,7 +1161,17 @@ base16ct v0.1.1
 ├── elliptic-curve v0.12.3
 │   ├── ecdsa v0.14.8
 │   │   └── p256 v0.11.1
-│   │       └── aws-sigv4 v1.1.1 (*)
+│   │       └── aws-sigv4 v1.1.1
+│   │           ├── aws-msk-iam-sasl-signer v1.0.0 (*)
+│   │           ├── aws-runtime v1.0.1
+│   │           │   ├── aws-config v1.0.1 (*)
+│   │           │   ├── aws-sdk-dynamodb v1.3.0 (*)
+│   │           │   ├── aws-sdk-glue v1.4.0 (*)
+│   │           │   ├── aws-sdk-kinesis v1.3.0 (*)
+│   │           │   ├── aws-sdk-s3 v1.1.0 (*)
+│   │           │   ├── aws-sdk-sts v1.3.1 (*)
+│   │           │   └── rw-aws-sdk-ec2 v1.2.0 (*)
+│   │           └── aws-sdk-s3 v1.1.0 (*)
 │   └── p256 v0.11.1 (*)
 └── sec1 v0.3.0
     └── elliptic-curve v0.12.3 (*)
@@ -1790,7 +1180,8 @@ base16ct v0.2.0
 ├── elliptic-curve v0.13.8
 │   ├── ecdsa v0.16.9
 │   │   ├── p256 v0.13.2
-│   │   │   └── openidconnect v3.4.0 (*)
+│   │   │   └── openidconnect v3.4.0
+│   │   │       └── pulsar v6.3.0 (*)
 │   │   └── p384 v0.13.0
 │   │       └── openidconnect v3.4.0 (*)
 │   ├── p256 v0.13.2 (*)
@@ -1802,23 +1193,26 @@ base16ct v0.2.0
     └── elliptic-curve v0.13.8 (*)
 
 base64 v0.13.1
-├── bson v2.11.0 (https://github.com/risingwavelabs/bson-rust?rev=e5175ec#e5175ecf) (*)
+├── bson v2.11.0 (https://github.com/risingwavelabs/bson-rust?rev=e5175ec#e5175ecf)
+│   └── mongodb v2.8.2
+│       └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
 ├── hdrhistogram v7.5.2
 │   ├── console-subscriber v0.4.0 (*)
 │   └── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
 ├── mongodb v2.8.2 (*)
-├── oauth2 v4.4.2 (*)
+├── oauth2 v4.4.2
+│   ├── openidconnect v3.4.0 (*)
+│   └── pulsar v6.3.0 (*)
 ├── openidconnect v3.4.0 (*)
 └── yup-oauth2 v8.3.0 (*)
 
 base64 v0.21.7
 ├── arrow-cast v50.0.0 (*)
+├── arrow-flight v50.0.0 (*)
 ├── datafusion-physical-expr v33.0.0 (*)
-├── google-cloud-auth v0.15.0 (*)
 ├── google-cloud-auth v0.16.0 (*)
 ├── google-cloud-bigquery v0.12.0 (*)
 ├── jsonwebtoken v9.3.0
-│   ├── google-cloud-auth v0.15.0 (*)
 │   ├── google-cloud-auth v0.16.0 (*)
 │   ├── pgwire v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/pgwire) (*)
 │   ├── reqsign v0.15.2 (*)
@@ -1826,7 +1220,13 @@ base64 v0.21.7
 │   └── risingwave_license v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/license)
 │       └── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
 ├── mysql_common v0.32.1 (*)
-├── object_store v0.7.1 (*)
+├── object_store v0.7.1
+│   ├── datafusion v33.0.0 (*)
+│   ├── datafusion-common v33.0.0 (*)
+│   ├── datafusion-execution v33.0.0 (*)
+│   ├── datafusion-proto v33.0.0 (*)
+│   ├── deltalake-core v0.17.0 (https://github.com/risingwavelabs/delta-rs?rev=5c2dccd4640490202ffe98adbd13b09cef8e007b#5c2dccd4) (*)
+│   └── parquet v48.0.1 (*)
 ├── parquet v48.0.1 (*)
 ├── pbjson v0.6.0
 │   └── risingwave_pb v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/prost) (*)
@@ -1843,18 +1243,46 @@ base64 v0.21.7
 │   │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
 │   │   ├── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
 │   │   ├── rust_decimal v1.35.0 (*)
-│   │   └── tokio-postgres v0.7.10 (https://github.com/madsim-rs/rust-postgres.git?rev=ac00d88#ac00d886) (*)
+│   │   └── tokio-postgres v0.7.10 (https://github.com/madsim-rs/rust-postgres.git?rev=ac00d88#ac00d886)
+│   │       ├── postgres-openssl v0.5.0
+│   │       │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   │       ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   │       ├── risingwave_e2e_extended_mode_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/e2e_extended_mode) (*)
+│   │       ├── risingwave_simulation v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/simulation)
+│   │       ├── risingwave_sqlsmith v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/sqlsmith) (*)
+│   │       └── risingwave_state_cleaning_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/state_cleaning_test)
+│   │       [dev-dependencies]
+│   │       └── pgwire v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/pgwire) (*)
 │   └── tokio-postgres v0.7.10 (https://github.com/madsim-rs/rust-postgres.git?rev=ac00d88#ac00d886) (*)
-├── reqwest v0.11.20 (*)
+├── reqwest v0.11.20
+│   ├── gcp-bigquery-client v0.18.0 (*)
+│   ├── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
+│   ├── oauth2 v4.4.2 (*)
+│   ├── object_store v0.7.1 (*)
+│   └── prometheus-http-query v0.8.0
+│       ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
+│       └── risingwave_meta_node v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/node) (*)
 ├── rustls-pemfile v1.0.4
 │   ├── mongodb v2.8.2 (*)
 │   ├── object_store v0.7.1 (*)
 │   ├── reqwest v0.11.20 (*)
 │   ├── rustls-native-certs v0.6.3
-│   │   ├── hyper-rustls v0.24.2 (*)
+│   │   ├── hyper-rustls v0.24.2
+│   │   │   ├── aws-smithy-runtime v1.1.3
+│   │   │   │   ├── aws-config v1.0.1 (*)
+│   │   │   │   ├── aws-sdk-dynamodb v1.3.0 (*)
+│   │   │   │   ├── aws-sdk-glue v1.4.0 (*)
+│   │   │   │   ├── aws-sdk-kinesis v1.3.0 (*)
+│   │   │   │   ├── aws-sdk-s3 v1.1.0 (*)
+│   │   │   │   ├── aws-sdk-sts v1.3.1 (*)
+│   │   │   │   ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
+│   │   │   │   └── rw-aws-sdk-ec2 v1.2.0 (*)
+│   │   │   ├── gcp-bigquery-client v0.18.0 (*)
+│   │   │   ├── reqwest v0.11.20 (*)
+│   │   │   ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
+│   │   │   └── yup-oauth2 v8.3.0 (*)
 │   │   └── tiberius v0.12.2 (*)
 │   ├── tiberius v0.12.2 (*)
-│   ├── tonic v0.10.2 (*)
 │   └── yup-oauth2 v8.3.0 (*)
 ├── rustls-pemfile v2.1.1
 │   ├── async-nats v0.35.0 (*)
@@ -1870,7 +1298,8 @@ base64 v0.21.7
 ├── sqlx-mysql v0.7.1 (*)
 ├── sqlx-postgres v0.7.1 (*)
 ├── tonic v0.10.2 (*)
-└── tonic v0.11.0 (*)
+├── tonic v0.11.0 (*)
+└── wasmtime-cache v20.0.0 (*)
 
 base64 v0.21.7
 ├── sqlx-mysql v0.7.1 (*)
@@ -1878,6 +1307,7 @@ base64 v0.21.7
 
 base64 v0.22.0
 ├── arrow-cast v52.0.0 (*)
+├── arrow-udf-wasm v0.2.2 (*)
 ├── async-nats v0.35.0 (*)
 ├── aws-msk-iam-sasl-signer v1.0.0 (*)
 ├── base64-url v3.0.0
@@ -1913,7 +1343,10 @@ bincode v1.3.3
 ├── risingwave_backup v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/backup) (*)
 ├── risingwave_common_secret v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/secret) (*)
 ├── risingwave_error v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/error) (*)
-└── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
+├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
+├── wasmtime v20.0.0 (*)
+├── wasmtime-cache v20.0.0 (*)
+└── wasmtime-environ v20.0.0 (*)
 [dev-dependencies]
 └── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
 
@@ -1922,7 +1355,11 @@ bincode v2.0.0-rc.3
 
 bitflags v1.3.2
 ├── axum v0.6.20 (*)
-├── crossterm v0.25.0 (*)
+├── bcc v0.0.33
+│   └── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
+├── crossterm v0.25.0
+│   └── inquire v0.7.0
+│       └── risingwave_ctl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/ctl) (*)
 ├── flatbuffers v23.5.26
 │   ├── arrow-ipc v48.0.1 (*)
 │   └── arrow-ipc v50.0.0 (*)
@@ -1937,14 +1374,25 @@ bitflags v1.3.2
 │       └── async-std v1.12.0 (*)
 ├── security-framework v2.9.2
 │   ├── native-tls v0.2.11
-│   │   ├── hyper-tls v0.5.0 (*)
-│   │   ├── hyper-tls v0.6.0 (*)
+│   │   ├── hyper-tls v0.5.0
+│   │   │   ├── clickhouse v0.11.5 (https://github.com/risingwavelabs/clickhouse.rs?rev=d38c8b6391af098b724c114e5a4746aedab6ab8e#d38c8b63)
+│   │   │   │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   │   │   ├── reqwest v0.11.20 (*)
+│   │   │   └── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
+│   │   ├── hyper-tls v0.6.0
+│   │   │   └── reqwest v0.12.4 (*)
 │   │   ├── mysql_async v0.34.1 (*)
 │   │   ├── pulsar v6.3.0 (*)
 │   │   ├── reqwest v0.11.20 (*)
 │   │   ├── reqwest v0.12.4 (*)
 │   │   ├── sqlx-core v0.7.1 (*)
-│   │   └── tokio-native-tls v0.3.1 (*)
+│   │   └── tokio-native-tls v0.3.1
+│   │       ├── hyper-tls v0.5.0 (*)
+│   │       ├── hyper-tls v0.6.0 (*)
+│   │       ├── mysql_async v0.34.1 (*)
+│   │       ├── pulsar v6.3.0 (*)
+│   │       ├── reqwest v0.11.20 (*)
+│   │       └── reqwest v0.12.4 (*)
 │   ├── rustls-native-certs v0.6.3 (*)
 │   └── rustls-native-certs v0.7.0 (*)
 └── system-configuration v0.5.1
@@ -1952,60 +1400,97 @@ bitflags v1.3.2
 
 bitflags v2.6.0
 ├── bindgen v0.69.4 (*)
-├── crossterm v0.27.0 (*)
-├── foyer-memory v0.6.1 (*)
+├── crossterm v0.27.0
+│   └── comfy-table v7.1.0
+│       ├── arrow-cast v48.0.1 (*)
+│       ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+│       ├── risingwave_ctl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/ctl) (*)
+│       └── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
+├── foyer-memory v0.6.1
+│   ├── foyer v0.10.1 (*)
+│   └── foyer-storage v0.9.1 (*)
 ├── foyer-storage v0.9.1 (*)
+├── fxprof-processed-profile v0.6.0
+│   └── wasmtime v20.0.0 (*)
 ├── inquire v0.7.0 (*)
 ├── mysql_common v0.32.1 (*)
 ├── nix v0.29.0
-│   └── foyer-common v0.8.1 (*)
+│   └── foyer-common v0.8.1
+│       ├── foyer v0.10.1 (*)
+│       ├── foyer-intrusive v0.8.1
+│       │   └── foyer-memory v0.6.1 (*)
+│       ├── foyer-memory v0.6.1 (*)
+│       └── foyer-storage v0.9.1 (*)
 ├── openssl v0.10.66
 │   ├── pgwire v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/pgwire) (*)
 │   ├── postgres-openssl v0.5.0 (*)
 │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
 │   ├── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
-│   └── tokio-openssl v0.6.3 (*)
+│   └── tokio-openssl v0.6.3
+│       ├── pgwire v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/pgwire) (*)
+│       └── postgres-openssl v0.5.0 (*)
 ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
 ├── rustix v0.38.31
+│   ├── cap-primitives v3.0.0
+│   │   ├── cap-fs-ext v3.0.0
+│   │   │   └── wasi-common v20.0.0 (*)
+│   │   ├── cap-std v3.0.0
+│   │   │   ├── cap-fs-ext v3.0.0 (*)
+│   │   │   ├── system-interface v0.27.2
+│   │   │   │   └── wasi-common v20.0.0 (*)
+│   │   │   └── wasi-common v20.0.0 (*)
+│   │   └── cap-time-ext v3.0.0
+│   │       └── wasi-common v20.0.0 (*)
+│   ├── cap-std v3.0.0 (*)
+│   ├── cap-time-ext v3.0.0 (*)
+│   ├── fs-set-times v0.20.1
+│   │   ├── cap-primitives v3.0.0 (*)
+│   │   └── wasi-common v20.0.0 (*)
 │   ├── is-terminal v0.4.9
 │   │   ├── criterion v0.5.1 (*)
 │   │   ├── env_logger v0.10.0 (*)
 │   │   └── inferno v0.11.16 (*)
-│   └── tempfile v3.10.0
-│       ├── datafusion v33.0.0 (*)
-│       ├── datafusion-execution v33.0.0 (*)
-│       ├── dialoguer v0.11.0
-│       │   └── risedev-config v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/risedevtool/config)
-│       ├── native-tls v0.2.11 (*)
-│       ├── pprof v0.13.0 (*)
-│       ├── prost-build v0.11.9 (*)
-│       ├── prost-build v0.12.1 (*)
-│       ├── prost-build v0.13.1 (*)
-│       ├── protobuf-native v0.2.2+3.19.1
-│       │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-│       ├── risedev v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/risedevtool)
-│       ├── risingwave_cmd_all v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/cmd_all)
-│       ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-│       ├── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
-│       ├── risingwave_simulation v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/simulation)
-│       ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
-│       ├── rusty-fork v0.3.0
-│       │   [dev-dependencies]
-│       │   └── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-│       ├── sqllogictest v0.21.0 (*)
-│       └── sqlx-macros-core v0.7.1 (*)
-│       [dev-dependencies]
-│       ├── pgwire v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/pgwire) (*)
-│       ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
-│       ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-│       ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
-│       ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-│       ├── risingwave_dml v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/dml) (*)
-│       ├── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
-│       ├── risingwave_planner_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend/planner_test)
-│       └── rw_resource_util v0.0.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/resource_util)
-│           ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-│           └── risingwave_common_metrics v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/metrics) (*)
+│   ├── system-interface v0.27.2 (*)
+│   ├── tempfile v3.10.0
+│   │   ├── arrow-udf-wasm v0.2.2 (*)
+│   │   ├── datafusion v33.0.0 (*)
+│   │   ├── datafusion-execution v33.0.0 (*)
+│   │   ├── dialoguer v0.11.0
+│   │   │   └── risedev-config v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/risedevtool/config)
+│   │   ├── native-tls v0.2.11 (*)
+│   │   ├── pprof v0.13.0 (*)
+│   │   ├── prost-build v0.11.9 (*)
+│   │   ├── prost-build v0.12.1 (*)
+│   │   ├── prost-build v0.13.1 (*)
+│   │   ├── protobuf-native v0.2.2+3.19.1
+│   │   │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   │   ├── risedev v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/risedevtool)
+│   │   ├── risingwave_cmd_all v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/cmd_all)
+│   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   │   ├── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
+│   │   ├── risingwave_simulation v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/simulation)
+│   │   ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
+│   │   ├── rusty-fork v0.3.0
+│   │   │   [dev-dependencies]
+│   │   │   └── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+│   │   ├── sqllogictest v0.21.0 (*)
+│   │   └── sqlx-macros-core v0.7.1 (*)
+│   │   [dev-dependencies]
+│   │   ├── pgwire v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/pgwire) (*)
+│   │   ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
+│   │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+│   │   ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
+│   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   │   ├── risingwave_dml v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/dml) (*)
+│   │   ├── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
+│   │   ├── risingwave_planner_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend/planner_test)
+│   │   └── rw_resource_util v0.0.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/resource_util)
+│   │       ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+│   │       └── risingwave_common_metrics v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/metrics) (*)
+│   ├── wasi-common v20.0.0 (*)
+│   ├── wasmtime-cache v20.0.0 (*)
+│   ├── wasmtime-fiber v20.0.0 (*)
+│   └── wasmtime-runtime v20.0.0 (*)
 ├── rustix v0.38.31
 │   └── which v4.4.2
 │       ├── bindgen v0.69.4 (*)
@@ -2015,7 +1500,23 @@ bitflags v2.6.0
 ├── sqlx-mysql v0.7.1 (*)
 ├── sqlx-postgres v0.7.1 (*)
 ├── sqlx-postgres v0.7.1 (*)
-└── tower-http v0.5.2 (*)
+├── system-interface v0.27.2 (*)
+├── tower-http v0.5.2
+│   ├── risingwave_common_service v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/common_service) (*)
+│   └── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
+├── wasi-common v20.0.0 (*)
+├── wasmparser v0.202.0
+│   ├── cranelift-wasm v0.107.0
+│   │   └── wasmtime-cranelift v20.0.0 (*)
+│   ├── wasmprinter v0.202.0 (*)
+│   ├── wasmtime v20.0.0 (*)
+│   ├── wasmtime-cranelift v20.0.0 (*)
+│   ├── wasmtime-environ v20.0.0 (*)
+│   ├── wasmtime-types v20.0.0
+│   │   ├── cranelift-wasm v0.107.0 (*)
+│   │   └── wasmtime-environ v20.0.0 (*)
+│   └── wit-parser v0.202.0 (*)
+└── wiggle v20.0.0 (*)
 
 brotli v3.5.0
 └── parquet v48.0.1 (*)
@@ -2030,7 +1531,9 @@ brotli-decompressor v4.0.1
 └── brotli v6.0.0 (*)
 
 byteorder v1.5.0
+├── bcc v0.0.33 (*)
 ├── fxhash v0.2.1
+│   ├── fxprof-processed-profile v0.6.0 (*)
 │   ├── inquire v0.7.0 (*)
 │   └── sled v0.34.7
 │       └── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
@@ -2070,22 +1573,123 @@ bytes v1.6.0
 ├── arrow-buffer v48.0.1 (*)
 ├── arrow-buffer v50.0.0 (*)
 ├── arrow-buffer v52.0.0 (*)
+├── arrow-flight v50.0.0 (*)
 ├── async-nats v0.35.0 (*)
 ├── asynchronous-codec v0.6.2
 │   └── tiberius v0.12.2 (*)
 ├── aws-config v1.0.1 (*)
-├── aws-http v0.60.0 (*)
+├── aws-http v0.60.0
+│   ├── aws-config v1.0.1 (*)
+│   ├── aws-runtime v1.0.1 (*)
+│   ├── aws-sdk-dynamodb v1.3.0 (*)
+│   ├── aws-sdk-glue v1.4.0 (*)
+│   ├── aws-sdk-kinesis v1.3.0 (*)
+│   ├── aws-sdk-s3 v1.1.0 (*)
+│   ├── aws-sdk-sts v1.3.1 (*)
+│   └── rw-aws-sdk-ec2 v1.2.0 (*)
 ├── aws-sdk-dynamodb v1.3.0 (*)
 ├── aws-sdk-glue v1.4.0 (*)
 ├── aws-sdk-kinesis v1.3.0 (*)
 ├── aws-sdk-s3 v1.1.0 (*)
 ├── aws-sigv4 v1.1.1 (*)
-├── aws-smithy-checksums v0.60.0 (*)
-├── aws-smithy-eventstream v0.60.3 (*)
+├── aws-smithy-checksums v0.60.0
+│   └── aws-sdk-s3 v1.1.0 (*)
+├── aws-smithy-eventstream v0.60.3
+│   ├── aws-runtime v1.0.1 (*)
+│   ├── aws-sdk-s3 v1.1.0 (*)
+│   ├── aws-sigv4 v1.1.1 (*)
+│   └── aws-smithy-http v0.60.3
+│       ├── aws-config v1.0.1 (*)
+│       ├── aws-runtime v1.0.1 (*)
+│       ├── aws-sdk-dynamodb v1.3.0 (*)
+│       ├── aws-sdk-glue v1.4.0 (*)
+│       ├── aws-sdk-kinesis v1.3.0 (*)
+│       ├── aws-sdk-s3 v1.1.0 (*)
+│       ├── aws-sdk-sts v1.3.1 (*)
+│       ├── aws-sigv4 v1.1.1 (*)
+│       ├── aws-smithy-checksums v0.60.0 (*)
+│       ├── aws-smithy-runtime v1.1.3 (*)
+│       ├── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
+│       ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│       ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
+│       └── rw-aws-sdk-ec2 v1.2.0 (*)
 ├── aws-smithy-http v0.60.3 (*)
 ├── aws-smithy-runtime v1.1.3 (*)
-├── aws-smithy-runtime-api v1.7.1 (*)
-├── aws-smithy-types v1.2.0 (*)
+├── aws-smithy-runtime-api v1.7.1
+│   ├── aws-config v1.0.1 (*)
+│   ├── aws-credential-types v1.2.0
+│   │   ├── aws-config v1.0.1 (*)
+│   │   ├── aws-msk-iam-sasl-signer v1.0.0 (*)
+│   │   ├── aws-runtime v1.0.1 (*)
+│   │   ├── aws-sdk-dynamodb v1.3.0 (*)
+│   │   ├── aws-sdk-glue v1.4.0 (*)
+│   │   ├── aws-sdk-kinesis v1.3.0 (*)
+│   │   ├── aws-sdk-s3 v1.1.0 (*)
+│   │   ├── aws-sdk-sts v1.3.1 (*)
+│   │   ├── aws-sigv4 v1.1.1 (*)
+│   │   ├── aws-types v1.3.0
+│   │   │   ├── aws-config v1.0.1 (*)
+│   │   │   ├── aws-http v0.60.0 (*)
+│   │   │   ├── aws-msk-iam-sasl-signer v1.0.0 (*)
+│   │   │   ├── aws-runtime v1.0.1 (*)
+│   │   │   ├── aws-sdk-dynamodb v1.3.0 (*)
+│   │   │   ├── aws-sdk-glue v1.4.0 (*)
+│   │   │   ├── aws-sdk-kinesis v1.3.0 (*)
+│   │   │   ├── aws-sdk-s3 v1.1.0 (*)
+│   │   │   ├── aws-sdk-sts v1.3.1 (*)
+│   │   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   │   │   └── rw-aws-sdk-ec2 v1.2.0 (*)
+│   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   │   ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
+│   │   └── rw-aws-sdk-ec2 v1.2.0 (*)
+│   ├── aws-http v0.60.0 (*)
+│   ├── aws-runtime v1.0.1 (*)
+│   ├── aws-sdk-dynamodb v1.3.0 (*)
+│   ├── aws-sdk-glue v1.4.0 (*)
+│   ├── aws-sdk-kinesis v1.3.0 (*)
+│   ├── aws-sdk-s3 v1.1.0 (*)
+│   ├── aws-sdk-sts v1.3.1 (*)
+│   ├── aws-sigv4 v1.1.1 (*)
+│   ├── aws-smithy-http v0.60.3 (*)
+│   ├── aws-smithy-runtime v1.1.3 (*)
+│   ├── aws-types v1.3.0 (*)
+│   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
+│   └── rw-aws-sdk-ec2 v1.2.0 (*)
+├── aws-smithy-types v1.2.0
+│   ├── aws-config v1.0.1 (*)
+│   ├── aws-credential-types v1.2.0 (*)
+│   ├── aws-http v0.60.0 (*)
+│   ├── aws-runtime v1.0.1 (*)
+│   ├── aws-sdk-dynamodb v1.3.0 (*)
+│   ├── aws-sdk-glue v1.4.0 (*)
+│   ├── aws-sdk-kinesis v1.3.0 (*)
+│   ├── aws-sdk-s3 v1.1.0 (*)
+│   ├── aws-sdk-sts v1.3.1 (*)
+│   ├── aws-sigv4 v1.1.1 (*)
+│   ├── aws-smithy-checksums v0.60.0 (*)
+│   ├── aws-smithy-eventstream v0.60.3 (*)
+│   ├── aws-smithy-http v0.60.3 (*)
+│   ├── aws-smithy-json v0.60.0
+│   │   ├── aws-config v1.0.1 (*)
+│   │   ├── aws-sdk-dynamodb v1.3.0 (*)
+│   │   ├── aws-sdk-glue v1.4.0 (*)
+│   │   ├── aws-sdk-kinesis v1.3.0 (*)
+│   │   ├── aws-sdk-s3 v1.1.0 (*)
+│   │   ├── aws-sdk-sts v1.3.1 (*)
+│   │   └── rw-aws-sdk-ec2 v1.2.0 (*)
+│   ├── aws-smithy-query v0.60.0
+│   │   ├── aws-sdk-sts v1.3.1 (*)
+│   │   └── rw-aws-sdk-ec2 v1.2.0 (*)
+│   ├── aws-smithy-runtime v1.1.3 (*)
+│   ├── aws-smithy-runtime-api v1.7.1 (*)
+│   ├── aws-smithy-types-convert v0.60.1
+│   │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   ├── aws-types v1.3.0 (*)
+│   ├── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
+│   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
+│   └── rw-aws-sdk-ec2 v1.2.0 (*)
 ├── axum v0.6.20 (*)
 ├── axum v0.7.4 (*)
 ├── axum-core v0.3.4 (*)
@@ -2094,13 +1698,62 @@ bytes v1.6.0
 │   ├── aws-smithy-http v0.60.3 (*)
 │   └── aws-smithy-types v1.2.0 (*)
 ├── clickhouse v0.11.5 (https://github.com/risingwavelabs/clickhouse.rs?rev=d38c8b6391af098b724c114e5a4746aedab6ab8e#d38c8b63) (*)
-├── combine v4.6.6 (*)
+├── combine v4.6.6
+│   ├── jni v0.21.1
+│   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   │   ├── risingwave_java_binding v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/java_binding)
+│   │   └── risingwave_jni_core v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/jni_core) (*)
+│   └── redis v0.25.1 (*)
 ├── datafusion v33.0.0 (*)
 ├── deltalake-core v0.17.0 (https://github.com/risingwavelabs/delta-rs?rev=5c2dccd4640490202ffe98adbd13b09cef8e007b#5c2dccd4) (*)
 ├── foyer-common v0.8.1 (*)
 ├── foyer-storage v0.9.1 (*)
-├── h2 v0.3.26 (*)
-├── h2 v0.4.4 (*)
+├── h2 v0.3.26
+│   ├── aws-smithy-runtime v1.1.3 (*)
+│   ├── hyper v0.14.27
+│   │   ├── aws-config v1.0.1 (*)
+│   │   ├── aws-smithy-runtime v1.1.3 (*)
+│   │   ├── aws-smithy-types v1.2.0 (*)
+│   │   ├── axum v0.6.20 (*)
+│   │   ├── clickhouse v0.11.5 (https://github.com/risingwavelabs/clickhouse.rs?rev=d38c8b6391af098b724c114e5a4746aedab6ab8e#d38c8b63) (*)
+│   │   ├── gcp-bigquery-client v0.18.0 (*)
+│   │   ├── hyper-rustls v0.24.2 (*)
+│   │   ├── hyper-timeout v0.4.1
+│   │   │   ├── tonic v0.10.2 (*)
+│   │   │   └── tonic v0.11.0 (*)
+│   │   ├── hyper-tls v0.5.0 (*)
+│   │   ├── object_store v0.7.1 (*)
+│   │   ├── reqwest v0.11.20 (*)
+│   │   ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
+│   │   ├── tonic v0.10.2 (*)
+│   │   ├── tonic v0.11.0 (*)
+│   │   └── yup-oauth2 v8.3.0 (*)
+│   ├── reqwest v0.11.20 (*)
+│   ├── tonic v0.10.2 (*)
+│   └── tonic v0.11.0 (*)
+├── h2 v0.4.4
+│   ├── hyper v1.4.1
+│   │   ├── axum v0.7.4 (*)
+│   │   ├── hyper-rustls v0.26.0 (*)
+│   │   ├── hyper-timeout v0.5.1
+│   │   │   └── tonic v0.12.1 (*)
+│   │   ├── hyper-tls v0.6.0 (*)
+│   │   ├── hyper-util v0.1.6
+│   │   │   ├── axum v0.7.4 (*)
+│   │   │   ├── console-subscriber v0.4.0 (*)
+│   │   │   ├── hyper-rustls v0.26.0 (*)
+│   │   │   ├── hyper-timeout v0.5.1 (*)
+│   │   │   ├── hyper-tls v0.6.0 (*)
+│   │   │   ├── reqwest v0.12.4 (*)
+│   │   │   ├── risingwave_common_metrics v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/metrics) (*)
+│   │   │   └── tonic v0.12.1 (*)
+│   │   ├── reqwest v0.12.4 (*)
+│   │   ├── risingwave_common_metrics v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/metrics) (*)
+│   │   ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
+│   │   ├── risingwave_rpc_client v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/rpc_client) (*)
+│   │   └── tonic v0.12.1 (*)
+│   ├── reqwest v0.12.4 (*)
+│   └── tonic v0.12.1 (*)
 ├── http v0.2.9
 │   ├── aws-config v1.0.1 (*)
 │   ├── aws-http v0.60.0 (*)
@@ -2120,7 +1773,6 @@ bytes v1.6.0
 │   ├── axum v0.6.20 (*)
 │   ├── axum-core v0.3.4 (*)
 │   ├── ginepro v0.7.2 (*)
-│   ├── google-cloud-gax v0.17.0 (*)
 │   ├── h2 v0.3.26 (*)
 │   ├── http-body v0.4.5
 │   │   ├── aws-http v0.60.0 (*)
@@ -2255,7 +1907,266 @@ bytes v1.6.0
 ├── sqlx-core v0.7.1 (*)
 ├── sqlx-mysql v0.7.1 (*)
 ├── tiberius v0.12.2 (*)
-├── tokio v1.39.2 (*)
+├── tokio v1.39.2
+│   ├── arrow-flight v50.0.0 (*)
+│   ├── arrow-udf-flight v0.1.0 (*)
+│   ├── async-compression v0.4.5
+│   │   ├── datafusion v33.0.0 (*)
+│   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   │   └── tower-http v0.5.2 (*)
+│   ├── async-global-executor v2.3.1 (*)
+│   ├── async-nats v0.35.0 (*)
+│   ├── await-tree v0.2.1
+│   │   ├── risingwave_compactor v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/compactor) (*)
+│   │   ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
+│   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   │   ├── risingwave_expr v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/core) (*)
+│   │   ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
+│   │   ├── risingwave_rt v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/runtime) (*)
+│   │   ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
+│   │   └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
+│   ├── aws-config v1.0.1 (*)
+│   ├── aws-smithy-async v1.2.1
+│   │   ├── aws-config v1.0.1 (*)
+│   │   ├── aws-credential-types v1.2.0 (*)
+│   │   ├── aws-runtime v1.0.1 (*)
+│   │   ├── aws-sdk-dynamodb v1.3.0 (*)
+│   │   ├── aws-sdk-glue v1.4.0 (*)
+│   │   ├── aws-sdk-kinesis v1.3.0 (*)
+│   │   ├── aws-sdk-s3 v1.1.0 (*)
+│   │   ├── aws-sdk-sts v1.3.1 (*)
+│   │   ├── aws-smithy-runtime v1.1.3 (*)
+│   │   ├── aws-smithy-runtime-api v1.7.1 (*)
+│   │   ├── aws-types v1.3.0 (*)
+│   │   └── rw-aws-sdk-ec2 v1.2.0 (*)
+│   ├── aws-smithy-runtime v1.1.3 (*)
+│   ├── aws-smithy-runtime-api v1.7.1 (*)
+│   ├── aws-smithy-types v1.2.0 (*)
+│   ├── axum v0.7.4 (*)
+│   ├── backon v0.4.4
+│   │   ├── google-cloud-bigquery v0.12.0 (*)
+│   │   └── opendal v0.47.2 (*)
+│   ├── clickhouse v0.11.5 (https://github.com/risingwavelabs/clickhouse.rs?rev=d38c8b6391af098b724c114e5a4746aedab6ab8e#d38c8b63) (*)
+│   ├── combine v4.6.6 (*)
+│   ├── console-subscriber v0.4.0 (*)
+│   ├── criterion v0.5.1 (*)
+│   ├── datafusion v33.0.0 (*)
+│   ├── datafusion-physical-plan v33.0.0 (*)
+│   ├── deltalake-core v0.17.0 (https://github.com/risingwavelabs/delta-rs?rev=5c2dccd4640490202ffe98adbd13b09cef8e007b#5c2dccd4) (*)
+│   ├── etcd-client v0.14.0 (*)
+│   ├── gcp-bigquery-client v0.18.0 (*)
+│   ├── ginepro v0.7.2 (*)
+│   ├── google-cloud-auth v0.16.0 (*)
+│   ├── google-cloud-bigquery v0.12.0 (*)
+│   ├── google-cloud-gax v0.19.0 (*)
+│   ├── google-cloud-metadata v0.5.0 (*)
+│   ├── google-cloud-pubsub v0.28.1 (*)
+│   ├── h2 v0.3.26 (*)
+│   ├── h2 v0.4.4 (*)
+│   ├── hyper v0.14.27 (*)
+│   ├── hyper v1.4.1 (*)
+│   ├── hyper-rustls v0.24.2 (*)
+│   ├── hyper-rustls v0.26.0 (*)
+│   ├── hyper-timeout v0.4.1 (*)
+│   ├── hyper-timeout v0.5.1 (*)
+│   ├── hyper-tls v0.5.0 (*)
+│   ├── hyper-tls v0.6.0 (*)
+│   ├── hyper-util v0.1.6 (*)
+│   ├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
+│   ├── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
+│   ├── madsim v0.2.30 (*)
+│   ├── madsim-rdkafka v0.4.2+0.34.0
+│   │   ├── risedev v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/risedevtool)
+│   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   │   └── risingwave_simulation v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/simulation)
+│   ├── madsim-tokio v0.2.28
+│   │   ├── foyer v0.10.1 (*)
+│   │   ├── foyer-common v0.8.1 (*)
+│   │   ├── foyer-memory v0.6.1 (*)
+│   │   ├── foyer-storage v0.9.1 (*)
+│   │   ├── pgwire v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/pgwire) (*)
+│   │   ├── risedev v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/risedevtool)
+│   │   ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
+│   │   ├── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
+│   │   ├── risingwave_cmd v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/cmd) (*)
+│   │   ├── risingwave_cmd_all v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/cmd_all)
+│   │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+│   │   ├── risingwave_common_heap_profiling v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/heap_profiling) (*)
+│   │   ├── risingwave_common_metrics v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/metrics) (*)
+│   │   ├── risingwave_common_service v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/common_service) (*)
+│   │   ├── risingwave_compaction_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/compaction_test)
+│   │   ├── risingwave_compactor v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/compactor) (*)
+│   │   ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
+│   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   │   ├── risingwave_ctl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/ctl) (*)
+│   │   ├── risingwave_dml v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/dml) (*)
+│   │   ├── risingwave_e2e_extended_mode_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/e2e_extended_mode) (*)
+│   │   ├── risingwave_expr v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/core) (*)
+│   │   ├── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
+│   │   ├── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
+│   │   ├── risingwave_hummock_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_test) (*)
+│   │   ├── risingwave_hummock_trace v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_trace) (*)
+│   │   ├── risingwave_java_binding v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/java_binding)
+│   │   ├── risingwave_jni_core v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/jni_core) (*)
+│   │   ├── risingwave_mem_table_spill_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream/spill_test)
+│   │   ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
+│   │   ├── risingwave_meta_node v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/node) (*)
+│   │   ├── risingwave_meta_service v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/service) (*)
+│   │   ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
+│   │   ├── risingwave_planner_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend/planner_test)
+│   │   ├── risingwave_regress_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/regress)
+│   │   ├── risingwave_rpc_client v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/rpc_client) (*)
+│   │   ├── risingwave_rt v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/runtime) (*)
+│   │   ├── risingwave_simulation v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/simulation)
+│   │   ├── risingwave_sqlparser v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/sqlparser) (*)
+│   │   ├── risingwave_sqlsmith v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/sqlsmith) (*)
+│   │   ├── risingwave_state_cleaning_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/state_cleaning_test)
+│   │   ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
+│   │   ├── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
+│   │   ├── sync-point v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/sync-point)
+│   │   │   ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
+│   │   │   ├── risingwave_meta_service v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/service) (*)
+│   │   │   ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
+│   │   │   └── risingwave_test_runner v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/test_runner)
+│   │   │       [dev-dependencies]
+│   │   │       ├── risingwave_hummock_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_test) (*)
+│   │   │       ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
+│   │   │       └── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
+│   │   │   [dev-dependencies]
+│   │   │   └── risingwave_hummock_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_test) (*)
+│   │   ├── tokio-postgres v0.7.10 (https://github.com/madsim-rs/rust-postgres.git?rev=ac00d88#ac00d886) (*)
+│   │   └── tokio-retry v0.3.0 (https://github.com/madsim-rs/rust-tokio-retry.git?rev=95e2fd3#95e2fd3c)
+│   │       ├── google-cloud-gax v0.19.0 (*)
+│   │       ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+│   │       ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   │       ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
+│   │       ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
+│   │       ├── risingwave_rpc_client v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/rpc_client) (*)
+│   │       ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
+│   │       └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
+│   │   [dev-dependencies]
+│   │   └── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
+│   ├── mongodb v2.8.2 (*)
+│   ├── mysql_async v0.34.1 (*)
+│   ├── object_store v0.7.1 (*)
+│   ├── opendal v0.47.2 (*)
+│   ├── opentelemetry-otlp v0.16.0 (*)
+│   ├── opentelemetry_sdk v0.23.0
+│   │   ├── minitrace-opentelemetry v0.6.7
+│   │   │   └── risingwave_rt v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/runtime) (*)
+│   │   ├── opentelemetry-otlp v0.16.0 (*)
+│   │   ├── opentelemetry-proto v0.6.0 (*)
+│   │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+│   │   ├── risingwave_rt v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/runtime) (*)
+│   │   └── tracing-opentelemetry v0.24.0 (*)
+│   ├── parquet v48.0.1 (*)
+│   ├── parquet v52.0.0 (*)
+│   ├── postgres-openssl v0.5.0 (*)
+│   ├── pulsar v6.3.0 (*)
+│   ├── redis v0.25.1 (*)
+│   ├── reqwest v0.11.20 (*)
+│   ├── reqwest v0.12.4 (*)
+│   ├── rumqttc v0.24.0 (*)
+│   ├── sqlx-core v0.7.1 (*)
+│   ├── tokio-io-timeout v1.2.0
+│   │   └── hyper-timeout v0.4.1 (*)
+│   ├── tokio-metrics v0.3.1
+│   │   ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
+│   │   └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
+│   ├── tokio-native-tls v0.3.1 (*)
+│   ├── tokio-openssl v0.6.3 (*)
+│   ├── tokio-rustls v0.23.4
+│   │   └── tiberius v0.12.2 (*)
+│   ├── tokio-rustls v0.24.1
+│   │   ├── hyper-rustls v0.24.2 (*)
+│   │   ├── mongodb v2.8.2 (*)
+│   │   └── reqwest v0.11.20 (*)
+│   ├── tokio-rustls v0.25.0 (*)
+│   ├── tokio-rustls v0.26.0 (*)
+│   ├── tokio-stream v0.1.15
+│   │   ├── console-subscriber v0.4.0 (*)
+│   │   ├── etcd-client v0.14.0 (*)
+│   │   ├── gcp-bigquery-client v0.18.0 (*)
+│   │   ├── opentelemetry_sdk v0.23.0 (*)
+│   │   ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
+│   │   ├── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
+│   │   ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
+│   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   │   ├── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
+│   │   ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
+│   │   ├── risingwave_meta_service v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/service) (*)
+│   │   ├── risingwave_rpc_client v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/rpc_client) (*)
+│   │   ├── risingwave_simulation v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/simulation)
+│   │   ├── risingwave_state_cleaning_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/state_cleaning_test)
+│   │   ├── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
+│   │   ├── sqlx-core v0.7.1 (*)
+│   │   ├── tokio-metrics v0.3.1 (*)
+│   │   ├── tonic v0.10.2 (*)
+│   │   ├── tonic v0.11.0 (*)
+│   │   └── tonic v0.12.1 (*)
+│   ├── tokio-util v0.7.9
+│   │   ├── aws-smithy-types v1.2.0 (*)
+│   │   ├── combine v4.6.6 (*)
+│   │   ├── datafusion v33.0.0 (*)
+│   │   ├── google-cloud-pubsub v0.28.1 (*)
+│   │   ├── h2 v0.3.26 (*)
+│   │   ├── h2 v0.4.4 (*)
+│   │   ├── madsim v0.2.30 (*)
+│   │   ├── mongodb v2.8.2 (*)
+│   │   ├── mysql_async v0.34.1 (*)
+│   │   ├── pulsar v6.3.0 (*)
+│   │   ├── redis v0.25.1 (*)
+│   │   ├── reqwest v0.11.20 (*)
+│   │   ├── reqwest v0.12.4 (*)
+│   │   ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
+│   │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+│   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   │   ├── tiberius v0.12.2 (*)
+│   │   ├── tokio-postgres v0.7.10 (https://github.com/madsim-rs/rust-postgres.git?rev=ac00d88#ac00d886) (*)
+│   │   ├── tower v0.4.13
+│   │   │   ├── axum v0.6.20 (*)
+│   │   │   ├── axum v0.7.4 (*)
+│   │   │   ├── etcd-client v0.14.0 (*)
+│   │   │   ├── ginepro v0.7.2 (*)
+│   │   │   ├── google-cloud-gax v0.19.0 (*)
+│   │   │   ├── hyper-util v0.1.6 (*)
+│   │   │   ├── risingwave_common_service v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/common_service) (*)
+│   │   │   ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
+│   │   │   ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
+│   │   │   ├── risingwave_rpc_client v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/rpc_client) (*)
+│   │   │   ├── tonic v0.10.2 (*)
+│   │   │   ├── tonic v0.11.0 (*)
+│   │   │   └── tonic v0.12.1 (*)
+│   │   └── tower-http v0.5.2 (*)
+│   ├── tonic v0.10.2 (*)
+│   ├── tonic v0.11.0 (*)
+│   ├── tonic v0.12.1 (*)
+│   ├── tower v0.4.13 (*)
+│   ├── tower-http v0.5.2 (*)
+│   ├── trust-dns-proto v0.21.2
+│   │   ├── mongodb v2.8.2 (*)
+│   │   └── trust-dns-resolver v0.21.2
+│   │       └── mongodb v2.8.2 (*)
+│   ├── trust-dns-proto v0.23.2
+│   │   └── trust-dns-resolver v0.23.2
+│   │       └── ginepro v0.7.2 (*)
+│   ├── trust-dns-resolver v0.21.2 (*)
+│   ├── trust-dns-resolver v0.23.2 (*)
+│   ├── tryhard v0.5.1
+│   │   └── async-nats v0.35.0 (*)
+│   └── yup-oauth2 v8.3.0 (*)
+│   [dev-dependencies]
+│   ├── risingwave_meta_dashboard v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta/dashboard) (*)
+│   └── rw_futures_util v0.0.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/futures_util)
+│       ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
+│       ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│       ├── risingwave_dml v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/dml) (*)
+│       ├── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
+│       ├── risingwave_java_binding v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/java_binding)
+│       ├── risingwave_jni_core v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/jni_core) (*)
+│       ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
+│       ├── risingwave_rpc_client v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/rpc_client) (*)
+│       └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
 ├── tokio-postgres v0.7.10 (https://github.com/madsim-rs/rust-postgres.git?rev=ac00d88#ac00d886) (*)
 ├── tokio-util v0.7.9 (*)
 ├── tonic v0.10.2 (*)
@@ -2402,7 +2313,8 @@ darling v0.20.9
 │       └── derive_builder v0.20.0
 │           ├── await-tree v0.2.1 (*)
 │           └── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
-├── mysql-common-derive v0.31.0 (proc-macro) (*)
+├── mysql-common-derive v0.31.0 (proc-macro)
+│   └── mysql_common v0.32.1 (*)
 └── serde_with_macros v3.8.0 (proc-macro)
     └── serde_with v3.8.0
         ├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
@@ -2488,7 +2400,6 @@ deranged v0.3.9
     ├── clickhouse v0.11.5 (https://github.com/risingwavelabs/clickhouse.rs?rev=d38c8b6391af098b724c114e5a4746aedab6ab8e#d38c8b63) (*)
     ├── duration-str v0.11.2 (*)
     ├── gcp-bigquery-client v0.18.0 (*)
-    ├── google-cloud-auth v0.15.0 (*)
     ├── google-cloud-auth v0.16.0 (*)
     ├── google-cloud-bigquery v0.12.0 (*)
     ├── mysql_common v0.32.1 (*)
@@ -2570,7 +2481,11 @@ event-listener v2.5.3
 │   ├── async-io v1.13.0 (*)
 │   ├── async-std v1.12.0 (*)
 │   ├── blocking v1.3.1 (*)
-│   └── moka v0.12.0 (*)
+│   └── moka v0.12.0
+│       ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│       ├── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
+│       ├── risingwave_rpc_client v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/rpc_client) (*)
+│       └── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
 └── sqlx-core v0.7.1 (*)
 
 event-listener v5.2.0
@@ -2608,7 +2523,100 @@ ff v0.13.0
     └── elliptic-curve v0.13.8 (*)
 
 fixedbitset v0.4.2
-└── petgraph v0.6.4 (*)
+└── petgraph v0.6.4
+    ├── crepe v0.1.8 (proc-macro)
+    │   └── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
+    ├── datafusion-physical-expr v33.0.0 (*)
+    ├── parking_lot_core v0.9.8
+    │   ├── dashmap v5.5.3
+    │   │   ├── datafusion v33.0.0 (*)
+    │   │   ├── datafusion-execution v33.0.0 (*)
+    │   │   ├── deltalake-core v0.17.0 (https://github.com/risingwavelabs/delta-rs?rev=5c2dccd4640490202ffe98adbd13b09cef8e007b#5c2dccd4) (*)
+    │   │   ├── governor v0.6.0
+    │   │   │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+    │   │   │   └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
+    │   │   └── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
+    │   └── parking_lot v0.12.1
+    │       ├── await-tree v0.2.1 (*)
+    │       ├── crossterm v0.25.0 (*)
+    │       ├── crossterm v0.27.0 (*)
+    │       ├── datafusion v33.0.0 (*)
+    │       ├── datafusion-execution v33.0.0 (*)
+    │       ├── datafusion-physical-plan v33.0.0 (*)
+    │       ├── deltalake-core v0.17.0 (https://github.com/risingwavelabs/delta-rs?rev=5c2dccd4640490202ffe98adbd13b09cef8e007b#5c2dccd4) (*)
+    │       ├── foyer-common v0.8.1 (*)
+    │       ├── foyer-memory v0.6.1 (*)
+    │       ├── foyer-storage v0.9.1 (*)
+    │       ├── futures-intrusive v0.5.0
+    │       │   ├── sqlx-core v0.7.1 (*)
+    │       │   ├── sqlx-sqlite v0.7.1 (*)
+    │       │   └── sqlx-sqlite v0.7.1 (*)
+    │       ├── governor v0.6.0 (*)
+    │       ├── minitrace v0.6.7
+    │       │   ├── foyer v0.10.1 (*)
+    │       │   ├── foyer-common v0.8.1 (*)
+    │       │   ├── foyer-memory v0.6.1 (*)
+    │       │   ├── foyer-storage v0.9.1 (*)
+    │       │   ├── minitrace-opentelemetry v0.6.7 (*)
+    │       │   └── risingwave_rt v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/runtime) (*)
+    │       ├── moka v0.12.0 (*)
+    │       ├── object_store v0.7.1 (*)
+    │       ├── pgwire v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/pgwire) (*)
+    │       ├── pprof v0.13.0 (*)
+    │       ├── prometheus v0.13.3
+    │       │   ├── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
+    │       │   ├── metrics-prometheus v0.7.0
+    │       │   │   └── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
+    │       │   ├── opendal v0.47.2 (*)
+    │       │   ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
+    │       │   ├── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
+    │       │   ├── risingwave_cmd v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/cmd) (*)
+    │       │   ├── risingwave_cmd_all v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/cmd_all)
+    │       │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+    │       │   ├── risingwave_common_metrics v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/metrics) (*)
+    │       │   ├── risingwave_common_service v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/common_service) (*)
+    │       │   ├── risingwave_compaction_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/compaction_test)
+    │       │   ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
+    │       │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+    │       │   ├── risingwave_expr v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/core) (*)
+    │       │   ├── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
+    │       │   ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
+    │       │   ├── risingwave_object_store v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/object_store) (*)
+    │       │   ├── risingwave_simulation v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/simulation)
+    │       │   ├── risingwave_state_cleaning_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/state_cleaning_test)
+    │       │   ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
+    │       │   └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
+    │       ├── pyo3 v0.21.2
+    │       │   └── arrow-udf-python v0.2.0 (*)
+    │       ├── risingwave_backup v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/backup) (*)
+    │       ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
+    │       ├── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
+    │       ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+    │       ├── risingwave_common_heap_profiling v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/heap_profiling) (*)
+    │       ├── risingwave_common_metrics v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/metrics) (*)
+    │       ├── risingwave_common_secret v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/secret) (*)
+    │       ├── risingwave_compactor v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/compactor) (*)
+    │       ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+    │       ├── risingwave_dml v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/dml) (*)
+    │       ├── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
+    │       ├── risingwave_hummock_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_test) (*)
+    │       ├── risingwave_hummock_trace v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_trace) (*)
+    │       ├── risingwave_meta v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/meta) (*)
+    │       ├── risingwave_rt v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/runtime) (*)
+    │       ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
+    │       ├── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
+    │       ├── serial_test v3.1.0
+    │       │   [dev-dependencies]
+    │       │   └── risingwave_hummock_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_test) (*)
+    │       ├── tokio v1.39.2 (*)
+    │       ├── tokio-postgres v0.7.10 (https://github.com/madsim-rs/rust-postgres.git?rev=ac00d88#ac00d886) (*)
+    │       ├── tracing-subscriber v0.3.17 (*)
+    │       ├── trust-dns-resolver v0.21.2 (*)
+    │       └── trust-dns-resolver v0.23.2 (*)
+    ├── prost-build v0.11.9 (*)
+    ├── prost-build v0.12.1 (*)
+    ├── prost-build v0.13.1 (*)
+    └── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
 
 fixedbitset v0.5.0
 ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
@@ -2640,6 +2648,7 @@ frunk_core v0.4.2
 
 futures-channel v0.3.30
 ├── futures v0.3.28
+│   ├── arrow-flight v50.0.0 (*)
 │   ├── async-nats v0.35.0 (*)
 │   ├── aws-msk-iam-sasl-signer v1.0.0 (*)
 │   ├── clickhouse v0.11.5 (https://github.com/risingwavelabs/clickhouse.rs?rev=d38c8b6391af098b724c114e5a4746aedab6ab8e#d38c8b63) (*)
@@ -2704,6 +2713,7 @@ futures-channel v0.3.30
 │   [dev-dependencies]
 │   └── risingwave_hummock_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_test) (*)
 ├── futures-util v0.3.30
+│   ├── arrow-udf-flight v0.1.0 (*)
 │   ├── asynchronous-codec v0.6.2 (*)
 │   ├── aws-smithy-async v1.2.1 (*)
 │   ├── axum v0.6.20 (*)
@@ -2793,6 +2803,7 @@ futures-sink v0.3.30
 │   ├── opentelemetry-otlp v0.16.0 (*)
 │   ├── opentelemetry-proto v0.6.0 (*)
 │   ├── opentelemetry_sdk v0.23.0 (*)
+│   ├── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
 │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
 │   ├── risingwave_rt v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/runtime) (*)
 │   └── tracing-opentelemetry v0.24.0 (*)
@@ -2905,7 +2916,8 @@ generic-array v0.14.7
 │       │   ├── scrypt v0.11.0 (*)
 │       │   ├── sqlx-core v0.7.1 (*)
 │       │   ├── sqlx-mysql v0.7.1 (*)
-│       │   └── sqlx-postgres v0.7.1 (*)
+│       │   ├── sqlx-postgres v0.7.1 (*)
+│       │   └── wasmtime-cache v20.0.0 (*)
 │       ├── sha2 v0.10.8
 │       │   ├── rust-embed-utils v8.4.0
 │       │   │   ├── rust-embed v8.4.0
@@ -2957,22 +2969,6 @@ generic-array v0.14.7
 ├── sec1 v0.7.3 (*)
 └── sqlx-mysql v0.7.1 (*)
 
-google-cloud-auth v0.15.0 (*)
-
-google-cloud-auth v0.16.0 (*)
-
-google-cloud-gax v0.17.0 (*)
-
-google-cloud-gax v0.19.0 (*)
-
-google-cloud-googleapis v0.13.0 (*)
-
-google-cloud-googleapis v0.15.0 (*)
-
-google-cloud-pubsub v0.25.0 (*)
-
-google-cloud-pubsub v0.28.1 (*)
-
 group v0.12.1 (*)
 
 group v0.13.0 (*)
@@ -3022,15 +3018,127 @@ hashbrown v0.12.3
     └── tower v0.4.13 (*)
 
 hashbrown v0.13.2
-└── halfbrown v0.2.4
-    ├── simd-json v0.13.3
-    │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
-    └── value-trait v0.8.0
-        └── simd-json v0.13.3 (*)
+├── halfbrown v0.2.4
+│   ├── simd-json v0.13.3
+│   │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   └── value-trait v0.8.0
+│       └── simd-json v0.13.3 (*)
+└── regalloc2 v0.9.3
+    └── cranelift-codegen v0.107.0
+        ├── cranelift-frontend v0.107.0
+        │   ├── cranelift-wasm v0.107.0 (*)
+        │   └── wasmtime-cranelift v20.0.0 (*)
+        ├── cranelift-native v0.107.0
+        │   └── wasmtime-cranelift v20.0.0 (*)
+        ├── cranelift-wasm v0.107.0 (*)
+        └── wasmtime-cranelift v20.0.0 (*)
 
-hashbrown v0.14.3 (*)
-
-hashbrown v0.14.3 (*)
+hashbrown v0.14.3
+├── arrow-array v48.0.1 (*)
+├── arrow-array v50.0.0 (*)
+├── arrow-array v52.0.0 (*)
+├── arrow-row v48.0.1 (*)
+├── arrow-row v50.0.0 (*)
+├── arrow-row v52.0.0 (*)
+├── cranelift-codegen v0.107.0 (*)
+├── dashmap v5.5.3 (*)
+├── datafusion v33.0.0 (*)
+├── datafusion-execution v33.0.0 (*)
+├── datafusion-optimizer v33.0.0 (*)
+├── datafusion-physical-expr v33.0.0 (*)
+├── datafusion-physical-plan v33.0.0 (*)
+├── foyer-common v0.8.1 (*)
+├── foyer-memory v0.6.1 (*)
+├── hashlink v0.8.4
+│   └── sqlx-core v0.7.1 (*)
+├── indexmap v2.2.6
+│   ├── arrow-json v48.0.1 (*)
+│   ├── bson v2.11.0 (https://github.com/risingwavelabs/bson-rust?rev=e5175ec#e5175ecf) (*)
+│   ├── datafusion v33.0.0 (*)
+│   ├── datafusion-physical-expr v33.0.0 (*)
+│   ├── datafusion-physical-plan v33.0.0 (*)
+│   ├── gimli v0.28.0
+│   │   ├── addr2line v0.21.0
+│   │   │   ├── backtrace v0.3.69
+│   │   │   │   ├── anyhow v1.0.86 (*)
+│   │   │   │   ├── failure v0.1.8
+│   │   │   │   │   └── plotlib v0.5.1
+│   │   │   │   │       └── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
+│   │   │   │   ├── parking_lot_core v0.9.8 (*)
+│   │   │   │   └── pprof v0.13.0 (*)
+│   │   │   └── wasmtime v20.0.0 (*)
+│   │   ├── cranelift-codegen v0.107.0 (*)
+│   │   ├── wasmtime v20.0.0 (*)
+│   │   ├── wasmtime-cranelift v20.0.0 (*)
+│   │   └── wasmtime-environ v20.0.0 (*)
+│   ├── h2 v0.3.26 (*)
+│   ├── h2 v0.4.4 (*)
+│   ├── inferno v0.11.16 (*)
+│   ├── object v0.33.0
+│   │   ├── wasmtime v20.0.0 (*)
+│   │   ├── wasmtime-cranelift v20.0.0 (*)
+│   │   ├── wasmtime-environ v20.0.0 (*)
+│   │   └── wasmtime-jit-debug v20.0.0
+│   │       ├── wasmtime v20.0.0 (*)
+│   │       └── wasmtime-runtime v20.0.0 (*)
+│   ├── petgraph v0.6.4 (*)
+│   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   ├── serde_yaml v0.9.25
+│   │   ├── risedev v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/risedevtool)
+│   │   ├── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
+│   │   ├── risingwave_ctl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/ctl) (*)
+│   │   └── risingwave_planner_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend/planner_test)
+│   │   [dev-dependencies]
+│   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   │   ├── risingwave_sqlparser v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/sqlparser) (*)
+│   │   └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
+│   ├── sqlx-core v0.7.1 (*)
+│   ├── toml_edit v0.19.15
+│   │   └── proc-macro-crate v1.3.1
+│   │       └── num_enum_derive v0.5.11 (proc-macro)
+│   │           └── num_enum v0.5.11
+│   │               └── rdkafka-sys v4.7.0+2.3.0
+│   │                   └── madsim-rdkafka v0.4.2+0.34.0 (*)
+│   ├── toml_edit v0.19.15
+│   │   └── toml v0.7.8
+│   │       └── icelake v0.0.10 (https://github.com/icelake-io/icelake?rev=07d53893d7788b4e41fc11efad8a6be828405c31#07d53893) (*)
+│   ├── toml_edit v0.21.1
+│   │   └── proc-macro-crate v3.1.0
+│   │       └── mysql-common-derive v0.31.0 (proc-macro) (*)
+│   ├── toml_edit v0.22.9
+│   │   └── toml v0.8.12
+│   │       ├── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
+│   │       ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+│   │       ├── risingwave_state_cleaning_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/state_cleaning_test)
+│   │       └── wasmtime-cache v20.0.0 (*)
+│   ├── wasmparser v0.202.0 (*)
+│   ├── wasmtime v20.0.0 (*)
+│   ├── wasmtime-environ v20.0.0 (*)
+│   ├── wasmtime-runtime v20.0.0 (*)
+│   ├── wasmtime-wit-bindgen v20.0.0 (*)
+│   └── wit-parser v0.202.0 (*)
+├── libflate_lz77 v2.1.0
+│   └── libflate v2.1.0
+│       ├── apache-avro v0.16.0 (https://github.com/risingwavelabs/avro?rev=25113ba88234a9ae23296e981d8302c290fdaa4b#25113ba8) (*)
+│       └── apache-avro v0.17.0 (https://github.com/apache/avro.git#fdab5db0) (*)
+├── lru v0.7.6 (https://github.com/risingwavelabs/lru-rs.git?rev=2682b85#2682b855)
+│   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+│   ├── risingwave_common_estimate_size v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/estimate_size) (*)
+│   ├── risingwave_rpc_client v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/rpc_client) (*)
+│   ├── risingwave_simulation v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/simulation)
+│   └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
+├── lru v0.12.0
+│   └── mysql_async v0.34.1 (*)
+├── metrics-util v0.17.0
+│   └── metrics-prometheus v0.7.0 (*)
+├── object v0.33.0 (*)
+├── ordered-multimap v0.7.1
+│   └── rust-ini v0.21.0
+│       └── reqsign v0.15.2 (*)
+├── parquet v48.0.1 (*)
+├── parquet v52.0.0 (*)
+├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
+└── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
 
 heck v0.3.3
 ├── bae v0.1.7 (proc-macro)
@@ -3087,6 +3195,9 @@ heck v0.4.1
 │   └── postgres-types v0.2.6 (*)
 ├── prost-build v0.11.9 (*)
 ├── prost-build v0.12.1 (*)
+├── pyo3-macros-backend v0.21.2
+│   └── pyo3-macros v0.21.2 (proc-macro)
+│       └── pyo3 v0.21.2 (*)
 ├── sea-bae v0.2.0 (proc-macro)
 │   └── sea-orm-macros v0.12.14 (proc-macro)
 │       └── sea-orm v0.12.14 (*)
@@ -3101,19 +3212,21 @@ heck v0.4.1
 │   └── snafu v0.7.5
 │       └── object_store v0.7.1 (*)
 ├── sqlx-macros-core v0.7.1 (*)
-└── strum_macros v0.25.3 (proc-macro)
-    ├── apache-avro v0.16.0 (https://github.com/risingwavelabs/avro?rev=25113ba88234a9ae23296e981d8302c290fdaa4b#25113ba8) (*)
-    ├── comfy-table v7.1.0 (*)
-    ├── datafusion-expr v33.0.0 (*)
-    ├── speedate v0.14.0
-    │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
-    │   └── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
-    └── strum v0.25.0
-        ├── apache-avro v0.16.0 (https://github.com/risingwavelabs/avro?rev=25113ba88234a9ae23296e981d8302c290fdaa4b#25113ba8) (*)
-        ├── comfy-table v7.1.0 (*)
-        ├── datafusion-expr v33.0.0 (*)
-        ├── sea-orm v0.12.14 (*)
-        └── speedate v0.14.0 (*)
+├── strum_macros v0.25.3 (proc-macro)
+│   ├── apache-avro v0.16.0 (https://github.com/risingwavelabs/avro?rev=25113ba88234a9ae23296e981d8302c290fdaa4b#25113ba8) (*)
+│   ├── comfy-table v7.1.0 (*)
+│   ├── datafusion-expr v33.0.0 (*)
+│   ├── speedate v0.14.0
+│   │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
+│   │   └── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
+│   └── strum v0.25.0
+│       ├── apache-avro v0.16.0 (https://github.com/risingwavelabs/avro?rev=25113ba88234a9ae23296e981d8302c290fdaa4b#25113ba8) (*)
+│       ├── comfy-table v7.1.0 (*)
+│       ├── datafusion-expr v33.0.0 (*)
+│       ├── sea-orm v0.12.14 (*)
+│       └── speedate v0.14.0 (*)
+├── wasmtime-wit-bindgen v20.0.0 (*)
+└── wiggle-generate v20.0.0 (*)
 
 heck v0.5.0
 ├── prost-build v0.13.1 (*)
@@ -3216,7 +3329,19 @@ indexmap v1.9.3 (*)
 
 indexmap v2.2.6 (*)
 
-indexmap v2.2.6 (*)
+io-lifetimes v1.0.11
+└── rustix v0.37.26 (*)
+
+io-lifetimes v2.0.3
+├── cap-fs-ext v3.0.0 (*)
+├── cap-primitives v3.0.0 (*)
+├── cap-std v3.0.0 (*)
+├── fs-set-times v0.20.1 (*)
+├── io-extras v0.18.1
+│   ├── cap-primitives v3.0.0 (*)
+│   └── cap-std v3.0.0 (*)
+├── system-interface v0.27.2 (*)
+└── wasi-common v20.0.0 (*)
 
 itertools v0.10.5
 ├── criterion v0.5.1 (*)
@@ -3246,6 +3371,7 @@ itertools v0.12.1
 ├── await-tree v0.2.1 (*)
 ├── bindgen v0.69.4 (*)
 ├── const-currying v0.0.4 (proc-macro) (*)
+├── cranelift-wasm v0.107.0 (*)
 ├── pgwire v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/pgwire) (*)
 ├── risedev v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/risedevtool)
 ├── risedev-config v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/risedevtool/config)
@@ -3323,10 +3449,12 @@ log v0.4.21
 ├── sqlx-mysql v0.7.1 (*)
 ├── sqlx-postgres v0.7.1 (*)
 ├── sqlx-sqlite v0.7.1 (*)
-└── tracing v0.1.40
-    ├── sqlx-mysql v0.7.1 (*)
-    ├── sqlx-postgres v0.7.1 (*)
-    └── sqlx-sqlite v0.7.1 (*)
+├── tracing v0.1.40
+│   ├── sqlx-mysql v0.7.1 (*)
+│   ├── sqlx-postgres v0.7.1 (*)
+│   └── sqlx-sqlite v0.7.1 (*)
+├── wit-parser v0.202.0 (*)
+└── witx v0.9.1 (*)
 
 log v0.4.21
 ├── apache-avro v0.16.0 (https://github.com/risingwavelabs/avro?rev=25113ba88234a9ae23296e981d8302c290fdaa4b#25113ba8) (*)
@@ -3334,6 +3462,9 @@ log v0.4.21
 ├── async-io v1.13.0 (*)
 ├── async-std v1.12.0 (*)
 ├── blocking v1.3.1 (*)
+├── cranelift-codegen v0.107.0 (*)
+├── cranelift-frontend v0.107.0 (*)
+├── cranelift-wasm v0.107.0 (*)
 ├── datafusion v33.0.0 (*)
 ├── datafusion-execution v33.0.0 (*)
 ├── datafusion-optimizer v33.0.0 (*)
@@ -3375,6 +3506,7 @@ log v0.4.21
 ├── pprof v0.13.0 (*)
 ├── pulsar v6.3.0 (*)
 ├── redis v0.25.1 (*)
+├── regalloc2 v0.9.3 (*)
 ├── reqsign v0.15.2 (*)
 ├── reqwest v0.11.20 (*)
 ├── reqwest v0.12.4 (*)
@@ -3387,7 +3519,6 @@ log v0.4.21
 │   ├── mongodb v2.8.2 (*)
 │   ├── reqwest v0.11.20 (*)
 │   ├── tokio-rustls v0.24.1 (*)
-│   ├── tonic v0.10.2 (*)
 │   └── yup-oauth2 v8.3.0 (*)
 ├── rustls v0.22.4 (*)
 ├── rustls v0.23.5 (*)
@@ -3406,6 +3537,7 @@ log v0.4.21
 ├── sqlx-sqlite v0.7.1 (*)
 ├── tokio-postgres v0.7.10 (https://github.com/madsim-rs/rust-postgres.git?rev=ac00d88#ac00d886) (*)
 ├── tracing v0.1.40
+│   ├── arrow-udf-flight v0.1.0 (*)
 │   ├── async-nats v0.35.0 (*)
 │   ├── await-tree v0.2.1 (*)
 │   ├── aws-config v1.0.1 (*)
@@ -3429,12 +3561,9 @@ log v0.4.21
 │   ├── foyer-memory v0.6.1 (*)
 │   ├── foyer-storage v0.9.1 (*)
 │   ├── ginepro v0.7.2 (*)
-│   ├── google-cloud-auth v0.15.0 (*)
 │   ├── google-cloud-auth v0.16.0 (*)
 │   ├── google-cloud-bigquery v0.12.0 (*)
-│   ├── google-cloud-gax v0.17.0 (*)
 │   ├── google-cloud-gax v0.19.0 (*)
-│   ├── google-cloud-pubsub v0.25.0 (*)
 │   ├── google-cloud-pubsub v0.28.1 (*)
 │   ├── h2 v0.3.26 (*)
 │   ├── h2 v0.4.4 (*)
@@ -3507,6 +3636,8 @@ log v0.4.21
 │   ├── tracing-subscriber v0.3.17 (*)
 │   ├── trust-dns-proto v0.23.2 (*)
 │   ├── trust-dns-resolver v0.23.2 (*)
+│   ├── wasi-common v20.0.0 (*)
+│   ├── wiggle v20.0.0 (*)
 │   └── workspace-config v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/workspace-config)
 │       ├── risingwave_cmd v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/cmd) (*)
 │       └── risingwave_cmd_all v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/cmd_all)
@@ -3516,6 +3647,12 @@ log v0.4.21
 │   └── tracing-opentelemetry v0.24.0 (*)
 ├── trust-dns-proto v0.21.2 (*)
 ├── trust-dns-resolver v0.21.2 (*)
+├── wasi-common v20.0.0 (*)
+├── wasmtime v20.0.0 (*)
+├── wasmtime-cache v20.0.0 (*)
+├── wasmtime-cranelift v20.0.0 (*)
+├── wasmtime-environ v20.0.0 (*)
+├── wasmtime-runtime v20.0.0 (*)
 ├── workspace-config v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/utils/workspace-config) (*)
 └── yup-oauth2 v8.3.0 (*)
 
@@ -3603,6 +3740,11 @@ num-iter v0.1.43
 num-iter v0.1.43
 └── num v0.4.1 (*)
 
+object v0.32.1
+└── backtrace v0.3.69 (*)
+
+object v0.33.0 (*)
+
 ordered-float v2.10.0
 ├── serde-value v0.7.0
 │   └── openidconnect v3.4.0 (*)
@@ -3680,6 +3822,27 @@ proc-macro-crate v1.3.1 (*)
 
 proc-macro-crate v3.1.0 (*)
 
+proc-macro-error v0.4.12
+└── genawaiter-proc-macro v0.99.1 (proc-macro)
+    └── genawaiter v0.99.1
+        └── arrow-udf-wasm v0.2.2 (*)
+
+proc-macro-error v1.0.4
+├── bae v0.1.7 (proc-macro) (*)
+├── crepe v0.1.8 (proc-macro) (*)
+├── minitrace-macro v0.6.7 (proc-macro)
+│   └── minitrace v0.6.7 (*)
+├── mysql-common-derive v0.31.0 (proc-macro) (*)
+├── ouroboros_macro v0.17.2 (proc-macro) (*)
+├── risingwave_common_proc_macro v1.11.0-alpha (proc-macro) (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/proc_macro) (*)
+└── sea-bae v0.2.0 (proc-macro) (*)
+
+proc-macro-error-attr v0.4.12 (proc-macro)
+└── proc-macro-error v0.4.12 (*)
+
+proc-macro-error-attr v1.0.4 (proc-macro)
+└── proc-macro-error v1.0.4 (*)
+
 proc-macro2 v1.0.85
 └── syn v1.0.109
     [dev-dependencies]
@@ -3694,7 +3857,6 @@ proc-macro2 v1.0.85
 ├── async-stream-impl v0.3.5 (proc-macro)
 │   └── async-stream v0.3.5
 │       ├── gcp-bigquery-client v0.18.0 (*)
-│       ├── google-cloud-pubsub v0.25.0 (*)
 │       ├── google-cloud-pubsub v0.28.1 (*)
 │       ├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
 │       ├── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
@@ -3703,6 +3865,7 @@ proc-macro2 v1.0.85
 │       ├── tonic v0.11.0 (*)
 │       └── tonic v0.12.1 (*)
 ├── async-trait v0.1.73 (proc-macro)
+│   ├── arrow-udf-wasm v0.2.2 (*)
 │   ├── axum v0.6.20 (*)
 │   ├── axum v0.7.4 (*)
 │   ├── axum-core v0.3.4 (*)
@@ -3713,16 +3876,12 @@ proc-macro2 v1.0.85
 │   ├── deltalake-core v0.17.0 (https://github.com/risingwavelabs/delta-rs?rev=5c2dccd4640490202ffe98adbd13b09cef8e007b#5c2dccd4) (*)
 │   ├── gcp-bigquery-client v0.18.0 (*)
 │   ├── ginepro v0.7.2 (*)
-│   ├── google-cloud-auth v0.15.0 (*)
 │   ├── google-cloud-auth v0.16.0 (*)
 │   ├── google-cloud-bigquery v0.12.0 (*)
 │   ├── google-cloud-token v0.1.2
-│   │   ├── google-cloud-auth v0.15.0 (*)
 │   │   ├── google-cloud-auth v0.16.0 (*)
 │   │   ├── google-cloud-bigquery v0.12.0 (*)
-│   │   ├── google-cloud-gax v0.17.0 (*)
 │   │   ├── google-cloud-gax v0.19.0 (*)
-│   │   ├── google-cloud-pubsub v0.25.0 (*)
 │   │   └── google-cloud-pubsub v0.28.1 (*)
 │   ├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
 │   ├── iceberg-catalog-rest v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
@@ -3770,6 +3929,8 @@ proc-macro2 v1.0.85
 │   ├── tonic v0.12.1 (*)
 │   ├── trust-dns-proto v0.21.2 (*)
 │   ├── trust-dns-proto v0.23.2 (*)
+│   ├── wasmtime v20.0.0 (*)
+│   ├── wiggle v20.0.0 (*)
 │   └── yup-oauth2 v8.3.0 (*)
 ├── auto_enums v0.8.5 (proc-macro)
 │   ├── const-currying v0.0.4 (proc-macro) (*)
@@ -3838,9 +3999,7 @@ proc-macro2 v1.0.85
 │       ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
 │       └── tiberius v0.12.2 (*)
 ├── failure_derive v0.1.8 (proc-macro)
-│   └── failure v0.1.8
-│       └── plotlib v0.5.1
-│           └── risingwave_bench v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/bench)
+│   └── failure v0.1.8 (*)
 ├── fix-hidden-lifetime-bug-proc_macros v0.2.5 (proc-macro)
 │   └── fix-hidden-lifetime-bug v0.2.5
 │       └── deltalake-core v0.17.0 (https://github.com/risingwavelabs/delta-rs?rev=5c2dccd4640490202ffe98adbd13b09cef8e007b#5c2dccd4) (*)
@@ -3865,6 +4024,7 @@ proc-macro2 v1.0.85
 │       └── risingwave_hummock_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage/hummock_test) (*)
 ├── futures-macro v0.3.30 (proc-macro)
 │   └── futures-util v0.3.30 (*)
+├── genawaiter-proc-macro v0.99.1 (proc-macro) (*)
 ├── inherent v1.0.10 (proc-macro)
 │   └── sea-query v0.30.7 (*)
 ├── linkme-impl v0.3.22 (proc-macro)
@@ -3874,8 +4034,7 @@ proc-macro2 v1.0.85
 │       └── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
 ├── madsim-macros v0.2.12 (proc-macro) (*)
 ├── madsim-tonic-build v0.5.0+0.12.0 (https://github.com/BugenZhao/madsim?rev=6eb6876#6eb68764) (*)
-├── minitrace-macro v0.6.7 (proc-macro)
-│   └── minitrace v0.6.7 (*)
+├── minitrace-macro v0.6.7 (proc-macro) (*)
 ├── mockall_derive v0.11.4 (proc-macro)
 │   └── mockall v0.11.4 (*)
 ├── mysql-common-derive v0.31.0 (proc-macro) (*)
@@ -3907,21 +4066,17 @@ proc-macro2 v1.0.85
 ├── postgres-derive v0.4.5 (proc-macro) (*)
 ├── prettyplease v0.1.25 (*)
 ├── prettyplease v0.2.15 (*)
-├── proc-macro-error v1.0.4
-│   ├── bae v0.1.7 (proc-macro) (*)
-│   ├── crepe v0.1.8 (proc-macro) (*)
-│   ├── minitrace-macro v0.6.7 (proc-macro) (*)
-│   ├── mysql-common-derive v0.31.0 (proc-macro) (*)
-│   ├── ouroboros_macro v0.17.2 (proc-macro) (*)
-│   ├── risingwave_common_proc_macro v1.11.0-alpha (proc-macro) (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/proc_macro) (*)
-│   └── sea-bae v0.2.0 (proc-macro) (*)
-├── proc-macro-error-attr v1.0.4 (proc-macro)
-│   └── proc-macro-error v1.0.4 (*)
+├── proc-macro-error v0.4.12 (*)
+├── proc-macro-error v1.0.4 (*)
+├── proc-macro-error-attr v0.4.12 (proc-macro) (*)
+├── proc-macro-error-attr v1.0.4 (proc-macro) (*)
 ├── prost-derive v0.11.9 (proc-macro) (*)
 ├── prost-derive v0.12.1 (proc-macro) (*)
 ├── prost-derive v0.13.1 (proc-macro) (*)
 ├── prost-helpers v0.1.0 (proc-macro) (/Users/bugenzhao/Developer/S/risingwave-opensource/src/prost/helpers)
 │   └── risingwave_pb v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/prost) (*)
+├── pyo3-macros v0.21.2 (proc-macro) (*)
+├── pyo3-macros-backend v0.21.2 (*)
 ├── quote v1.0.36
 │   ├── apache-avro-derive v0.17.0 (proc-macro) (https://github.com/apache/avro.git#fdab5db0) (*)
 │   ├── async-attributes v1.1.2 (proc-macro)
@@ -3968,6 +4123,7 @@ proc-macro2 v1.0.85
 │   ├── frunk_proc_macros v0.1.2 (proc-macro) (*)
 │   ├── futures-async-stream-macro v0.2.9 (proc-macro) (*)
 │   ├── futures-macro v0.3.30 (proc-macro) (*)
+│   ├── genawaiter-proc-macro v0.99.1 (proc-macro) (*)
 │   ├── inherent v1.0.10 (proc-macro) (*)
 │   ├── linkme-impl v0.3.22 (proc-macro) (*)
 │   ├── madsim-macros v0.2.12 (proc-macro) (*)
@@ -3981,12 +4137,16 @@ proc-macro2 v1.0.85
 │   ├── parse-display-derive v0.9.0 (proc-macro) (*)
 │   ├── pin-project-internal v1.1.3 (proc-macro) (*)
 │   ├── postgres-derive v0.4.5 (proc-macro) (*)
+│   ├── proc-macro-error v0.4.12 (*)
 │   ├── proc-macro-error v1.0.4 (*)
+│   ├── proc-macro-error-attr v0.4.12 (proc-macro) (*)
 │   ├── proc-macro-error-attr v1.0.4 (proc-macro) (*)
 │   ├── prost-derive v0.11.9 (proc-macro) (*)
 │   ├── prost-derive v0.12.1 (proc-macro) (*)
 │   ├── prost-derive v0.13.1 (proc-macro) (*)
 │   ├── prost-helpers v0.1.0 (proc-macro) (/Users/bugenzhao/Developer/S/risingwave-opensource/src/prost/helpers) (*)
+│   ├── pyo3-macros v0.21.2 (proc-macro) (*)
+│   ├── pyo3-macros-backend v0.21.2 (*)
 │   ├── ref-cast-impl v1.0.20 (proc-macro)
 │   │   └── ref-cast v1.0.20
 │   │       └── simd-json v0.13.3 (*)
@@ -4004,6 +4164,14 @@ proc-macro2 v1.0.85
 │   ├── sealed v0.5.0 (proc-macro) (*)
 │   ├── serde_default v0.1.0 (proc-macro) (*)
 │   ├── serde_derive v1.0.203 (proc-macro)
+│   │   ├── cranelift-entity v0.107.0
+│   │   │   ├── cranelift-bforest v0.107.0
+│   │   │   │   └── cranelift-codegen v0.107.0 (*)
+│   │   │   ├── cranelift-codegen v0.107.0 (*)
+│   │   │   ├── cranelift-wasm v0.107.0 (*)
+│   │   │   ├── wasmtime-cranelift v20.0.0 (*)
+│   │   │   ├── wasmtime-environ v20.0.0 (*)
+│   │   │   └── wasmtime-types v20.0.0 (*)
 │   │   ├── criterion v0.5.1 (*)
 │   │   ├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
 │   │   ├── iceberg-catalog-rest v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
@@ -4031,6 +4199,7 @@ proc-macro2 v1.0.85
 │   │   │   ├── ciborium v0.2.1 (*)
 │   │   │   ├── clickhouse v0.11.5 (https://github.com/risingwavelabs/clickhouse.rs?rev=d38c8b6391af098b724c114e5a4746aedab6ab8e#d38c8b63) (*)
 │   │   │   ├── console-subscriber v0.4.0 (*)
+│   │   │   ├── cranelift-entity v0.107.0 (*)
 │   │   │   ├── criterion v0.5.1 (*)
 │   │   │   ├── csv v1.3.0
 │   │   │   │   ├── arrow-csv v48.0.1 (*)
@@ -4055,8 +4224,9 @@ proc-macro2 v1.0.85
 │   │   │   │   │   │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
 │   │   │   │   │   │   ├── risingwave_common_metrics v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/metrics) (*)
 │   │   │   │   │   │   └── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
-│   │   │   │   │   └── jwalk v0.8.1
-│   │   │   │   │       └── dircpy v0.3.16 (*)
+│   │   │   │   │   ├── jwalk v0.8.1
+│   │   │   │   │   │   └── dircpy v0.3.16 (*)
+│   │   │   │   │   └── wasmtime v20.0.0 (*)
 │   │   │   │   ├── risingwave_batch v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/batch) (*)
 │   │   │   │   ├── risingwave_common v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common) (*)
 │   │   │   │   ├── risingwave_compute v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/compute) (*)
@@ -4119,8 +4289,8 @@ proc-macro2 v1.0.85
 │   │   │   ├── foyer-common v0.8.1 (*)
 │   │   │   ├── foyer-memory v0.6.1 (*)
 │   │   │   ├── foyer-storage v0.9.1 (*)
+│   │   │   ├── fxprof-processed-profile v0.6.0 (*)
 │   │   │   ├── gcp-bigquery-client v0.18.0 (*)
-│   │   │   ├── google-cloud-auth v0.15.0 (*)
 │   │   │   ├── google-cloud-auth v0.16.0 (*)
 │   │   │   ├── google-cloud-bigquery v0.12.0 (*)
 │   │   │   ├── halfbrown v0.2.4 (*)
@@ -4184,6 +4354,7 @@ proc-macro2 v1.0.85
 │   │   │   ├── risingwave_pb v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/prost) (*)
 │   │   │   ├── risingwave_planner_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend/planner_test)
 │   │   │   ├── risingwave_simulation v0.1.0 (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/simulation)
+│   │   │   ├── risingwave_sqlparser v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/sqlparser) (*)
 │   │   │   ├── risingwave_state_cleaning_test v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/tests/state_cleaning_test)
 │   │   │   ├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
 │   │   │   ├── risingwave_stream v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/stream) (*)
@@ -4210,8 +4381,8 @@ proc-macro2 v1.0.85
 │   │   │   │   ├── console-subscriber v0.4.0 (*)
 │   │   │   │   ├── criterion v0.5.1 (*)
 │   │   │   │   ├── deltalake-core v0.17.0 (https://github.com/risingwavelabs/delta-rs?rev=5c2dccd4640490202ffe98adbd13b09cef8e007b#5c2dccd4) (*)
+│   │   │   │   ├── fxprof-processed-profile v0.6.0 (*)
 │   │   │   │   ├── gcp-bigquery-client v0.18.0 (*)
-│   │   │   │   ├── google-cloud-auth v0.15.0 (*)
 │   │   │   │   ├── google-cloud-auth v0.16.0 (*)
 │   │   │   │   ├── google-cloud-bigquery v0.12.0 (*)
 │   │   │   │   ├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
@@ -4264,6 +4435,7 @@ proc-macro2 v1.0.85
 │   │   │   │   ├── tinytemplate v1.2.1
 │   │   │   │   │   └── criterion v0.5.1 (*)
 │   │   │   │   ├── tracing-subscriber v0.3.17 (*)
+│   │   │   │   ├── wasmtime v20.0.0 (*)
 │   │   │   │   └── yup-oauth2 v8.3.0 (*)
 │   │   │   ├── serde_nanos v0.1.3
 │   │   │   │   └── async-nats v0.35.0 (*)
@@ -4287,6 +4459,9 @@ proc-macro2 v1.0.85
 │   │   │   ├── serde_yaml v0.9.25 (*)
 │   │   │   ├── simd-json v0.13.3 (*)
 │   │   │   ├── smallvec v1.13.1
+│   │   │   │   ├── cranelift-codegen v0.107.0 (*)
+│   │   │   │   ├── cranelift-frontend v0.107.0 (*)
+│   │   │   │   ├── cranelift-wasm v0.107.0 (*)
 │   │   │   │   ├── governor v0.6.0 (*)
 │   │   │   │   ├── hyper v1.4.1 (*)
 │   │   │   │   ├── jsonbb v0.1.4 (*)
@@ -4296,6 +4471,7 @@ proc-macro2 v1.0.85
 │   │   │   │   ├── parking_lot_core v0.8.6 (*)
 │   │   │   │   ├── parking_lot_core v0.9.8 (*)
 │   │   │   │   ├── pprof v0.13.0 (*)
+│   │   │   │   ├── regalloc2 v0.9.3 (*)
 │   │   │   │   ├── risingwave_expr v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/core) (*)
 │   │   │   │   ├── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
 │   │   │   │   ├── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
@@ -4337,6 +4513,7 @@ proc-macro2 v1.0.85
 │   │   │   │   ├── datafusion-physical-expr v33.0.0 (*)
 │   │   │   │   ├── datafusion-physical-plan v33.0.0 (*)
 │   │   │   │   ├── debugid v0.8.0
+│   │   │   │   │   ├── fxprof-processed-profile v0.6.0 (*)
 │   │   │   │   │   └── symbolic-common v12.4.0
 │   │   │   │   │       └── symbolic-demangle v12.4.0
 │   │   │   │   │           └── pprof v0.13.0 (*)
@@ -4369,6 +4546,10 @@ proc-macro2 v1.0.85
 │   │   │   │   └── tiberius v0.12.2 (*)
 │   │   │   │   [dev-dependencies]
 │   │   │   │   └── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
+│   │   │   ├── wasmtime v20.0.0 (*)
+│   │   │   ├── wasmtime-cache v20.0.0 (*)
+│   │   │   ├── wasmtime-environ v20.0.0 (*)
+│   │   │   ├── wasmtime-types v20.0.0 (*)
 │   │   │   └── yup-oauth2 v8.3.0 (*)
 │   │   │   [dev-dependencies]
 │   │   │   ├── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
@@ -4378,16 +4559,23 @@ proc-macro2 v1.0.85
 │   │   │   ├── serde_json v1.0.117
 │   │   │   │   ├── apache-avro-derive v0.17.0 (proc-macro) (https://github.com/apache/avro.git#fdab5db0) (*)
 │   │   │   │   ├── sqlx-macros-core v0.7.1 (*)
-│   │   │   │   └── sqlx-postgres v0.7.1 (*)
+│   │   │   │   ├── sqlx-postgres v0.7.1 (*)
+│   │   │   │   └── wit-parser v0.202.0 (*)
 │   │   │   │   [build-dependencies]
 │   │   │   │   └── jsonschema-transpiler v1.10.0 (https://github.com/mozilla/jsonschema-transpiler?rev=c1a89d720d118843d8bcca51084deb0ed223e4b4#c1a89d72) (*)
 │   │   │   ├── sqlx-macros-core v0.7.1 (*)
 │   │   │   ├── sqlx-mysql v0.7.1 (*)
 │   │   │   ├── sqlx-postgres v0.7.1 (*)
-│   │   │   └── sqlx-sqlite v0.7.1 (*)
+│   │   │   ├── sqlx-sqlite v0.7.1 (*)
+│   │   │   └── wit-parser v0.202.0 (*)
 │   │   │   [build-dependencies]
 │   │   │   └── jsonschema-transpiler v1.10.0 (https://github.com/mozilla/jsonschema-transpiler?rev=c1a89d720d118843d8bcca51084deb0ed223e4b4#c1a89d72) (*)
-│   │   └── serde_with v3.8.0 (*)
+│   │   ├── serde_with v3.8.0 (*)
+│   │   ├── wasmtime v20.0.0 (*)
+│   │   ├── wasmtime-cache v20.0.0 (*)
+│   │   ├── wasmtime-environ v20.0.0 (*)
+│   │   ├── wasmtime-types v20.0.0 (*)
+│   │   └── wit-parser v0.202.0 (*)
 │   ├── serde_derive_internals v0.26.0
 │   │   └── clickhouse-derive v0.1.1 (proc-macro) (https://github.com/risingwavelabs/clickhouse.rs?rev=d38c8b6391af098b724c114e5a4746aedab6ab8e#d38c8b63) (*)
 │   ├── serde_repr v0.1.16 (proc-macro)
@@ -4425,12 +4613,15 @@ proc-macro2 v1.0.85
 │   │   ├── enum-display-macro v0.1.3 (proc-macro) (*)
 │   │   ├── failure_derive v0.1.8 (proc-macro) (*)
 │   │   ├── fix-hidden-lifetime-bug-proc_macros v0.2.5 (proc-macro) (*)
+│   │   ├── genawaiter-proc-macro v0.99.1 (proc-macro) (*)
 │   │   ├── madsim-macros v0.2.12 (proc-macro) (*)
 │   │   ├── minitrace-macro v0.6.7 (proc-macro) (*)
 │   │   ├── mockall_derive v0.11.4 (proc-macro) (*)
 │   │   ├── num_enum_derive v0.5.11 (proc-macro) (*)
 │   │   ├── prettyplease v0.1.25 (*)
+│   │   ├── proc-macro-error v0.4.12 (*)
 │   │   ├── proc-macro-error v1.0.4 (*)
+│   │   ├── proc-macro-error-attr v0.4.12 (proc-macro) (*)
 │   │   ├── prost-build v0.11.9 (*)
 │   │   ├── prost-derive v0.11.9 (proc-macro) (*)
 │   │   ├── risingwave_common_proc_macro v1.11.0-alpha (proc-macro) (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/proc_macro) (*)
@@ -4444,6 +4635,8 @@ proc-macro2 v1.0.85
 │   │   ├── sqlparser_derive v0.1.1 (proc-macro) (*)
 │   │   ├── sqlx-macros v0.7.1 (proc-macro) (*)
 │   │   ├── sqlx-macros-core v0.7.1 (*)
+│   │   ├── syn-mid v0.5.4
+│   │   │   └── proc-macro-error-attr v0.4.12 (proc-macro) (*)
 │   │   ├── synstructure v0.12.6
 │   │   │   └── failure_derive v0.1.8 (proc-macro) (*)
 │   │   ├── tracing-test-macro v0.2.4 (proc-macro)
@@ -4495,6 +4688,8 @@ proc-macro2 v1.0.85
 │   │   ├── prost-derive v0.12.1 (proc-macro) (*)
 │   │   ├── prost-derive v0.13.1 (proc-macro) (*)
 │   │   ├── prost-helpers v0.1.0 (proc-macro) (/Users/bugenzhao/Developer/S/risingwave-opensource/src/prost/helpers) (*)
+│   │   ├── pyo3-macros v0.21.2 (proc-macro) (*)
+│   │   ├── pyo3-macros-backend v0.21.2 (*)
 │   │   ├── ref-cast-impl v1.0.20 (proc-macro) (*)
 │   │   ├── risingwave-fields-derive v1.11.0-alpha (proc-macro) (/Users/bugenzhao/Developer/S/risingwave-opensource/src/common/fields-derive) (*)
 │   │   ├── risingwave_expr_macro v0.1.0 (proc-macro) (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/macro) (*)
@@ -4516,8 +4711,10 @@ proc-macro2 v1.0.85
 │   │   │   └── thiserror v1.0.61
 │   │   │       ├── apache-avro v0.16.0 (https://github.com/risingwavelabs/avro?rev=25113ba88234a9ae23296e981d8302c290fdaa4b#25113ba8) (*)
 │   │   │       ├── apache-avro v0.17.0 (https://github.com/apache/avro.git#fdab5db0) (*)
+│   │   │       ├── arrow-udf-flight v0.1.0 (*)
 │   │   │       ├── async-nats v0.35.0 (*)
 │   │   │       ├── aws-msk-iam-sasl-signer v1.0.0 (*)
+│   │   │       ├── bcc v0.0.33 (*)
 │   │   │       ├── clickhouse v0.11.5 (https://github.com/risingwavelabs/clickhouse.rs?rev=d38c8b6391af098b724c114e5a4746aedab6ab8e#d38c8b63) (*)
 │   │   │       ├── deltalake-core v0.17.0 (https://github.com/risingwavelabs/delta-rs?rev=5c2dccd4640490202ffe98adbd13b09cef8e007b#5c2dccd4) (*)
 │   │   │       ├── dialoguer v0.11.0 (*)
@@ -4525,13 +4722,10 @@ proc-macro2 v1.0.85
 │   │   │       ├── foyer-storage v0.9.1 (*)
 │   │   │       ├── gcp-bigquery-client v0.18.0 (*)
 │   │   │       ├── ginepro v0.7.2 (*)
-│   │   │       ├── google-cloud-auth v0.15.0 (*)
 │   │   │       ├── google-cloud-auth v0.16.0 (*)
 │   │   │       ├── google-cloud-bigquery v0.12.0 (*)
-│   │   │       ├── google-cloud-gax v0.17.0 (*)
 │   │   │       ├── google-cloud-gax v0.19.0 (*)
 │   │   │       ├── google-cloud-metadata v0.5.0 (*)
-│   │   │       ├── google-cloud-pubsub v0.25.0 (*)
 │   │   │       ├── google-cloud-pubsub v0.28.1 (*)
 │   │   │       ├── jni v0.21.1 (*)
 │   │   │       ├── memcomparable v0.2.0 (*)
@@ -4590,7 +4784,13 @@ proc-macro2 v1.0.85
 │   │   │       ├── trust-dns-proto v0.21.2 (*)
 │   │   │       ├── trust-dns-proto v0.23.2 (*)
 │   │   │       ├── trust-dns-resolver v0.21.2 (*)
-│   │   │       └── trust-dns-resolver v0.23.2 (*)
+│   │   │       ├── trust-dns-resolver v0.23.2 (*)
+│   │   │       ├── wasi-common v20.0.0 (*)
+│   │   │       ├── wasmtime-cranelift v20.0.0 (*)
+│   │   │       ├── wasmtime-environ v20.0.0 (*)
+│   │   │       ├── wasmtime-types v20.0.0 (*)
+│   │   │       ├── wiggle v20.0.0 (*)
+│   │   │       └── witx v0.9.1 (*)
 │   │   ├── tokio-macros v2.4.0 (proc-macro)
 │   │   │   └── tokio v1.39.2 (*)
 │   │   ├── tonic-build v0.12.1 (*)
@@ -4606,8 +4806,20 @@ proc-macro2 v1.0.85
 │   │   │       ├── iceberg v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
 │   │   │       ├── iceberg-catalog-rest v0.2.0 (https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e) (*)
 │   │   │       └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   │   ├── wasmtime-component-macro v20.0.0 (proc-macro) (*)
+│   │   ├── wasmtime-versioned-export-macros v20.0.0 (proc-macro)
+│   │   │   ├── wasmtime-cranelift v20.0.0 (*)
+│   │   │   ├── wasmtime-fiber v20.0.0 (*)
+│   │   │   ├── wasmtime-jit-debug v20.0.0 (*)
+│   │   │   └── wasmtime-runtime v20.0.0 (*)
+│   │   │   [build-dependencies]
+│   │   │   ├── wasmtime-fiber v20.0.0 (*)
+│   │   │   └── wasmtime-runtime v20.0.0 (*)
+│   │   ├── wiggle-generate v20.0.0 (*)
+│   │   ├── wiggle-macro v20.0.0 (proc-macro) (*)
 │   │   └── with_options v1.11.0-alpha (proc-macro) (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector/with_options)
 │   │       └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
+│   ├── syn-mid v0.5.4 (*)
 │   ├── synstructure v0.12.6 (*)
 │   ├── thiserror-ext-derive v0.1.2 (proc-macro) (*)
 │   ├── thiserror-impl v1.0.61 (proc-macro) (*)
@@ -4618,6 +4830,10 @@ proc-macro2 v1.0.85
 │   ├── typed-builder v0.10.0 (proc-macro) (*)
 │   ├── typed-builder-macro v0.16.2 (proc-macro) (*)
 │   ├── typed-builder-macro v0.18.2 (proc-macro) (*)
+│   ├── wasmtime-component-macro v20.0.0 (proc-macro) (*)
+│   ├── wasmtime-versioned-export-macros v20.0.0 (proc-macro) (*)
+│   ├── wiggle-generate v20.0.0 (*)
+│   ├── wiggle-macro v20.0.0 (proc-macro) (*)
 │   └── with_options v1.11.0-alpha (proc-macro) (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector/with_options) (*)
 │   [dev-dependencies]
 │   └── risingwave_connector v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector) (*)
@@ -4650,6 +4866,7 @@ proc-macro2 v1.0.85
 ├── strum_macros v0.26.4 (proc-macro) (*)
 ├── syn v1.0.109 (*)
 ├── syn v2.0.66 (*)
+├── syn-mid v0.5.4 (*)
 ├── synstructure v0.12.6 (*)
 ├── thiserror-ext-derive v0.1.2 (proc-macro) (*)
 ├── thiserror-impl v1.0.61 (proc-macro) (*)
@@ -4659,6 +4876,10 @@ proc-macro2 v1.0.85
 ├── typed-builder v0.10.0 (proc-macro) (*)
 ├── typed-builder-macro v0.16.2 (proc-macro) (*)
 ├── typed-builder-macro v0.18.2 (proc-macro) (*)
+├── wasmtime-component-macro v20.0.0 (proc-macro) (*)
+├── wasmtime-versioned-export-macros v20.0.0 (proc-macro) (*)
+├── wiggle-generate v20.0.0 (*)
+├── wiggle-macro v20.0.0 (proc-macro) (*)
 └── with_options v1.11.0-alpha (proc-macro) (/Users/bugenzhao/Developer/S/risingwave-opensource/src/connector/with_options) (*)
 
 prost v0.11.9 (*)
@@ -4687,8 +4908,6 @@ prost-types v0.11.9 (*)
 
 prost-types v0.12.1 (*)
 
-prost-types v0.12.1 (*)
-
 prost-types v0.13.1 (*)
 
 prost-types v0.13.1 (*)
@@ -4705,6 +4924,8 @@ rand v0.8.5
 ├── apache-avro v0.17.0 (https://github.com/apache/avro.git#fdab5db0) (*)
 ├── async-nats v0.35.0 (*)
 ├── bson v2.11.0 (https://github.com/risingwavelabs/bson-rust?rev=e5175ec#e5175ecf) (*)
+├── cap-rand v3.0.0
+│   └── wasi-common v20.0.0 (*)
 ├── datafusion v33.0.0 (*)
 ├── datafusion-execution v33.0.0 (*)
 ├── datafusion-physical-expr v33.0.0 (*)
@@ -4847,6 +5068,12 @@ rust_decimal v1.35.0 (*)
 
 rust_decimal v1.35.0 (*)
 
+rustc-hash v1.1.0
+└── regalloc2 v0.9.3 (*)
+
+rustc-hash v1.1.0
+└── bindgen v0.69.4 (*)
+
 rustc_version v0.2.3
 └── rustc_version_runtime v0.2.1
     └── mongodb v2.8.2 (*)
@@ -4927,7 +5154,10 @@ semver v0.9.0
 └── rustc_version_runtime v0.2.1 (*)
 
 semver v1.0.18
-└── rustc_version v0.4.0 (*)
+├── rustc_version v0.4.0 (*)
+├── wasmparser v0.202.0 (*)
+├── wasmtime v20.0.0 (*)
+└── wit-parser v0.202.0 (*)
 
 serde v1.0.203 (*)
 
@@ -4953,6 +5183,12 @@ sha2 v0.10.8 (*)
 
 sha2 v0.10.8 (*)
 
+shellexpand v2.1.2
+└── wiggle-generate v20.0.0 (*)
+
+shellexpand v3.1.0
+└── rust-embed-impl v8.4.0 (proc-macro) (*)
+
 signature v1.6.4 (*)
 
 signature v2.2.0 (*)
@@ -4966,6 +5202,7 @@ smallvec v1.13.1 (*)
 
 socket2 v0.4.9
 ├── async-io v1.13.0 (*)
+├── bcc v0.0.33 (*)
 ├── hyper v0.14.27 (*)
 └── mongodb v2.8.2 (*)
 
@@ -4982,6 +5219,8 @@ spin v0.5.2
 └── lazy_static v1.4.0
     ├── apache-avro v0.16.0 (https://github.com/risingwavelabs/avro?rev=25113ba88234a9ae23296e981d8302c290fdaa4b#25113ba8) (*)
     ├── arrow-csv v48.0.1 (*)
+    ├── arrow-udf-python v0.2.0 (*)
+    ├── arrow-udf-wasm v0.2.2 (*)
     ├── bindgen v0.69.4 (*)
     ├── console v0.15.7
     │   ├── dialoguer v0.11.0 (*)
@@ -5089,6 +5328,25 @@ syn v1.0.109 (*)
 
 syn v2.0.66 (*)
 
+target-lexicon v0.12.14
+└── pyo3-build-config v0.21.2
+    └── pyo3-macros-backend v0.21.2 (*)
+    [build-dependencies]
+    ├── arrow-udf-python v0.2.0 (*)
+    ├── pyo3 v0.21.2 (*)
+    └── pyo3-ffi v0.21.2
+        └── pyo3 v0.21.2 (*)
+[build-dependencies]
+└── pyo3-build-config v0.21.2 (*)
+
+target-lexicon v0.12.14
+├── cranelift-codegen v0.107.0 (*)
+├── cranelift-frontend v0.107.0 (*)
+├── cranelift-native v0.107.0 (*)
+├── wasmtime v20.0.0 (*)
+├── wasmtime-cranelift v20.0.0 (*)
+└── wasmtime-environ v20.0.0 (*)
+
 time v0.3.30 (*)
 
 time v0.3.30 (*)
@@ -5190,11 +5448,25 @@ uuid v1.10.0
 ├── sqlx-postgres v0.7.1 (*)
 └── sqlx-sqlite v0.7.1 (*)
 
+wasm-encoder v0.202.0
+├── wasmtime v20.0.0 (*)
+├── wasmtime-environ v20.0.0 (*)
+└── wasmtime-runtime v20.0.0 (*)
+
+wasm-encoder v0.206.0
+└── wast v206.0.0
+    └── wat v1.206.0
+        └── wasmtime v20.0.0 (*)
+
+wast v35.0.2
+└── witx v0.9.1 (*)
+
+wast v206.0.0 (*)
+
 webpki-roots v0.25.2
 ├── hyper-rustls v0.24.2 (*)
 ├── mongodb v2.8.2 (*)
-├── reqwest v0.11.20 (*)
-└── tonic v0.10.2 (*)
+└── reqwest v0.11.20 (*)
 
 webpki-roots v0.26.1
 ├── reqwest v0.12.4 (*)
@@ -5230,8 +5502,10 @@ zstd v0.13.0
 ├── mysql_common v0.32.1 (*)
 ├── parquet v48.0.1 (*)
 ├── parquet v52.0.0 (*)
+├── risingwave_expr_impl v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/expr/impl) (*)
 ├── risingwave_frontend v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/frontend) (*)
-└── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
+├── risingwave_storage v1.11.0-alpha (/Users/bugenzhao/Developer/S/risingwave-opensource/src/storage) (*)
+└── wasmtime-cache v20.0.0 (*)
 
 zstd-safe v6.0.6
 └── zstd v0.12.4 (*)
