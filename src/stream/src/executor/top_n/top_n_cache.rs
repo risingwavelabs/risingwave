@@ -20,13 +20,17 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef};
 use risingwave_common::row::{CompactedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::DataType;
+use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_storage::StateStore;
 
-use super::topn_cache_state::TopNCacheState;
-use super::{CacheKey, GroupKey, ManagedTopNState};
+use super::{GroupKey, ManagedTopNState};
 use crate::consistency::{consistency_error, enable_strict_consistency};
 use crate::executor::error::StreamExecutorResult;
+
+/// `CacheKey` is composed of `(order_by, remaining columns of pk)`.
+pub type CacheKey = (Vec<u8>, Vec<u8>);
+type Cache = EstimatedBTreeMap<CacheKey, CompactedRow>;
 
 const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
 const TOPN_CACHE_MIN_CAPACITY: usize = 10;
@@ -44,17 +48,17 @@ const TOPN_CACHE_MIN_CAPACITY: usize = 10;
 /// since they have different semantics.
 pub struct TopNCache<const WITH_TIES: bool> {
     /// Rows in the range `[0, offset)`
-    pub low: TopNCacheState,
+    pub low: Cache,
     /// Rows in the range `[offset, offset+limit)`
     ///
     /// When `WITH_TIES` is true, it also stores ties for the last element,
     /// and thus the size can be larger than `limit`.
-    pub middle: TopNCacheState,
+    pub middle: Cache,
     /// Rows in the range `[offset+limit, offset+limit+high_capacity)`
     ///
     /// When `WITH_TIES` is true, it also stores ties for the last element,
     /// and thus the size can be larger than `high_capacity`.
-    pub high: TopNCacheState,
+    pub high: Cache,
     pub high_capacity: usize,
     pub offset: usize,
     /// Assumption: `limit != 0`
@@ -89,7 +93,7 @@ impl<const WITH_TIES: bool> Debug for TopNCache<WITH_TIES> {
 
         fn format_cache(
             f: &mut std::fmt::Formatter<'_>,
-            cache: &TopNCacheState,
+            cache: &Cache,
             data_types: &[DataType],
         ) -> std::fmt::Result {
             if cache.is_empty() {
@@ -167,9 +171,9 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
             assert!(offset == 0, "OFFSET is not supported with WITH TIES");
         }
         Self {
-            low: TopNCacheState::new(),
-            middle: TopNCacheState::new(),
-            high: TopNCacheState::new(),
+            low: Cache::new(),
+            middle: Cache::new(),
+            high: Cache::new(),
             high_capacity: offset
                 .checked_add(limit)
                 .and_then(|v| v.checked_mul(TOPN_CACHE_HIGH_CAPACITY_FACTOR))
