@@ -155,6 +155,8 @@ pub use utils::DummyExecutor;
 pub use values::ValuesExecutor;
 pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;
+pub use approx_percentile::local::LocalApproxPercentileExecutor;
+pub use approx_percentile::global::GlobalApproxPercentileExecutor;
 
 use self::barrier_align::AlignedMessageStream;
 

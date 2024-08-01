@@ -26,7 +26,7 @@ use std::iter;
 use risingwave_common::hash::AllVirtualNodeIter;
 use risingwave_storage::store::PrefetchOptions;
 
-pub struct GlobalApproxPercentile<S: StateStore> {
+pub struct GlobalApproxPercentileExecutor<S: StateStore> {
     _ctx: ActorContextRef,
     pub input: Executor,
     pub quantile: f64,
@@ -41,7 +41,7 @@ pub struct GlobalApproxPercentile<S: StateStore> {
 }
 
 
-impl<S: StateStore> GlobalApproxPercentile<S> {
+impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
     pub fn new(
         _ctx: ActorContextRef,
         input: Executor,
@@ -139,7 +139,7 @@ impl<S: StateStore> GlobalApproxPercentile<S> {
     }
 }
 
-impl<S: StateStore> Execute for GlobalApproxPercentile<S> {
+impl<S: StateStore> Execute for GlobalApproxPercentileExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }

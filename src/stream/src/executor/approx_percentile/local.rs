@@ -21,21 +21,21 @@ use risingwave_pb::expr::InputRef;
 
 use crate::executor::prelude::*;
 
-pub struct LocalApproxPercentile {
+pub struct LocalApproxPercentileExecutor {
     _ctx: ActorContextRef,
     pub input: Executor,
     pub base: f64,
-    pub percentile_col: InputRef,
+    pub percentile_index: usize,
     pub schema: Schema,
     pub chunk_size: usize,
 }
 
-impl LocalApproxPercentile {
+impl LocalApproxPercentileExecutor {
     pub fn new(
         _ctx: ActorContextRef,
         input: Executor,
         base: f64,
-        percentile_col: InputRef,
+        percentile_index: usize,
         schema: Schema,
         chunk_size: usize,
     ) -> Self {
@@ -43,7 +43,7 @@ impl LocalApproxPercentile {
             _ctx,
             input,
             base,
-            percentile_col,
+            percentile_index,
             schema,
             chunk_size,
         }
@@ -51,7 +51,7 @@ impl LocalApproxPercentile {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
-        let percentile_index = self.percentile_col.index as usize;
+        let percentile_index = self.percentile_index;
         #[for_await]
         for message in self.input.execute() {
             match message? {
@@ -110,7 +110,7 @@ impl LocalApproxPercentile {
     }
 }
 
-impl Execute for LocalApproxPercentile {
+impl Execute for LocalApproxPercentileExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }

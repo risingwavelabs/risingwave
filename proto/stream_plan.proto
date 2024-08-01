@@ -790,6 +790,16 @@ message OverWindowNode {
   OverWindowCachePolicy cache_policy = 5;
 }
 
+message LocalApproxPercentileNode {
+  double base = 1;
+  uint32 percentile_index = 2;
+}
+//
+//message GlobalApproxPercentileNode {
+//  double base = 1;
+//  double quantile = 2;
+//}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -835,6 +845,8 @@ message StreamNode {
     CdcFilterNode cdc_filter = 140;
     SourceBackfillNode source_backfill = 142;
     ChangeLogNode changelog = 143;
+    LocalApproxPercentileNode local_approx_percentile = 144;
+    // GlobalApproxPercentileNode global_approx_percentile = 145;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
