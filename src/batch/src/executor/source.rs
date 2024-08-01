@@ -32,9 +32,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::Executor;
 use crate::error::{BatchError, Result};
-use crate::executor::{
-    BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder, FileSelector, IcebergScanExecutor,
-};
+use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder, IcebergScanExecutor};
 use crate::task::BatchTaskContext;
 
 pub struct SourceExecutor {
@@ -113,7 +111,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
                 Ok(Box::new(IcebergScanExecutor::new(
                     iceberg_properties.to_iceberg_config(),
                     Some(split.snapshot_id),
-                    FileSelector::FileList(split.files),
+                    split.files.into_iter().map(|x| x.deserialize()).collect(),
                     source.context.get_config().developer.chunk_size,
                     schema,
                     source.plan_node().get_identity().clone(),

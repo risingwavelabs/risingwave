@@ -18,11 +18,12 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use futures::StreamExt;
-use iceberg::spec::{DataContentType, ManifestList};
+use futures_async_stream::for_await;
+use iceberg::scan::FileScanTask;
 use itertools::Itertools;
 pub use parquet_file_reader::*;
 use risingwave_common::bail;
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
@@ -111,10 +112,23 @@ impl UnknownFields for IcebergProperties {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct IcebergFileScanTaskJsonStr(String);
+
+impl IcebergFileScanTaskJsonStr {
+    pub fn deserialize(&self) -> FileScanTask {
+        serde_json::from_str(&self.0).unwrap()
+    }
+
+    pub fn serialize(task: &FileScanTask) -> Self {
+        Self(serde_json::to_string(task).unwrap())
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct IcebergSplit {
     pub split_id: i64,
     pub snapshot_id: i64,
-    pub files: Vec<String>,
+    pub files: Vec<IcebergFileScanTaskJsonStr>,
 }
 
 impl SplitMetaData for IcebergSplit {
@@ -169,6 +183,7 @@ pub enum IcebergTimeTravelInfo {
 impl IcebergSplitEnumerator {
     pub async fn list_splits_batch(
         &self,
+        schema: Schema,
         time_traval_info: Option<IcebergTimeTravelInfo>,
         batch_parallelism: usize,
     ) -> ConnectorResult<Vec<IcebergSplit>> {
@@ -209,30 +224,19 @@ impl IcebergSplitEnumerator {
         };
         let mut files = vec![];
 
-        let snapshot = table
-            .metadata()
-            .snapshot_by_id(snapshot_id)
-            .expect("snapshot must exist");
-
-        let manifest_list: ManifestList = snapshot
-            .load_manifest_list(table.file_io(), table.metadata())
-            .await
+        let scan = table
+            .scan()
+            .snapshot_id(snapshot_id)
+            .select(schema.names())
+            .build()
             .map_err(|e| anyhow!(e))?;
-        for entry in manifest_list.entries() {
-            let manifest = entry
-                .load_manifest(table.file_io())
-                .await
-                .map_err(|e| anyhow!(e))?;
-            let mut manifest_entries_stream =
-                futures::stream::iter(manifest.entries().iter().filter(|e| e.is_alive()));
 
-            while let Some(manifest_entry) = manifest_entries_stream.next().await {
-                let file = manifest_entry.data_file();
-                if file.content_type() != DataContentType::Data {
-                    bail!("Reading iceberg table with delete files is unsupported. Please try to compact the table first.");
-                }
-                files.push(file.file_path().to_string());
-            }
+        let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
+
+        #[for_await]
+        for task in file_scan_stream {
+            let task = task.map_err(|e| anyhow!(e))?;
+            files.push(IcebergFileScanTaskJsonStr::serialize(&task));
         }
         let split_num = batch_parallelism;
         // evenly split the files into splits based on the parallelism.
