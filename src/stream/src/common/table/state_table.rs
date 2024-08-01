@@ -1011,6 +1011,9 @@ where
 
     /// Update a row. The old and new value should have the same pk.
     pub fn update(&mut self, old_value: impl Row, new_value: impl Row) {
+        println!("pk: {:?}", self.pk_indices());
+        println!("old_row: {:?}", old_value);
+        println!("new_row: {:?}", new_value);
         let old_pk = (&old_value).project(self.pk_indices());
         let new_pk = (&new_value).project(self.pk_indices());
         debug_assert!(

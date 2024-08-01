@@ -17,7 +17,6 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::GlobalApproxPercentileNode;
 
@@ -98,7 +97,7 @@ impl PlanTreeNodeUnary for StreamGlobalApproxPercentile {
 impl_plan_tree_node_for_unary! {StreamGlobalApproxPercentile}
 
 impl StreamNode for StreamGlobalApproxPercentile {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         let relative_error = self.relative_error.get_data().as_ref().unwrap();
         let relative_error = relative_error.as_float64().into_inner();
         let base = (1.0 + relative_error) / (1.0 - relative_error);
@@ -116,11 +115,13 @@ impl StreamNode for StreamGlobalApproxPercentile {
             bucket_state_table: Some(
                 bucket_table_builder
                     .build(vec![], 0)
+                    .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
             count_state_table: Some(
                 count_table_builder
                     .build(vec![], 0)
+                    .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
         };

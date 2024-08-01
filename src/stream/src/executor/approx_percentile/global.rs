@@ -14,6 +14,7 @@
 
 use core::ops::Bound;
 
+use risingwave_common::bail;
 use risingwave_common::array::Op;
 use risingwave_common::row::RowExt;
 use risingwave_storage::store::PrefetchOptions;
@@ -58,6 +59,11 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
     async fn execute_inner(self) {
         let mut bucket_state_table = self.bucket_state_table;
         let mut count_state_table = self.count_state_table;
+        let mut input_stream = self.input.execute();
+        let first_barrier = expect_first_barrier(&mut input_stream).await?;
+        bucket_state_table.init_epoch(first_barrier.epoch);
+        count_state_table.init_epoch(first_barrier.epoch);
+        yield Message::Barrier(first_barrier);
         let mut old_row_count = count_state_table.get_row(&[Datum::None; 0]).await?;
         let mut row_count = if let Some(row) = old_row_count.as_ref() {
             row.datum_at(0).unwrap().into_int64()
@@ -65,27 +71,33 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
             0
         };
         #[for_await]
-        for message in self.input.execute() {
+        for message in input_stream {
             match message? {
                 Message::Chunk(chunk) => {
                     for (_, row) in chunk.rows() {
-                        let pk_datum = row.datum_at(0);
-                        let pk = row.project(&[0]);
+                        println!("row: {:?}", row);
                         let delta_datum = row.datum_at(1);
                         let delta: i32 = delta_datum.unwrap().into_int32();
                         row_count = row_count.checked_add(delta as i64).unwrap();
 
+                        let pk_datum = row.datum_at(0);
+                        let pk = row.project(&[0]);
+
                         let old_row = bucket_state_table.get_row(pk).await?;
-                        let old_value: i32 = if let Some(row) = old_row.as_ref() {
-                            row.datum_at(0).unwrap().into_int32()
+                        let old_bucket_row_count: i64 = if let Some(row) = old_row.as_ref() {
+                            row.datum_at(1).unwrap().into_int64()
                         } else {
                             0
                         };
 
-                        let new_value = old_value + delta;
-                        let new_value_datum = Datum::from(ScalarImpl::Int32(new_value));
+                        let new_value = old_bucket_row_count.checked_add(delta as i64).unwrap();
+                        let new_value_datum = Datum::from(ScalarImpl::Int64(new_value));
                         let new_row = &[pk_datum.map(|d| d.into()), new_value_datum];
-                        bucket_state_table.update(old_row, new_row);
+                        if old_row.is_none() {
+                            bucket_state_table.insert(new_row);
+                        } else {
+                            bucket_state_table.update(old_row, new_row);
+                        }
                     }
                 }
                 Message::Barrier(barrier) => {
@@ -100,7 +112,7 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
                         .await?
                     {
                         let row = keyed_row?.into_owned_row();
-                        let count = row.datum_at(1).unwrap().into_int32();
+                        let count = row.datum_at(1).unwrap().into_int64();
                         acc_count += count as u64;
                         if acc_count >= quantile_count {
                             let bucket_id = row.datum_at(0).unwrap().into_int32();
@@ -118,14 +130,15 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
                         }
                     }
                     let row_count_to_persist = &[Datum::from(ScalarImpl::Int64(row_count))];
-                    if let Some(old_row_count) = old_row_count {
+                    if let Some(old_row_count) = old_row_count && row_count_to_persist.into_owned_row() != old_row_count {
                         count_state_table.update(old_row_count, row_count_to_persist);
                     } else {
                         count_state_table.insert(row_count_to_persist);
                     }
-                    old_row_count = Some(row_count_to_persist.into_owned_row());
                     count_state_table.commit(barrier.epoch).await?;
                     bucket_state_table.commit(barrier.epoch).await?;
+
+                    old_row_count = Some(row_count_to_persist.into_owned_row());
                     yield Message::Barrier(barrier);
                 }
                 m => yield m,
