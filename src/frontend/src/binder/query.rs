@@ -46,7 +46,7 @@ pub struct BoundQuery {
 
 impl BoundQuery {
     /// The schema returned by this [`BoundQuery`].
-    pub fn schema(&self) -> &Schema {
+    pub fn schema(&self) -> std::borrow::Cow<'_, Schema> {
         self.body.schema()
     }
 
@@ -484,7 +484,7 @@ impl Binder {
         self.context.cte_to_relation = new_context.cte_to_relation;
 
         Self::align_schema(&mut base, &mut recursive, SetOperator::Union)?;
-        let schema = base.schema().clone();
+        let schema = base.schema().into_owned();
 
         let recursive_union = RecursiveUnion {
             all,

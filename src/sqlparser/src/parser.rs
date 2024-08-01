@@ -4082,16 +4082,19 @@ impl Parser<'_> {
                 // Unexpected token or EOF => stop parsing the query body
                 None => break,
             };
-            let corresponding = self.parse_corresponding()?;
             if precedence >= next_precedence {
                 break;
             }
             self.next_token(); // skip past the set operator
+
+            let all = self.parse_keyword(Keyword::ALL);
+            let corresponding = self.parse_corresponding()?;
+
             expr = SetExpr::SetOperation {
                 left: Box::new(expr),
                 op: op.unwrap(),
                 corresponding,
-                all: self.parse_keyword(Keyword::ALL),
+                all,
                 right: Box::new(self.parse_query_body(next_precedence)?),
             };
         }
