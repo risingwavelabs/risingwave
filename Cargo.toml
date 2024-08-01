@@ -179,6 +179,7 @@ tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git"
     "profiling",
     "stats",
 ], rev = "64a2d9" }
+# TODO(http-bump): bump to use tonic 0.12 once minitrace-opentelemetry is updated
 opentelemetry = "0.23"
 opentelemetry-otlp = "0.16"
 opentelemetry_sdk = { version = "0.23", default-features = false }
