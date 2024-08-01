@@ -24,9 +24,9 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_pb::hummock::group_delta::PbDeltaType;
 use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
 use risingwave_pb::hummock::{
-    CompactionConfig, PbGroupConstruct, PbGroupDelta, PbGroupDestroy, PbGroupMetaChange,
-    PbGroupTableChange, PbHummockVersion, PbHummockVersionDelta, PbIntraLevelDelta,
-    PbStateTableInfo, StateTableInfo, StateTableInfoDelta,
+    CompactionConfig, PbGroupConstruct, PbGroupDelta, PbGroupDestroy, PbGroupMerge,
+    PbGroupMetaChange, PbGroupTableChange, PbHummockVersion, PbHummockVersionDelta,
+    PbIntraLevelDelta, PbStateTableInfo, StateTableInfo, StateTableInfoDelta,
 };
 use tracing::warn;
 
@@ -483,12 +483,18 @@ impl HummockVersionDelta {
             .flat_map(|group_deltas| {
                 group_deltas.group_deltas.iter().flat_map(|group_delta| {
                     static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
-                    let sst_slice = match group_delta {
-                        GroupDelta::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
-                        GroupDelta::GroupConstruct(_)
-                        | GroupDelta::GroupDestroy(_)
-                        | GroupDelta::GroupMetaChange(_)
-                        | GroupDelta::GroupTableChange(_) => &EMPTY_VEC,
+                    // let sst_slice = match group_delta {
+                    //     GroupDelta::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
+                    //     GroupDelta::GroupConstruct(_)
+                    //     | GroupDelta::GroupDestroy(_)
+                    //     | GroupDelta::GroupMetaChange(_)
+                    //     | GroupDelta::GroupTableChange(_) => &EMPTY_VEC,
+                    // };
+
+                    let sst_slice = if let GroupDelta::IntraLevel(level_delta) = &group_delta {
+                        &level_delta.inserted_table_infos
+                    } else {
+                        &EMPTY_VEC
                     };
                     sst_slice.iter().map(|sst| sst.object_id)
                 })
@@ -508,13 +514,12 @@ impl HummockVersionDelta {
         let ssts_from_group_deltas = self.group_deltas.values().flat_map(|group_deltas| {
             group_deltas.group_deltas.iter().flat_map(|group_delta| {
                 static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
-                let sst_slice = match group_delta {
-                    GroupDelta::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
-                    GroupDelta::GroupConstruct(_)
-                    | GroupDelta::GroupDestroy(_)
-                    | GroupDelta::GroupMetaChange(_)
-                    | GroupDelta::GroupTableChange(_) => &EMPTY_VEC,
+                let sst_slice = if let GroupDelta::IntraLevel(level_delta) = &group_delta {
+                    &level_delta.inserted_table_infos
+                } else {
+                    &EMPTY_VEC
                 };
+
                 sst_slice.iter()
             })
         });
@@ -546,12 +551,10 @@ impl HummockVersionDelta {
             .flat_map(|group_deltas| {
                 group_deltas.group_deltas.iter().flat_map(|group_delta| {
                     static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
-                    let sst_slice = match group_delta {
-                        GroupDelta::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
-                        GroupDelta::GroupConstruct(_)
-                        | GroupDelta::GroupDestroy(_)
-                        | GroupDelta::GroupMetaChange(_)
-                        | GroupDelta::GroupTableChange(_) => &EMPTY_VEC,
+                    let sst_slice = if let GroupDelta::IntraLevel(level_delta) = &group_delta {
+                        &level_delta.inserted_table_infos
+                    } else {
+                        &EMPTY_VEC
                     };
                     sst_slice.iter()
                 })
@@ -855,6 +858,8 @@ pub enum GroupDelta {
 
     #[allow(dead_code)]
     GroupTableChange(PbGroupTableChange),
+
+    GroupMerge(PbGroupMerge),
 }
 
 impl From<PbGroupDelta> for GroupDelta {
@@ -875,6 +880,7 @@ impl From<PbGroupDelta> for GroupDelta {
             Some(PbDeltaType::GroupTableChange(pb_group_table_change)) => {
                 GroupDelta::GroupTableChange(pb_group_table_change)
             }
+            Some(PbDeltaType::GroupMerge(pb_group_merge)) => GroupDelta::GroupMerge(pb_group_merge),
             None => panic!("delta_type is not set"),
         }
     }
@@ -898,6 +904,9 @@ impl From<GroupDelta> for PbGroupDelta {
             GroupDelta::GroupTableChange(pb_group_table_change) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupTableChange(pb_group_table_change)),
             },
+            GroupDelta::GroupMerge(pb_group_merge) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::GroupMerge(pb_group_merge)),
+            },
         }
     }
 }
@@ -920,6 +929,9 @@ impl From<&GroupDelta> for PbGroupDelta {
             GroupDelta::GroupTableChange(pb_group_table_change) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupTableChange(pb_group_table_change.clone())),
             },
+            GroupDelta::GroupMerge(pb_group_merge) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::GroupMerge(pb_group_merge.clone())),
+            },
         }
     }
 }
@@ -941,6 +953,9 @@ impl From<&PbGroupDelta> for GroupDelta {
             }
             Some(PbDeltaType::GroupTableChange(pb_group_table_change)) => {
                 GroupDelta::GroupTableChange(pb_group_table_change.clone())
+            }
+            Some(PbDeltaType::GroupMerge(pb_group_merge)) => {
+                GroupDelta::GroupMerge(pb_group_merge.clone())
             }
             None => panic!("delta_type is not set"),
         }

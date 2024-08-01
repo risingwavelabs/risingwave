@@ -407,7 +407,16 @@ impl HummockManager {
             self.write_checkpoint(&versioning_guard.checkpoint).await?;
             checkpoint_version
         };
+
+        // println!("load checkpoint version {:?}", redo_state);
+
+        // println!(
+        //     "check point version cgs {:?}",
+        //     redo_state.levels.keys().cloned().collect_vec()
+        // );
+
         for version_delta in hummock_version_deltas.values() {
+            // println!("version_delta {:?}", version_delta);
             if version_delta.prev_id == redo_state.id {
                 redo_state.apply_version_delta(version_delta);
             }

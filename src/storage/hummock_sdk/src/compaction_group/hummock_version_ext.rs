@@ -19,10 +19,11 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use prost::Message;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_pb::hummock::{
-    CompactionConfig, CompatibilityVersion, GroupConstruct, GroupDestroy, GroupMetaChange,
+    CompactionConfig, CompatibilityVersion, GroupConstruct, GroupMerge, GroupMetaChange,
     GroupTableChange, PbLevelType,
 };
 use tracing::warn;
@@ -47,13 +48,17 @@ pub struct GroupDeltasSummary {
     pub insert_sub_level_id: u64,
     pub insert_table_infos: Vec<SstableInfo>,
     pub group_construct: Option<GroupConstruct>,
-    pub group_destroy: Option<GroupDestroy>,
+    pub group_destroy: Option<CompactionGroupId>,
     pub group_meta_changes: Vec<GroupMetaChange>,
     pub group_table_change: Option<GroupTableChange>,
     pub new_vnode_partition_count: u32,
+    pub group_merge: Option<GroupMerge>,
 }
 
-pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary {
+pub fn summarize_group_deltas(
+    group_deltas: &GroupDeltas,
+    default_group_id: CompactionGroupId,
+) -> GroupDeltasSummary {
     let mut delete_sst_levels = Vec::with_capacity(group_deltas.group_deltas.len());
     let mut delete_sst_ids_set = HashSet::new();
     let mut insert_sst_level_id = u32::MAX;
@@ -64,6 +69,8 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
     let mut group_meta_changes = vec![];
     let mut group_table_change = None;
     let mut new_vnode_partition_count = 0;
+
+    let mut group_merge = None;
 
     for group_delta in &group_deltas.group_deltas {
         match group_delta {
@@ -83,15 +90,20 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
                 assert!(group_construct.is_none());
                 group_construct = Some(construct_delta.clone());
             }
-            GroupDelta::GroupDestroy(destroy_delta) => {
+            GroupDelta::GroupDestroy(_) => {
                 assert!(group_destroy.is_none());
-                group_destroy = Some(destroy_delta.clone());
+                group_destroy = Some(default_group_id);
             }
             GroupDelta::GroupMetaChange(meta_delta) => {
                 group_meta_changes.push(meta_delta.clone());
             }
             GroupDelta::GroupTableChange(meta_delta) => {
                 group_table_change = Some(meta_delta.clone());
+            }
+            GroupDelta::GroupMerge(merge_delta) => {
+                assert!(group_merge.is_none());
+                group_merge = Some(merge_delta.clone());
+                group_destroy = Some(merge_delta.right_group_id);
             }
         }
     }
@@ -110,6 +122,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
         group_meta_changes,
         group_table_change,
         new_vnode_partition_count,
+        group_merge,
     }
 }
 
@@ -416,6 +429,13 @@ impl HummockVersion {
                 } else {
                     split_sst_info_for_level(&member_table_ids, sub_level, &mut new_sst_id)
                 };
+
+                tracing::info!(
+                    "sub_level {:?} insert_table_infos {:?}",
+                    sub_level.sub_level_id,
+                    insert_table_infos
+                );
+
                 sub_level
                     .table_infos
                     .extract_if(|sst_info| {
@@ -447,9 +467,25 @@ impl HummockVersion {
                 }
             }
         }
+
         for (idx, level) in parent_levels.levels.iter_mut().enumerate() {
-            let insert_table_infos =
-                split_sst_info_for_level(&member_table_ids, level, &mut new_sst_id);
+            let insert_table_infos = if let Some(split_key) = &split_key {
+                HummockVersion::split_sst_info_for_level_v2(
+                    // &member_table_ids,
+                    level,
+                    &mut new_sst_id,
+                    split_key,
+                )
+            } else {
+                split_sst_info_for_level(&member_table_ids, level, &mut new_sst_id)
+            };
+
+            tracing::info!(
+                "level {:?} insert_table_infos {:?}",
+                level.level_idx,
+                insert_table_infos
+            );
+
             cur_levels.levels[idx].total_file_size += insert_table_infos
                 .iter()
                 .map(|sst| sst.estimated_sst_size)
@@ -575,46 +611,52 @@ impl HummockVersion {
 
         // apply to `levels`, which is different compaction groups
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
-            let summary = summarize_group_deltas(group_deltas);
+            let summary = summarize_group_deltas(group_deltas, *compaction_group_id);
             if let Some(group_construct) = &summary.group_construct {
-                let split_key = if group_construct.split_key.is_some() {
-                    Some(Bytes::from(group_construct.split_key.clone().unwrap()))
+                if group_construct.parent_group_id == group_construct.group_id {
+                    // merge
                 } else {
-                    None
-                };
+                    // split
 
-                let mut new_levels = build_initial_compaction_group_levels(
-                    *compaction_group_id,
-                    group_construct.get_group_config().unwrap(),
-                );
-                let parent_group_id = group_construct.parent_group_id;
-                new_levels.parent_group_id = parent_group_id;
-                #[expect(deprecated)]
-                // for backward-compatibility of previous hummock version delta
-                new_levels
-                    .member_table_ids
-                    .clone_from(&group_construct.table_ids);
-                self.levels.insert(*compaction_group_id, new_levels);
-                let member_table_ids =
-                    if group_construct.version >= CompatibilityVersion::NoMemberTableIds as _ {
-                        self.state_table_info
-                            .compaction_group_member_table_ids(*compaction_group_id)
-                            .iter()
-                            .map(|table_id| table_id.table_id)
-                            .collect()
+                    let split_key = if group_construct.split_key.is_some() {
+                        Some(Bytes::from(group_construct.split_key.clone().unwrap()))
                     } else {
-                        #[expect(deprecated)]
-                        // for backward-compatibility of previous hummock version delta
-                        HashSet::from_iter(group_construct.table_ids.clone())
+                        None
                     };
 
-                self.init_with_parent_group(
-                    parent_group_id,
-                    *compaction_group_id,
-                    member_table_ids,
-                    group_construct.get_new_sst_start_id(),
-                    split_key.clone(),
-                );
+                    let mut new_levels = build_initial_compaction_group_levels(
+                        *compaction_group_id,
+                        group_construct.get_group_config().unwrap(),
+                    );
+                    let parent_group_id = group_construct.parent_group_id;
+                    new_levels.parent_group_id = parent_group_id;
+                    #[expect(deprecated)]
+                    // for backward-compatibility of previous hummock version delta
+                    new_levels
+                        .member_table_ids
+                        .clone_from(&group_construct.table_ids);
+                    self.levels.insert(*compaction_group_id, new_levels);
+                    let member_table_ids =
+                        if group_construct.version >= CompatibilityVersion::NoMemberTableIds as _ {
+                            self.state_table_info
+                                .compaction_group_member_table_ids(*compaction_group_id)
+                                .iter()
+                                .map(|table_id| table_id.table_id)
+                                .collect()
+                        } else {
+                            #[expect(deprecated)]
+                            // for backward-compatibility of previous hummock version delta
+                            HashSet::from_iter(group_construct.table_ids.clone())
+                        };
+
+                    self.init_with_parent_group(
+                        parent_group_id,
+                        *compaction_group_id,
+                        member_table_ids,
+                        group_construct.get_new_sst_start_id(),
+                        split_key.clone(),
+                    );
+                }
             } else if let Some(group_change) = &summary.group_table_change {
                 // TODO: may deprecate this branch? This enum variant is not created anywhere
                 assert!(
@@ -648,8 +690,14 @@ impl HummockVersion {
                     .expect("compaction group should exist")
                     .member_table_ids
                     .append(&mut moving_tables);
+            } else if let Some(group_merge) = &summary.group_merge {
+                println!(
+                    "group_merge left {:?} right {:?}",
+                    group_merge.left_group_id, group_merge.right_group_id
+                );
+                self.merge_compaction_group(group_merge.left_group_id, group_merge.right_group_id)
             }
-            let has_destroy = summary.group_destroy.is_some();
+            let group_destroy = summary.group_destroy.clone();
             let levels = self
                 .levels
                 .get_mut(compaction_group_id)
@@ -689,7 +737,8 @@ impl HummockVersion {
                     insert_table_infos
                 );
                 assert!(
-                    delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty() || has_destroy,
+                    delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty()
+                        || group_destroy.is_some(),
                     "no sst should be deleted when committing an epoch"
                 );
                 if !insert_table_infos.is_empty() {
@@ -709,8 +758,8 @@ impl HummockVersion {
                         .compaction_group_member_table_ids(*compaction_group_id),
                 );
             }
-            if has_destroy {
-                self.levels.remove(compaction_group_id);
+            if let Some(destroy_group_id) = &group_destroy {
+                self.levels.remove(destroy_group_id);
             }
         }
         self.id = version_delta.id;
@@ -868,6 +917,9 @@ impl HummockVersion {
                 }
 
                 for level in &parent_levels.levels {
+                    if level.table_infos.is_empty() {
+                        continue;
+                    }
                     let pos = Self::get_split_pos(&level.table_infos, split_key);
                     let sst = level.table_infos.get(pos).unwrap();
                     if let SstSplitType::Both = HummockVersion::need_to_split(sst, split_key) {
@@ -884,46 +936,51 @@ impl HummockVersion {
         new_sst_id: &mut u64,
         split_key: &Bytes,
     ) -> Vec<SstableInfo> {
+        if level.table_infos.is_empty() {
+            return vec![];
+        }
         if level.level_type == PbLevelType::Overlapping {
+            // TODO: filter the Overlapping sst with table_id / vnode / key_range
             level.table_infos.clone()
         } else {
             let pos = Self::get_split_pos(&level.table_infos, split_key);
+            if pos >= level.table_infos.len() {
+                return vec![];
+            }
+
             let mut insert_table_infos = vec![];
             let sst = &mut level.table_infos[pos];
             let sst_split_type = Self::need_to_split(sst, split_key);
 
             match sst_split_type {
                 SstSplitType::Left => {
-                    // no need to split
-                    // do nothing
+                    insert_table_infos.extend_from_slice(&level.table_infos[pos + 1..]);
+                    level.table_infos = level.table_infos[0..=pos].to_vec();
                 }
                 SstSplitType::Right => {
-                    let branch_sst = sst.clone();
-                    drop_sst_info(sst);
-                    insert_table_infos.push(branch_sst);
+                    insert_table_infos.extend_from_slice(&level.table_infos[pos..]); // the sst at pos has been split to the right
+                    level.table_infos = level.table_infos[0..pos].to_vec();
                 }
                 SstSplitType::Both => {
                     // split the sst
                     let branch_sst = Self::split_sst_v2(sst, new_sst_id, split_key);
                     insert_table_infos.push(branch_sst.clone());
+                    // the sst at pos has been split to both left and right
+                    // the branched sst has been inserted to the `insert_table_infos`
+                    insert_table_infos.extend_from_slice(&level.table_infos[pos + 1..]);
+                    level.table_infos = level.table_infos[0..=pos].to_vec();
                 }
-            }
+            };
 
-            insert_table_infos.extend_from_slice(&level.table_infos[pos + 1..]);
             insert_table_infos
         }
     }
 
     pub fn get_split_pos(sstables: &Vec<SstableInfo>, split_key: &Bytes) -> usize {
-        println!("sstables len {:?}", sstables.len());
         sstables
             .partition_point(|sst| {
                 let key_range = &sst.key_range;
                 let left = &key_range.left;
-                println!(
-                    "sst {:?} left {:?} split_key {:?}",
-                    sst.sst_id, left, split_key
-                );
                 left.cmp(split_key) == Ordering::Less
             })
             .saturating_sub(1)
@@ -1006,6 +1063,75 @@ impl HummockVersion {
         }
 
         SstSplitType::Both
+    }
+
+    pub fn merge_compaction_group(
+        &mut self,
+        left_group_id: CompactionGroupId,
+        right_group_id: CompactionGroupId,
+    ) {
+        let total_cg = self.levels.keys().cloned().collect::<Vec<_>>();
+        let [left_levels, right_levels] = self
+            .levels
+            .get_many_mut([&left_group_id, &right_group_id])
+            .expect(&format!(
+                "compaction group should exist left {} right {} all {:?}",
+                left_group_id, right_group_id, total_cg,
+            ));
+
+        if let Some(ref mut l0) = left_levels.l0 {
+            let right_l0 = right_levels.l0.as_mut().unwrap();
+
+            for right_sub_level in &mut right_l0.sub_levels {
+                let mut sub_level = right_sub_level.clone();
+                // Reinitialise `vnode_partition_count`` to avoid misaligned hierarchies
+                // caused by the merge of different compaction groups.(picker might reject the different `vnode_partition_count` sub_level to compact)
+                sub_level.vnode_partition_count = 0;
+                l0.sub_levels.push(sub_level);
+            }
+
+            l0.sub_levels
+                .sort_by_key(|sub_level| sub_level.sub_level_id);
+        }
+
+        for (idx, level) in right_levels.levels.iter_mut().enumerate() {
+            if level.table_infos.is_empty() {
+                continue;
+            }
+
+            let insert_table_infos = level.table_infos.clone();
+            left_levels.levels[idx].total_file_size += insert_table_infos
+                .iter()
+                .map(|sst| sst.estimated_sst_size)
+                .sum::<u64>();
+            left_levels.levels[idx].uncompressed_file_size += insert_table_infos
+                .iter()
+                .map(|sst| sst.uncompressed_file_size)
+                .sum::<u64>();
+
+            if idx == 4 {
+                println!(
+                    "left tables {:?} insert_table_infos {:?}",
+                    left_levels.levels[idx].table_infos, insert_table_infos
+                );
+            }
+
+            left_levels.levels[idx]
+                .table_infos
+                .extend(insert_table_infos);
+            left_levels.levels[idx]
+                .table_infos
+                .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
+            assert!(
+                can_concat(&left_levels.levels[idx].table_infos),
+                "{}",
+                format!(
+                    "left_levels.levels[{}].table_infos: {:?} level_idx {:?}",
+                    idx, left_levels.levels[idx].table_infos, left_levels.levels[idx].level_idx
+                )
+            );
+            level.table_infos.clear();
+        }
     }
 }
 
@@ -1787,6 +1913,8 @@ mod tests {
                 },
                 table_ids: vec![1, 2, 3, 4, 5],
                 uncompressed_file_size: 2,
+                file_size: 100,
+                estimated_sst_size: 100,
                 ..Default::default()
             };
 
@@ -1851,10 +1979,15 @@ mod tests {
                 )
                 .encode()
             };
-            let origin_sst = sst.clone();
-            let split_type = HummockVersion::need_to_split(&origin_sst, &split_key.into());
+            let mut origin_sst = sst.clone();
+            let split_type = HummockVersion::need_to_split(&origin_sst, &split_key.clone().into());
             println!("split_type {:?}", split_type);
             assert_eq!(SstSplitType::Both, split_type);
+
+            let mut new_sst_id = 1;
+            let branch_sst =
+                HummockVersion::split_sst_v2(&mut origin_sst, &mut new_sst_id, &split_key.into());
+            println!("branch_sst {:?} origin_sst {:?}", branch_sst, origin_sst);
 
             let split_key = {
                 FullKey::for_test(

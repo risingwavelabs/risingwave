@@ -578,7 +578,7 @@ impl SstableStore {
             let store = self.store.clone();
             let meta_path = self.get_sst_data_path(object_id);
             let stats_ptr = stats.remote_io_time.clone();
-            let range = sst.meta_offset as usize..sst.estimated_sst_size as usize;
+            let range = sst.meta_offset as usize..sst.file_size as usize;
             async move {
                 let now = Instant::now();
                 let buf = store.read(&meta_path, range).await?;

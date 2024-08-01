@@ -206,7 +206,7 @@ pub fn estimate_memory_for_compact_task(
         if level.level_type == LevelType::Nonoverlapping {
             let mut cur_level_max_sst_meta_size = 0;
             for sst in &level.table_infos {
-                let meta_size = sst.estimated_sst_size - sst.meta_offset;
+                let meta_size = sst.file_size - sst.meta_offset;
                 task_max_sst_meta_ratio = std::cmp::max(
                     task_max_sst_meta_ratio,
                     meta_size * 100 / sst.estimated_sst_size,
@@ -216,7 +216,7 @@ pub fn estimate_memory_for_compact_task(
             result += max_input_stream_estimated_memory + cur_level_max_sst_meta_size;
         } else {
             for sst in &level.table_infos {
-                let meta_size = sst.estimated_sst_size - sst.meta_offset;
+                let meta_size = sst.file_size - sst.meta_offset;
                 result += max_input_stream_estimated_memory + meta_size;
                 task_max_sst_meta_ratio = std::cmp::max(
                     task_max_sst_meta_ratio,

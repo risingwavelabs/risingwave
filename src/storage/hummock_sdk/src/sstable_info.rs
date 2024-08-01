@@ -84,7 +84,11 @@ impl From<PbSstableInfo> for SstableInfo {
             range_tombstone_count: pb_sstable_info.range_tombstone_count,
             bloom_filter_kind: PbBloomFilterType::try_from(pb_sstable_info.bloom_filter_kind)
                 .unwrap(),
-            estimated_sst_size: pb_sstable_info.estimated_sst_size,
+            estimated_sst_size: if pb_sstable_info.estimated_sst_size == 0 {
+                pb_sstable_info.file_size
+            } else {
+                pb_sstable_info.estimated_sst_size
+            },
         }
     }
 }
@@ -113,7 +117,11 @@ impl From<&PbSstableInfo> for SstableInfo {
             range_tombstone_count: pb_sstable_info.range_tombstone_count,
             bloom_filter_kind: PbBloomFilterType::try_from(pb_sstable_info.bloom_filter_kind)
                 .unwrap(),
-            estimated_sst_size: pb_sstable_info.estimated_sst_size,
+            estimated_sst_size: if pb_sstable_info.estimated_sst_size == 0 {
+                pb_sstable_info.file_size
+            } else {
+                pb_sstable_info.estimated_sst_size
+            },
         }
     }
 }

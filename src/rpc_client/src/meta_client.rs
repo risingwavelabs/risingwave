@@ -1393,6 +1393,19 @@ impl MetaClient {
         let resp = self.inner.get_version_by_epoch(req).await?;
         Ok(resp.version.unwrap())
     }
+
+    pub async fn merge_compaction_group(
+        &self,
+        left_group_id: CompactionGroupId,
+        right_group_id: CompactionGroupId,
+    ) -> Result<()> {
+        let req = MergeCompactionGroupRequest {
+            left_group_id,
+            right_group_id,
+        };
+        self.inner.merge_compaction_group(req).await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -2059,6 +2072,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, cancel_compact_task, CancelCompactTaskRequest, CancelCompactTaskResponse}
             ,{ hummock_client, list_change_log_epochs, ListChangeLogEpochsRequest, ListChangeLogEpochsResponse }
             ,{ hummock_client, get_version_by_epoch, GetVersionByEpochRequest, GetVersionByEpochResponse }
+            ,{ hummock_client, merge_compaction_group, MergeCompactionGroupRequest, MergeCompactionGroupResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
