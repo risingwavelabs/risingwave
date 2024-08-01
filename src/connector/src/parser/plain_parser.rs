@@ -202,6 +202,7 @@ mod tests {
     use std::ops::Deref;
     use std::sync::Arc;
 
+    use expect_test::expect;
     use futures::executor::block_on;
     use futures::StreamExt;
     use futures_async_stream::try_stream;
@@ -210,7 +211,6 @@ mod tests {
     use risingwave_pb::connector_service::cdc_message;
 
     use super::*;
-    use crate::parser::schema_change::TableChangeType;
     use crate::parser::{MessageMeta, SourceStreamChunkBuilder, TransactionControl};
     use crate::source::cdc::DebeziumCdcMeta;
     use crate::source::{ConnectorProperties, DataType, SourceMessage, SplitId};
@@ -503,17 +503,68 @@ mod tests {
             .await;
 
         let res = res.unwrap();
-        match res {
-            ParseResult::SchemaChange(schema_change) => {
-                assert_eq!(schema_change.table_changes.len(), 1);
-                let table_change = &schema_change.table_changes[0];
-                assert_eq!(table_change.cdc_table_name, "mydb.test");
-                assert_eq!(table_change.change_type, TableChangeType::Alter);
-                assert_eq!(table_change.columns.len(), 3);
-                let column_names = table_change.columns.iter().map(|c| c.name()).collect_vec();
-                assert_eq!(column_names, vec!["id", "v1", "v2"]);
-            }
-            _ => panic!("unexpected parse result: {:?}", res),
-        }
+        expect![[r#"
+            SchemaChange(
+                SchemaChangeEnvelope {
+                    table_changes: [
+                        TableSchemaChange {
+                            cdc_table_name: "mydb.test",
+                            columns: [
+                                ColumnCatalog {
+                                    column_desc: ColumnDesc {
+                                        data_type: Int32,
+                                        column_id: #2147483646,
+                                        name: "id",
+                                        field_descs: [],
+                                        type_name: "",
+                                        generated_or_default_column: None,
+                                        description: None,
+                                        additional_column: AdditionalColumn {
+                                            column_type: None,
+                                        },
+                                        version: Pr13707,
+                                    },
+                                    is_hidden: false,
+                                },
+                                ColumnCatalog {
+                                    column_desc: ColumnDesc {
+                                        data_type: Timestamptz,
+                                        column_id: #2147483646,
+                                        name: "v1",
+                                        field_descs: [],
+                                        type_name: "",
+                                        generated_or_default_column: None,
+                                        description: None,
+                                        additional_column: AdditionalColumn {
+                                            column_type: None,
+                                        },
+                                        version: Pr13707,
+                                    },
+                                    is_hidden: false,
+                                },
+                                ColumnCatalog {
+                                    column_desc: ColumnDesc {
+                                        data_type: Varchar,
+                                        column_id: #2147483646,
+                                        name: "v2",
+                                        field_descs: [],
+                                        type_name: "",
+                                        generated_or_default_column: None,
+                                        description: None,
+                                        additional_column: AdditionalColumn {
+                                            column_type: None,
+                                        },
+                                        version: Pr13707,
+                                    },
+                                    is_hidden: false,
+                                },
+                            ],
+                            change_type: Alter,
+                        },
+                    ],
+                },
+            )
+        "#]]
+        .assert_debug_eq(&res);
     }
 }

@@ -161,14 +161,10 @@ message CdcMessage {
   string offset = 3;
   string full_table_name = 4;
   int64 source_ts_ms = 5;
-
-  // Deprecated: use `msg_type` instead
-  reserved "is_transaction_meta";
-  reserved 6;
+  CdcMessageType msg_type = 6;
 
   // The key of the Debezium message, which only used by `mongodb-cdc` connector.
   string key = 7;
-  CdcMessageType msg_type = 8;
 }
 
 enum SourceType {
