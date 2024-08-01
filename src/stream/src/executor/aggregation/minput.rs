@@ -31,7 +31,7 @@ use risingwave_storage::StateStore;
 
 use super::agg_state_cache::{AggStateCache, GenericAggStateCache};
 use super::GroupKey;
-use crate::common::cache::{OrderedStateCache, TopNStateCache};
+use crate::common::state_cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
 use crate::executor::{PkIndices, StreamExecutorResult};

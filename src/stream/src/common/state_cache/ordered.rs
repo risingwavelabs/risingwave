@@ -12,55 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
-
 use risingwave_common::array::Op;
-use risingwave_common_estimate_size::{EstimateSize, KvSize};
+use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
+use risingwave_common_estimate_size::EstimateSize;
 
 use super::{StateCache, StateCacheFiller};
 
-/// An implementation of [`StateCache`] that uses a [`BTreeMap`] as the underlying cache, with no
-/// capacity limit.
+/// An implementation of [`StateCache`] that keeps all entries in an ordered in-memory map.
+#[derive(Clone, EstimateSize)]
 pub struct OrderedStateCache<K: Ord + EstimateSize, V: EstimateSize> {
-    cache: BTreeMap<K, V>,
+    cache: EstimatedBTreeMap<K, V>,
     synced: bool,
-    kv_heap_size: KvSize,
-}
-
-impl<K: Ord + EstimateSize, V: EstimateSize> EstimateSize for OrderedStateCache<K, V> {
-    fn estimated_heap_size(&self) -> usize {
-        // TODO: Add btreemap internal size
-        // https://github.com/risingwavelabs/risingwave/issues/9713
-        self.kv_heap_size.size()
-    }
 }
 
 impl<K: Ord + EstimateSize, V: EstimateSize> OrderedStateCache<K, V> {
     pub fn new() -> Self {
         Self {
-            cache: BTreeMap::new(),
+            cache: Default::default(),
             synced: false,
-            kv_heap_size: KvSize::new(),
         }
-    }
-
-    fn insert_cache(&mut self, key: K, value: V) -> Option<V> {
-        let key_size = self.kv_heap_size.add_val(&key);
-        self.kv_heap_size.add_val(&value);
-        let old_val = self.cache.insert(key, value);
-        if let Some(old_val) = &old_val {
-            self.kv_heap_size.sub_size(key_size);
-            self.kv_heap_size.sub_val(old_val);
-        }
-        old_val
-    }
-
-    fn delete_cache(&mut self, key: &K) -> Option<V> {
-        let old_val = self.cache.remove(key);
-        if let Some(old_val) = &old_val {
-            self.kv_heap_size.sub(key, old_val);
-        }
-        old_val
     }
 }
 
@@ -87,7 +57,7 @@ impl<K: Ord + EstimateSize, V: EstimateSize> StateCache for OrderedStateCache<K,
 
     fn insert(&mut self, key: Self::Key, value: Self::Value) -> Option<Self::Value> {
         if self.synced {
-            self.insert_cache(key, value)
+            self.cache.insert(key, value)
         } else {
             None
         }
@@ -95,7 +65,7 @@ impl<K: Ord + EstimateSize, V: EstimateSize> StateCache for OrderedStateCache<K,
 
     fn delete(&mut self, key: &Self::Key) -> Option<Self::Value> {
         if self.synced {
-            self.delete_cache(key)
+            self.cache.remove(key)
         } else {
             None
         }
