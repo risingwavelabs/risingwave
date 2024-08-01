@@ -118,7 +118,7 @@ impl fmt::Display for SetExpr {
                 corresponding,
             } => {
                 let all_str = if *all { " ALL" } else { "" };
-                write!(f, "{} {}{} {}{}", left, op, all_str, right, corresponding)
+                write!(f, "{} {}{}{} {}", left, op, all_str, corresponding, right)
             }
         }
     }
