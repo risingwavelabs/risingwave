@@ -97,10 +97,31 @@ impl TracingContext {
         http::HeaderMap::try_from(&map).unwrap_or_default()
     }
 
+    /// Convert the tracing context to the W3C trace context format in HTTP headers.
+    pub fn to_http_1_headers(&self) -> http_1::HeaderMap {
+        let map = self.to_w3c();
+        http_1::HeaderMap::try_from(&map).unwrap_or_default()
+    }
+
     /// Create a new tracing context from the W3C trace context format in HTTP headers.
     ///
     /// Returns `None` if the headers are invalid.
     pub fn from_http_headers(headers: &http::HeaderMap) -> Option<Self> {
+        let mut map = HashMap::new();
+
+        // See [Trace Context](https://www.w3.org/TR/trace-context/) for these header names.
+        for key in ["traceparent", "tracestate"] {
+            let value = headers.get(key)?.to_str().ok()?;
+            map.insert(key.to_string(), value.to_string());
+        }
+
+        Some(Self::from_w3c(&map))
+    }
+
+    /// Create a new tracing context from the W3C trace context format in HTTP headers.
+    ///
+    /// Returns `None` if the headers are invalid.
+    pub fn from_http_1_headers(headers: &http_1::HeaderMap) -> Option<Self> {
         let mut map = HashMap::new();
 
         // See [Trace Context](https://www.w3.org/TR/trace-context/) for these header names.

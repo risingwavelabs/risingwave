@@ -19,8 +19,8 @@ async-trait = "0.1"
 easy-ext = "1"
 either = "1.13.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-http = "0.2"
-hyper = "0.14" # required by tonic
+http = "1"
+hyper = "1"
 itertools = { workspace = true }
 lru = { workspace = true }
 moka = { version = "0.12", features = ["future"] }

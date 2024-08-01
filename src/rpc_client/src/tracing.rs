@@ -16,46 +16,21 @@ use std::task::{Context, Poll};
 
 use futures::Future;
 use risingwave_common::util::tracing::TracingContext;
-use tower::{Layer, Service};
-
-/// A layer that decorates the inner service with [`TracingInject`].
-#[derive(Clone, Default)]
-pub struct TracingInjectLayer {
-    _private: (),
-}
-
-impl TracingInjectLayer {
-    #[allow(dead_code)]
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
-impl<S> Layer<S> for TracingInjectLayer {
-    type Service = TracingInject<S>;
-
-    fn layer(&self, service: S) -> Self::Service {
-        TracingInject { inner: service }
-    }
-}
+use tonic::body::BoxBody;
+use tower::Service;
 
 /// A service wrapper that injects the [`TracingContext`] obtained from the current tracing span
 /// into the HTTP headers of the request.
 ///
 /// See also `TracingExtract` in the `common_service` crate.
 #[derive(Clone, Debug)]
-pub struct TracingInject<S> {
-    inner: S,
+pub struct TracingInjectChannel {
+    inner: tonic::transport::Channel,
 }
 
-impl<S, B> Service<hyper::Request<B>> for TracingInject<S>
-where
-    S: Service<hyper::Request<B>> + Clone + Send + 'static,
-    S::Future: Send + 'static,
-    B: hyper::body::HttpBody, // tonic `Channel` uses `BoxBody` instead of `hyper::Body`
-{
-    type Error = S::Error;
-    type Response = S::Response;
+impl Service<http::Request<BoxBody>> for TracingInjectChannel {
+    type Error = tonic::transport::Error;
+    type Response = http::Response<BoxBody>;
 
     type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
 
@@ -63,7 +38,7 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, mut req: hyper::Request<B>) -> Self::Future {
+    fn call(&mut self, mut req: http::Request<BoxBody>) -> Self::Future {
         // This is necessary because tonic internally uses `tower::buffer::Buffer`.
         // See https://github.com/tower-rs/tower/issues/547#issuecomment-767629149
         // for details on why this is necessary
@@ -71,7 +46,7 @@ where
         let mut inner = std::mem::replace(&mut self.inner, clone);
 
         async move {
-            let headers = TracingContext::from_current_span().to_http_headers();
+            let headers = TracingContext::from_current_span().to_http_1_headers();
             req.headers_mut().extend(headers);
             inner.call(req).await
         }
@@ -81,7 +56,7 @@ where
 /// A wrapper around tonic's `Channel` that injects the [`TracingContext`] obtained from the current
 /// tracing span when making gRPC requests.
 #[cfg(not(madsim))]
-pub type Channel = TracingInject<tonic::transport::Channel>;
+pub type Channel = TracingInjectChannel;
 #[cfg(madsim)]
 pub type Channel = tonic::transport::Channel;
 
@@ -95,7 +70,7 @@ impl tonic::transport::Channel {
     /// `TracingExtract` middleware.
     pub fn tracing_injected(self) -> Channel {
         #[cfg(not(madsim))]
-        return TracingInject { inner: self };
+        return TracingInjectChannel { inner: self };
         #[cfg(madsim)]
         return self;
     }

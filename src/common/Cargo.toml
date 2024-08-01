@@ -56,6 +56,7 @@ governor = { version = "0.6", default-features = false, features = ["std"] }
 hashbrown = "0.14"
 hex = "0.4.3"
 http = "0.2"
+http_1 = { package = "http", version = "1" }
 humantime = "2.1"
 hytra = { workspace = true }
 itertools = { workspace = true }
