@@ -64,7 +64,7 @@ use tracing::{trace, Instrument};
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
-use crate::common::cache::{StateCache, StateCacheFiller};
+use crate::common::state_cache::{StateCache, StateCacheFiller};
 use crate::common::table::state_table_cache::StateTableWatermarkCache;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
