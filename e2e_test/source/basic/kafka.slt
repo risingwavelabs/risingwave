@@ -391,7 +391,7 @@ create table s29 (id bytea) with (
   topic = 'kafka_source_format_bytes',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest',
-  streaming_rate_limit = 200
+  source_rate_limit = 200
 ) FORMAT PLAIN ENCODE BYTES
 
 statement ok

@@ -41,7 +41,7 @@ impl CompactionPicker for IntraCompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        let l0 = levels.l0.as_ref().unwrap();
+        let l0 = &levels.l0;
         if l0.sub_levels.is_empty() {
             return None;
         }
@@ -450,11 +450,11 @@ pub mod tests {
         }];
         let mut levels = Levels {
             levels,
-            l0: Some(OverlappingLevel {
+            l0: OverlappingLevel {
                 sub_levels: vec![],
                 total_file_size: 0,
                 uncompressed_file_size: 0,
-            }),
+            },
             ..Default::default()
         };
         push_tables_level0_nonoverlapping(
@@ -495,10 +495,10 @@ pub mod tests {
                 table_infos: vec![generate_table(3, 1, 200, 300, 2)],
                 ..Default::default()
             }],
-            l0: Some(generate_l0_nonoverlapping_sublevels(vec![
+            l0: generate_l0_nonoverlapping_sublevels(vec![
                 generate_table(1, 1, 100, 210, 2),
                 generate_table(2, 1, 200, 250, 2),
-            ])),
+            ]),
             ..Default::default()
         };
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
@@ -534,7 +534,7 @@ pub mod tests {
                 ],
             ]);
             let levels = Levels {
-                l0: Some(l0),
+                l0,
                 levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
                 ..Default::default()
             };
@@ -582,7 +582,7 @@ pub mod tests {
                 ],
             ]);
             let levels = Levels {
-                l0: Some(l0),
+                l0,
                 levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
                 ..Default::default()
             };
@@ -653,7 +653,7 @@ pub mod tests {
                 ],
             ]);
             let levels = Levels {
-                l0: Some(l0),
+                l0,
                 levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
                 ..Default::default()
             };
@@ -728,7 +728,7 @@ pub mod tests {
             generate_table(2, 1, 150, 250, 1),
         ]]);
         let levels = Levels {
-            l0: Some(l0),
+            l0,
             levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
             ..Default::default()
         };
@@ -748,7 +748,7 @@ pub mod tests {
             vec![generate_table(5, 1, 10, 90, 1)],
         ]);
         let mut levels = Levels {
-            l0: Some(l0),
+            l0,
             levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
             ..Default::default()
         };
@@ -757,20 +757,20 @@ pub mod tests {
             .is_none());
 
         // Cannot trivial move because latter sub-level is overlapping
-        levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Nonoverlapping;
-        levels.l0.as_mut().unwrap().sub_levels[1].level_type = LevelType::Overlapping;
+        levels.l0.sub_levels[0].level_type = LevelType::Nonoverlapping;
+        levels.l0.sub_levels[1].level_type = LevelType::Overlapping;
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
         assert!(ret.is_none());
 
         // Cannot trivial move because former sub-level is overlapping
-        levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Overlapping;
-        levels.l0.as_mut().unwrap().sub_levels[1].level_type = LevelType::Nonoverlapping;
+        levels.l0.sub_levels[0].level_type = LevelType::Overlapping;
+        levels.l0.sub_levels[1].level_type = LevelType::Nonoverlapping;
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
         assert!(ret.is_none());
 
         // trivial move
-        levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Nonoverlapping;
-        levels.l0.as_mut().unwrap().sub_levels[1].level_type = LevelType::Nonoverlapping;
+        levels.l0.sub_levels[0].level_type = LevelType::Nonoverlapping;
+        levels.l0.sub_levels[1].level_type = LevelType::Nonoverlapping;
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
@@ -845,7 +845,7 @@ pub mod tests {
         let mut local_stats = LocalPickerStatistic::default();
 
         let levels = Levels {
-            l0: Some(l0),
+            l0,
             levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
             ..Default::default()
         };
@@ -860,11 +860,11 @@ pub mod tests {
         let input = ret.as_ref().unwrap();
         assert_eq!(input.input_levels.len(), 2);
         assert_ne!(
-            levels.l0.as_ref().unwrap().sub_levels[0].table_infos.len(),
+            levels.l0.sub_levels[0].table_infos.len(),
             input.input_levels[0].table_infos.len()
         );
         assert_ne!(
-            levels.l0.as_ref().unwrap().sub_levels[1].table_infos.len(),
+            levels.l0.sub_levels[1].table_infos.len(),
             input.input_levels[1].table_infos.len()
         );
     }

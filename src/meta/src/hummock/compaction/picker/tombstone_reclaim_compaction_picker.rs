@@ -135,8 +135,6 @@ impl TombstoneReclaimCompactionPicker {
 
 #[cfg(test)]
 pub mod tests {
-    use risingwave_hummock_sdk::level::OverlappingLevel;
-
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::create_overlap_strategy;
@@ -145,7 +143,6 @@ pub mod tests {
     #[test]
     fn test_basic() {
         let mut levels = Levels {
-            l0: Some(OverlappingLevel::default()),
             levels: vec![
                 generate_level(1, vec![]),
                 generate_level(

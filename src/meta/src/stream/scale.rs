@@ -799,8 +799,18 @@ impl ScaleController {
         Ok(())
     }
 
-    // Results are the generated reschedule plan and the changes that need to be updated to the meta store.
-    pub(crate) async fn prepare_reschedule_command(
+    /// From the high-level [`WorkerReschedule`] to the low-level reschedule plan [`Reschedule`].
+    ///
+    /// Returns `(reschedule_fragment, applied_reschedules)`
+    /// - `reschedule_fragment`: the generated reschedule plan
+    /// - `applied_reschedules`: the changes that need to be updated to the meta store (`pre_apply_reschedules`, only for V1).
+    ///
+    /// In [normal process of scaling](`GlobalStreamManager::reschedule_actors_impl`), we use the returned values to
+    /// build a [`Command::RescheduleFragment`], which will then flows through the barrier mechanism to perform scaling.
+    /// Meta store is updated after the barrier is collected.
+    ///
+    /// During recovery, we don't need the barrier mechanism, and can directly use the returned values to update meta.
+    pub(crate) async fn analyze_reschedule_plan(
         &self,
         mut reschedules: HashMap<FragmentId, WorkerReschedule>,
         options: RescheduleOptions,
@@ -812,6 +822,7 @@ impl ScaleController {
         let ctx = self
             .build_reschedule_context(&mut reschedules, options, table_parallelisms)
             .await?;
+        let reschedules = reschedules;
 
         // Here, the plan for both upstream and downstream of the NO_SHUFFLE Fragment should already have been populated.
 
@@ -2136,7 +2147,7 @@ impl ScaleController {
         WorkerReschedule { worker_actor_diff }
     }
 
-    pub fn build_no_shuffle_relation_index(
+    fn build_no_shuffle_relation_index(
         actor_map: &HashMap<ActorId, CustomActorInfo>,
         no_shuffle_source_fragment_ids: &mut HashSet<FragmentId>,
         no_shuffle_target_fragment_ids: &mut HashSet<FragmentId>,
@@ -2164,7 +2175,7 @@ impl ScaleController {
         }
     }
 
-    pub fn build_fragment_dispatcher_index(
+    fn build_fragment_dispatcher_index(
         actor_map: &HashMap<ActorId, CustomActorInfo>,
         fragment_dispatcher_map: &mut HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
     ) {
@@ -2303,8 +2314,8 @@ impl ScaleController {
     }
 }
 
-// At present, for table level scaling, we use the strategy TableResizePolicy.
-// Currently, this is used as an internal interface, so it won’t be included in Protobuf for the time being.
+/// At present, for table level scaling, we use the strategy `TableResizePolicy`.
+/// Currently, this is used as an internal interface, so it won’t be included in Protobuf.
 pub struct TableResizePolicy {
     pub(crate) worker_ids: BTreeSet<WorkerId>,
     pub(crate) table_parallelisms: HashMap<u32, TableParallelism>,
@@ -2319,6 +2330,13 @@ impl GlobalStreamManager {
         self.scale_controller.reschedule_lock.write().await
     }
 
+    /// The entrypoint of rescheduling actors.
+    ///
+    /// Used by:
+    /// - The directly exposed low-level API `risingwave_meta_service::scale_service::ScaleService` (`risectl meta reschedule`)
+    /// - High-level parallelism control API
+    ///     * manual `ALTER [TABLE | INDEX | MATERIALIZED VIEW | SINK] SET PARALLELISM`
+    ///     * automatic parallelism control for [`TableParallelism::Adaptive`] when worker nodes changed
     pub async fn reschedule_actors(
         &self,
         reschedules: HashMap<FragmentId, WorkerReschedule>,
@@ -2350,7 +2368,7 @@ impl GlobalStreamManager {
 
         let (reschedule_fragment, applied_reschedules) = self
             .scale_controller
-            .prepare_reschedule_command(reschedules, options, table_parallelism.as_mut())
+            .analyze_reschedule_plan(reschedules, options, table_parallelism.as_mut())
             .await?;
 
         tracing::debug!("reschedule plan: {:?}", reschedule_fragment);
@@ -2411,6 +2429,14 @@ impl GlobalStreamManager {
         Ok(())
     }
 
+    /// When new worker nodes joined, or the parallelism of existing worker nodes changed,
+    /// examines if there are any jobs can be scaled, and scales them if found.
+    ///
+    /// This method will iterate over all `CREATED` jobs, and can be repeatedly called.
+    ///
+    /// Returns
+    /// - `Ok(false)` if no jobs can be scaled;
+    /// - `Ok(true)` if some jobs are scaled, and it is possible that there are more jobs can be scaled.
     async fn trigger_parallelism_control(&self) -> MetaResult<bool> {
         let background_streaming_jobs = self
             .metadata_manager
@@ -2532,7 +2558,9 @@ impl GlobalStreamManager {
 
         for batch in batches {
             let parallelisms: HashMap<_, _> = batch.into_iter().collect();
-
+            // `table_parallelisms` contains ALL created jobs.
+            // We rely on `generate_table_resize_plan` to check if there are
+            // any jobs that can be scaled.
             let plan = self
                 .scale_controller
                 .generate_table_resize_plan(TableResizePolicy {
@@ -2569,6 +2597,7 @@ impl GlobalStreamManager {
         Ok(true)
     }
 
+    /// Handles notification of worker node activation and deletion, and triggers parallelism control.
     async fn run(&self, mut shutdown_rx: Receiver<()>) {
         tracing::info!("starting automatic parallelism control monitor");
 
@@ -2638,14 +2667,19 @@ impl GlobalStreamManager {
                 notification = local_notification_rx.recv() => {
                     let notification = notification.expect("local notification channel closed in loop of stream manager");
 
+                    // Only maintain the cache for streaming compute nodes.
+                    let worker_is_streaming_compute = |worker: &WorkerNode| {
+                        worker.get_type() == Ok(WorkerType::ComputeNode)
+                            && worker.property.as_ref().unwrap().is_streaming
+                    };
+
                     match notification {
                         LocalNotification::WorkerNodeActivated(worker) => {
-                            match (worker.get_type(), worker.property.as_ref()) {
-                                (Ok(WorkerType::ComputeNode), Some(prop)) if prop.is_streaming => {
-                                    tracing::info!("worker {} activated notification received", worker.id);
-                                }
-                                _ => continue
+                            if !worker_is_streaming_compute(&worker) {
+                                continue;
                             }
+
+                            tracing::info!(worker = worker.id, "worker activated notification received");
 
                             let prev_worker = worker_cache.insert(worker.id, worker.clone());
 
@@ -2665,11 +2699,14 @@ impl GlobalStreamManager {
                         // Since our logic for handling passive scale-in is within the barrier manager,
                         // there’s not much we can do here. All we can do is proactively remove the entries from our cache.
                         LocalNotification::WorkerNodeDeleted(worker) => {
+                            if !worker_is_streaming_compute(&worker) {
+                                continue;
+                            }
+
                             match worker_cache.remove(&worker.id) {
                                 Some(prev_worker) => {
                                     tracing::info!(worker = prev_worker.id, "worker removed from stream manager cache");
                                 }
-
                                 None => {
                                     tracing::warn!(worker = worker.id, "worker not found in stream manager cache, but it was removed");
                                 }

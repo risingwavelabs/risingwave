@@ -282,8 +282,6 @@ async fn test_hummock_table() {
         Ordering::Equal,
         levels
             .l0
-            .as_ref()
-            .unwrap()
             .sub_levels
             .iter()
             .chain(levels.levels.iter())
@@ -1809,8 +1807,6 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
     assert!(current_version
         .get_compaction_group_levels(2)
         .l0
-        .as_ref()
-        .unwrap()
         .sub_levels
         .is_empty());
     assert_eq!(
@@ -2227,7 +2223,7 @@ async fn test_partition_level() {
     }
     let current_version = hummock_manager.get_current_version().await;
     let group = current_version.get_compaction_group_levels(new_group_id);
-    for sub_level in &group.l0.as_ref().unwrap().sub_levels {
+    for sub_level in &group.l0.sub_levels {
         if sub_level.total_file_size > config.sub_level_max_compaction_bytes {
             assert!(sub_level.vnode_partition_count > 0);
         }

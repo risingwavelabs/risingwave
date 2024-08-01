@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(lazy_cell)]
+#![feature(let_chains)]
 
 mod common;
 mod standalone;

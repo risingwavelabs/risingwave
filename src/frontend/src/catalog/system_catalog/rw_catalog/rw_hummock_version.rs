@@ -86,11 +86,7 @@ async fn read_hummock_sstables(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHu
 fn remove_key_range_from_version(mut version: HummockVersion) -> HummockVersion {
     // Because key range is too verbose for manual analysis, just don't expose it.
     for cg in version.levels.values_mut() {
-        for level in cg
-            .levels
-            .iter_mut()
-            .chain(cg.l0.as_mut().unwrap().sub_levels.iter_mut())
-        {
+        for level in cg.levels.iter_mut().chain(cg.l0.sub_levels.iter_mut()) {
             for sst in &mut level.table_infos {
                 sst.remove_key_range();
             }
@@ -115,7 +111,7 @@ fn version_to_compaction_group_rows(version: &HummockVersion) -> Vec<RwHummockVe
 fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
     let mut sstables = vec![];
     for cg in version.levels.into_values() {
-        for level in cg.levels.into_iter().chain(cg.l0.unwrap().sub_levels) {
+        for level in cg.levels.into_iter().chain(cg.l0.sub_levels) {
             for sst in level.table_infos {
                 let estimated_sst_file_size = sst.estimated_sst_size;
                 let key_range = &sst.key_range;

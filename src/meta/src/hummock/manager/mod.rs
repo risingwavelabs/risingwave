@@ -61,7 +61,7 @@ pub(crate) mod checkpoint;
 mod commit_epoch;
 mod compaction;
 pub mod sequence;
-mod time_travel;
+pub mod time_travel;
 mod timer_task;
 mod transaction;
 mod utils;
@@ -480,7 +480,7 @@ impl HummockManager {
 
         self.delete_object_tracker.clear();
         // Not delete stale objects when archive or time travel is enabled
-        if !self.env.opts.enable_hummock_data_archive && !self.env.opts.enable_hummock_time_travel {
+        if !self.env.opts.enable_hummock_data_archive && !self.time_travel_enabled().await {
             versioning_guard.mark_objects_for_deletion(context_info, &self.delete_object_tracker);
         }
 

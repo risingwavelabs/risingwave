@@ -136,8 +136,8 @@ pub mod tests {
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 
     pub fn push_table_level0_overlapping(levels: &mut Levels, sst: SstableInfo) {
-        levels.l0.as_mut().unwrap().total_file_size += sst.estimated_sst_size;
-        levels.l0.as_mut().unwrap().sub_levels.push(Level {
+        levels.l0.total_file_size += sst.estimated_sst_size;
+        levels.l0.sub_levels.push(Level {
             level_idx: 0,
             level_type: LevelType::Overlapping,
             total_file_size: sst.estimated_sst_size,
@@ -150,14 +150,7 @@ pub mod tests {
 
     pub fn push_table_level0_nonoverlapping(levels: &mut Levels, sst: SstableInfo) {
         push_table_level0_overlapping(levels, sst);
-        levels
-            .l0
-            .as_mut()
-            .unwrap()
-            .sub_levels
-            .last_mut()
-            .unwrap()
-            .level_type = LevelType::Nonoverlapping;
+        levels.l0.sub_levels.last_mut().unwrap().level_type = LevelType::Nonoverlapping;
     }
 
     pub fn push_tables_level0_nonoverlapping(levels: &mut Levels, table_infos: Vec<SstableInfo>) {
@@ -170,8 +163,8 @@ pub mod tests {
             .map(|table| table.uncompressed_file_size)
             .sum();
         let sub_level_id = table_infos[0].sst_id;
-        levels.l0.as_mut().unwrap().total_file_size += total_file_size;
-        levels.l0.as_mut().unwrap().sub_levels.push(Level {
+        levels.l0.total_file_size += total_file_size;
+        levels.l0.sub_levels.push(Level {
             level_idx: 0,
             level_type: LevelType::Nonoverlapping,
             total_file_size,

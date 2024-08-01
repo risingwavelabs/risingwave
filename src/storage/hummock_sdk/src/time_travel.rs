@@ -102,8 +102,6 @@ pub fn refill_version(
     for level in version.levels.values_mut().flat_map(|level| {
         level
             .l0
-            .as_mut()
-            .unwrap()
             .sub_levels
             .iter_mut()
             .rev()
@@ -160,7 +158,7 @@ fn stripped_l0(origin: &OverlappingLevel) -> OverlappingLevel {
 fn stripped_levels(origin: &Levels) -> Levels {
     Levels {
         levels: origin.levels.iter().map(stripped_level).collect(),
-        l0: origin.l0.as_ref().map(stripped_l0),
+        l0: stripped_l0(&origin.l0),
         group_id: origin.group_id,
         parent_group_id: origin.parent_group_id,
         member_table_ids: Default::default(),

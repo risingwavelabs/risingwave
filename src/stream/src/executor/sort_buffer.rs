@@ -34,7 +34,7 @@ use risingwave_storage::table::KeyedRow;
 use risingwave_storage::StateStore;
 
 use super::{StreamExecutorError, StreamExecutorResult};
-use crate::common::cache::{StateCache, StateCacheFiller, TopNStateCache};
+use crate::common::state_cache::{StateCache, StateCacheFiller, TopNStateCache};
 use crate::common::table::state_table::StateTable;
 
 type CacheKey = (

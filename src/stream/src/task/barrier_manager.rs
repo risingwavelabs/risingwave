@@ -39,7 +39,8 @@ use tonic::{Code, Status};
 use self::managed_state::ManagedBarrierState;
 use crate::error::{IntoUnexpectedExit, StreamError, StreamResult};
 use crate::task::{
-    ActorHandle, ActorId, AtomicU64Ref, SharedContext, StreamEnvironment, UpDownActorIds,
+    ActorHandle, ActorId, AtomicU64Ref, PartialGraphId, SharedContext, StreamEnvironment,
+    UpDownActorIds,
 };
 
 mod managed_state;
@@ -56,7 +57,9 @@ use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::streaming_control_stream_request::{InitRequest, Request};
-use risingwave_pb::stream_service::streaming_control_stream_response::InitResponse;
+use risingwave_pb::stream_service::streaming_control_stream_response::{
+    InitResponse, ShutdownResponse,
+};
 use risingwave_pb::stream_service::{
     streaming_control_stream_response, BarrierCompleteResponse, BuildActorInfo,
     StreamingControlStreamRequest, StreamingControlStreamResponse,
@@ -119,8 +122,37 @@ impl ControlStreamHandle {
 
             let err = err.into_inner();
             if sender.send(Err(err)).is_err() {
-                warn!("failed to notify finish of control stream");
+                warn!("failed to notify reset of control stream");
             }
+        }
+    }
+
+    /// Send `Shutdown` message to the control stream and wait for the stream to be closed
+    /// by the meta service.
+    async fn shutdown_stream(&mut self) {
+        if let Some((sender, _)) = self.pair.take() {
+            if sender
+                .send(Ok(StreamingControlStreamResponse {
+                    response: Some(streaming_control_stream_response::Response::Shutdown(
+                        ShutdownResponse::default(),
+                    )),
+                }))
+                .is_err()
+            {
+                warn!("failed to notify shutdown of control stream");
+            } else {
+                tracing::info!("waiting for meta service to close control stream...");
+
+                // Wait for the stream to be closed, to ensure that the `Shutdown` message has
+                // been acknowledged by the meta service for more precise error report.
+                //
+                // This is because the meta service will reset the control stream manager and
+                // drop the connection to us upon recovery. As a result, the receiver part of
+                // this sender will also be dropped, causing the stream to close.
+                sender.closed().await;
+            }
+        } else {
+            debug!("control stream has been reset, ignore shutdown");
         }
     }
 
@@ -194,7 +226,7 @@ pub(super) enum LocalBarrierEvent {
         epoch: EpochPair,
     },
     ReportCreateProgress {
-        current_epoch: u64,
+        epoch: EpochPair,
         actor: ActorId,
         state: BackfillState,
     },
@@ -207,6 +239,7 @@ pub(super) enum LocalBarrierEvent {
     Flush(oneshot::Sender<()>),
 }
 
+#[derive(strum_macros::Display)]
 pub(super) enum LocalActorOperation {
     NewControlStream {
         handle: ControlStreamHandle,
@@ -242,6 +275,9 @@ pub(super) enum LocalActorOperation {
     },
     InspectState {
         result_sender: oneshot::Sender<String>,
+    },
+    Shutdown {
+        result_sender: oneshot::Sender<()>,
     },
 }
 
@@ -427,8 +463,8 @@ impl LocalBarrierWorker {
                 (sender, create_actors_result) = self.actor_manager_state.next_created_actors() => {
                     self.handle_actor_created(sender, create_actors_result);
                 }
-                completed_epoch = self.state.next_completed_epoch() => {
-                    let result = self.on_epoch_completed(completed_epoch);
+                (partial_graph_id, completed_epoch) = self.state.next_completed_epoch() => {
+                    let result = self.on_epoch_completed(partial_graph_id, completed_epoch);
                     if let Err(err) = result {
                         self.notify_other_failure(err, "failed to complete epoch").await;
                     }
@@ -450,6 +486,15 @@ impl LocalBarrierWorker {
                                 self.control_stream_handle.send_response(StreamingControlStreamResponse {
                                     response: Some(streaming_control_stream_response::Response::Init(InitResponse {}))
                                 });
+                            }
+                            LocalActorOperation::Shutdown { result_sender } => {
+                                if !self.actor_manager_state.handles.is_empty() {
+                                    tracing::warn!(
+                                        "shutdown with running actors, scaling or migration will be triggered"
+                                    );
+                                }
+                                self.control_stream_handle.shutdown_stream().await;
+                                let _ = result_sender.send(());
                             }
                             actor_op => {
                                 self.handle_actor_op(actor_op);
@@ -500,7 +545,14 @@ impl LocalBarrierWorker {
                         .into_iter()
                         .map(TableId::new)
                         .collect(),
+                    PartialGraphId::new(req.partial_graph_id),
                 )?;
+                Ok(())
+            }
+            Request::RemovePartialGraph(req) => {
+                self.remove_partial_graphs(
+                    req.partial_graph_ids.into_iter().map(PartialGraphId::new),
+                );
                 Ok(())
             }
             Request::Init(_) => {
@@ -515,11 +567,11 @@ impl LocalBarrierWorker {
                 self.collect(actor_id, epoch)
             }
             LocalBarrierEvent::ReportCreateProgress {
-                current_epoch,
+                epoch,
                 actor,
                 state,
             } => {
-                self.update_create_mview_progress(current_epoch, actor, state);
+                self.update_create_mview_progress(epoch, actor, state);
             }
             LocalBarrierEvent::SubscribeBarrierMutation {
                 actor_id,
@@ -536,8 +588,8 @@ impl LocalBarrierWorker {
 
     fn handle_actor_op(&mut self, actor_op: LocalActorOperation) {
         match actor_op {
-            LocalActorOperation::NewControlStream { .. } => {
-                unreachable!("NewControlStream event should be handled separately in async context")
+            LocalActorOperation::NewControlStream { .. } | LocalActorOperation::Shutdown { .. } => {
+                unreachable!("event {actor_op} should be handled separately in async context")
             }
             LocalActorOperation::DropActors {
                 actors,
@@ -589,9 +641,17 @@ impl LocalBarrierWorker {
 
 // event handler
 impl LocalBarrierWorker {
-    fn on_epoch_completed(&mut self, epoch: u64) -> StreamResult<()> {
-        let result = self
+    fn on_epoch_completed(
+        &mut self,
+        partial_graph_id: PartialGraphId,
+        epoch: u64,
+    ) -> StreamResult<()> {
+        let state = self
             .state
+            .graph_states
+            .get_mut(&partial_graph_id)
+            .expect("should exist");
+        let result = state
             .pop_completed_epoch(epoch)
             .expect("should exist")
             .expect("should have completed")?;
@@ -616,6 +676,8 @@ impl LocalBarrierWorker {
                 streaming_control_stream_response::Response::CompleteBarrier(
                     BarrierCompleteResponse {
                         request_id: "todo".to_string(),
+                        partial_graph_id: partial_graph_id.into(),
+                        epoch,
                         status: None,
                         create_mview_progress,
                         synced_sstables: synced_sstables
@@ -673,6 +735,7 @@ impl LocalBarrierWorker {
         to_send: HashSet<ActorId>,
         to_collect: HashSet<ActorId>,
         table_ids: HashSet<TableId>,
+        partial_graph_id: PartialGraphId,
     ) -> StreamResult<()> {
         if !cfg!(test) {
             // The barrier might be outdated and been injected after recovery in some certain extreme
@@ -720,7 +783,7 @@ impl LocalBarrierWorker {
         }
 
         self.state
-            .transform_to_issued(barrier, to_collect, table_ids);
+            .transform_to_issued(barrier, to_collect, table_ids, partial_graph_id);
 
         for actor_id in to_send {
             match self.barrier_senders.get(&actor_id) {
@@ -760,6 +823,23 @@ impl LocalBarrierWorker {
         Ok(())
     }
 
+    fn remove_partial_graphs(&mut self, partial_graph_ids: impl Iterator<Item = PartialGraphId>) {
+        for partial_graph_id in partial_graph_ids {
+            if let Some(graph) = self.state.graph_states.remove(&partial_graph_id) {
+                assert!(
+                    graph.is_empty(),
+                    "non empty graph to be removed: {}",
+                    &graph
+                );
+            } else {
+                warn!(
+                    partial_graph_id = partial_graph_id.0,
+                    "no partial graph to remove"
+                );
+            }
+        }
+    }
+
     /// Reset all internal states.
     pub(super) fn reset_state(&mut self) {
         *self = Self::new(self.actor_manager.clone());
@@ -777,14 +857,12 @@ impl LocalBarrierWorker {
         self.add_failure(actor_id, err.clone());
         let root_err = self.try_find_root_failure().await.unwrap(); // always `Some` because we just added one
 
-        let failed_epochs = self.state.epochs_await_on_actor(actor_id).collect_vec();
-        if !failed_epochs.is_empty() {
+        if let Some(actor_state) = self.state.actor_states.get(&actor_id)
+            && (!actor_state.inflight_barriers.is_empty() || actor_state.is_running())
+        {
             self.control_stream_handle.reset_stream_with_err(
                 anyhow!(root_err)
-                    .context(format!(
-                        "failed to collect barrier for epoch {:?}",
-                        failed_epochs
-                    ))
+                    .context("failed to collect barrier")
                     .to_status_unnamed(Code::Internal),
             );
         }
@@ -1137,6 +1215,7 @@ pub(crate) mod barrier_test_utils {
                             actor_ids_to_send: actor_to_send.into_iter().collect(),
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),
                             table_ids_to_sync: vec![],
+                            partial_graph_id: u32::MAX,
                         },
                     )),
                 }))

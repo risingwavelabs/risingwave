@@ -697,7 +697,7 @@ pub async fn handle(
         } => alter_table_with_sr::handle_refresh_schema(handler_args, name).await,
         Statement::AlterTable {
             name,
-            operation: AlterTableOperation::SetStreamingRateLimit { rate_limit },
+            operation: AlterTableOperation::SetSourceRateLimit { rate_limit },
         } => {
             alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                 handler_args,
@@ -814,7 +814,7 @@ pub async fn handle(
         Statement::AlterView {
             materialized,
             name,
-            operation: AlterViewOperation::SetStreamingRateLimit { rate_limit },
+            operation: AlterViewOperation::SetBackfillRateLimit { rate_limit },
         } if materialized => {
             alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                 handler_args,
@@ -946,7 +946,7 @@ pub async fn handle(
         } => alter_source_with_sr::handler_refresh_schema(handler_args, name).await,
         Statement::AlterSource {
             name,
-            operation: AlterSourceOperation::SetStreamingRateLimit { rate_limit },
+            operation: AlterSourceOperation::SetSourceRateLimit { rate_limit },
         } => {
             alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                 handler_args,

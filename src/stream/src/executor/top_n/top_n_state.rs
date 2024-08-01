@@ -23,7 +23,8 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use super::{serialize_pk_to_cache_key, CacheKey, CacheKeySerde, GroupKey, TopNCache};
+use super::top_n_cache::CacheKey;
+use super::{serialize_pk_to_cache_key, CacheKeySerde, GroupKey, TopNCache};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 

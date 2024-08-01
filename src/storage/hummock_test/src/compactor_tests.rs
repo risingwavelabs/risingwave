@@ -345,8 +345,6 @@ pub(crate) mod tests {
             .chain(
                 group
                     .l0
-                    .as_ref()
-                    .unwrap()
                     .sub_levels
                     .iter()
                     .flat_map(|level| level.table_infos.clone()),
@@ -803,7 +801,6 @@ pub(crate) mod tests {
             filter_key_extractor_manager,
         )
         .await;
-
         hummock_manager_ref
             .report_compact_task(
                 result_task.task_id,
@@ -1940,16 +1937,6 @@ pub(crate) mod tests {
             ..Default::default()
         };
         let (ret, fast_ret) = run_fast_and_normal_runner(compact_ctx.clone(), task).await;
-        println!(
-            "normal compact result data: {}, fast compact result data: {}",
-            ret.iter().map(|sst| sst.estimated_sst_size).sum::<u64>(),
-            fast_ret
-                .iter()
-                .map(|sst| sst.estimated_sst_size)
-                .sum::<u64>(),
-        );
-        // check_compaction_result(compact_ctx.sstable_store, ret.clone(), fast_ret, target_file_size).await;
-
         let mut fast_tables = Vec::with_capacity(fast_ret.len());
         let mut normal_tables = Vec::with_capacity(ret.len());
         let mut stats = StoreLocalStatistic::default();

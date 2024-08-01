@@ -206,7 +206,7 @@ impl HummockManager {
             });
         }
         // Whenever data archive or time travel is enabled, we can directly discard reference to stale objects that will no longer be used.
-        if self.env.opts.enable_hummock_data_archive || self.env.opts.enable_hummock_time_travel {
+        if self.env.opts.enable_hummock_data_archive || self.time_travel_enabled().await {
             let context_info = self.context_info.read().await;
             let min_pinned_version_id = context_info.min_pinned_version_id();
             stale_objects.retain(|version_id, _| *version_id >= min_pinned_version_id);
@@ -234,7 +234,7 @@ impl HummockManager {
         assert!(new_checkpoint.version.id > versioning.checkpoint.version.id);
         versioning.checkpoint = new_checkpoint;
         // Not delete stale objects when archive or time travel is enabled
-        if !self.env.opts.enable_hummock_data_archive && !self.env.opts.enable_hummock_time_travel {
+        if !self.env.opts.enable_hummock_data_archive && !self.time_travel_enabled().await {
             versioning.mark_objects_for_deletion(&context_info, &self.delete_object_tracker);
         }
 

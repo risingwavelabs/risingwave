@@ -296,7 +296,7 @@ pub fn get_sorted_committed_object_ids(
     levels
         .levels
         .iter()
-        .chain(levels.l0.as_ref().unwrap().sub_levels.iter())
+        .chain(levels.l0.sub_levels.iter())
         .flat_map(|levels| levels.table_infos.iter().map(|info| info.object_id))
         .sorted()
         .collect_vec()

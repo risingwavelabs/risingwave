@@ -850,7 +850,26 @@ impl UnsyncData {
         // called `start_epoch` because we have stopped writing on it.
         if !table_data.unsync_epochs.contains_key(&next_epoch) {
             if let Some(stopped_next_epoch) = table_data.stopped_next_epoch {
-                assert_eq!(stopped_next_epoch, next_epoch);
+                if stopped_next_epoch != next_epoch {
+                    let table_id = table_data.table_id.table_id;
+                    let unsync_epochs = table_data.unsync_epochs.keys().collect_vec();
+                    if cfg!(debug_assertions) {
+                        panic!(
+                            "table_id {} stop epoch {} different to prev stop epoch {}. unsync epochs: {:?}, syncing epochs {:?}, max_synced_epoch {:?}",
+                            table_id, next_epoch, stopped_next_epoch, unsync_epochs, table_data.syncing_epochs, table_data.max_synced_epoch
+                        );
+                    } else {
+                        warn!(
+                            table_id,
+                            stopped_next_epoch,
+                            next_epoch,
+                            ?unsync_epochs,
+                            syncing_epochs = ?table_data.syncing_epochs,
+                            max_synced_epoch = ?table_data.max_synced_epoch,
+                            "different stop epoch"
+                        );
+                    }
+                }
             } else {
                 if let Some(max_epoch) = table_data.max_epoch() {
                     assert_gt!(next_epoch, max_epoch);

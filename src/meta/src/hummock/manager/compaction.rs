@@ -1693,7 +1693,7 @@ pub fn check_cg_write_limit(
     compaction_config: &CompactionConfig,
 ) -> WriteLimitType {
     let threshold = compaction_config.level0_stop_write_threshold_sub_level_number as usize;
-    let l0_sub_level_number = levels.l0.as_ref().unwrap().sub_levels.len();
+    let l0_sub_level_number = levels.l0.sub_levels.len();
     if threshold < l0_sub_level_number {
         return WriteLimitType::WriteStop(l0_sub_level_number, threshold);
     }

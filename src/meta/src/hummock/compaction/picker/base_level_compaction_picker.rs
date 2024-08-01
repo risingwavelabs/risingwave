@@ -47,7 +47,7 @@ impl CompactionPicker for LevelCompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        let l0 = levels.l0.as_ref().unwrap();
+        let l0 = &levels.l0;
         if l0.sub_levels.is_empty() {
             return None;
         }
@@ -315,11 +315,11 @@ pub mod tests {
             ],
         );
         let mut levels = Levels {
-            l0: Some(OverlappingLevel {
+            l0: OverlappingLevel {
                 total_file_size: l0.total_file_size,
                 uncompressed_file_size: l0.total_file_size,
                 sub_levels: vec![l0],
-            }),
+            },
             levels: vec![generate_level(
                 1,
                 vec![
@@ -353,10 +353,10 @@ pub mod tests {
             assert_eq!(ret2.input_levels[1].table_infos[0].sst_id, 5);
         }
 
-        levels.l0.as_mut().unwrap().sub_levels[0]
+        levels.l0.sub_levels[0]
             .table_infos
             .retain(|table| table.sst_id != 4);
-        levels.l0.as_mut().unwrap().total_file_size -= ret.input_levels[0].table_infos[0].file_size;
+        levels.l0.total_file_size -= ret.input_levels[0].table_infos[0].file_size;
 
         levels_handler[0].remove_task(0);
         levels_handler[1].remove_task(0);
@@ -415,11 +415,11 @@ pub mod tests {
         }];
         let mut levels = Levels {
             levels,
-            l0: Some(OverlappingLevel {
+            l0: OverlappingLevel {
                 sub_levels: vec![],
                 total_file_size: 0,
                 uncompressed_file_size: 0,
-            }),
+            },
             ..Default::default()
         };
         push_tables_level0_nonoverlapping(&mut levels, vec![generate_table(1, 1, 50, 140, 2)]);
@@ -477,11 +477,11 @@ pub mod tests {
         }];
         let mut levels = Levels {
             levels,
-            l0: Some(OverlappingLevel {
+            l0: OverlappingLevel {
                 sub_levels: vec![],
                 total_file_size: 0,
                 uncompressed_file_size: 0,
-            }),
+            },
             ..Default::default()
         };
         push_tables_level0_nonoverlapping(
@@ -543,7 +543,7 @@ pub mod tests {
                 uncompressed_file_size: 900,
                 ..Default::default()
             }],
-            l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
+            l0: generate_l0_nonoverlapping_sublevels(vec![]),
             ..Default::default()
         };
         push_tables_level0_nonoverlapping(
@@ -557,11 +557,7 @@ pub mod tests {
 
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
         let mut local_stats = LocalPickerStatistic::default();
-        levels_handler[0].add_pending_task(
-            1,
-            4,
-            &levels.l0.as_ref().unwrap().sub_levels[0].table_infos,
-        );
+        levels_handler[0].add_pending_task(1, 4, &levels.l0.sub_levels[0].table_infos);
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
         // Skip this compaction because the write amplification is too large.
         assert!(ret.is_none());
@@ -583,7 +579,7 @@ pub mod tests {
             s.level_type = LevelType::Nonoverlapping;
         }
         let levels = Levels {
-            l0: Some(l0),
+            l0,
             levels: vec![generate_level(1, vec![generate_table(3, 1, 0, 100000, 1)])],
             ..Default::default()
         };
@@ -660,7 +656,7 @@ pub mod tests {
         ]);
 
         let levels = Levels {
-            l0: Some(l0),
+            l0,
             levels: vec![generate_level(1, vec![generate_table(3, 1, 0, 100000, 1)])],
             ..Default::default()
         };
@@ -668,7 +664,7 @@ pub mod tests {
         let mut local_stats = LocalPickerStatistic::default();
 
         // Create a pending sub-level.
-        let pending_level = levels.l0.as_ref().unwrap().sub_levels[1].clone();
+        let pending_level = levels.l0.sub_levels[1].clone();
         assert_eq!(pending_level.sub_level_id, 1);
         let tier_task_input = CompactionInput {
             input_levels: vec![InputLevel {
@@ -726,7 +722,7 @@ pub mod tests {
         ]);
 
         let levels = Levels {
-            l0: Some(l0),
+            l0,
             levels: vec![generate_level(1, vec![generate_table(3, 1, 1, 100, 1)])],
             ..Default::default()
         };
