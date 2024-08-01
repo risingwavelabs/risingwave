@@ -849,7 +849,6 @@ impl CommandContext {
     pub async fn wait_epoch_commit(&self, epoch: HummockEpoch) -> MetaResult<()> {
         let futures = self.info.node_map.values().map(|worker_node| async {
             let worker = worker_node.clone();
-            tracing::info!("get client for compute {:?}", worker);
             let client = self
                 .barrier_manager_context
                 .env
