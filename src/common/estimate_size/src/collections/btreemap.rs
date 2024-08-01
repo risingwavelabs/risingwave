@@ -18,6 +18,7 @@ use std::ops::{Bound, RangeInclusive};
 
 use crate::{EstimateSize, KvSize};
 
+#[derive(Clone)]
 pub struct EstimatedBTreeMap<K, V> {
     inner: BTreeMap<K, V>,
     heap_size: KvSize,
@@ -42,6 +43,22 @@ impl<K, V> EstimatedBTreeMap<K, V> {
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
+        self.inner.iter()
+    }
+
+    pub fn range<R>(&self, range: R) -> std::collections::btree_map::Range<'_, K, V>
+    where
+        K: Ord,
+        R: std::ops::RangeBounds<K>,
+    {
+        self.inner.range(range)
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &V> {
+        self.inner.values()
+    }
 }
 
 impl<K, V> Default for EstimatedBTreeMap<K, V> {
@@ -63,19 +80,23 @@ where
         self.inner.last_key_value()
     }
 
-    pub fn insert(&mut self, key: K, value: V) {
+    pub fn insert(&mut self, key: K, value: V) -> Option<V> {
         let key_size = self.heap_size.add_val(&key);
         self.heap_size.add_val(&value);
-        if let Some(old_value) = self.inner.insert(key, value) {
+        let old_value = self.inner.insert(key, value);
+        if let Some(old_value) = &old_value {
             self.heap_size.sub_size(key_size);
-            self.heap_size.sub_val(&old_value);
+            self.heap_size.sub_val(old_value);
         }
+        old_value
     }
 
-    pub fn remove(&mut self, key: &K) {
-        if let Some(value) = self.inner.remove(key) {
-            self.heap_size.sub(key, &value);
+    pub fn remove(&mut self, key: &K) -> Option<V> {
+        let old_value = self.inner.remove(key);
+        if let Some(old_value) = &old_value {
+            self.heap_size.sub(key, old_value);
         }
+        old_value
     }
 
     pub fn clear(&mut self) {
@@ -100,17 +121,6 @@ where
             inner,
             heap_size: &mut self.heap_size,
         })
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
-        self.inner.iter()
-    }
-
-    pub fn range<R>(&self, range: R) -> std::collections::btree_map::Range<'_, K, V>
-    where
-        R: std::ops::RangeBounds<K>,
-    {
-        self.inner.range(range)
     }
 
     /// Retain the given range of entries in the map, removing others.
