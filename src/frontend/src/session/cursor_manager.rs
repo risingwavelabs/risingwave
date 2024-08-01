@@ -541,7 +541,6 @@ impl SubscriptionCursor {
         formats: &Vec<Format>,
         session_data: &StaticSessionData,
     ) -> Result<Vec<Option<Bytes>>> {
-        println!("param_types: {:?}", formats);
         let row_len = row.len();
         let new_row = if let Some(rw_timestamp) = rw_timestamp {
             let rw_timestamp_formats = formats.get(row_len).unwrap_or(&Format::Text);
