@@ -179,7 +179,7 @@ pub async fn create_executor(
         NodeBody::StreamFsFetch => FsFetchExecutorBuilder,
         NodeBody::SourceBackfill => SourceBackfillExecutorBuilder,
         NodeBody::Changelog => ChangeLogExecutorBuilder,
-        // NodeBody::GlobalApproxPercentile => todo!(),
+        NodeBody::GlobalApproxPercentile => GlobalApproxPercentileExecutorBuilder,
         NodeBody::LocalApproxPercentile => LocalApproxPercentileExecutorBuilder,
     }
 }

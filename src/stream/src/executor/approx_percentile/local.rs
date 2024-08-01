@@ -26,7 +26,6 @@ pub struct LocalApproxPercentileExecutor {
     pub input: Executor,
     pub base: f64,
     pub percentile_index: usize,
-    pub schema: Schema,
     pub chunk_size: usize,
 }
 
@@ -36,7 +35,6 @@ impl LocalApproxPercentileExecutor {
         input: Executor,
         base: f64,
         percentile_index: usize,
-        schema: Schema,
         chunk_size: usize,
     ) -> Self {
         Self {
@@ -44,7 +42,6 @@ impl LocalApproxPercentileExecutor {
             input,
             base,
             percentile_index,
-            schema,
             chunk_size,
         }
     }

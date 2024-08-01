@@ -31,8 +31,6 @@ pub struct GlobalApproxPercentileExecutor<S: StateStore> {
     pub input: Executor,
     pub quantile: f64,
     pub base: f64,
-    pub percentile_col: InputRef,
-    pub schema: Schema,
     pub chunk_size: usize,
     /// Used for the approx percentile buckets.
     pub bucket_state_table: StateTable<S>,
@@ -47,8 +45,6 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
         input: Executor,
         quantile: f64,
         base: f64,
-        percentile_col: InputRef,
-        schema: Schema,
         chunk_size: usize,
         bucket_state_table: StateTable<S>,
         count_state_table: StateTable<S>,
@@ -58,8 +54,6 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
             input,
             quantile,
             base,
-            percentile_col,
-            schema,
             chunk_size,
             bucket_state_table,
             count_state_table,
@@ -69,7 +63,6 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
     /// TODO(kwannoel): Include cache later.
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
-        let percentile_index = self.percentile_col.index as usize;
         let mut bucket_state_table = self.bucket_state_table;
         let mut count_state_table = self.count_state_table;
         let mut old_row_count = count_state_table.get_row(&[Datum::None; 0]).await?;
