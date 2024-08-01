@@ -301,6 +301,7 @@ impl<'a> JsonbRef<'a> {
             .ok_or_else(|| format!("cannot cast jsonb {} to type boolean", self.type_name()))
     }
 
+    /// If the JSON is a string, returns the associated string.
     pub fn as_string(&self) -> Result<String, String> {
         self.0
             .as_str()

@@ -23,6 +23,7 @@ use risingwave_pb::plan_common::additional_column::ColumnType;
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
 use crate::parser::debezium::schema_change::{SchemaChangeEnvelope, TableSchemaChange};
 use crate::parser::mysql::mysql_typename_to_rw_type;
+use crate::parser::schema_change::TableChangeType;
 use crate::parser::TransactionControl;
 use crate::source::{ConnectorProperties, SourceColumnDesc};
 
@@ -161,6 +162,11 @@ pub fn parse_schema_change(
 
             let id = jsonb_access_field!(jsonb, "id", string);
             let ty = jsonb_access_field!(jsonb, "type", string);
+            let ddl_type: TableChangeType = ty.as_str().into();
+            if matches!(ddl_type, TableChangeType::Create | TableChangeType::Drop) {
+                tracing::debug!("skip table schema change for create/drop command");
+                continue;
+            }
 
             let mut column_descs: Vec<ColumnDesc> = vec![];
             if let Some(table) = jsonb.access_object_field("table")

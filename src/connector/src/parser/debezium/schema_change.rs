@@ -27,12 +27,26 @@ pub struct SchemaChangeEnvelope {
 pub(crate) enum TableChangeType {
     Unspecified,
     Alter,
+    Create,
+    Drop,
 }
 
 impl TableChangeType {
+    #[allow(dead_code)]
+    pub fn from_proto(value: PbTableChangeType) -> Self {
+        match value {
+            PbTableChangeType::Alter => TableChangeType::Alter,
+            PbTableChangeType::Create => TableChangeType::Create,
+            PbTableChangeType::Drop => TableChangeType::Drop,
+            PbTableChangeType::Unspecified => TableChangeType::Unspecified,
+        }
+    }
+
     pub fn to_proto(self) -> PbTableChangeType {
         match self {
             TableChangeType::Alter => PbTableChangeType::Alter,
+            TableChangeType::Create => PbTableChangeType::Create,
+            TableChangeType::Drop => PbTableChangeType::Drop,
             TableChangeType::Unspecified => PbTableChangeType::Unspecified,
         }
     }
@@ -42,6 +56,8 @@ impl From<&str> for TableChangeType {
     fn from(value: &str) -> Self {
         match value {
             "ALTER" => TableChangeType::Alter,
+            "CREATE" => TableChangeType::Create,
+            "DROP" => TableChangeType::Drop,
             _ => TableChangeType::Unspecified,
         }
     }

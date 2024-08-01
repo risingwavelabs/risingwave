@@ -192,12 +192,6 @@ public class DbzChangeEventConsumer
 
                 case SCHEMA_CHANGE:
                     {
-                        var ddl = ((Struct) record.value()).getString("ddl");
-                        if (ddl.contains("CREATE") || ddl.contains("DROP")) {
-                            LOG.info("skip create/drop table event");
-                            continue;
-                        }
-
                         var sourceStruct = ((Struct) record.value()).getStruct("source");
                         if (sourceStruct == null) {
                             throw new CdcConnectorException(
