@@ -18,8 +18,8 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::Table;
-use risingwave_pb::stream_plan::GlobalApproxPercentileNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::GlobalApproxPercentileNode;
 
 use crate::expr::{ExprRewriter, ExprVisitor, Literal};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -109,12 +109,20 @@ impl StreamNode for StreamGlobalApproxPercentile {
         bucket_table_builder.add_column(&Field::with_name(DataType::Int32, "bucket_id"));
         bucket_table_builder.add_column(&Field::with_name(DataType::Int64, "count"));
         let mut count_table_builder = TableCatalogBuilder::default();
-        bucket_table_builder.add_column(&Field::with_name(DataType::Int64, "total_count"));
+        count_table_builder.add_column(&Field::with_name(DataType::Int64, "total_count"));
         let body = GlobalApproxPercentileNode {
             base,
             quantile,
-            bucket_state_table: Some(bucket_table_builder.build(vec![], 0).to_internal_table_prost()),
-            count_state_table: Some(count_table_builder.build(vec![], 0).to_internal_table_prost()),
+            bucket_state_table: Some(
+                bucket_table_builder
+                    .build(vec![], 0)
+                    .to_internal_table_prost(),
+            ),
+            count_state_table: Some(
+                count_table_builder
+                    .build(vec![], 0)
+                    .to_internal_table_prost(),
+            ),
         };
         PbNodeBody::GlobalApproxPercentile(body)
     }

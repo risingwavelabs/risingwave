@@ -112,6 +112,8 @@ mod utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
+pub use approx_percentile::global::GlobalApproxPercentileExecutor;
+pub use approx_percentile::local::LocalApproxPercentileExecutor;
 pub use backfill::arrangement_backfill::*;
 pub use backfill::cdc::{CdcBackfillExecutor, CdcScanOptions, ExternalStorageTable};
 pub use backfill::no_shuffle_backfill::*;
@@ -155,8 +157,6 @@ pub use utils::DummyExecutor;
 pub use values::ValuesExecutor;
 pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;
-pub use approx_percentile::local::LocalApproxPercentileExecutor;
-pub use approx_percentile::global::GlobalApproxPercentileExecutor;
 
 use self::barrier_align::AlignedMessageStream;
 

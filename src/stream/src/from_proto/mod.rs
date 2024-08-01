@@ -62,6 +62,8 @@ use risingwave_pb::stream_plan::{StreamNode, TemporalJoinNode};
 use risingwave_storage::StateStore;
 
 use self::append_only_dedup::*;
+use self::approx_percentile::global::*;
+use self::approx_percentile::local::*;
 use self::barrier_recv::*;
 use self::batch_query::*;
 use self::cdc_filter::CdcFilterExecutorBuilder;
@@ -95,8 +97,6 @@ use self::stream_scan::*;
 use self::temporal_join::*;
 use self::top_n::*;
 use self::union::*;
-use self::approx_percentile::local::*;
-use self::approx_percentile::global::*;
 use self::watermark_filter::WatermarkFilterBuilder;
 use crate::error::StreamResult;
 use crate::executor::{Execute, Executor, ExecutorInfo};

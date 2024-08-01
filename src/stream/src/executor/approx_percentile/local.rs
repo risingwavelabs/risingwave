@@ -17,7 +17,6 @@ use std::iter;
 
 use risingwave_common::array::Op;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_pb::expr::InputRef;
 
 use crate::executor::prelude::*;
 
@@ -53,7 +52,8 @@ impl LocalApproxPercentileExecutor {
         for message in self.input.execute() {
             match message? {
                 Message::Chunk(chunk) => {
-                    let mut builder = DataChunkBuilder::new(vec![DataType::Int32; 2], self.chunk_size);
+                    let mut builder =
+                        DataChunkBuilder::new(vec![DataType::Int32; 2], self.chunk_size);
                     let chunk = chunk.project(&[percentile_index]);
                     let mut pos_counts = HashMap::new();
                     let mut neg_counts = HashMap::new();
@@ -84,8 +84,15 @@ impl LocalApproxPercentileExecutor {
                         }
                     }
 
-                    for (bucket, count) in neg_counts.into_iter().chain(pos_counts.into_iter()).chain(iter::once((0, zero_count))) {
-                        let row = [Datum::from(ScalarImpl::Int32(bucket)), Datum::from(ScalarImpl::Int32(count))];
+                    for (bucket, count) in neg_counts
+                        .into_iter()
+                        .chain(pos_counts.into_iter())
+                        .chain(iter::once((0, zero_count)))
+                    {
+                        let row = [
+                            Datum::from(ScalarImpl::Int32(bucket)),
+                            Datum::from(ScalarImpl::Int32(count)),
+                        ];
                         if let Some(data_chunk) = builder.append_one_row(&row) {
                             // NOTE(kwannoel): The op here is simply ignored.
                             // The downstream global_approx_percentile will always just update its bucket counts.

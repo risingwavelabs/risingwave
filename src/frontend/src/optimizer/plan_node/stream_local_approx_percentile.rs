@@ -16,8 +16,8 @@ use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
-use risingwave_pb::stream_plan::LocalApproxPercentileNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::LocalApproxPercentileNode;
 
 use crate::expr::{ExprRewriter, ExprVisitor, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;

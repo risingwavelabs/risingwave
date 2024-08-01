@@ -16,15 +16,9 @@ use core::ops::Bound;
 
 use risingwave_common::array::Op;
 use risingwave_common::row::RowExt;
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_pb::expr::InputRef;
+use risingwave_storage::store::PrefetchOptions;
 
 use crate::executor::prelude::*;
-
-use std::collections::HashMap;
-use std::iter;
-use risingwave_common::hash::AllVirtualNodeIter;
-use risingwave_storage::store::PrefetchOptions;
 
 pub struct GlobalApproxPercentileExecutor<S: StateStore> {
     _ctx: ActorContextRef,
@@ -37,7 +31,6 @@ pub struct GlobalApproxPercentileExecutor<S: StateStore> {
     /// Used for the approx percentile count.
     pub count_state_table: StateTable<S>,
 }
-
 
 impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
     pub fn new(
@@ -98,19 +91,28 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
                 Message::Barrier(barrier) => {
                     let quantile_count = (row_count as f64 * self.quantile).ceil() as u64;
                     let mut acc_count = 0;
-                    let bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (Bound::Unbounded, Bound::Unbounded);
+                    let bounds: (Bound<OwnedRow>, Bound<OwnedRow>) =
+                        (Bound::Unbounded, Bound::Unbounded);
                     // Just iterate over the singleton vnode.
                     #[for_await]
-                    for keyed_row in bucket_state_table.iter_with_prefix(&[Datum::None; 0], &bounds, PrefetchOptions::default()).await? {
+                    for keyed_row in bucket_state_table
+                        .iter_with_prefix(&[Datum::None; 0], &bounds, PrefetchOptions::default())
+                        .await?
+                    {
                         let row = keyed_row?.into_owned_row();
                         let count = row.datum_at(1).unwrap().into_int32();
                         acc_count += count as u64;
                         if acc_count >= quantile_count {
                             let bucket_id = row.datum_at(0).unwrap().into_int32();
-                            let percentile_value = 2.0 * self.base.powi(bucket_id) / (self.base + 1.0);
-                            let percentile_datum = Datum::from(ScalarImpl::Float64(percentile_value.into()));
+                            let percentile_value =
+                                2.0 * self.base.powi(bucket_id) / (self.base + 1.0);
+                            let percentile_datum =
+                                Datum::from(ScalarImpl::Float64(percentile_value.into()));
                             let percentile_row = &[percentile_datum];
-                            let percentile_chunk = StreamChunk::from_rows(&[(Op::Insert, percentile_row)], &[DataType::Float64]);
+                            let percentile_chunk = StreamChunk::from_rows(
+                                &[(Op::Insert, percentile_row)],
+                                &[DataType::Float64],
+                            );
                             yield Message::Chunk(percentile_chunk);
                             break;
                         }

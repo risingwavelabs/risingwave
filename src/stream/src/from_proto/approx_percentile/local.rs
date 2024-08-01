@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::from_proto::*;
 use risingwave_pb::stream_plan::LocalApproxPercentileNode;
 
 use crate::executor::LocalApproxPercentileExecutor;
+use crate::from_proto::*;
 
 pub struct LocalApproxPercentileExecutorBuilder;
 
@@ -34,7 +34,8 @@ impl ExecutorBuilder for LocalApproxPercentileExecutorBuilder {
             node.base,
             node.percentile_index as usize,
             params.env.config().developer.chunk_size,
-        ).boxed();
+        )
+        .boxed();
         Ok(Executor::new(params.info, exec))
     }
 }
