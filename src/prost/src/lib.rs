@@ -296,6 +296,17 @@ impl catalog::StreamSourceInfo {
     }
 }
 
+impl catalog::Sink {
+    // TODO: remove this placeholder
+    // creating table sink does not have an id, so we need a placeholder
+    pub const UNIQUE_IDENTITY_FOR_CREATING_TABLE_SINK: &'static str = "PLACE_HOLDER";
+
+    pub fn unique_identity(&self) -> String {
+        // TODO: use a more unique name
+        format!("{}", self.id)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::data::{data_type, DataType};
