@@ -112,6 +112,6 @@
     create table t1 (a int, b numeric, c bigint);
     create table t2 (a int, b numeric, y bigint);
     create table t3 (x int, b numeric, c bigint);
-    select * from t1 union corresponding by (c) select * from t2 union all corresponding by (b) select * from t3;
+    select * from t1 union corresponding select * from t2 union all corresponding by (c) select * from t3;
   expected_outputs:
     - binder_error
