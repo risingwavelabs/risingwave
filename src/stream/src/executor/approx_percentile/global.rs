@@ -76,8 +76,13 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
         };
 
         // Get prev output, based on the current state.
-        let mut prev_output = Self::get_output(&bucket_state_table, row_count as u64, self.quantile, self.base)
-            .await?;
+        let mut prev_output = Self::get_output(
+            &bucket_state_table,
+            row_count as u64,
+            self.quantile,
+            self.base,
+        )
+        .await?;
 
         let mut received_input = false;
 
@@ -106,7 +111,11 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
 
                         let new_value = old_bucket_row_count.checked_add(delta as i64).unwrap();
                         let new_value_datum = Datum::from(ScalarImpl::Int64(new_value));
-                        let new_row = &[sign_datum.to_owned_datum(), bucket_id_datum.map(|d| d.into()), new_value_datum];
+                        let new_row = &[
+                            sign_datum.to_owned_datum(),
+                            bucket_id_datum.map(|d| d.into()),
+                            new_value_datum,
+                        ];
 
                         if old_row.is_none() {
                             bucket_state_table.insert(new_row);
@@ -129,8 +138,13 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
                     // we haven't pushed any data to downstream.
                     // Naturally, if row_count_state is some,
                     // we have pushed data to downstream.
-                    let new_output = Self::get_output(&bucket_state_table, row_count as u64, self.quantile, self.base)
-                        .await?;
+                    let new_output = Self::get_output(
+                        &bucket_state_table,
+                        row_count as u64,
+                        self.quantile,
+                        self.base,
+                    )
+                    .await?;
                     let percentile_chunk = if row_count_state.is_none() {
                         StreamChunk::from_rows(
                             &[(Op::Insert, &[new_output.clone()])],
@@ -138,7 +152,10 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
                         )
                     } else {
                         StreamChunk::from_rows(
-                            &[(Op::UpdateDelete, &[prev_output.clone()]), (Op::UpdateInsert, &[new_output.clone()])],
+                            &[
+                                (Op::UpdateDelete, &[prev_output.clone()]),
+                                (Op::UpdateInsert, &[new_output.clone()]),
+                            ],
                             &[DataType::Float64],
                         )
                     };
@@ -176,8 +193,14 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
     ) -> StreamExecutorResult<Datum> {
         let quantile_count = (row_count as f64 * quantile).floor() as u64;
         let mut acc_count = 0;
-        let neg_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (Bound::Unbounded, Bound::Excluded((&[Datum::from(ScalarImpl::Int16(0))]).to_owned_row()));
-        let non_neg_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (Bound::Included((&[Datum::from(ScalarImpl::Int16(0))]).to_owned_row()), Bound::Unbounded);
+        let neg_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (
+            Bound::Unbounded,
+            Bound::Excluded((&[Datum::from(ScalarImpl::Int16(0))]).to_owned_row()),
+        );
+        let non_neg_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (
+            Bound::Included((&[Datum::from(ScalarImpl::Int16(0))]).to_owned_row()),
+            Bound::Unbounded,
+        );
         // Just iterate over the singleton vnode.
         // TODO(kwannoel): Should we just use separate state tables for
         // positive and negative counts?
@@ -188,8 +211,12 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
             .await?
             .chain(
                 bucket_state_table
-                    .iter_with_prefix(&[Datum::None; 0], &non_neg_bounds, PrefetchOptions::default())
-                    .await?
+                    .iter_with_prefix(
+                        &[Datum::None; 0],
+                        &non_neg_bounds,
+                        PrefetchOptions::default(),
+                    )
+                    .await?,
             )
         {
             let row = keyed_row?.into_owned_row();

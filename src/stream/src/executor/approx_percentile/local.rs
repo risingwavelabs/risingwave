@@ -52,8 +52,10 @@ impl LocalApproxPercentileExecutor {
         for message in self.input.execute() {
             match message? {
                 Message::Chunk(chunk) => {
-                    let mut builder =
-                        DataChunkBuilder::new(vec![DataType::Int16, DataType::Int32, DataType::Int32], self.chunk_size);
+                    let mut builder = DataChunkBuilder::new(
+                        vec![DataType::Int16, DataType::Int32, DataType::Int32],
+                        self.chunk_size,
+                    );
                     let chunk = chunk.project(&[percentile_index]);
                     let mut pos_counts = HashMap::new();
                     let mut neg_counts = HashMap::new();
