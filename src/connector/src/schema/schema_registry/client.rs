@@ -27,13 +27,13 @@ use crate::schema::{invalid_option_error, InvalidOptionError};
 
 pub const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
 pub const SCHEMA_REGISTRY_PASSWORD: &str = "schema.registry.password";
-pub const SCHEMA_REGISTRY_CA_PATH: &str = "schema.registry.ca_pem_path";
+pub const SCHEMA_REGISTRY_CA_PEM_PATH: &str = "schema.registry.ca_pem_path";
 
 #[derive(Debug, Clone, Default)]
 pub struct SchemaRegistryAuth {
     username: Option<String>,
     password: Option<String>,
-    ca_option: Option<String>,
+    ca_pem_path: Option<String>,
 }
 
 impl From<&HashMap<String, String>> for SchemaRegistryAuth {
@@ -41,7 +41,7 @@ impl From<&HashMap<String, String>> for SchemaRegistryAuth {
         SchemaRegistryAuth {
             username: props.get(SCHEMA_REGISTRY_USERNAME).cloned(),
             password: props.get(SCHEMA_REGISTRY_PASSWORD).cloned(),
-            ca_option: props.get(SCHEMA_REGISTRY_CA_PATH).cloned(),
+            ca_pem_path: props.get(SCHEMA_REGISTRY_CA_PEM_PATH).cloned(),
         }
     }
 }
@@ -51,7 +51,7 @@ impl From<&BTreeMap<String, String>> for SchemaRegistryAuth {
         SchemaRegistryAuth {
             username: props.get(SCHEMA_REGISTRY_USERNAME).cloned(),
             password: props.get(SCHEMA_REGISTRY_PASSWORD).cloned(),
-            ca_option: props.get(SCHEMA_REGISTRY_CA_PATH).cloned(),
+            ca_pem_path: props.get(SCHEMA_REGISTRY_CA_PEM_PATH).cloned(),
         }
     }
 }
@@ -109,7 +109,7 @@ impl Client {
         }
 
         let mut client_builder = reqwest::Client::builder();
-        if let Some(ca_path) = client_config.ca_option.as_ref() {
+        if let Some(ca_path) = client_config.ca_pem_path.as_ref() {
             if ca_path.eq_ignore_ascii_case("ignore") {
                 client_builder = client_builder.danger_accept_invalid_certs(true);
             } else {
@@ -258,7 +258,7 @@ mod tests {
             &SchemaRegistryAuth {
                 username: None,
                 password: None,
-                ca_option: None,
+                ca_pem_path: None,
             },
         )
         .unwrap();
