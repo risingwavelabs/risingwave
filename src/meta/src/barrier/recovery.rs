@@ -33,7 +33,7 @@ use tokio::time::Instant;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, warn, Instrument};
 
-use super::TracedEpoch;
+use super::{CheckpointControl, TracedEpoch};
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::InflightActorInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
@@ -122,14 +122,14 @@ impl GlobalBarrierManagerContext {
         Ok(())
     }
 
-    async fn recover_background_mv_progress(&self) -> MetaResult<()> {
+    async fn recover_background_mv_progress(&self) -> MetaResult<CreateMviewProgressTracker> {
         match &self.metadata_manager {
             MetadataManager::V1(_) => self.recover_background_mv_progress_v1().await,
             MetadataManager::V2(_) => self.recover_background_mv_progress_v2().await,
         }
     }
 
-    async fn recover_background_mv_progress_v1(&self) -> MetaResult<()> {
+    async fn recover_background_mv_progress_v1(&self) -> MetaResult<CreateMviewProgressTracker> {
         let mgr = self.metadata_manager.as_v1_ref();
         let mviews = mgr.catalog_manager.list_creating_background_mvs().await;
 
@@ -155,14 +155,14 @@ impl GlobalBarrierManagerContext {
 
         let version_stats = self.hummock_manager.get_version_stats().await;
         // If failed, enter recovery mode.
-        {
-            *self.tracker.lock() =
-                CreateMviewProgressTracker::recover_v1(version_stats, table_mview_map, mgr.clone());
-        }
-        Ok(())
+        Ok(CreateMviewProgressTracker::recover_v1(
+            version_stats,
+            table_mview_map,
+            mgr.clone(),
+        ))
     }
 
-    async fn recover_background_mv_progress_v2(&self) -> MetaResult<()> {
+    async fn recover_background_mv_progress_v2(&self) -> MetaResult<CreateMviewProgressTracker> {
         let mgr = self.metadata_manager.as_v2_ref();
         let mviews = mgr
             .catalog_controller
@@ -182,11 +182,12 @@ impl GlobalBarrierManagerContext {
 
         let version_stats = self.hummock_manager.get_version_stats().await;
         // If failed, enter recovery mode.
-        {
-            *self.tracker.lock() =
-                CreateMviewProgressTracker::recover_v2(mview_map, version_stats, mgr.clone());
-        }
-        Ok(())
+
+        Ok(CreateMviewProgressTracker::recover_v2(
+            mview_map,
+            version_stats,
+            mgr.clone(),
+        ))
     }
 
     /// Pre buffered drop and cancel command, return true if any.
@@ -234,9 +235,12 @@ impl GlobalBarrierManager {
                 .committed_epoch
                 .into(),
         );
+
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked("cluster is under recovering");
+        // Clear all control streams to release resources (connections to compute nodes) first.
+        self.control_stream_manager.clear();
 
         tracing::info!("recovery start!");
         let retry_strategy = Self::get_retry_strategy();
@@ -262,7 +266,8 @@ impl GlobalBarrierManager {
 
                     // Mview progress needs to be recovered.
                     tracing::info!("recovering mview progress");
-                    self.context
+                    let tracker = self
+                        .context
                         .recover_background_mv_progress()
                         .await
                         .context("recover mview progress should not fail")?;
@@ -288,6 +293,7 @@ impl GlobalBarrierManager {
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
                     // FIXME: Transactions should be used.
+                    // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
                     let mut info = if !self.env.opts.disable_automatic_parallelism_control
                         && background_streaming_jobs.is_empty()
                     {
@@ -331,7 +337,9 @@ impl GlobalBarrierManager {
                     let info = info;
 
                     self.context
-                        .purge_state_table_from_hummock(&info.existing_table_ids())
+                        .purge_state_table_from_hummock(
+                            &InflightActorInfo::existing_table_ids(&info.fragment_infos).collect(),
+                        )
                         .await
                         .context("purge state table from hummock")?;
 
@@ -381,13 +389,17 @@ impl GlobalBarrierManager {
                         tracing::Span::current(), // recovery span
                     ));
 
-                    let mut node_to_collect = control_stream_manager
-                        .inject_barrier(command_ctx.clone(), info.existing_table_ids())?;
+                    let mut node_to_collect = control_stream_manager.inject_barrier(
+                        &command_ctx,
+                        &info.fragment_infos,
+                        Some(&info.fragment_infos),
+                    )?;
                     while !node_to_collect.is_empty() {
-                        let (worker_id, prev_epoch, _) = control_stream_manager
+                        let (worker_id, result) = control_stream_manager
                             .next_complete_barrier_response()
-                            .await?;
-                        assert_eq!(prev_epoch, command_ctx.prev_epoch.value().0);
+                            .await;
+                        let resp = result?;
+                        assert_eq!(resp.epoch, command_ctx.prev_epoch.value().0);
                         assert!(node_to_collect.remove(&worker_id));
                     }
 
@@ -395,6 +407,7 @@ impl GlobalBarrierManager {
                         BarrierManagerState::new(new_epoch, info, command_ctx.next_paused_reason()),
                         active_streaming_nodes,
                         control_stream_manager,
+                        tracker,
                     )
                 };
                 if recovery_result.is_err() {
@@ -410,11 +423,17 @@ impl GlobalBarrierManager {
         recovery_timer.observe_duration();
         self.scheduled_barriers.mark_ready();
 
+        let create_mview_tracker: CreateMviewProgressTracker;
+
         (
             self.state,
             self.active_streaming_nodes,
             self.control_stream_manager,
+            create_mview_tracker,
         ) = new_state;
+
+        self.checkpoint_control =
+            CheckpointControl::new(self.context.clone(), create_mview_tracker).await;
 
         tracing::info!(
             epoch = self.state.in_flight_prev_epoch().value().0,
@@ -717,7 +736,7 @@ impl GlobalBarrierManagerContext {
         } else {
             let (reschedule_fragment, _) = self
                 .scale_controller
-                .prepare_reschedule_command(
+                .analyze_reschedule_plan(
                     plan,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: true,
@@ -867,7 +886,7 @@ impl GlobalBarrierManagerContext {
 
             let (reschedule_fragment, applied_reschedules) = self
                 .scale_controller
-                .prepare_reschedule_command(
+                .analyze_reschedule_plan(
                     plan,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: true,

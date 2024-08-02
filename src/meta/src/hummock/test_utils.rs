@@ -41,6 +41,7 @@ use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::selector::{default_compaction_selector, LocalSelectorStatistic};
 use crate::hummock::compaction::{CompactionDeveloperConfig, CompactionSelectorContext};
 use crate::hummock::level_handler::LevelHandler;
+pub use crate::hummock::manager::CommitEpochInfo;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
 use crate::manager::{
@@ -296,7 +297,7 @@ pub fn get_sorted_committed_object_ids(
     levels
         .levels
         .iter()
-        .chain(levels.l0.as_ref().unwrap().sub_levels.iter())
+        .chain(levels.l0.sub_levels.iter())
         .flat_map(|levels| levels.table_infos.iter().map(|info| info.object_id))
         .sorted()
         .collect_vec()

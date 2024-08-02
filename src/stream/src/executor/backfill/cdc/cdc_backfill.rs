@@ -655,7 +655,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                     // mark progress as finished
                     if let Some(progress) = self.progress.as_mut() {
-                        progress.finish(barrier.epoch.curr, total_snapshot_row_count);
+                        progress.finish(barrier.epoch, total_snapshot_row_count);
                     }
                     yield msg;
                     // break after the state have been saved

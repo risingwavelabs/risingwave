@@ -740,7 +740,7 @@ impl ActorGraphBuilder {
                 .contains(&worker_slot_id.worker_id())
             {
                 bail!(
-                    "The worker {} where the associated upstream is located is unscheduable",
+                    "The worker {} where the associated upstream is located is unschedulable",
                     worker_slot_id.worker_id(),
                 );
             }

@@ -405,7 +405,7 @@ pub async fn compute_node_serve(
         meta_cache,
         block_cache,
     );
-    let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr);
+    let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr.clone());
     let health_srv = HealthServiceImpl::new();
 
     let telemetry_manager = TelemetryManager::new(
@@ -423,7 +423,9 @@ pub async fn compute_node_serve(
 
     // Clean up the spill directory.
     #[cfg(not(madsim))]
-    SpillOp::clean_spill_directory().await.unwrap();
+    if config.batch.enable_spill {
+        SpillOp::clean_spill_directory().await.unwrap();
+    }
 
     let server = tonic::transport::Server::builder()
         .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
@@ -469,8 +471,12 @@ pub async fn compute_node_serve(
     // Wait for the shutdown signal.
     shutdown.cancelled().await;
 
-    // TODO(shutdown): gracefully unregister from the meta service (need to cautious since it may
-    // trigger auto-scaling)
+    // Unregister from the meta service, then...
+    // - batch queries will not be scheduled to this compute node,
+    // - streaming actors will not be scheduled to this compute node after next recovery.
+    meta_client.try_unregister().await;
+    // Shutdown the streaming manager.
+    let _ = stream_mgr.shutdown().await;
 
     // NOTE(shutdown): We can't simply join the tonic server here because it only returns when all
     // existing connections are closed, while we have long-running streaming calls that never

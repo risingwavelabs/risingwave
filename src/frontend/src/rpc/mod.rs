@@ -81,6 +81,8 @@ async fn get_new_table_plan(
     database_id: u32,
     owner: u32,
 ) -> Result<ReplaceTablePlan, AutoSchemaChangeError> {
+    tracing::info!("get_new_table_plan for table {}", table_name);
+
     let session_mgr = SESSION_MANAGER
         .get()
         .expect("session manager has been initialized");

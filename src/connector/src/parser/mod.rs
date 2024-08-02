@@ -835,6 +835,10 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                 },
 
                 Ok(ParseResult::SchemaChange(schema_change)) => {
+                    if schema_change.is_empty() {
+                        continue;
+                    }
+
                     let (oneshot_tx, oneshot_rx) = tokio::sync::oneshot::channel();
                     // we bubble up the schema change event to the source executor via channel,
                     // and wait for the source executor to finish the schema change process before

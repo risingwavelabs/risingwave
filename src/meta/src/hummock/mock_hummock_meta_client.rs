@@ -95,6 +95,10 @@ impl MockHummockMetaClient {
             .await
             .unwrap_or(None)
     }
+
+    pub fn context_id(&self) -> HummockContextId {
+        self.context_id
+    }
 }
 
 fn mock_err(error: super::error::Error) -> RpcError {
@@ -193,6 +197,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                     version.state_table_info.info().keys().cloned().collect(),
                 )]),
                 epoch,
+                vec![],
             ))
             .await
             .map_err(mock_err)?;

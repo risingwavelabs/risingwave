@@ -256,7 +256,7 @@ pub fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
         .collect();
 
     Function {
-        aggregate: false,
+        scalar_as_agg: false,
         name: ObjectName(vec![Ident::new_unchecked(func_name)]),
         args,
         variadic: false,

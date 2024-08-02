@@ -198,7 +198,7 @@ impl Level {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Levels {
     pub levels: Vec<Level>,
-    pub l0: Option<OverlappingLevel>,
+    pub l0: OverlappingLevel,
     pub group_id: u64,
     pub parent_group_id: u64,
 
@@ -208,7 +208,7 @@ pub struct Levels {
 
 impl Levels {
     pub fn level0(&self) -> &OverlappingLevel {
-        self.l0.as_ref().unwrap()
+        &self.l0
     }
 
     pub fn get_level(&self, level_idx: usize) -> &Level {
@@ -254,9 +254,7 @@ impl Levels {
             + size_of::<u64>()
             + size_of::<u64>()
             + size_of::<u32>();
-        if let Some(l0) = self.l0.as_ref() {
-            basic += l0.estimated_encode_len();
-        }
+        basic += self.l0.estimated_encode_len();
 
         basic
     }
@@ -266,11 +264,7 @@ impl From<&PbLevels> for Levels {
     #[expect(deprecated)]
     fn from(pb_levels: &PbLevels) -> Self {
         Self {
-            l0: if pb_levels.l0.is_some() {
-                Some(OverlappingLevel::from(pb_levels.l0.as_ref().unwrap()))
-            } else {
-                None
-            },
+            l0: OverlappingLevel::from(pb_levels.l0.as_ref().unwrap()),
             levels: pb_levels.levels.iter().map(Level::from).collect_vec(),
             group_id: pb_levels.group_id,
             parent_group_id: pb_levels.parent_group_id,
@@ -283,11 +277,7 @@ impl From<&Levels> for PbLevels {
     #[expect(deprecated)]
     fn from(levels: &Levels) -> Self {
         Self {
-            l0: if levels.l0.is_some() {
-                Some(levels.l0.as_ref().unwrap().into())
-            } else {
-                None
-            },
+            l0: Some((&levels.l0).into()),
             levels: levels.levels.iter().map(PbLevel::from).collect_vec(),
             group_id: levels.group_id,
             parent_group_id: levels.parent_group_id,
@@ -300,11 +290,7 @@ impl From<PbLevels> for Levels {
     #[expect(deprecated)]
     fn from(pb_levels: PbLevels) -> Self {
         Self {
-            l0: if pb_levels.l0.is_some() {
-                Some(OverlappingLevel::from(pb_levels.l0.unwrap()))
-            } else {
-                None
-            },
+            l0: OverlappingLevel::from(pb_levels.l0.as_ref().unwrap()),
             levels: pb_levels.levels.into_iter().map(Level::from).collect_vec(),
             group_id: pb_levels.group_id,
             parent_group_id: pb_levels.parent_group_id,
@@ -317,11 +303,7 @@ impl From<Levels> for PbLevels {
     fn from(levels: Levels) -> Self {
         #[expect(deprecated)]
         Self {
-            l0: if levels.l0.is_some() {
-                Some(levels.l0.unwrap().into())
-            } else {
-                None
-            },
+            l0: Some(levels.l0.into()),
             levels: levels.levels.into_iter().map(PbLevel::from).collect_vec(),
             group_id: levels.group_id,
             parent_group_id: levels.parent_group_id,

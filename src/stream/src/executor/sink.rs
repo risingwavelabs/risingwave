@@ -362,20 +362,32 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         } else {
                             chunks
                         };
-                        let chunks = if re_construct_with_sink_pk {
-                            StreamChunkCompactor::new(down_stream_pk.clone(), chunks)
+                        if re_construct_with_sink_pk {
+                            let chunks = StreamChunkCompactor::new(down_stream_pk.clone(), chunks)
                                 .reconstructed_compacted_chunks(
                                     chunk_size,
                                     input_data_types.clone(),
                                     sink_type != SinkType::ForceAppendOnly,
-                                )
+                                );
+                            for c in chunks {
+                                yield Message::Chunk(c);
+                            }
                         } else {
-                            chunks
+                            let mut chunk_builder =
+                                StreamChunkBuilder::new(chunk_size, input_data_types.clone());
+                            for chunk in chunks {
+                                for (op, row) in chunk.rows() {
+                                    if let Some(c) = chunk_builder.append_row(op, row) {
+                                        yield Message::Chunk(c);
+                                    }
+                                }
+                            }
+
+                            if let Some(c) = chunk_builder.take() {
+                                yield Message::Chunk(c);
+                            }
                         };
 
-                        for c in chunks {
-                            yield Message::Chunk(c);
-                        }
                         if let Some(w) = mem::take(&mut watermark) {
                             yield Message::Watermark(w)
                         }

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -21,9 +22,11 @@ use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::{bail, bail_not_implemented};
+use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::catalog::{Source, Table};
 use risingwave_pb::ddl_service::TableJobType;
-use risingwave_pb::stream_plan::StreamFragmentGraph;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
 use risingwave_sqlparser::ast::{
     AlterTableOperation, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType, Encode,
     ObjectName, Statement, StructField,
@@ -37,7 +40,8 @@ use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::ExprImpl;
+use crate::expr::{Expr, ExprImpl, InputRef, Literal};
+use crate::handler::create_sink::{fetch_incoming_sinks, insert_merger_to_union_with_project};
 use crate::session::SessionImpl;
 use crate::{Binder, TableCatalog, WithOptions};
 
@@ -172,14 +176,14 @@ pub async fn get_replace_table_plan(
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (graph, table, source, job_type) = generate_stream_graph_for_table(
+    let (mut graph, mut table, source, job_type) = generate_stream_graph_for_table(
         session,
         table_name,
         original_catalog,
         source_schema,
-        handler_args,
+        handler_args.clone(),
         col_id_gen,
-        columns,
+        columns.clone(),
         wildcard_idx,
         constraints,
         source_watermarks,
@@ -204,7 +208,78 @@ pub async fn get_replace_table_plan(
         table.columns.len(),
     );
 
+    let incoming_sink_ids: HashSet<_> = original_catalog.incoming_sinks.iter().copied().collect();
+
+    let target_columns = table
+        .columns
+        .iter()
+        .map(|col| ColumnCatalog::from(col.clone()))
+        .collect_vec();
+
+    for sink in fetch_incoming_sinks(session, &incoming_sink_ids)? {
+        hijack_merger_for_target_table(
+            &mut graph,
+            &target_columns,
+            &sink,
+            Some(&sink.unique_identity()),
+        )?;
+    }
+
+    table.incoming_sinks = incoming_sink_ids.iter().copied().collect();
+
     Ok((source, table, graph, col_index_mapping, job_type))
+}
+
+pub(crate) fn hijack_merger_for_target_table(
+    graph: &mut StreamFragmentGraph,
+    target_columns: &[ColumnCatalog],
+    sink: &SinkCatalog,
+    uniq_identify: Option<&str>,
+) -> Result<()> {
+    let mut sink_columns = sink.original_target_columns.clone();
+    if sink_columns.is_empty() {
+        // This is due to the fact that the value did not exist in earlier versions,
+        // which means no schema changes such as `ADD/DROP COLUMN` have been made to the table.
+        // Therefore the columns of the table at this point are `original_target_columns`.
+        // This value of sink will be filled on the meta.
+        sink_columns = target_columns.to_vec();
+    }
+
+    let mut i = 0;
+    let mut j = 0;
+    let mut exprs = Vec::new();
+
+    while j < target_columns.len() {
+        if i < sink_columns.len() && sink_columns[i].data_type() == target_columns[j].data_type() {
+            exprs.push(ExprImpl::InputRef(Box::new(InputRef {
+                data_type: sink_columns[i].data_type().clone(),
+                index: i,
+            })));
+
+            i += 1;
+            j += 1;
+        } else {
+            exprs.push(ExprImpl::Literal(Box::new(Literal::new(
+                None,
+                target_columns[j].data_type().clone(),
+            ))));
+
+            j += 1;
+        }
+    }
+
+    let pb_project = PbNodeBody::Project(ProjectNode {
+        select_list: exprs.iter().map(|expr| expr.to_expr_proto()).collect(),
+        ..Default::default()
+    });
+
+    for fragment in graph.fragments.values_mut() {
+        if let Some(node) = &mut fragment.node {
+            insert_merger_to_union_with_project(node, &pb_project, uniq_identify);
+        }
+    }
+
+    Ok(())
 }
 
 /// Handle `ALTER TABLE [ADD|DROP] COLUMN` statements. The `operation` must be either `AddColumn` or
@@ -217,8 +292,11 @@ pub async fn handle_alter_table_column(
     let session = handler_args.session;
     let original_catalog = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
-    if !original_catalog.incoming_sinks.is_empty() {
-        bail_not_implemented!("alter table with incoming sinks");
+    if !original_catalog.incoming_sinks.is_empty() && original_catalog.has_generated_column() {
+        return Err(RwError::from(ErrorCode::BindError(
+            "Alter a table with incoming sink and generated column has not been implemented."
+                .to_string(),
+        )));
     }
 
     // Retrieve the original table definition and parse it to AST.
@@ -256,6 +334,14 @@ pub async fn handle_alter_table_column(
             "alter a table with empty column definitions".to_string(),
             "Please recreate the table with column definitions.".to_string(),
         ))?
+    }
+
+    if !original_catalog.incoming_sinks.is_empty()
+        && matches!(operation, AlterTableOperation::DropColumn { .. })
+    {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "dropping columns in target table of sinks is not supported".to_string(),
+        ))?;
     }
 
     match operation {

@@ -420,9 +420,11 @@ impl FrontendEnv {
 
         // Clean up the spill directory.
         #[cfg(not(madsim))]
-        SpillOp::clean_spill_directory()
-            .await
-            .map_err(|err| anyhow!(err))?;
+        if config.batch.enable_spill {
+            SpillOp::clean_spill_directory()
+                .await
+                .map_err(|err| anyhow!(err))?;
+        }
 
         let total_memory_bytes = resource_util::memory::system_memory_available_bytes();
         let heap_profiler =

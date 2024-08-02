@@ -20,7 +20,7 @@ use anyhow::anyhow;
 use futures::future::{select, Either};
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_meta_model_v2::{ObjectId, SourceId};
-use risingwave_pb::catalog::{PbSource, PbTable};
+use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
@@ -549,6 +549,17 @@ impl MetadataManager {
             MetadataManager::V2(mgr) => {
                 mgr.catalog_controller
                     .get_table_by_ids(ids.into_iter().map(|id| id as _).collect())
+                    .await
+            }
+        }
+    }
+
+    pub async fn get_sink_catalog_by_ids(&self, ids: &[u32]) -> MetaResult<Vec<PbSink>> {
+        match &self {
+            MetadataManager::V1(mgr) => Ok(mgr.catalog_manager.get_sinks(ids).await),
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .get_sink_by_ids(ids.iter().map(|id| *id as _).collect())
                     .await
             }
         }

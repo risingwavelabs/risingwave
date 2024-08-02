@@ -740,7 +740,7 @@ impl DdlService for DdlServiceImpl {
         _request: Request<GetDdlProgressRequest>,
     ) -> Result<Response<GetDdlProgressResponse>, Status> {
         Ok(Response::new(GetDdlProgressResponse {
-            ddl_progress: self.ddl_controller.get_ddl_progress().await,
+            ddl_progress: self.ddl_controller.get_ddl_progress().await?,
         }))
     }
 
@@ -962,7 +962,7 @@ impl DdlService for DdlServiceImpl {
                 .await?;
 
             tracing::info!(
-                "Table jobs to replace: {:?}",
+                "(auto schema change) Table jobs to replace: {:?}",
                 tables.iter().map(|t| t.id).collect::<Vec<_>>()
             );
             for table in tables {
@@ -987,7 +987,7 @@ impl DdlService for DdlServiceImpl {
                             plan,
                         )))
                         .await?;
-                    tracing::info!("Table replaced {} success", table.id);
+                    tracing::info!("(auto schema change) Table {} replaced success", table.id);
                 }
             }
         }
