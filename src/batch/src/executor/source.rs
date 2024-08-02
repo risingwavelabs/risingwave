@@ -111,6 +111,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
                 Ok(Box::new(IcebergScanExecutor::new(
                     iceberg_properties.to_iceberg_config(),
                     Some(split.snapshot_id),
+                    split.table_meta.deserialize(),
                     split.files.into_iter().map(|x| x.deserialize()).collect(),
                     source.context.get_config().developer.chunk_size,
                     schema,

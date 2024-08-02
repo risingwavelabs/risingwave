@@ -15,7 +15,9 @@
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use iceberg::scan::FileScanTask;
+use iceberg::spec::TableMetadata;
 use risingwave_common::array::arrow::IcebergArrowConvert;
+use std::mem;
 use risingwave_common::catalog::Schema;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 
@@ -24,7 +26,9 @@ use crate::executor::{DataChunk, Executor};
 
 pub struct IcebergScanExecutor {
     iceberg_config: IcebergConfig,
+    #[allow(dead_code)]
     snapshot_id: Option<i64>,
+    table_meta: TableMetadata,
     file_scan_tasks: Vec<FileScanTask>,
     batch_size: usize,
     schema: Schema,
@@ -49,6 +53,7 @@ impl IcebergScanExecutor {
     pub fn new(
         iceberg_config: IcebergConfig,
         snapshot_id: Option<i64>,
+        table_meta: TableMetadata,
         file_scan_tasks: Vec<FileScanTask>,
         batch_size: usize,
         schema: Schema,
@@ -57,6 +62,7 @@ impl IcebergScanExecutor {
         Self {
             iceberg_config,
             snapshot_id,
+            table_meta,
             file_scan_tasks,
             batch_size,
             schema,
@@ -65,18 +71,18 @@ impl IcebergScanExecutor {
     }
 
     #[try_stream(ok = DataChunk, error = BatchError)]
-    async fn do_execute(self: Box<Self>) {
+    async fn do_execute(mut self: Box<Self>) {
         let start = std::time::Instant::now();
-        let table = self.iceberg_config.load_table_v2().await?;
+        let table = self.iceberg_config.load_table_v2_with_metadata(self.table_meta).await?;
         let data_types = self.schema.data_types();
-        let batch_size = self.batch_size;
 
         let tasks_len = self.file_scan_tasks.len();
+        let file_scan_tasks = mem::take(&mut self.file_scan_tasks);
 
         let file_scan_stream = {
             #[try_stream]
             async move {
-                for file_scan_task in self.file_scan_tasks {
+                for file_scan_task in file_scan_tasks {
                     yield file_scan_task;
                 }
             }
@@ -84,7 +90,7 @@ impl IcebergScanExecutor {
 
         let reader = table
             .reader_builder()
-            .with_batch_size(batch_size)
+            .with_batch_size(self.batch_size)
             .build();
 
         let record_batch_stream = reader

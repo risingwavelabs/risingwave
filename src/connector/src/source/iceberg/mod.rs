@@ -20,6 +20,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use futures_async_stream::for_await;
 use iceberg::scan::FileScanTask;
+use iceberg::spec::TableMetadata;
 use itertools::Itertools;
 pub use parquet_file_reader::*;
 use risingwave_common::bail;
@@ -125,9 +126,23 @@ impl IcebergFileScanTaskJsonStr {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct TableMetadataJsonStr(String);
+
+impl TableMetadataJsonStr {
+    pub fn deserialize(&self) -> TableMetadata {
+        serde_json::from_str(&self.0).unwrap()
+    }
+
+    pub fn serialize(metadata: &TableMetadata) -> Self {
+        Self(serde_json::to_string(metadata).unwrap())
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct IcebergSplit {
     pub split_id: i64,
     pub snapshot_id: i64,
+    pub table_meta: TableMetadataJsonStr,
     pub files: Vec<IcebergFileScanTaskJsonStr>,
 }
 
@@ -238,6 +253,9 @@ impl IcebergSplitEnumerator {
             let task = task.map_err(|e| anyhow!(e))?;
             files.push(IcebergFileScanTaskJsonStr::serialize(&task));
         }
+
+        let table_meta = TableMetadataJsonStr::serialize(table.metadata());
+
         let split_num = batch_parallelism;
         // evenly split the files into splits based on the parallelism.
         let split_size = files.len() / split_num;
@@ -249,6 +267,7 @@ impl IcebergSplitEnumerator {
             let split = IcebergSplit {
                 split_id: i as i64,
                 snapshot_id,
+                table_meta: table_meta.clone(),
                 files: files[start..end].to_vec(),
             };
             splits.push(split);
