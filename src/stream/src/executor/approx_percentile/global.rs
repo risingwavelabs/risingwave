@@ -14,7 +14,6 @@
 
 use core::ops::Bound;
 
-use risingwave_common::bail;
 use risingwave_common::array::Op;
 use risingwave_common::row::RowExt;
 use risingwave_storage::store::PrefetchOptions;
