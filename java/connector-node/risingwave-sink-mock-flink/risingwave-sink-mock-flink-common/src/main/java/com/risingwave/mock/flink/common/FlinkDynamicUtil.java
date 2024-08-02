@@ -120,14 +120,15 @@ public class FlinkDynamicUtil {
                 throw Status.FAILED_PRECONDITION
                         .withDescription(
                                 String.format(
-                                        "Don't match in the name, rw is %s", columnDesc.getName()))
+                                        "Name mismatch. Column `%s` on RisingWave side is not found on Flink side.",
+                                        columnDesc.getName()))
                         .asRuntimeException();
             }
             if (!checkType(columnDesc.getDataType(), flinkColumnMap.get(columnDesc.getName()))) {
                 throw Status.FAILED_PRECONDITION
                         .withDescription(
                                 String.format(
-                                        "Don't match in the type, name is %s, Sink is %s, rw is %s",
+                                        "Data type mismatch for column `%s`. Flink side: `%s`, RisingWave side: `%s`.",
                                         columnDesc.getName(),
                                         flinkColumnMap.get(columnDesc.getName()),
                                         columnDesc.getDataType().getTypeName()))
