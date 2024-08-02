@@ -397,11 +397,6 @@ derive_from_blob!(VnodeBitmap, risingwave_pb::common::Buffer);
 derive_from_blob!(ActorMapping, risingwave_pb::stream_plan::PbActorMapping);
 derive_from_blob!(ExprContext, risingwave_pb::plan_common::PbExprContext);
 
-derive_from_blob!(
-    FragmentVnodeMapping,
-    risingwave_pb::common::ParallelUnitMapping
-);
-
 derive_array_from_blob!(
     HummockVersionDeltaArray,
     risingwave_pb::hummock::PbHummockVersionDelta,

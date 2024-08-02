@@ -522,6 +522,7 @@ pub trait FromArrow {
             Int16 => self.from_int16_array(array.as_any().downcast_ref().unwrap()),
             Int32 => self.from_int32_array(array.as_any().downcast_ref().unwrap()),
             Int64 => self.from_int64_array(array.as_any().downcast_ref().unwrap()),
+            Decimal128(_, _) => self.from_decimal128_array(array.as_any().downcast_ref().unwrap()),
             Decimal256(_, _) => self.from_int256_array(array.as_any().downcast_ref().unwrap()),
             Float32 => self.from_float32_array(array.as_any().downcast_ref().unwrap()),
             Float64 => self.from_float64_array(array.as_any().downcast_ref().unwrap()),
@@ -600,6 +601,13 @@ pub trait FromArrow {
         array: &arrow_array::Decimal256Array,
     ) -> Result<ArrayImpl, ArrayError> {
         Ok(ArrayImpl::Int256(array.into()))
+    }
+
+    fn from_decimal128_array(
+        &self,
+        array: &arrow_array::Decimal128Array,
+    ) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Decimal(array.try_into()?))
     }
 
     fn from_float32_array(
@@ -1137,8 +1145,8 @@ mod tests {
     fn date() {
         let array = DateArray::from_iter([
             None,
-            Date::with_days(12345).ok(),
-            Date::with_days(-12345).ok(),
+            Date::with_days_since_ce(12345).ok(),
+            Date::with_days_since_ce(-12345).ok(),
         ]);
         let arrow = arrow_array::Date32Array::from(&array);
         assert_eq!(DateArray::from(&arrow), array);

@@ -14,8 +14,8 @@
 
 use std::sync::Arc;
 
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
+use risingwave_hummock_sdk::level::{InputLevel, Levels, OverlappingLevel};
+use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
@@ -55,7 +55,7 @@ impl TierCompactionPicker {
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type() != LevelType::Overlapping {
+            if level.level_type != LevelType::Overlapping {
                 continue;
             }
 
@@ -146,7 +146,7 @@ impl CompactionPicker for TierCompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        let l0 = levels.l0.as_ref().unwrap();
+        let l0 = &levels.l0;
         if l0.sub_levels.is_empty() {
             return None;
         }
@@ -165,8 +165,8 @@ pub mod tests {
     use std::sync::Arc;
 
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::new_sub_level;
-    use risingwave_pb::hummock::hummock_version::Levels;
-    use risingwave_pb::hummock::{LevelType, OverlappingLevel};
+    use risingwave_hummock_sdk::level::{Levels, OverlappingLevel};
+    use risingwave_pb::hummock::LevelType;
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::picker::{
@@ -195,7 +195,7 @@ pub mod tests {
             ],
         ]);
         let levels = Levels {
-            l0: Some(l0),
+            l0,
             levels: vec![],
             ..Default::default()
         };
@@ -222,7 +222,7 @@ pub mod tests {
         );
 
         let empty_level = Levels {
-            l0: Some(generate_l0_overlapping_sublevels(vec![])),
+            l0: generate_l0_overlapping_sublevels(vec![]),
             levels: vec![],
             ..Default::default()
         };
@@ -243,7 +243,7 @@ pub mod tests {
         ]);
 
         let levels = Levels {
-            l0: Some(l0),
+            l0,
             levels: vec![],
             ..Default::default()
         };
@@ -285,11 +285,11 @@ pub mod tests {
             ],
         );
         let levels = Levels {
-            l0: Some(OverlappingLevel {
+            l0: OverlappingLevel {
                 total_file_size: l1.total_file_size + l2.total_file_size,
                 uncompressed_file_size: l1.total_file_size + l2.total_file_size,
                 sub_levels: vec![l1, l2],
-            }),
+            },
             levels: vec![],
             ..Default::default()
         };
@@ -319,7 +319,7 @@ pub mod tests {
             generate_table(10, 1, 1, 100, 1),
         ]]);
         let mut levels = Levels {
-            l0: Some(l0),
+            l0,
             levels: vec![],
             ..Default::default()
         };

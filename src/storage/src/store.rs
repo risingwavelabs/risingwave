@@ -25,6 +25,7 @@ use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use futures_async_stream::try_stream;
 use prost::Message;
+use risingwave_common::array::Op;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
@@ -36,6 +37,7 @@ use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
     TracedReadOptions, TracedSealCurrentEpochOptions, TracedWriteOptions,
 };
+use risingwave_pb::hummock::PbVnodeWatermark;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
@@ -187,6 +189,24 @@ impl<T> ChangeLogValue<T> {
                 old_value: f(old_value)?,
             },
             ChangeLogValue::Delete(value) => ChangeLogValue::Delete(f(value)?),
+        })
+    }
+
+    pub fn into_op_value_iter(self) -> impl Iterator<Item = (Op, T)> {
+        std::iter::from_coroutine(move || match self {
+            Self::Insert(row) => {
+                yield (Op::Insert, row);
+            }
+            Self::Delete(row) => {
+                yield (Op::Delete, row);
+            }
+            Self::Update {
+                old_value,
+                new_value,
+            } => {
+                yield (Op::UpdateDelete, old_value);
+                yield (Op::UpdateInsert, new_value);
+            }
         })
     }
 }
@@ -382,6 +402,9 @@ pub trait LocalStateStore: StaticSendSync {
         key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_;
+
+    /// Get last persisted watermark for a given vnode.
+    fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes>;
 
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
     fn insert(
@@ -756,8 +779,11 @@ impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
                 (
                     direction == WatermarkDirection::Ascending,
                     watermarks
-                        .iter()
-                        .map(|watermark| Message::encode_to_vec(&watermark.to_protobuf()))
+                        .into_iter()
+                        .map(|watermark| {
+                            let pb_watermark = PbVnodeWatermark::from(watermark);
+                            Message::encode_to_vec(&pb_watermark)
+                        })
                         .collect(),
                 )
             }),
@@ -779,10 +805,10 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
                         WatermarkDirection::Descending
                     },
                     watermarks
-                        .iter()
+                        .into_iter()
                         .map(|serialized_watermark| {
                             Message::decode(serialized_watermark.as_slice())
-                                .map(|pb| VnodeWatermark::from_protobuf(&pb))
+                                .map(|pb: PbVnodeWatermark| VnodeWatermark::from(pb))
                                 .expect("should not failed")
                         })
                         .collect(),

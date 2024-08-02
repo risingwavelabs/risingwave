@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use risingwave_common::types::{Fields, JsonbVal};
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
 use serde_json::json;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -41,7 +44,12 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockVersionDelta
             max_committed_epoch: d.max_committed_epoch as _,
             safe_epoch: d.visible_table_safe_epoch() as _,
             trivial_move: d.trivial_move,
-            group_deltas: json!(d.group_deltas).into(),
+            group_deltas: json!(d
+                .group_deltas
+                .into_iter()
+                .map(|(group_id, deltas)| (group_id, PbGroupDeltas::from(deltas)))
+                .collect::<HashMap<u64, PbGroupDeltas>>())
+            .into(),
         })
         .collect();
     Ok(rows)

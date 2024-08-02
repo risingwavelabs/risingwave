@@ -805,6 +805,7 @@ mod tests {
                 filter: None,
                 direct_args: vec![],
                 udf: None,
+                scalar: None,
             };
 
             let agg_prost = HashAggNode {
@@ -883,6 +884,7 @@ mod tests {
             filter: None,
             direct_args: vec![],
             udf: None,
+            scalar: None,
         };
 
         let agg_prost = HashAggNode {
@@ -1000,6 +1002,7 @@ mod tests {
             filter: None,
             direct_args: vec![],
             udf: None,
+            scalar: None,
         };
 
         let agg_prost = HashAggNode {
@@ -1092,6 +1095,7 @@ mod tests {
             filter: None,
             direct_args: vec![],
             udf: None,
+            scalar: None,
         };
 
         let agg_prost = HashAggNode {

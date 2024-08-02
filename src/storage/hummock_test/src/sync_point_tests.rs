@@ -213,7 +213,7 @@ pub async fn compact_once(
     hummock_manager_ref
         .report_compact_task(
             result_task.task_id,
-            result_task.task_status(),
+            result_task.task_status,
             result_task.sorted_output_ssts,
             Some(to_prost_table_stats_map(task_stats)),
         )
@@ -417,16 +417,10 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
         .levels[4];
     assert_eq!(base_level.table_infos.len(), 3);
-    assert!(
-        base_level.table_infos[0]
-            .key_range
-            .as_ref()
-            .unwrap()
-            .right_exclusive
-    );
+    assert!(base_level.table_infos[0].key_range.right_exclusive);
     assert_eq!(
-        user_key(&base_level.table_infos[0].key_range.as_ref().unwrap().right),
-        user_key(&base_level.table_infos[1].key_range.as_ref().unwrap().left),
+        user_key(&base_level.table_infos[0].key_range.right),
+        user_key(&base_level.table_infos[1].key_range.left),
     );
     storage.wait_version(version).await;
     let read_options = ReadOptions {
