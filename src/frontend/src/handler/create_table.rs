@@ -46,6 +46,7 @@ use risingwave_sqlparser::ast::{
     ExplainOptions, Format, ObjectName, OnConflict, SourceWatermark, TableConstraint,
 };
 use risingwave_sqlparser::parser::IncludeOption;
+use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field, Clause};
@@ -1110,7 +1111,7 @@ async fn derive_schema_for_cdc_table(
             .check_available()
             .map_err(|err| {
                 ErrorCode::NotSupported(
-                    err.to_string(),
+                    err.to_report_string(),
                     "Please define the schema manually".to_owned(),
                 )
             })?;
