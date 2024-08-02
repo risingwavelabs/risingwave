@@ -28,7 +28,6 @@ pub struct LocalApproxPercentileExecutor {
     pub chunk_size: usize,
 }
 
-// FIXME: neg and zeros are not handled correctly.
 impl LocalApproxPercentileExecutor {
     pub fn new(
         _ctx: ActorContextRef,
