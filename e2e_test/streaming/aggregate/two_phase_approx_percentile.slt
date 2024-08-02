@@ -70,3 +70,9 @@ query I
 select percentile_cont(0.01) within group (order by p_col) from t;
 ----
 -979.99
+
+statement ok
+drop materialized view m1;
+
+statement ok
+drop table t;
