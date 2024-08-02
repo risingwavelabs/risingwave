@@ -602,50 +602,45 @@ impl HummockVersion {
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
             let summary = summarize_group_deltas(group_deltas, *compaction_group_id);
             if let Some(group_construct) = &summary.group_construct {
-                if group_construct.parent_group_id == group_construct.group_id {
-                    // merge
+                // split
+                let split_key = if group_construct.split_key.is_some() {
+                    Some(Bytes::from(group_construct.split_key.clone().unwrap()))
                 } else {
-                    // split
+                    None
+                };
 
-                    let split_key = if group_construct.split_key.is_some() {
-                        Some(Bytes::from(group_construct.split_key.clone().unwrap()))
+                let mut new_levels = build_initial_compaction_group_levels(
+                    *compaction_group_id,
+                    group_construct.get_group_config().unwrap(),
+                );
+                let parent_group_id = group_construct.parent_group_id;
+                new_levels.parent_group_id = parent_group_id;
+                #[expect(deprecated)]
+                // for backward-compatibility of previous hummock version delta
+                new_levels
+                    .member_table_ids
+                    .clone_from(&group_construct.table_ids);
+                self.levels.insert(*compaction_group_id, new_levels);
+                let member_table_ids =
+                    if group_construct.version >= CompatibilityVersion::NoMemberTableIds as _ {
+                        self.state_table_info
+                            .compaction_group_member_table_ids(*compaction_group_id)
+                            .iter()
+                            .map(|table_id| table_id.table_id)
+                            .collect()
                     } else {
-                        None
+                        #[expect(deprecated)]
+                        // for backward-compatibility of previous hummock version delta
+                        HashSet::from_iter(group_construct.table_ids.clone())
                     };
 
-                    let mut new_levels = build_initial_compaction_group_levels(
-                        *compaction_group_id,
-                        group_construct.get_group_config().unwrap(),
-                    );
-                    let parent_group_id = group_construct.parent_group_id;
-                    new_levels.parent_group_id = parent_group_id;
-                    #[expect(deprecated)]
-                    // for backward-compatibility of previous hummock version delta
-                    new_levels
-                        .member_table_ids
-                        .clone_from(&group_construct.table_ids);
-                    self.levels.insert(*compaction_group_id, new_levels);
-                    let member_table_ids =
-                        if group_construct.version >= CompatibilityVersion::NoMemberTableIds as _ {
-                            self.state_table_info
-                                .compaction_group_member_table_ids(*compaction_group_id)
-                                .iter()
-                                .map(|table_id| table_id.table_id)
-                                .collect()
-                        } else {
-                            #[expect(deprecated)]
-                            // for backward-compatibility of previous hummock version delta
-                            HashSet::from_iter(group_construct.table_ids.clone())
-                        };
-
-                    self.init_with_parent_group(
-                        parent_group_id,
-                        *compaction_group_id,
-                        member_table_ids,
-                        group_construct.get_new_sst_start_id(),
-                        split_key.clone(),
-                    );
-                }
+                self.init_with_parent_group(
+                    parent_group_id,
+                    *compaction_group_id,
+                    member_table_ids,
+                    group_construct.get_new_sst_start_id(),
+                    split_key.clone(),
+                );
             } else if let Some(group_change) = &summary.group_table_change {
                 // TODO: may deprecate this branch? This enum variant is not created anywhere
                 assert!(
@@ -665,7 +660,9 @@ impl HummockVersion {
                 let levels = self
                     .levels
                     .get_mut(&group_change.origin_group_id)
-                    .expect("compaction group should exist");
+                    .unwrap_or_else(|| {
+                        panic!("compaction group {} does not exist", compaction_group_id)
+                    });
                 #[expect(deprecated)]
                 // for backward-compatibility of previous hummock version delta
                 let mut moving_tables = levels
@@ -676,7 +673,9 @@ impl HummockVersion {
                 // for backward-compatibility of previous hummock version delta
                 self.levels
                     .get_mut(compaction_group_id)
-                    .expect("compaction group should exist")
+                    .unwrap_or_else(|| {
+                        panic!("compaction group {} does not exist", compaction_group_id)
+                    })
                     .member_table_ids
                     .append(&mut moving_tables);
             } else if let Some(group_merge) = &summary.group_merge {
@@ -687,10 +686,9 @@ impl HummockVersion {
                 self.merge_compaction_group(group_merge.left_group_id, group_merge.right_group_id)
             }
             let group_destroy = summary.group_destroy;
-            let levels = self
-                .levels
-                .get_mut(compaction_group_id)
-                .expect("compaction group should exist");
+            let levels = self.levels.get_mut(compaction_group_id).unwrap_or_else(|| {
+                panic!("compaction group {} does not exist", compaction_group_id)
+            });
 
             #[expect(deprecated)] // for backward-compatibility of previous hummock version delta
             for group_meta_delta in &summary.group_meta_changes {
@@ -1011,27 +1009,8 @@ impl HummockVersion {
 
             (l, r)
         };
-
-        let (table_ids_l, table_ids_r) = {
-            let split_full_key = FullKey::decode(&split_key);
-            let split_user_key = split_full_key.user_key;
-            let vnode = split_user_key.get_vnode_id();
-            let table_id = split_user_key.table_id.table_id();
-            let table_ids = &origin_sst_info.table_ids;
-            assert!(table_ids.is_sorted());
-
-            let pos = table_ids.binary_search(&table_id).unwrap();
-            if vnode == 0 {
-                // The split logic binds the vnode and assumes that the incoming split key epoch == 0, so we place the table_id to the right
-                (table_ids[..pos].to_vec(), table_ids[pos..].to_vec())
-            } else {
-                (table_ids[..=pos].to_vec(), table_ids[pos..].to_vec())
-            }
-
-            // split table_id that related to split_key both left and right
-            // let pos = table_ids.binary_search(&table_id).unwrap();
-            // (table_ids[..=pos].to_vec(), table_ids[pos..].to_vec())
-        };
+        let (table_ids_l, table_ids_r) =
+            split_table_ids(&origin_sst_info.table_ids, split_key.clone());
 
         // rebuild the key_range and size and sstable file size
         {
@@ -1666,6 +1645,28 @@ pub fn split_sst(sst_info: &mut SstableInfo, new_sst_id: &mut u64) -> SstableInf
     *new_sst_id += 1;
 
     branch_table_info
+}
+
+pub fn split_table_ids(table_ids: &Vec<u32>, split_key: Bytes) -> (Vec<u32>, Vec<u32>) {
+    assert!(table_ids.is_sorted());
+    let split_full_key = FullKey::decode(&split_key);
+    let split_user_key = split_full_key.user_key;
+    let vnode = split_user_key.get_vnode_id();
+    let table_id = split_user_key.table_id.table_id();
+
+    // let pos = table_ids.binary_search(&table_id).unwrap();
+    let pos = table_ids.partition_point(|&id| id < table_id);
+    if vnode == 0 {
+        // The split logic binds the vnode and assumes that the incoming split key epoch == 0, so we place the table_id to the right
+        // NOTE: This branch can avoid split same table_id into two groups when vnode == 0, it related to the implementation of `state_table_info` with compaction group
+        (table_ids[..pos].to_vec(), table_ids[pos..].to_vec())
+    } else {
+        (table_ids[..=pos].to_vec(), table_ids[pos..].to_vec())
+    }
+
+    // split table_id that related to split_key both left and right
+    // let pos = table_ids.binary_search(&table_id).unwrap();
+    // (table_ids[..=pos].to_vec(), table_ids[pos..].to_vec())
 }
 
 #[cfg(test)]

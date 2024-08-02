@@ -16,16 +16,14 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compact_task::ReportTask;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ids, TableGroupInfo,
+    get_compaction_group_ids, split_table_ids, TableGroupInfo,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
-use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::version::{GroupDelta, GroupDeltas};
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_meta_model_v2::compaction_config;
@@ -441,11 +439,16 @@ impl HummockManager {
         //     )
         //     .await?;
 
+        if !table_ids.is_sorted() {
+            return Err(Error::CompactionGroup(
+                "table_ids must be sorted".to_string(),
+            ));
+        }
+
         let result = self
-            .split_compaction_group_v2(
+            .move_state_tables_to_dedicated_compaction_group(
                 parent_group_id,
-                table_ids[0],
-                VirtualNode::MAX,
+                table_ids,
                 self.env.opts.partition_vnode_count,
             )
             .await?;
@@ -634,9 +637,8 @@ impl HummockManager {
     pub async fn split_compaction_group_v2(
         &self,
         parent_group_id: CompactionGroupId,
-        mut table_id: StateTableId,
+        table_id: StateTableId,
         vnode: VirtualNode,
-        partition_vnode_count: u32,
     ) -> Result<CompactionGroupId> {
         let compaction_guard = self.compaction.write().await;
         let mut versioning_guard = self.versioning.write().await;
@@ -670,13 +672,13 @@ impl HummockManager {
             .map(|table_id| table_id.table_id)
             .collect_vec();
 
-        let pos = table_ids.partition_point(|&id| id <= table_id);
+        // not need to split
+        if table_id == *table_ids.first().unwrap() && group_split::is_vnode_split_to_right(vnode) {
+            return Ok(parent_group_id);
+        }
 
-        if pos == 0 {
-            return Err(Error::CompactionGroup(format!(
-                "Not to split ({}) all tables from group {}",
-                table_id, parent_group_id
-            )));
+        if table_id == *table_ids.last().unwrap() && group_split::is_vnode_split_to_left(vnode) {
+            return Ok(parent_group_id);
         }
 
         let mut version = HummockVersionTransaction::new(
@@ -687,27 +689,10 @@ impl HummockManager {
         );
         let mut new_version_delta = version.new_delta();
 
-        let split_key = {
-            let mut vnode_index = vnode.to_index();
+        let split_key = group_split::build_split_key(table_id, vnode, &table_ids);
 
-            if vnode == VirtualNode::MAX {
-                table_id = table_ids[pos]; // use next table_id
-                vnode_index = 0;
-            } else {
-                vnode_index += 1;
-            }
+        let (_, table_ids_right) = split_table_ids(&table_ids, split_key.clone());
 
-            Bytes::from(
-                FullKey::new(
-                    TableId::from(table_id),
-                    TableKey(VirtualNode::from_index(vnode_index).to_be_bytes()),
-                    0,
-                )
-                .encode(),
-            )
-        };
-
-        let table_ids = table_ids[pos..].to_vec();
         let split_sst_count = new_version_delta
             .latest_version()
             .count_new_ssts_in_group_split_v2(parent_group_id, split_key.clone());
@@ -724,7 +709,7 @@ impl HummockManager {
                 // All NewCompactionGroup pairs are mapped to one new compaction group.
                 let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
                 // The new config will be persisted later.
-                let mut config = self
+                let config = self
                     .compaction_group_manager
                     .read()
                     .await
@@ -732,9 +717,9 @@ impl HummockManager {
                     .as_ref()
                     .clone();
 
-                if table_ids.len() == 1 {
-                    config.split_weight_by_vnode = partition_vnode_count;
-                }
+                // if table_ids_right.len() == 1 {
+                //     config.split_weight_by_vnode = partition_vnode_count;
+                // }
 
                 #[expect(deprecated)]
                 // fill the deprecated field with default value
@@ -758,7 +743,7 @@ impl HummockManager {
 
         let (new_compaction_group_id, config) = new_group;
         new_version_delta.with_latest_version(|version, new_version_delta| {
-            for table_id in &table_ids {
+            for table_id in &table_ids_right {
                 let table_id = TableId::new(*table_id);
                 let info = version
                     .state_table_info
@@ -825,6 +810,54 @@ impl HummockManager {
             .move_state_table_count
             .with_label_values(&[&parent_group_id.to_string()])
             .inc();
+
+        Ok(target_compaction_group_id)
+    }
+
+    pub async fn move_state_tables_to_dedicated_compaction_group(
+        &self,
+        parent_group_id: CompactionGroupId,
+        table_ids: &[StateTableId],
+        _partition_vnode_count: u32,
+    ) -> Result<CompactionGroupId> {
+        if table_ids.is_empty() {
+            return Ok(parent_group_id);
+        }
+
+        if !table_ids.is_sorted() {
+            return Err(Error::CompactionGroup(
+                "table_ids must be sorted".to_string(),
+            ));
+        }
+
+        // move [3,4,5,6]
+        // [1,2,3,4,5,6,7,8,9,10] -> [1,2] [3,4,5,6] [7,8,9,10]
+        // split key
+        // 1. table_id = 3, vnode = 0, epoch = 0
+        // 2. table_id = 7, vnode = 0, epoch = 0
+        let table_ids = table_ids.iter().cloned().unique().collect_vec();
+
+        // split 1
+        let target_compaction_group_id = self
+            .split_compaction_group_v2(
+                parent_group_id,
+                *table_ids.first().unwrap(),
+                group_split::VNODE_SPLIT_TO_RIGHT,
+            )
+            .await?;
+
+        // split 2
+        let target_compaction_group_id = self
+            .split_compaction_group_v2(
+                target_compaction_group_id,
+                *table_ids.last().unwrap(),
+                group_split::VNODE_SPLIT_TO_LEFT,
+            )
+            .await?;
+
+        if table_ids.len() == 1 {
+            // update compaction config for target_compaction_group_id
+        }
 
         Ok(target_compaction_group_id)
     }
@@ -1215,6 +1248,42 @@ impl<'a> CompactionGroupTransaction<'a> {
         }
 
         Ok(results)
+    }
+}
+
+pub mod group_split {
+    use bytes::Bytes;
+    use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_hummock_sdk::compaction_group::StateTableId;
+    use risingwave_hummock_sdk::key::{FullKey, TableKey};
+
+    pub const VNODE_SPLIT_TO_RIGHT: VirtualNode = VirtualNode::ZERO;
+    pub const VNODE_SPLIT_TO_LEFT: VirtualNode = VirtualNode::MAX;
+
+    pub fn is_vnode_split_to_right(vnode: VirtualNode) -> bool {
+        vnode == VNODE_SPLIT_TO_RIGHT
+    }
+
+    pub fn is_vnode_split_to_left(vnode: VirtualNode) -> bool {
+        vnode == VNODE_SPLIT_TO_LEFT
+    }
+
+    // By default, the split key is constructed with vnode = 0 and epoch = 0, so that we can split table_id to the right group
+    pub fn build_split_key(
+        mut table_id: StateTableId,
+        mut vnode: VirtualNode,
+        table_ids: &Vec<u32>,
+    ) -> Bytes {
+        if is_vnode_split_to_left(vnode) {
+            // Modify `table_id` to `next_table_id` to satisfy the `split_to_right`` rule, so that the `table_id`` originally passed in will be split to left.
+            table_id = table_ids[table_ids.partition_point(|x| *x <= table_id)]; // use next table_id
+            vnode = VNODE_SPLIT_TO_RIGHT;
+        }
+
+        Bytes::from(
+            FullKey::new(TableId::from(table_id), TableKey(vnode.to_be_bytes()), 0).encode(),
+        )
     }
 }
 
