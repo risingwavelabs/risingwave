@@ -173,7 +173,7 @@ pub struct FragmentManager {
     core: RwLock<FragmentManagerCore>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct InflightFragmentInfo {
     pub actors: HashMap<ActorId, WorkerNodeId>,
     pub state_table_ids: HashSet<TableId>,

@@ -240,6 +240,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             created_at_cluster_version: value.1.created_at_cluster_version,
             create_type: PbCreateType::Foreground as _,
             secret_refs: secret_ref_map,
+            original_target_columns: value.0.original_target_columns.to_protobuf(),
         }
     }
 }

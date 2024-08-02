@@ -23,7 +23,7 @@ use risingwave_sqlparser::ast::{
     ObjectName, Query, StructField, TrimWhereField, UnaryOperator,
 };
 
-use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
+use crate::binder::expr::function::is_sys_function_without_args;
 use crate::binder::Binder;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
@@ -72,10 +72,7 @@ impl Binder {
             Expr::Row(exprs) => self.bind_row(exprs),
             // input ref
             Expr::Identifier(ident) => {
-                if SYS_FUNCTION_WITHOUT_ARGS
-                    .iter()
-                    .any(|e| ident.real_value().as_str() == *e && ident.quote_style().is_none())
-                {
+                if is_sys_function_without_args(&ident) {
                     // Rewrite a system variable to a function call, e.g. `SELECT current_schema;`
                     // will be rewritten to `SELECT current_schema();`.
                     // NOTE: Here we don't 100% follow the behavior of Postgres, as it doesn't

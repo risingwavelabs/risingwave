@@ -735,7 +735,7 @@ impl DdlService for DdlServiceImpl {
         _request: Request<GetDdlProgressRequest>,
     ) -> Result<Response<GetDdlProgressResponse>, Status> {
         Ok(Response::new(GetDdlProgressResponse {
-            ddl_progress: self.ddl_controller.get_ddl_progress().await,
+            ddl_progress: self.ddl_controller.get_ddl_progress().await?,
         }))
     }
 

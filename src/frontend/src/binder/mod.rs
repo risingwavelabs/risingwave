@@ -780,7 +780,7 @@ mod tests {
                                 UnnamedExpr(
                                     Function(
                                         Function {
-                                            aggregate: false,
+                                            scalar_as_agg: false,
                                             name: ObjectName(
                                                 [
                                                     Ident {
