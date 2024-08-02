@@ -52,6 +52,7 @@ pub struct FileSink<S: OpendalSinkBackend> {
 
     /// The description of the sink's format.
     pub(crate) format_desc: SinkFormatDesc,
+    pub(crate) engine_type: EngineType,
     pub(crate) marker: PhantomData<S>,
 }
 
@@ -78,6 +79,14 @@ pub trait OpendalSinkBackend: Send + Sync + 'static + Clone + PartialEq {
     fn from_btreemap(hash_map: BTreeMap<String, String>) -> Result<Self::Properties>;
     fn new_operator(properties: Self::Properties) -> Result<Operator>;
     fn get_path(properties: &Self::Properties) -> String;
+    fn get_engine_type() -> EngineType;
+}
+
+#[derive(Clone, Debug)]
+pub enum EngineType {
+    Gcs,
+    S3,
+    Fs,
 }
 
 impl<S: OpendalSinkBackend> Sink for FileSink<S> {
@@ -113,6 +122,7 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
             self.is_append_only,
             writer_param.executor_id,
             self.format_desc.encode.clone(),
+            self.engine_type.clone(),
         )?
         .into_log_sinker(writer_param.sink_metrics))
     }
@@ -126,7 +136,7 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
         let config = S::from_btreemap(param.properties)?;
         let path = S::get_path(&config);
         let op = S::new_operator(config)?;
-
+        let engine_type = S::get_engine_type();
         Ok(Self {
             op,
             path,
@@ -135,6 +145,7 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
             format_desc: param
                 .format_desc
                 .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
+            engine_type,
             marker: PhantomData,
         })
     }
@@ -149,6 +160,7 @@ pub struct OpenDalSinkWriter {
     epoch: Option<u64>,
     executor_id: u64,
     encode_type: SinkEncode,
+    engine_type: EngineType,
 }
 
 /// The `FileWriterEnum` enum represents different types of file writers used for various sink
@@ -213,6 +225,7 @@ impl OpenDalSinkWriter {
         is_append_only: bool,
         executor_id: u64,
         encode_type: SinkEncode,
+        engine_type: EngineType,
     ) -> Result<Self> {
         let arrow_schema = convert_rw_schema_to_arrow_schema(rw_schema)?;
         Ok(Self {
@@ -223,7 +236,9 @@ impl OpenDalSinkWriter {
             is_append_only,
             epoch: None,
             executor_id,
+
             encode_type,
+            engine_type,
         })
     }
 
@@ -236,10 +251,18 @@ impl OpenDalSinkWriter {
 
         // Note: sink decoupling is not currently supported, which means that output files will not be batched across checkpoints.
         // The current implementation writes files every time a checkpoint arrives, so the naming convention is `epoch + executor_id + .suffix`.
-        let object_name = format!(
-            "{}/{}_{}.{}",
-            self.write_path, epoch, self.executor_id, suffix,
-        );
+        let object_name = match self.engine_type {
+            // For the local fs sink, the data will be automatically written to the defined path.
+            // Therefore, there is no need to specify the path in the file name.
+            EngineType::Fs => {
+                format!("{}_{}.{}", epoch, self.executor_id, suffix,)
+            }
+            _ => format!(
+                "{}/{}_{}.{}",
+                self.write_path, epoch, self.executor_id, suffix,
+            ),
+        };
+
         Ok(self
             .operator
             .writer_with(&object_name)

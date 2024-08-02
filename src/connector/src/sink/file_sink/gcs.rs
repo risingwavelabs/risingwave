@@ -110,4 +110,8 @@ impl OpendalSinkBackend for GcsSink {
     fn get_path(properties: &Self::Properties) -> String {
         (*properties.common.path).to_string()
     }
+
+    fn get_engine_type() -> super::opendal_sink::EngineType {
+        super::opendal_sink::EngineType::Gcs
+    }
 }
