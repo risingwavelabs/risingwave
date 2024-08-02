@@ -1086,6 +1086,10 @@ impl HummockVersion {
                 )
             });
 
+        Self::merge_levels(left_levels, right_levels);
+    }
+
+    fn merge_levels(left_levels: &mut Levels, right_levels: &mut Levels) {
         let right_l0 = &right_levels.l0;
 
         for right_sub_level in &right_l0.sub_levels {
@@ -2062,7 +2066,7 @@ mod tests {
                     right,
                     right_exclusive: false,
                 },
-                table_ids: table_ids,
+                table_ids,
                 file_size: 100,
                 estimated_sst_size: 100,
                 uncompressed_file_size: 100,

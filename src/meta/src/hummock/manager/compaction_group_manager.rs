@@ -710,7 +710,7 @@ impl HummockManager {
         let table_ids = table_ids[pos..].to_vec();
         let split_sst_count = new_version_delta
             .latest_version()
-            .count_new_ssts_in_group_split_v2(parent_group_id, &split_key);
+            .count_new_ssts_in_group_split_v2(parent_group_id, split_key.clone());
 
         tracing::info!(
             "LI)K parent_group_id: {}, split_sst_count: {}",
