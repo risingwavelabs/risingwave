@@ -1093,17 +1093,35 @@ impl HummockVersion {
         let right_l0 = &right_levels.l0;
 
         for right_sub_level in &right_l0.sub_levels {
-            let mut sub_level = right_sub_level.clone();
+            let sub_level = right_sub_level.clone();
             // Reinitialise `vnode_partition_count`` to avoid misaligned hierarchies
             // caused by the merge of different compaction groups.(picker might reject the different `vnode_partition_count` sub_level to compact)
-            sub_level.vnode_partition_count = 0;
-            left_levels.l0.sub_levels.push(sub_level);
-
-            left_levels
+            // sub_level.vnode_partition_count = 0;
+            if let Ok(insert_hint) = left_levels
                 .l0
                 .sub_levels
-                .sort_by_key(|sub_level| sub_level.sub_level_id);
+                .binary_search_by_key(&sub_level.sub_level_id, |level| level.sub_level_id)
+            {
+                add_ssts_to_sub_level(
+                    &mut left_levels.l0,
+                    insert_hint,
+                    sub_level.table_infos.clone(),
+                )
+            } else {
+                insert_new_sub_level(
+                    &mut left_levels.l0,
+                    sub_level.sub_level_id,
+                    sub_level.level_type,
+                    sub_level.table_infos.clone(),
+                    None,
+                );
+            }
         }
+
+        left_levels
+            .l0
+            .sub_levels
+            .sort_by_key(|sub_level| sub_level.sub_level_id);
 
         for (idx, level) in right_levels.levels.iter_mut().enumerate() {
             if level.table_infos.is_empty() {
@@ -2039,6 +2057,23 @@ mod tests {
         }
     }
 
+    fn gen_sst_info(object_id: u64, table_ids: Vec<u32>, left: Bytes, right: Bytes) -> SstableInfo {
+        SstableInfo {
+            object_id,
+            sst_id: object_id,
+            key_range: KeyRange {
+                left,
+                right,
+                right_exclusive: false,
+            },
+            table_ids,
+            file_size: 100,
+            estimated_sst_size: 100,
+            uncompressed_file_size: 100,
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn test_split_sst_info_for_level() {
         let mut version = HummockVersion::default();
@@ -2056,22 +2091,6 @@ mod tests {
         )]);
 
         let cg1 = version.levels.get_mut(&1).unwrap();
-
-        let gen_sst_info =
-            |object_id: u64, table_ids: Vec<u32>, left: Bytes, right: Bytes| SstableInfo {
-                object_id,
-                sst_id: object_id,
-                key_range: KeyRange {
-                    left,
-                    right,
-                    right_exclusive: false,
-                },
-                table_ids,
-                file_size: 100,
-                estimated_sst_size: 100,
-                uncompressed_file_size: 100,
-                ..Default::default()
-            };
 
         cg1.levels[0] = Level {
             level_idx: 1,
@@ -2197,32 +2216,6 @@ mod tests {
             sub_level_id: 101,
             level_type: LevelType::Overlapping,
             total_file_size: 300,
-            ..Default::default()
-        });
-
-        cg1.l0.sub_levels.push(Level {
-            level_idx: 0,
-            table_infos: vec![gen_sst_info(
-                2,
-                vec![2],
-                FullKey::for_test(
-                    TableId::new(2),
-                    gen_key_from_str(VirtualNode::from_index(1), "1"),
-                    0,
-                )
-                .encode()
-                .into(),
-                FullKey::for_test(
-                    TableId::new(2),
-                    gen_key_from_str(VirtualNode::from_index(200), "1"),
-                    0,
-                )
-                .encode()
-                .into(),
-            )],
-            sub_level_id: 102,
-            level_type: LevelType::Nonoverlapping,
-            total_file_size: 100,
             ..Default::default()
         });
 
@@ -2381,6 +2374,385 @@ mod tests {
             assert_eq!(101, cg1.levels[0].table_infos[1].sst_id);
             assert_eq!(100 / 2, cg1.levels[0].table_infos[1].estimated_sst_size);
             assert_eq!(vec![3], cg1.levels[0].table_infos[1].table_ids);
+        }
+    }
+
+    #[test]
+    fn test_merge_levels() {
+        let mut left_levels = build_initial_compaction_group_levels(
+            1,
+            &CompactionConfig {
+                max_level: 6,
+                ..Default::default()
+            },
+        );
+
+        let mut right_levels = build_initial_compaction_group_levels(
+            2,
+            &CompactionConfig {
+                max_level: 6,
+                ..Default::default()
+            },
+        );
+
+        left_levels.levels[0] = Level {
+            level_idx: 1,
+            level_type: LevelType::Nonoverlapping,
+            table_infos: vec![
+                gen_sst_info(
+                    1,
+                    vec![3],
+                    FullKey::for_test(
+                        TableId::new(3),
+                        gen_key_from_str(VirtualNode::from_index(1), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(3),
+                        gen_key_from_str(VirtualNode::from_index(200), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                ),
+                gen_sst_info(
+                    10,
+                    vec![3, 4],
+                    FullKey::for_test(
+                        TableId::new(3),
+                        gen_key_from_str(VirtualNode::from_index(201), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(4),
+                        gen_key_from_str(VirtualNode::from_index(10), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                ),
+                gen_sst_info(
+                    11,
+                    vec![4],
+                    FullKey::for_test(
+                        TableId::new(4),
+                        gen_key_from_str(VirtualNode::from_index(11), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(4),
+                        gen_key_from_str(VirtualNode::from_index(200), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                ),
+            ],
+            total_file_size: 300,
+            ..Default::default()
+        };
+
+        left_levels.l0.sub_levels.push(Level {
+            level_idx: 0,
+            table_infos: vec![gen_sst_info(
+                3,
+                vec![3],
+                FullKey::for_test(
+                    TableId::new(3),
+                    gen_key_from_str(VirtualNode::from_index(1), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+                FullKey::for_test(
+                    TableId::new(3),
+                    gen_key_from_str(VirtualNode::from_index(200), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+            )],
+            sub_level_id: 101,
+            level_type: LevelType::Overlapping,
+            total_file_size: 100,
+            ..Default::default()
+        });
+
+        left_levels.l0.sub_levels.push(Level {
+            level_idx: 0,
+            table_infos: vec![gen_sst_info(
+                3,
+                vec![3],
+                FullKey::for_test(
+                    TableId::new(3),
+                    gen_key_from_str(VirtualNode::from_index(1), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+                FullKey::for_test(
+                    TableId::new(3),
+                    gen_key_from_str(VirtualNode::from_index(200), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+            )],
+            sub_level_id: 102,
+            level_type: LevelType::Overlapping,
+            total_file_size: 100,
+            ..Default::default()
+        });
+
+        left_levels.l0.sub_levels.push(Level {
+            level_idx: 0,
+            table_infos: vec![gen_sst_info(
+                3,
+                vec![3],
+                FullKey::for_test(
+                    TableId::new(3),
+                    gen_key_from_str(VirtualNode::from_index(1), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+                FullKey::for_test(
+                    TableId::new(3),
+                    gen_key_from_str(VirtualNode::from_index(200), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+            )],
+            sub_level_id: 103,
+            level_type: LevelType::Nonoverlapping,
+            total_file_size: 100,
+            ..Default::default()
+        });
+
+        right_levels.levels[0] = Level {
+            level_idx: 1,
+            level_type: LevelType::Nonoverlapping,
+            table_infos: vec![
+                gen_sst_info(
+                    1,
+                    vec![5],
+                    FullKey::for_test(
+                        TableId::new(5),
+                        gen_key_from_str(VirtualNode::from_index(1), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(5),
+                        gen_key_from_str(VirtualNode::from_index(200), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                ),
+                gen_sst_info(
+                    10,
+                    vec![5, 6],
+                    FullKey::for_test(
+                        TableId::new(5),
+                        gen_key_from_str(VirtualNode::from_index(201), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(6),
+                        gen_key_from_str(VirtualNode::from_index(10), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                ),
+                gen_sst_info(
+                    11,
+                    vec![6],
+                    FullKey::for_test(
+                        TableId::new(6),
+                        gen_key_from_str(VirtualNode::from_index(11), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                    FullKey::for_test(
+                        TableId::new(6),
+                        gen_key_from_str(VirtualNode::from_index(200), "1"),
+                        0,
+                    )
+                    .encode()
+                    .into(),
+                ),
+            ],
+            total_file_size: 300,
+            ..Default::default()
+        };
+
+        right_levels.l0.sub_levels.push(Level {
+            level_idx: 0,
+            table_infos: vec![gen_sst_info(
+                3,
+                vec![5],
+                FullKey::for_test(
+                    TableId::new(5),
+                    gen_key_from_str(VirtualNode::from_index(1), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+                FullKey::for_test(
+                    TableId::new(5),
+                    gen_key_from_str(VirtualNode::from_index(200), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+            )],
+            sub_level_id: 101,
+            level_type: LevelType::Overlapping,
+            total_file_size: 100,
+            ..Default::default()
+        });
+
+        right_levels.l0.sub_levels.push(Level {
+            level_idx: 0,
+            table_infos: vec![gen_sst_info(
+                5,
+                vec![5],
+                FullKey::for_test(
+                    TableId::new(5),
+                    gen_key_from_str(VirtualNode::from_index(1), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+                FullKey::for_test(
+                    TableId::new(5),
+                    gen_key_from_str(VirtualNode::from_index(200), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+            )],
+            sub_level_id: 102,
+            level_type: LevelType::Overlapping,
+            total_file_size: 100,
+            ..Default::default()
+        });
+
+        right_levels.l0.sub_levels.push(Level {
+            level_idx: 0,
+            table_infos: vec![gen_sst_info(
+                3,
+                vec![5],
+                FullKey::for_test(
+                    TableId::new(5),
+                    gen_key_from_str(VirtualNode::from_index(1), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+                FullKey::for_test(
+                    TableId::new(5),
+                    gen_key_from_str(VirtualNode::from_index(200), "1"),
+                    0,
+                )
+                .encode()
+                .into(),
+            )],
+            sub_level_id: 104,
+            level_type: LevelType::Nonoverlapping,
+            total_file_size: 100,
+            ..Default::default()
+        });
+
+        {
+            // test empty
+            let mut left_levels = Levels::default();
+            let mut right_levels = Levels::default();
+
+            HummockVersion::merge_levels(&mut left_levels, &mut right_levels);
+        }
+
+        {
+            // test empty left
+            let mut left_levels = build_initial_compaction_group_levels(
+                1,
+                &CompactionConfig {
+                    max_level: 6,
+                    ..Default::default()
+                },
+            );
+            let mut right_levels = right_levels.clone();
+
+            HummockVersion::merge_levels(&mut left_levels, &mut right_levels);
+
+            assert!(left_levels.l0.sub_levels.len() == 3);
+            assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
+            assert_eq!(100, left_levels.l0.sub_levels[0].total_file_size);
+            assert!(left_levels.l0.sub_levels[1].sub_level_id == 102);
+            assert_eq!(100, left_levels.l0.sub_levels[1].total_file_size);
+            assert!(left_levels.l0.sub_levels[2].sub_level_id == 104);
+            assert_eq!(100, left_levels.l0.sub_levels[2].total_file_size);
+
+            assert!(left_levels.levels[0].level_idx == 1);
+            assert_eq!(300, left_levels.levels[0].total_file_size);
+        }
+
+        {
+            // test empty right
+            let mut left_levels = left_levels.clone();
+            let mut right_levels = build_initial_compaction_group_levels(
+                2,
+                &CompactionConfig {
+                    max_level: 6,
+                    ..Default::default()
+                },
+            );
+
+            HummockVersion::merge_levels(&mut left_levels, &mut right_levels);
+
+            assert!(left_levels.l0.sub_levels.len() == 3);
+            assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
+            assert_eq!(100, left_levels.l0.sub_levels[0].total_file_size);
+            assert!(left_levels.l0.sub_levels[1].sub_level_id == 102);
+            assert_eq!(100, left_levels.l0.sub_levels[1].total_file_size);
+            assert!(left_levels.l0.sub_levels[2].sub_level_id == 103);
+            assert_eq!(100, left_levels.l0.sub_levels[2].total_file_size);
+
+            assert!(left_levels.levels[0].level_idx == 1);
+            assert_eq!(300, left_levels.levels[0].total_file_size);
+        }
+
+        {
+            let mut left_levels = left_levels.clone();
+            let mut right_levels = right_levels.clone();
+
+            HummockVersion::merge_levels(&mut left_levels, &mut right_levels);
+
+            assert!(left_levels.l0.sub_levels.len() == 4);
+            assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
+            assert_eq!(200, left_levels.l0.sub_levels[0].total_file_size);
+            assert!(left_levels.l0.sub_levels[1].sub_level_id == 102);
+            assert_eq!(200, left_levels.l0.sub_levels[1].total_file_size);
+            assert!(left_levels.l0.sub_levels[2].sub_level_id == 103);
+            assert_eq!(100, left_levels.l0.sub_levels[2].total_file_size);
+            assert!(left_levels.l0.sub_levels[3].sub_level_id == 104);
+            assert_eq!(100, left_levels.l0.sub_levels[3].total_file_size);
+
+            assert!(left_levels.levels[0].level_idx == 1);
+            assert_eq!(600, left_levels.levels[0].total_file_size);
         }
     }
 }
