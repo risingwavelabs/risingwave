@@ -19,12 +19,13 @@ use risingwave_common::types::{
 };
 use risingwave_connector_codec::decoder::AccessExt;
 use risingwave_pb::plan_common::additional_column::ColumnType;
+use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
 use crate::parser::debezium::schema_change::{SchemaChangeEnvelope, TableSchemaChange};
-use crate::parser::mysql::mysql_typename_to_rw_type;
 use crate::parser::schema_change::TableChangeType;
 use crate::parser::TransactionControl;
+use crate::source::cdc::external::mysql::{mysql_type_to_rw_type, type_name_to_mysql_type};
 use crate::source::{ConnectorProperties, SourceColumnDesc};
 
 // Example of Debezium JSON value:
@@ -181,7 +182,18 @@ pub fn parse_schema_change(
                             unimplemented!()
                         }
                         ConnectorProperties::MysqlCdc(_) => {
-                            mysql_typename_to_rw_type(type_name.as_str())?
+                            let ty = type_name_to_mysql_type(type_name.as_str());
+                            match ty {
+                                Some(ty) => mysql_type_to_rw_type(&ty).map_err(|err| {
+                                    tracing::warn!(error=%err.as_report(), "unsupported mysql type in schema change message");
+                                    AccessError::UnsupportedType {
+                                        ty: type_name.clone(),
+                                    }
+                                })?,
+                                None => {
+                                    Err(AccessError::UnsupportedType { ty: type_name })?
+                                }
+                            }
                         }
                         _ => {
                             unreachable!()

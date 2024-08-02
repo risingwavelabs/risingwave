@@ -22,7 +22,6 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
     DataType, Date, Decimal, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
-use risingwave_connector_codec::decoder::{AccessError, AccessResult};
 use rust_decimal::Decimal as RustDecimal;
 use thiserror_ext::AsReport;
 
@@ -140,27 +139,6 @@ pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> Owne
         datums.push(datum);
     }
     OwnedRow::new(datums)
-}
-
-pub fn mysql_typename_to_rw_type(type_name: &str) -> AccessResult<DataType> {
-    match type_name.to_lowercase().as_str() {
-        "tinyint" | "smallint" => Ok(DataType::Int16),
-        "int" => Ok(DataType::Int32),
-        "bigint" => Ok(DataType::Int64),
-        "float" => Ok(DataType::Float32),
-        "double" => Ok(DataType::Float64),
-        "decimal" => Ok(DataType::Decimal),
-        "char" | "varchar" | "text" | "mediumtext" | "longtext" => Ok(DataType::Varchar),
-        "date" => Ok(DataType::Date),
-        "time" => Ok(DataType::Time),
-        "timestamp" => Ok(DataType::Timestamptz),
-        "datetime" => Ok(DataType::Timestamp),
-        "json" => Ok(DataType::Jsonb),
-        "binary" | "varbinary" | "blob" | "mediumblob" | "longblob" => Ok(DataType::Bytea),
-        _ => Err(AccessError::UnsupportedType {
-            ty: type_name.to_string(),
-        }),
-    }
 }
 
 #[cfg(test)]
