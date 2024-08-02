@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use anyhow::anyhow;
 use opendal::layers::{LoggingLayer, RetryLayer};
@@ -36,14 +36,11 @@ pub struct GcsCommon {
 
     /// If credential/ADC is not set. The service account can be used to provide the credential info.
     #[serde(rename = "gcs.service_account", default)]
-    pub service_account: Option<String>,
+    pub service_account: String,
 
     /// The directory where the sink file is located
-    #[serde(rename = "gcs.path", default)]
+    #[serde(rename = "gcs.path")]
     pub path: String,
-
-    #[serde(flatten)]
-    pub unknown_fields: HashMap<String, String>,
 }
 
 #[serde_as]
@@ -52,7 +49,7 @@ pub struct GcsConfig {
     #[serde(flatten)]
     pub common: GcsCommon,
 
-    pub r#type: String, // accept "append-only" or "upsert"
+    pub r#type: String, // accept "append-only"
 }
 
 pub const GCS_SINK: &str = "gcs";
@@ -74,9 +71,8 @@ impl<S: OpendalSinkBackend> FileSink<S> {
             }
         }
 
-        if let Some(service_account) = config.common.service_account {
-            builder.service_account(&service_account);
-        }
+        builder.service_account(&config.common.service_account);
+
         let operator: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())

@@ -27,7 +27,7 @@ use crate::sink::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SI
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct FsCommon {
     /// The directory where the sink file is located.
-    #[serde(rename = "fs.path", default)]
+    #[serde(rename = "fs.path")]
     pub path: String,
 }
 
@@ -37,7 +37,7 @@ pub struct FsConfig {
     #[serde(flatten)]
     pub common: FsCommon,
 
-    pub r#type: String, // accept "append-only" or "upsert"
+    pub r#type: String, // accept "append-only"
 }
 
 pub const FS_SINK: &str = "fs";

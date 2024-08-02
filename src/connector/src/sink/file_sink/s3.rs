@@ -31,7 +31,7 @@ pub struct S3Common {
     #[serde(rename = "s3.bucket_name")]
     pub bucket_name: String,
     /// The directory where the sink file is located.
-    #[serde(rename = "s3.path", default)]
+    #[serde(rename = "s3.path")]
     pub path: String,
     #[serde(rename = "s3.credentials.access", default)]
     pub access: Option<String>,
@@ -49,7 +49,7 @@ pub struct S3Config {
     #[serde(flatten)]
     pub common: S3Common,
 
-    pub r#type: String, // accept "append-only" or "upsert"
+    pub r#type: String, // accept "append-only"
 }
 
 pub const S3_SINK: &str = "s3";
