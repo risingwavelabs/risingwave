@@ -97,11 +97,12 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
 
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
-            return Err(SinkError::Config(
-                anyhow!("File sink only supports append-only mode at present.
-                Please change the query to append-only, and you need to specify it explicitly after the `FORMAT ... ENCODE ...` statement. 
-                For example, `FORMAT xxx ENCODE xxx(force_append_only='true')`")
-            ));
+            return Err(SinkError::Config(anyhow!(
+                "File sink only supports append-only mode at present. \
+                    Please change the query to append-only, and specify it \
+                    explicitly after the `FORMAT ... ENCODE ...` statement. \
+                    For example, `FORMAT xxx ENCODE xxx(force_append_only='true')`"
+            )));
         }
         if self.format_desc.encode != SinkEncode::Parquet {
             return Err(SinkError::Config(anyhow!(
