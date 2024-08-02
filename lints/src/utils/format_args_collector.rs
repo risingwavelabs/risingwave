@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Copied from `https://github.com/Alexendoo/rust-clippy/blob/c187bff864234e869dabcb41d2336639e29e2511/clippy_lints/src/utils/format_args_collector.rs`
+//! Copied from `https://github.com/rust-lang/rust-clippy/blob/993d8ae2a7b26ac779fde923b2ce9ce35d7143a8/clippy_lints/src/utils/format_args_collector.rs`
 
 use std::iter::once;
 use std::mem;
