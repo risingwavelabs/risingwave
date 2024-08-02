@@ -2656,6 +2656,19 @@ impl CatalogController {
             .collect())
     }
 
+    pub async fn get_sink_by_ids(&self, sink_ids: Vec<SinkId>) -> MetaResult<Vec<PbSink>> {
+        let inner = self.inner.read().await;
+        let sink_objs = Sink::find()
+            .find_also_related(Object)
+            .filter(sink::Column::SinkId.is_in(sink_ids))
+            .all(&inner.db)
+            .await?;
+        Ok(sink_objs
+            .into_iter()
+            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
+            .collect())
+    }
+
     pub async fn get_subscription_by_id(
         &self,
         subscription_id: SubscriptionId,

@@ -23,14 +23,15 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
 use postgres_types::FromSql;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_sqlparser::ast::{SetExpr, Statement};
 
 use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
-use super::{PgResponseStream, RwPgResponse};
-use crate::binder::{Binder, BoundStatement};
+use super::{create_mv, PgResponseStream, RwPgResponse};
+use crate::binder::{Binder, BoundCreateView, BoundStatement};
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::flush::do_flush;
@@ -80,6 +81,7 @@ pub fn handle_parse(
     }))
 }
 
+/// Execute a "Portal", which is a prepared statement with bound parameters.
 pub async fn handle_execute(
     handler_args: HandlerArgs,
     portal: PortalResult,
@@ -87,17 +89,70 @@ pub async fn handle_execute(
     let PortalResult {
         bound_result,
         result_formats,
-        ..
+        statement,
     } = portal;
+    match statement {
+        Statement::Query(_)
+        | Statement::Insert { .. }
+        | Statement::Delete { .. }
+        | Statement::Update { .. } => {
+            // Execute a batch query
+            let session = handler_args.session.clone();
+            let plan_fragmenter_result = {
+                let context = OptimizerContext::from_handler_args(handler_args);
+                let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?;
 
-    let session = handler_args.session.clone();
-    let plan_fragmenter_result = {
-        let context = OptimizerContext::from_handler_args(handler_args);
-        let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?;
+                gen_batch_plan_fragmenter(&session, plan_result)?
+            };
+            execute(session, plan_fragmenter_result, result_formats).await
+        }
+        Statement::CreateView { materialized, .. } if materialized => {
+            // Execute a CREATE MATERIALIZED VIEW
+            let BoundResult {
+                bound,
+                dependent_relations,
+                ..
+            } = bound_result;
+            let create_mv = if let BoundStatement::CreateView(create_mv) = bound {
+                create_mv
+            } else {
+                unreachable!("expect a BoundStatement::CreateView")
+            };
+            let BoundCreateView {
+                or_replace,
+                materialized: _,
+                if_not_exists,
+                name,
+                columns,
+                query,
+                emit_mode,
+                with_options,
+            } = *create_mv;
+            if or_replace {
+                bail_not_implemented!("CREATE OR REPLACE VIEW");
+            }
 
-        gen_batch_plan_fragmenter(&session, plan_result)?
-    };
-    execute(session, plan_fragmenter_result, result_formats).await
+            // Hack: replace the `with_options` with the bounded ones.
+            let handler_args = HandlerArgs {
+                session: handler_args.session.clone(),
+                sql: handler_args.sql.clone(),
+                normalized_sql: handler_args.normalized_sql.clone(),
+                with_options: crate::WithOptions::try_from(with_options.as_slice())?,
+            };
+
+            create_mv::handle_create_mv_bound(
+                handler_args,
+                if_not_exists,
+                name,
+                *query,
+                dependent_relations,
+                columns,
+                emit_mode,
+            )
+            .await
+        }
+        _ => unreachable!(),
+    }
 }
 
 pub fn gen_batch_plan_by_statement(

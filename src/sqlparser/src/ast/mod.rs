@@ -2481,6 +2481,8 @@ impl fmt::Display for FunctionArg {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Function {
+    /// Whether the function is prefixed with `aggregate:`
+    pub scalar_as_agg: bool,
     pub name: ObjectName,
     pub args: Vec<FunctionArg>,
     /// whether the last argument is variadic, e.g. `foo(a, b, variadic c)`
@@ -2497,6 +2499,7 @@ pub struct Function {
 impl Function {
     pub fn no_arg(name: ObjectName) -> Self {
         Self {
+            scalar_as_agg: false,
             name,
             args: vec![],
             variadic: false,
@@ -2511,6 +2514,9 @@ impl Function {
 
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.scalar_as_agg {
+            write!(f, "aggregate:")?;
+        }
         write!(
             f,
             "{}({}",

@@ -1,11 +1,16 @@
 package com.risingwave;
 
+import org.apache.commons.dbutils.QueryRunner;
+import org.apache.commons.dbutils.handlers.MapListHandler;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
+import java.util.Map;
 
 public class TestMaterializedView {
 
@@ -17,11 +22,38 @@ public class TestMaterializedView {
                 statement.executeUpdate(dropViewQuery);
                 System.out.println("Materialized view dropped successfully.");
             }
-            String truncateTableQuery = "DROP TABLE my_table_java;";
+            String truncateTableQuery = "DROP TABLE IF EXISTS my_table_java;";
             try (Statement statement = connection.createStatement()) {
                 statement.executeUpdate(truncateTableQuery);
-                System.out.println("Table dropped successfully.");
+                System.out.println("Table my_table_java dropped successfully.");
             }
+            truncateTableQuery = "DROP TABLE IF EXISTS test_struct;";
+            try (Statement statement = connection.createStatement()) {
+                statement.executeUpdate(truncateTableQuery);
+                System.out.println("Table test_struct dropped successfully.");
+            }
+        }
+    }
+
+    @Test
+    public void testStruct() throws SQLException {
+        try (Connection conn = TestUtils.establishConnection()) {
+            Statement statement = conn.createStatement();
+            statement.executeUpdate("CREATE TABLE IF NOT EXISTS test_struct(" +
+                    "i1 int [], v1 struct<v2 int, v3 double>, t1 timestamptz, c1 varchar" +
+                    ")");
+
+            String insertDataSQL = "INSERT INTO test_struct (i1, v1, t1, c1) VALUES ('{1}', (2, 3), '2020-01-01 01:02:03', 'abc')";
+            statement.execute(insertDataSQL);
+            statement.execute("FLUSH;");
+
+            QueryRunner runner = new QueryRunner();
+            String query = "SELECT * FROM test_struct";
+            List<Map<String, Object>> resultList = runner.query(conn, query, new MapListHandler());
+            Assertions.assertEquals(resultList.size(), 1);
+            Assertions.assertEquals(resultList.get(0).get("v1"), "(2,3)");
+        } finally {
+            clearDatabase();
         }
     }
 

@@ -40,7 +40,6 @@ env_scripts = [
   is_external_udf_enabled = get_env ENABLE_EXTERNAL_UDF
   is_wasm_udf_enabled = get_env ENABLE_WASM_UDF
   is_js_udf_enabled = get_env ENABLE_JS_UDF
-  is_deno_udf_enabled = get_env ENABLE_DENO_UDF
   is_python_udf_enabled = get_env ENABLE_PYTHON_UDF
 
   if ${is_sanitizer_enabled}
@@ -77,11 +76,6 @@ env_scripts = [
   if ${is_js_udf_enabled}
     flags = get_env RISINGWAVE_FEATURE_FLAGS
     set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features js-udf"
-  end
-
-  if ${is_deno_udf_enabled}
-    flags = get_env RISINGWAVE_FEATURE_FLAGS
-    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features deno-udf"
   end
 
   if ${is_python_udf_enabled}
@@ -766,7 +760,7 @@ set -e
 for tool in cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-make cargo-udeps
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
-  cargo binstall -y --no-symlinks $tool
+  cargo binstall -y --locked --no-symlinks $tool
   echo
 done
 

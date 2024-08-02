@@ -220,11 +220,11 @@ pub struct BackpressureMonitoredLogReader<R: LogReader> {
     inner: R,
     /// Start time to wait for new future after poll ready
     wait_new_future_start_time: Option<Instant>,
-    wait_new_future_duration_ns: LabelGuardedIntCounter<3>,
+    wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
 }
 
 impl<R: LogReader> BackpressureMonitoredLogReader<R> {
-    fn new(inner: R, wait_new_future_duration_ns: LabelGuardedIntCounter<3>) -> Self {
+    fn new(inner: R, wait_new_future_duration_ns: LabelGuardedIntCounter<4>) -> Self {
         Self {
             inner,
             wait_new_future_start_time: None,

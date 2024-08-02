@@ -53,7 +53,6 @@ use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::store::version::{
     HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
 };
-use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockResult, MemoryLimiter, SstableObjectIdManager, SstableStoreRef, TrackerId,
 };
@@ -611,8 +610,6 @@ impl HummockEventHandler {
             }
             HummockVersionUpdate::PinnedVersion(version) => *version,
         };
-
-        validate_table_key_range(&newly_pinned_version);
 
         pinned_version.new_pin_version(newly_pinned_version)
     }

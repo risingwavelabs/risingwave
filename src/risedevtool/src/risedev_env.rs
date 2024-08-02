@@ -110,11 +110,13 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 let port = &c.port;
                 let user = &c.user;
                 let password = &c.password;
+                let database = &c.database;
                 // These envs are used by `postgres` cli.
                 writeln!(env, r#"PGHOST="{host}""#,).unwrap();
                 writeln!(env, r#"PGPORT="{port}""#,).unwrap();
                 writeln!(env, r#"PGUSER="{user}""#,).unwrap();
                 writeln!(env, r#"PGPASSWORD="{password}""#,).unwrap();
+                writeln!(env, r#"PGDATABASE="{database}""#,).unwrap();
             }
             _ => {}
         }

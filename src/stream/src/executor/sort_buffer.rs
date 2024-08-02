@@ -34,7 +34,7 @@ use risingwave_storage::table::KeyedRow;
 use risingwave_storage::StateStore;
 
 use super::{StreamExecutorError, StreamExecutorResult};
-use crate::common::cache::{StateCache, StateCacheFiller, TopNStateCache};
+use crate::common::state_cache::{StateCache, StateCacheFiller, TopNStateCache};
 use crate::common::table::state_table::StateTable;
 
 type CacheKey = (
@@ -177,8 +177,8 @@ impl<S: StateStore> SortBuffer<S> {
         }
 
         // TODO(rc): Need something like `table.range_delete()`. Here we call
-        // `update_watermark(watermark, true)` as an alternative to `range_delete((..watermark))`.
-        buffer_table.update_watermark(watermark, true);
+        // `update_watermark(watermark)` as an alternative to `range_delete((..watermark))`.
+        buffer_table.update_watermark(watermark);
     }
 
     #[try_stream(ok = OwnedRow, error = StreamExecutorError)]

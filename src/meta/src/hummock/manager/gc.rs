@@ -430,7 +430,7 @@ mod tests {
         let committed_object_ids = sst_infos
             .into_iter()
             .flatten()
-            .map(|s| s.get_object_id())
+            .map(|s| s.object_id)
             .sorted()
             .collect_vec();
         assert!(!committed_object_ids.is_empty());

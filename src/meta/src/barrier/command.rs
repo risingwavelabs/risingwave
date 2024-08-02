@@ -41,12 +41,10 @@ use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use thiserror_ext::AsReport;
 use tracing::warn;
 
-use super::info::{
-    CommandActorChanges, CommandFragmentChanges, CommandNewFragmentInfo, InflightActorInfo,
-};
+use super::info::{CommandActorChanges, CommandFragmentChanges, InflightActorInfo};
 use super::trace::TracedEpoch;
 use crate::barrier::GlobalBarrierManagerContext;
-use crate::manager::{DdlType, MetadataManager, StreamingJob, WorkerId};
+use crate::manager::{DdlType, InflightFragmentInfo, MetadataManager, StreamingJob, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
 use crate::MetaResult;
@@ -75,7 +73,8 @@ pub struct Reschedule {
     /// The downstream fragments of this fragment.
     pub downstream_fragment_ids: Vec<FragmentId>,
 
-    /// Reassigned splits for source actors
+    /// Reassigned splits for source actors.
+    /// It becomes the `actor_splits` in [`UpdateMutation`].
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
     /// Whether this fragment is injectable. The injectable means whether the fragment contains
@@ -109,8 +108,8 @@ impl ReplaceTablePlan {
     fn actor_changes(&self) -> CommandActorChanges {
         let mut fragment_changes = HashMap::new();
         for fragment in self.new_table_fragments.fragments.values() {
-            let fragment_change = CommandFragmentChanges::NewFragment(CommandNewFragmentInfo {
-                new_actors: fragment
+            let fragment_change = CommandFragmentChanges::NewFragment(InflightFragmentInfo {
+                actors: fragment
                     .actors
                     .iter()
                     .map(|actor| {
@@ -120,13 +119,11 @@ impl ReplaceTablePlan {
                                 .actor_status
                                 .get(&actor.actor_id)
                                 .expect("should exist")
-                                .get_parallel_unit()
-                                .expect("should set")
-                                .worker_node_id,
+                                .worker_id(),
                         )
                     })
                     .collect(),
-                table_ids: fragment
+                state_table_ids: fragment
                     .state_table_ids
                     .iter()
                     .map(|table_id| TableId::new(*table_id))
@@ -161,12 +158,12 @@ pub struct CreateStreamingJobCommandInfo {
 }
 
 impl CreateStreamingJobCommandInfo {
-    fn new_fragment_info(&self) -> impl Iterator<Item = (FragmentId, CommandNewFragmentInfo)> + '_ {
+    fn new_fragment_info(&self) -> impl Iterator<Item = (FragmentId, InflightFragmentInfo)> + '_ {
         self.table_fragments.fragments.values().map(|fragment| {
             (
                 fragment.fragment_id,
-                CommandNewFragmentInfo {
-                    new_actors: fragment
+                InflightFragmentInfo {
+                    actors: fragment
                         .actors
                         .iter()
                         .map(|actor| {
@@ -176,13 +173,11 @@ impl CreateStreamingJobCommandInfo {
                                     .actor_status
                                     .get(&actor.actor_id)
                                     .expect("should exist")
-                                    .get_parallel_unit()
-                                    .expect("should set")
-                                    .worker_node_id,
+                                    .worker_id(),
                             )
                         })
                         .collect(),
-                    table_ids: fragment
+                    state_table_ids: fragment
                         .state_table_ids
                         .iter()
                         .map(|table_id| TableId::new(*table_id))
@@ -827,15 +822,19 @@ impl CommandContext {
             _ => self.current_paused_reason,
         }
     }
+}
 
+impl Command {
     /// For `CancelStreamingJob`, returns the table id of the target table.
     pub fn table_to_cancel(&self) -> Option<TableId> {
-        match &self.command {
+        match self {
             Command::CancelStreamingJob(table_fragments) => Some(table_fragments.table_id()),
             _ => None,
         }
     }
+}
 
+impl CommandContext {
     /// Clean up actors in CNs if needed, used by drop, cancel and reschedule commands.
     async fn clean_up(&self, actors: Vec<ActorId>) -> MetaResult<()> {
         self.barrier_manager_context
