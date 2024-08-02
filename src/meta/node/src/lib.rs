@@ -187,6 +187,12 @@ pub struct MetaNodeOpts {
     #[clap(long, hide = true, env = "RW_CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
 
+    /// The license key to activate enterprise features.
+    #[educe(Debug(ignore))]
+    #[clap(long, hide = true, env = "RW_LICENSE_KEY")]
+    #[override_opts(path = system.license_key)]
+    pub license_key: Option<String>,
+
     /// 128-bit AES key for secret store in HEX format.
     #[educe(Debug(ignore))]
     #[clap(long, hide = true, env = "RW_SECRET_STORE_PRIVATE_KEY_HEX")]
