@@ -384,8 +384,8 @@ mod tests {
 
         fn get_session(
             &self,
-            database_id: u32,
-            user_name: u32,
+            _database_id: u32,
+            _user_name: u32,
         ) -> Result<Arc<Self::Session>, BoxedError> {
             todo!()
         }
@@ -529,7 +529,7 @@ mod tests {
         tokio::spawn(async move {
             pg_serve(
                 &bind_addr,
-                session_mgr,
+                Arc::new(session_mgr),
                 None,
                 None,
                 CancellationToken::new(), // dummy

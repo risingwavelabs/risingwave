@@ -673,6 +673,7 @@ mod tests {
             created_at_cluster_version: None,
             initialized_at_cluster_version: None,
             version_column_index: None,
+            cdc_table_name: None,
         }
         .into();
 
@@ -735,6 +736,7 @@ mod tests {
                 initialized_at_cluster_version: None,
                 dependent_relations: vec![],
                 version_column_index: None,
+                cdc_table_name: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
