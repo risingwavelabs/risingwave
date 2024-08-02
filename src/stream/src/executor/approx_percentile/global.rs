@@ -59,20 +59,32 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
         let mut bucket_state_table = self.bucket_state_table;
         let mut count_state_table = self.count_state_table;
         let mut input_stream = self.input.execute();
+
+        // Initialize state tables.
         let first_barrier = expect_first_barrier(&mut input_stream).await?;
         bucket_state_table.init_epoch(first_barrier.epoch);
         count_state_table.init_epoch(first_barrier.epoch);
         yield Message::Barrier(first_barrier);
-        let mut old_row_count = count_state_table.get_row(&[Datum::None; 0]).await?;
-        let mut row_count = if let Some(row) = old_row_count.as_ref() {
+
+        // Get row count state, and row_count.
+        let mut row_count_state = count_state_table.get_row(&[Datum::None; 0]).await?;
+        let mut row_count = if let Some(row) = row_count_state.as_ref() {
             row.datum_at(0).unwrap().into_int64()
         } else {
             0
         };
+
+        // Get prev output, based on the current state.
+        let mut prev_output = Self::get_output(&bucket_state_table, row_count as u64, self.quantile, self.base)
+            .await?;
+
+        let mut received_input = false;
+
         #[for_await]
         for message in input_stream {
             match message? {
                 Message::Chunk(chunk) => {
+                    received_input = true;
                     for (_, row) in chunk.rows() {
                         let delta_datum = row.datum_at(1);
                         let delta: i32 = delta_datum.unwrap().into_int32();
@@ -92,6 +104,7 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
                         let new_value_datum = Datum::from(ScalarImpl::Int64(new_value));
                         let new_row = &[pk_datum.map(|d| d.into()), new_value_datum];
                         if old_row.is_none() {
+                            println!("inserting row: {:?}", new_row);
                             bucket_state_table.insert(new_row);
                         } else {
                             bucket_state_table.update(old_row, new_row);
@@ -99,48 +112,87 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
                     }
                 }
                 Message::Barrier(barrier) => {
-                    let quantile_count = (row_count as f64 * self.quantile).ceil() as u64;
-                    let mut acc_count = 0;
-                    let bounds: (Bound<OwnedRow>, Bound<OwnedRow>) =
-                        (Bound::Unbounded, Bound::Unbounded);
-                    // Just iterate over the singleton vnode.
-                    #[for_await]
-                    for keyed_row in bucket_state_table
-                        .iter_with_prefix(&[Datum::None; 0], &bounds, PrefetchOptions::default())
-                        .await?
-                    {
-                        let row = keyed_row?.into_owned_row();
-                        let count = row.datum_at(1).unwrap().into_int64();
-                        acc_count += count as u64;
-                        if acc_count >= quantile_count {
-                            let bucket_id = row.datum_at(0).unwrap().into_int32();
-                            let percentile_value =
-                                2.0 * self.base.powi(bucket_id) / (self.base + 1.0);
-                            let percentile_datum =
-                                Datum::from(ScalarImpl::Float64(percentile_value.into()));
-                            let percentile_row = &[percentile_datum];
-                            let percentile_chunk = StreamChunk::from_rows(
-                                &[(Op::Insert, percentile_row)],
-                                &[DataType::Float64],
-                            );
-                            yield Message::Chunk(percentile_chunk);
-                            break;
-                        }
+                    // If we haven't received any input, we don't need to update the state.
+                    // This is unless row count state is empty, then we need to persist the state,
+                    // and yield a NULL downstream.
+                    if !received_input && row_count_state.is_some() {
+                        count_state_table.commit(barrier.epoch).await?;
+                        bucket_state_table.commit(barrier.epoch).await?;
+                        yield Message::Barrier(barrier);
+                        continue;
                     }
-                    let row_count_to_persist = &[Datum::from(ScalarImpl::Int64(row_count))];
-                    if let Some(old_row_count) = old_row_count {
-                        count_state_table.update(old_row_count, row_count_to_persist);
+                    // We maintain an invariant, iff row_count_state is none,
+                    // we haven't pushed any data to downstream.
+                    // Naturally, if row_count_state is some,
+                    // we have pushed data to downstream.
+                    let new_output = Self::get_output(&bucket_state_table, row_count as u64, self.quantile, self.base)
+                        .await?;
+                    let percentile_chunk = if row_count_state.is_none() {
+                        StreamChunk::from_rows(
+                            &[(Op::Insert, &[new_output.clone()])],
+                            &[DataType::Float64],
+                        )
                     } else {
-                        count_state_table.insert(row_count_to_persist);
+                        StreamChunk::from_rows(
+                            &[(Op::UpdateDelete, &[prev_output.clone()]), (Op::UpdateInsert, &[new_output.clone()])],
+                            &[DataType::Float64],
+                        )
+                    };
+                    prev_output = new_output;
+                    yield Message::Chunk(percentile_chunk);
+
+                    let new_row_count_state = &[Datum::from(ScalarImpl::Int64(row_count))];
+                    if let Some(row_count_state) = row_count_state {
+                        count_state_table.update(row_count_state, new_row_count_state);
+                    } else {
+                        count_state_table.insert(new_row_count_state);
                     }
-                    old_row_count = Some(row_count_to_persist.into_owned_row());
+                    row_count_state = Some(new_row_count_state.into_owned_row());
                     count_state_table.commit(barrier.epoch).await?;
+
                     bucket_state_table.commit(barrier.epoch).await?;
+
                     yield Message::Barrier(barrier);
                 }
                 m => yield m,
             }
         }
+    }
+
+    /// We have these scenarios to consider, based on row count state.
+    /// 1. We have no row count state, this means it's the bootstrap init for this executor.
+    ///    Output NULL as an INSERT. Persist row count state=0.
+    /// 2. We have row count state.
+    ///    Output UPDATE (old_state, new_state) to downstream.
+    /// FIXME(kwannoel): Only output updates when there's some input.
+    async fn get_output(
+        bucket_state_table: &StateTable<S>,
+        row_count: u64,
+        quantile: f64,
+        base: f64,
+    ) -> StreamExecutorResult<Datum> {
+        let quantile_count = (row_count as f64 * quantile).floor() as u64;
+        let mut acc_count = 0;
+        let bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (Bound::Unbounded, Bound::Unbounded);
+        // Just iterate over the singleton vnode.
+        #[for_await]
+        for keyed_row in bucket_state_table
+            .iter_with_prefix(&[Datum::None; 0], &bounds, PrefetchOptions::default())
+            .await?
+        {
+            println!("twophase order row: {:?}", keyed_row);
+            let row = keyed_row?.into_owned_row();
+            let count = row.datum_at(1).unwrap().into_int64();
+            acc_count += count as u64;
+            if acc_count > quantile_count {
+                let bucket_id = row.datum_at(0).unwrap().into_int32();
+                println!("two-phase bucket_id to output: {:?}, base: {:?}", bucket_id, base);
+                let percentile_value = 2.0 * base.powi(bucket_id) / (base + 1.0);
+                let percentile_datum = Datum::from(ScalarImpl::Float64(percentile_value.into()));
+                return Ok(percentile_datum);
+            }
+        }
+        Ok(Datum::None)
     }
 }
 

@@ -28,6 +28,7 @@ pub struct LocalApproxPercentileExecutor {
     pub chunk_size: usize,
 }
 
+// FIXME: neg and zeros are not handled correctly.
 impl LocalApproxPercentileExecutor {
     pub fn new(
         _ctx: ActorContextRef,
@@ -63,14 +64,14 @@ impl LocalApproxPercentileExecutor {
                         let value: f64 = value.into_float64().into_inner();
                         if value < 0.0 {
                             let value = -value;
-                            let bucket = value.log(self.base).floor() as i32;
+                            let bucket = value.log(self.base).ceil() as i32;
                             let count = neg_counts.entry(bucket).or_insert(0);
                             match op {
                                 Op::Insert | Op::UpdateInsert => *count += 1,
                                 Op::Delete | Op::UpdateDelete => *count -= 1,
                             }
                         } else if value > 0.0 {
-                            let bucket = value.log(self.base).floor() as i32;
+                            let bucket = value.log(self.base).ceil() as i32;
                             let count = pos_counts.entry(bucket).or_insert(0);
                             match op {
                                 Op::Insert | Op::UpdateInsert => *count += 1,
