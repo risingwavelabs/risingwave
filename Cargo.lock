@@ -14129,12 +14129,11 @@ dependencies = [
 [[package]]
 name = "tokio-stream"
 version = "0.1.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "267ac89e0bec6e691e5813911606935d77c476ff49024f98abcea3e7b15e37af"
+source = "git+https://github.com/madsim-rs/tokio.git?rev=0dd1055#0dd105567b323c863c29f794d2221ed588956d8d"
 dependencies = [
  "futures-core",
+ "madsim-tokio",
  "pin-project-lite",
- "tokio",
 ]
 
 [[package]]
