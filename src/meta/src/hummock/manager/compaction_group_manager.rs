@@ -691,7 +691,7 @@ impl HummockManager {
             let mut vnode_index = vnode.to_index();
 
             if vnode == VirtualNode::MAX {
-                table_id = table_ids[pos];
+                table_id = table_ids[pos]; // use next table_id
                 vnode_index = 0;
             } else {
                 vnode_index += 1;
