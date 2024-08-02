@@ -262,6 +262,11 @@ impl S3StreamingUploader {
                 .collect_vec(),
         );
 
+        let _timer = metrics
+            .operation_latency
+            .with_label_values(&["s3", operation_type.as_str()])
+            .start_timer();
+
         let builder = || async {
             self.client
                 .complete_multipart_upload()
