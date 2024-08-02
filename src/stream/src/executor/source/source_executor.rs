@@ -128,7 +128,7 @@ impl<S: StateStore> SourceExecutor<S> {
             tokio::sync::mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
         let meta_client = self.actor_ctx.meta_client.clone();
         // spawn a task to handle schema change event from source parser
-        let _ = tokio::task::spawn(async move {
+        let _join_handle = tokio::task::spawn(async move {
             while let Some((schema_change, finish_tx)) = schema_change_rx.recv().await {
                 let table_names = schema_change.table_names();
                 tracing::info!("recv a schema change event for tables: {:?}", table_names);

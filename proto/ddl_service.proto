@@ -445,7 +445,6 @@ message CommentOnResponse {
   uint64 version = 2;
 }
 
-
 message TableSchemaChange {
   enum TableChangeType {
     UNSPECIFIED = 0;
@@ -468,7 +467,6 @@ message AutoSchemaChangeRequest {
 }
 
 message AutoSchemaChangeResponse {}
-
 
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);

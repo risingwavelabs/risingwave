@@ -97,9 +97,9 @@ pub async fn get_new_table_definition_for_cdc_table(
         ))?
     }
 
-    // since the DDL is committed on upstream, so we can safely replace the original columns with new columns
+    // replace the original columns with new version columns
     let mut new_column_defs = vec![];
-    for col in new_columns.into_iter() {
+    for col in new_columns {
         let ty = to_ast_data_type(col.data_type())?;
         new_column_defs.push(ColumnDef::new(col.name().into(), ty, None, vec![]));
     }
