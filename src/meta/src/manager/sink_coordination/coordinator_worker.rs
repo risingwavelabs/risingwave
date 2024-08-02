@@ -267,8 +267,9 @@ impl CoordinatorWorker {
                         ));
                     }
                     Err(e) => {
-                        return Err(anyhow!(e)
-                            .context("failed to poll one of the writer request streams"));
+                        return Err(
+                            anyhow!(e).context("failed to poll one of the writer request streams")
+                        );
                     }
                 },
                 Either::Right((None, _)) => {
