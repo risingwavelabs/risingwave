@@ -390,7 +390,6 @@ pub mod grpc_middleware {
     use either::Either;
     use futures::Future;
     use tonic::body::BoxBody;
-    use tonic::server::NamedService;
     use tower::{Layer, Service};
 
     /// Manages the await-trees of `gRPC` requests that are currently served by the compute node.
@@ -478,7 +477,8 @@ pub mod grpc_middleware {
         }
     }
 
-    impl<S: NamedService> NamedService for AwaitTreeMiddleware<S> {
+    #[cfg(not(madsim))]
+    impl<S: tonic::server::NamedService> tonic::server::NamedService for AwaitTreeMiddleware<S> {
         const NAME: &'static str = S::NAME;
     }
 }

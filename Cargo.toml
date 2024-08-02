@@ -129,7 +129,7 @@ rdkafka = { package = "madsim-rdkafka", version = "0.4.1", features = [
 ] }
 hashbrown = { version = "0.14", features = ["ahash", "inline-more", "nightly"] }
 criterion = { version = "0.5", features = ["async_futures"] }
-tonic = { package = "madsim-tonic", version = "0.5" }
+tonic = { package = "madsim-tonic", version = "0.5", git = "https://github.com/BugenZhao/madsim", rev = "20afe23b9a8c953cc111cc1f9d31f5da825ab8b9" }
 tonic-build = { package = "madsim-tonic-build", version = "0.5" }
 otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "e6cd165b9bc85783b42c106e99186b86b73e3507" }
 prost = { version = "0.13" }

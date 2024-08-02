@@ -329,6 +329,7 @@ where
 
 // Compatibility implementation for hyper 0.14 ecosystem.
 // Should be the same as those with imports from `http::Uri` and `hyper_util::client::legacy`.
+// TODO(http-bump): remove this after there is no more dependency on hyper 0.14.
 mod compat {
     use http_02::Uri;
     use hyper_014::client::connect::{Connected, Connection};

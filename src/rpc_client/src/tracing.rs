@@ -28,6 +28,7 @@ pub struct TracingInjectChannel {
     inner: tonic::transport::Channel,
 }
 
+#[cfg(not(madsim))]
 impl Service<http::Request<BoxBody>> for TracingInjectChannel {
     type Error = tonic::transport::Error;
     type Response = http::Response<BoxBody>;
