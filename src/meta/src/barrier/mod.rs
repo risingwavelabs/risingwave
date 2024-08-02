@@ -1342,5 +1342,6 @@ fn collect_commit_epoch_info(
             InflightActorInfo::existing_table_ids(&command_ctx.info.fragment_infos).collect(),
         )]),
         epoch,
+        vec![],
     )
 }
