@@ -79,6 +79,12 @@ pub struct RestoreOpts {
     /// Print the target snapshot, but won't restore to meta store.
     #[clap(long)]
     pub dry_run: bool,
+    /// The read timeout for object store
+    #[clap(long, default_value_t = 600000)]
+    pub read_attempt_timeout_ms: u64,
+    /// The maximum number of read retry attempts for the object store.
+    #[clap(long, default_value_t = 3)]
+    pub read_retry_attempts: u64,
 }
 
 async fn restore_hummock_version(
