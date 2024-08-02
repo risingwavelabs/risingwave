@@ -5,6 +5,7 @@ set -euo pipefail
 export RW_PREFIX=$PWD/.risingwave
 export PREFIX_BIN=./target/debug
 export PREFIX_LOG=$RW_PREFIX/log
+export PREFIX_CONFIG=$RW_PREFIX/config
 export RISEDEV=1 # as if we are running in RiseDev
 
 # You can fill up this section by consulting
