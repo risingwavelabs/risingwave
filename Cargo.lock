@@ -2821,7 +2821,7 @@ dependencies = [
  "serde_json",
  "thread_local",
  "tokio",
- "tokio-stream",
+ "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "tonic 0.12.1",
  "tracing",
  "tracing-core",
@@ -4508,7 +4508,7 @@ dependencies = [
  "http 1.1.0",
  "prost 0.13.1",
  "tokio",
- "tokio-stream",
+ "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "tonic 0.12.1",
  "tonic-build",
  "tower",
@@ -5250,7 +5250,7 @@ dependencies = [
  "thiserror",
  "time",
  "tokio",
- "tokio-stream",
+ "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "url",
  "yup-oauth2",
 ]
@@ -8017,7 +8017,7 @@ dependencies = [
  "rand",
  "thiserror",
  "tokio",
- "tokio-stream",
+ "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -10012,7 +10012,7 @@ dependencies = [
  "thiserror-ext",
  "tikv-jemallocator",
  "tokio-metrics",
- "tokio-stream",
+ "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
  "tokio-util",
  "tracing",
  "twox-hash",
@@ -10055,7 +10055,7 @@ dependencies = [
  "serde",
  "serde_yaml",
  "thiserror-ext",
- "tokio-stream",
+ "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
  "toml 0.8.12",
  "tracing",
  "tracing-subscriber",
@@ -10443,7 +10443,7 @@ dependencies = [
  "tempfile",
  "thiserror-ext",
  "tikv-jemalloc-ctl",
- "tokio-stream",
+ "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
  "tower",
  "tracing",
  "uuid",
@@ -10573,7 +10573,7 @@ dependencies = [
  "time",
  "tokio-postgres",
  "tokio-retry",
- "tokio-stream",
+ "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
@@ -10898,7 +10898,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "thiserror-ext",
- "tokio-stream",
+ "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
  "tracing",
  "uuid",
  "workspace-hack",
@@ -11138,7 +11138,7 @@ dependencies = [
  "thiserror",
  "thiserror-ext",
  "tokio-retry",
- "tokio-stream",
+ "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
  "tower",
  "tower-http",
  "tracing",
@@ -11250,7 +11250,7 @@ dependencies = [
  "serde_json",
  "sync-point",
  "thiserror-ext",
- "tokio-stream",
+ "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
  "tracing",
  "workspace-hack",
 ]
@@ -11375,7 +11375,7 @@ dependencies = [
  "thiserror",
  "thiserror-ext",
  "tokio-retry",
- "tokio-stream",
+ "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
  "tower",
  "tracing",
  "url",
@@ -11460,7 +11460,7 @@ dependencies = [
  "tempfile",
  "tikv-jemallocator",
  "tokio-postgres",
- "tokio-stream",
+ "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
  "tracing",
  "tracing-subscriber",
 ]
@@ -11528,7 +11528,7 @@ dependencies = [
  "serde",
  "serde_with 3.8.0",
  "tokio-postgres",
- "tokio-stream",
+ "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
  "toml 0.8.12",
  "tracing",
  "workspace-hack",
@@ -11669,7 +11669,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-metrics",
  "tokio-retry",
- "tokio-stream",
+ "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
  "tracing",
  "tracing-test",
  "workspace-hack",
@@ -13272,7 +13272,7 @@ dependencies = [
  "thiserror",
  "time",
  "tokio",
- "tokio-stream",
+ "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing",
  "url",
  "uuid",
@@ -14023,7 +14023,7 @@ dependencies = [
  "futures-util",
  "pin-project-lite",
  "tokio",
- "tokio-stream",
+ "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -14123,6 +14123,17 @@ checksum = "0c7bc40d0e5a97695bb96e27995cd3a08538541b0a846f65bba7a359f36700d4"
 dependencies = [
  "rustls 0.23.5",
  "rustls-pki-types",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-stream"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "267ac89e0bec6e691e5813911606935d77c476ff49024f98abcea3e7b15e37af"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
  "tokio",
 ]
 
@@ -14244,7 +14255,7 @@ dependencies = [
  "rustls-pemfile 1.0.4",
  "tokio",
  "tokio-rustls 0.24.1",
- "tokio-stream",
+ "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "tower",
  "tower-layer",
  "tower-service",
@@ -14271,7 +14282,7 @@ dependencies = [
  "pin-project",
  "prost 0.12.1",
  "tokio",
- "tokio-stream",
+ "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "tower",
  "tower-layer",
  "tower-service",
@@ -14304,7 +14315,7 @@ dependencies = [
  "socket2 0.5.6",
  "tokio",
  "tokio-rustls 0.26.0",
- "tokio-stream",
+ "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "tower",
  "tower-layer",
  "tower-service",

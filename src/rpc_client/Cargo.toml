@@ -43,7 +43,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
 ] }
 tokio-retry = "0.3"
-tokio-stream = "0.1"
+tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tower = "0.4"
 tracing = "0.1"
