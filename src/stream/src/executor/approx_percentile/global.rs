@@ -184,7 +184,7 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
     /// 1. We have no row count state, this means it's the bootstrap init for this executor.
     ///    Output NULL as an INSERT. Persist row count state=0.
     /// 2. We have row count state.
-    ///    Output UPDATE (old_state, new_state) to downstream.
+    ///    Output UPDATE (`old_state`, `new_state`) to downstream.
     async fn get_output(
         bucket_state_table: &StateTable<S>,
         row_count: u64,
@@ -195,10 +195,10 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
         let mut acc_count = 0;
         let neg_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (
             Bound::Unbounded,
-            Bound::Excluded((&[Datum::from(ScalarImpl::Int16(0))]).to_owned_row()),
+            Bound::Excluded([Datum::from(ScalarImpl::Int16(0))].to_owned_row()),
         );
         let non_neg_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (
-            Bound::Included((&[Datum::from(ScalarImpl::Int16(0))]).to_owned_row()),
+            Bound::Included([Datum::from(ScalarImpl::Int16(0))].to_owned_row()),
             Bound::Unbounded,
         );
         // Just iterate over the singleton vnode.
