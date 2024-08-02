@@ -54,7 +54,7 @@ impl LocalApproxPercentileExecutor {
             match message? {
                 Message::Chunk(chunk) => {
                     let mut builder =
-                        DataChunkBuilder::new(vec![DataType::Int32; 2], self.chunk_size);
+                        DataChunkBuilder::new(vec![DataType::Int32, DataType::Int16, DataType::Int32], self.chunk_size);
                     let chunk = chunk.project(&[percentile_index]);
                     let mut pos_counts = HashMap::new();
                     let mut neg_counts = HashMap::new();
@@ -64,7 +64,7 @@ impl LocalApproxPercentileExecutor {
                         let value: f64 = value.into_float64().into_inner();
                         if value < 0.0 {
                             let value = -value;
-                            let bucket = value.log(self.base).ceil() as i32;
+                            let bucket = value.log(self.base).ceil() as i32; // TODO(kwannoel): should this be floor??
                             let count = neg_counts.entry(bucket).or_insert(0);
                             match op {
                                 Op::Insert | Op::UpdateInsert => *count += 1,
@@ -85,13 +85,15 @@ impl LocalApproxPercentileExecutor {
                         }
                     }
 
-                    for (bucket, count) in neg_counts
+                    for (sign, bucket, count) in neg_counts
                         .into_iter()
-                        .chain(pos_counts.into_iter())
-                        .chain(iter::once((0, zero_count)))
+                        .map(|(b, c)| (-1, b, c))
+                        .chain(pos_counts.into_iter().map(|(b, c)| (1, b, c)))
+                        .chain(iter::once((0, 0, zero_count)))
                     {
                         let row = [
                             Datum::from(ScalarImpl::Int32(bucket)),
+                            Datum::from(ScalarImpl::Int16(sign)),
                             Datum::from(ScalarImpl::Int32(count)),
                         ];
                         if let Some(data_chunk) = builder.append_one_row(&row) {

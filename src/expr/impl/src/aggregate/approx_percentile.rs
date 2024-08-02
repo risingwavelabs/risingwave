@@ -162,16 +162,13 @@ impl AggregateFunction for ApproxPercentile {
             }
         }
         acc_count += state.zeros;
-        println!("zeros count: {:?}, {:?}", state.zeros, acc_count);
         if acc_count > quantile_count {
             return Ok(Datum::from(ScalarImpl::Float64(0.0.into())));
         }
         for (bucket_id, count) in &state.pos_buckets {
-            println!("shuffle order row: bucket_id {:?}, count {:?}", bucket_id, count);
             acc_count += count;
             if acc_count > quantile_count {
                 // approx value = 2 * y^i / (y + 1)
-                println!("shuffle bucket_id to output: {:?}, {:?}", bucket_id, self.base);
                 let approx_percentile = 2.0 * self.base.powi(*bucket_id) / (self.base + 1.0);
                 let approx_percentile = ScalarImpl::Float64(approx_percentile.into());
                 return Ok(Datum::from(approx_percentile));

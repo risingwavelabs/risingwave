@@ -16,6 +16,7 @@ use core::ops::Bound;
 
 use risingwave_common::array::Op;
 use risingwave_common::row::RowExt;
+use risingwave_common::types::ToOwnedDatum;
 use risingwave_storage::store::PrefetchOptions;
 
 use crate::executor::prelude::*;
@@ -86,25 +87,30 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
                 Message::Chunk(chunk) => {
                     received_input = true;
                     for (_, row) in chunk.rows() {
-                        let delta_datum = row.datum_at(1);
+                        // Decoding
+                        let bucket_id_datum = row.datum_at(0);
+
+                        let sign_datum = row.datum_at(1);
+
+                        let delta_datum = row.datum_at(2);
                         let delta: i32 = delta_datum.unwrap().into_int32();
+
+                        // Updates
                         row_count = row_count.checked_add(delta as i64).unwrap();
 
-                        let pk_datum = row.datum_at(0);
-                        let pk = row.project(&[0]);
-
+                        let pk = row.project(&[0, 1]);
                         let old_row = bucket_state_table.get_row(pk).await?;
                         let old_bucket_row_count: i64 = if let Some(row) = old_row.as_ref() {
-                            row.datum_at(1).unwrap().into_int64()
+                            row.datum_at(2).unwrap().into_int64()
                         } else {
                             0
                         };
 
                         let new_value = old_bucket_row_count.checked_add(delta as i64).unwrap();
                         let new_value_datum = Datum::from(ScalarImpl::Int64(new_value));
-                        let new_row = &[pk_datum.map(|d| d.into()), new_value_datum];
+                        let new_row = &[bucket_id_datum.map(|d| d.into()), sign_datum.to_owned_datum(), new_value_datum];
+
                         if old_row.is_none() {
-                            println!("inserting row: {:?}", new_row);
                             bucket_state_table.insert(new_row);
                         } else {
                             bucket_state_table.update(old_row, new_row);
@@ -173,6 +179,7 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
     ) -> StreamExecutorResult<Datum> {
         let quantile_count = (row_count as f64 * quantile).floor() as u64;
         let mut acc_count = 0;
+        let mut neg_acc_count = row_count - quantile_count;
         let bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (Bound::Unbounded, Bound::Unbounded);
         // Just iterate over the singleton vnode.
         #[for_await]
@@ -180,14 +187,17 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
             .iter_with_prefix(&[Datum::None; 0], &bounds, PrefetchOptions::default())
             .await?
         {
-            println!("twophase order row: {:?}", keyed_row);
             let row = keyed_row?.into_owned_row();
-            let count = row.datum_at(1).unwrap().into_int64();
+            let sign = row.datum_at(1).unwrap().into_int16();
+            let count = row.datum_at(2).unwrap().into_int64();
+            neg_acc_count = neg_acc_count.saturating_sub(count as u64);
             acc_count += count as u64;
-            if acc_count > quantile_count {
+            if (sign < 0 && neg_acc_count == 0) || (sign >= 0 && acc_count > quantile_count) {
+                if sign == 0 {
+                    return Ok(Datum::from(ScalarImpl::Float64(0.0.into())));
+                }
                 let bucket_id = row.datum_at(0).unwrap().into_int32();
-                println!("two-phase bucket_id to output: {:?}, base: {:?}", bucket_id, base);
-                let percentile_value = 2.0 * base.powi(bucket_id) / (base + 1.0);
+                let percentile_value = sign as f64 * 2.0 * base.powi(bucket_id) / (base + 1.0);
                 let percentile_datum = Datum::from(ScalarImpl::Float64(percentile_value.into()));
                 return Ok(percentile_datum);
             }

@@ -22,7 +22,12 @@ flush;
 query I
 select * from m1;
 ----
-0.9900000000000001
+0
+
+query I
+select percentile_cont(0.01) within group (order by p_col) from t;
+----
+0
 
 statement ok
 insert into t select a, 1 from generate_series(11, 1000) t(a);
@@ -44,3 +49,24 @@ query I
 select approx_percentile(0.01, 0.01) within group (order by p_col) from t group by grp_col;
 ----
 8.93541864376352
+
+statement ok
+insert into t select a, 1 from generate_series(-1000, -1) t(a);
+
+statement ok
+flush;
+
+query I
+select * from m1;
+----
+10.074696689511264
+
+query I
+select approx_percentile(0.01, 0.01) within group (order by p_col) from t group by grp_col;
+----
+-982.5779489474152
+
+query I
+select percentile_cont(0.01) within group (order by p_col) from t;
+----
+-979.99
