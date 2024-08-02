@@ -31,7 +31,6 @@ use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, TransactionTrai
 use tokio::sync::oneshot::Sender;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tracing::info;
 
 use crate::controller::SqlMetaStore;
 use crate::manager::{LocalNotification, NotificationManagerRef};

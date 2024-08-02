@@ -30,7 +30,6 @@ use risingwave_pb::meta::SystemParams;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tracing::info;
 
 use self::model::SystemParamsModel;
 use super::NotificationManagerRef;
