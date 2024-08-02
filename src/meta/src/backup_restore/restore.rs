@@ -257,6 +257,8 @@ mod tests {
             hummock_storage_url: "memory".to_string(),
             hummock_storage_directory: "".to_string(),
             dry_run: false,
+            read_attempt_timeout_ms: 60000,
+            read_retry_attempts: 3,
         }
     }
 
