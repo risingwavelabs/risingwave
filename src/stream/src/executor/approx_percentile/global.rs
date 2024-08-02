@@ -75,7 +75,6 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
             match message? {
                 Message::Chunk(chunk) => {
                     for (_, row) in chunk.rows() {
-                        println!("row: {:?}", row);
                         let delta_datum = row.datum_at(1);
                         let delta: i32 = delta_datum.unwrap().into_int32();
                         row_count = row_count.checked_add(delta as i64).unwrap();
@@ -130,15 +129,14 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
                         }
                     }
                     let row_count_to_persist = &[Datum::from(ScalarImpl::Int64(row_count))];
-                    if let Some(old_row_count) = old_row_count && row_count_to_persist.into_owned_row() != old_row_count {
+                    if let Some(old_row_count) = old_row_count {
                         count_state_table.update(old_row_count, row_count_to_persist);
                     } else {
                         count_state_table.insert(row_count_to_persist);
                     }
+                    old_row_count = Some(row_count_to_persist.into_owned_row());
                     count_state_table.commit(barrier.epoch).await?;
                     bucket_state_table.commit(barrier.epoch).await?;
-
-                    old_row_count = Some(row_count_to_persist.into_owned_row());
                     yield Message::Barrier(barrier);
                 }
                 m => yield m,
