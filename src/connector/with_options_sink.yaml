@@ -213,8 +213,7 @@ FsConfig:
   - name: fs.path
     field_type: String
     comments: The directory where the sink file is located.
-    required: false
-    default: Default::default
+    required: true
   - name: r#type
     field_type: String
     required: true
@@ -235,8 +234,7 @@ GcsConfig:
   - name: gcs.path
     field_type: String
     comments: The directory where the sink file is located
-    required: false
-    default: Default::default
+    required: true
   - name: r#type
     field_type: String
     required: true
@@ -790,8 +788,7 @@ S3Config:
   - name: s3.path
     field_type: String
     comments: The directory where the sink file is located.
-    required: false
-    default: Default::default
+    required: true
   - name: s3.credentials.access
     field_type: String
     required: false
