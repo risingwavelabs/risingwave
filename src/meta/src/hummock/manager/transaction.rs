@@ -116,7 +116,7 @@ impl<'a> HummockVersionTransaction<'a> {
     #[expect(clippy::type_complexity)]
     pub(super) fn pre_commit_epoch(
         &mut self,
-        epoch: HummockEpoch,
+        max_committed_epoch: HummockEpoch,
         commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>>,
         new_table_ids: HashMap<TableId, CompactionGroupId>,
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
@@ -127,7 +127,7 @@ impl<'a> HummockVersionTransaction<'a> {
         )>,
     ) -> HummockVersionDelta {
         let mut new_version_delta = self.new_delta();
-        new_version_delta.max_committed_epoch = epoch;
+        new_version_delta.max_committed_epoch = max_committed_epoch;
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
 
@@ -151,13 +151,14 @@ impl<'a> HummockVersionTransaction<'a> {
                 }));
 
                 for (epoch, insert_ssts) in batch_commit_sst {
+                    assert!(epoch < max_committed_epoch);
                     let l0_sub_level_id = epoch;
                     let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
                         0,
-                        l0_sub_level_id, // default
-                        vec![],
-                        insert_ssts.into_iter().map(|s| s.sst_info).collect(), // default
-                        0,                                                     // default
+                        l0_sub_level_id,
+                        vec![], // default
+                        insert_ssts.into_iter().map(|s| s.sst_info).collect(),
+                        0, // default
                     ));
                     group_deltas.push(group_delta);
                 }
@@ -171,7 +172,7 @@ impl<'a> HummockVersionTransaction<'a> {
                 .entry(compaction_group_id)
                 .or_default()
                 .group_deltas;
-            let l0_sub_level_id = epoch;
+            let l0_sub_level_id = max_committed_epoch;
             let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
                 0,
                 l0_sub_level_id,
@@ -186,32 +187,33 @@ impl<'a> HummockVersionTransaction<'a> {
         // update state table info
         new_version_delta.with_latest_version(|version, delta| {
             for (table_id, cg_id) in new_table_ids {
+                assert!(
+                    !version.state_table_info.info().contains_key(&table_id),
+                    "newly added table exists previously: {:?}",
+                    table_id
+                );
                 delta.state_table_info_delta.insert(
                     table_id,
                     StateTableInfoDelta {
-                        committed_epoch: epoch,
-                        safe_epoch: epoch,
+                        committed_epoch: max_committed_epoch,
+                        safe_epoch: max_committed_epoch,
                         compaction_group_id: cg_id,
                     },
                 );
             }
 
             for (table_id, info) in version.state_table_info.info() {
-                assert!(
-                    delta
-                        .state_table_info_delta
-                        .insert(
-                            *table_id,
-                            StateTableInfoDelta {
-                                committed_epoch: epoch,
-                                safe_epoch: info.safe_epoch,
-                                compaction_group_id: info.compaction_group_id,
-                            }
-                        )
-                        .is_none(),
-                    "newly added table exists previously: {:?}",
-                    table_id
-                );
+                assert!(delta
+                    .state_table_info_delta
+                    .insert(
+                        *table_id,
+                        StateTableInfoDelta {
+                            committed_epoch: max_committed_epoch,
+                            safe_epoch: info.safe_epoch,
+                            compaction_group_id: info.compaction_group_id,
+                        }
+                    )
+                    .is_none(),);
             }
         });
 

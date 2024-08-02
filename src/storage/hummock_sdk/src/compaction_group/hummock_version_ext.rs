@@ -358,9 +358,24 @@ impl HummockVersion {
         new_sst_start_id: u64,
     ) {
         let mut new_sst_id = new_sst_start_id;
-        if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId
-            || !self.levels.contains_key(&parent_group_id)
-        {
+        if !self.levels.contains_key(&parent_group_id) {
+            warn!(parent_group_id, "non-existing parent group id to init from");
+            return;
+        }
+        if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId {
+            if new_sst_start_id != 0 {
+                if cfg!(debug_assertions) {
+                    panic!(
+                        "non-zero sst start id {} for NewCompactionGroup",
+                        new_sst_start_id
+                    );
+                } else {
+                    warn!(
+                        new_sst_start_id,
+                        "non-zero sst start id for NewCompactionGroup"
+                    );
+                }
+            }
             return;
         }
         let [parent_levels, cur_levels] = self

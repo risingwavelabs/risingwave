@@ -2621,4 +2621,12 @@ async fn test_commit_multi_epoch() {
     assert_eq!(sub_level2.sub_level_id, epoch2);
     assert_eq!(sub_level2.table_infos.len(), 1);
     assert_eq!(sub_level2.table_infos[0].object_id, sst_epoch2.object_id);
+
+    let info = new_version
+        .state_table_info
+        .info()
+        .get(&batch_commit_table_id)
+        .unwrap();
+    assert_eq!(info.committed_epoch, epoch2);
+    assert_eq!(info.compaction_group_id, new_cg_id);
 }
