@@ -26,6 +26,7 @@ use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, TableId, TableVersionId, DEFAULT_SCHEMA_NAME,
     INITIAL_TABLE_VERSION_ID,
 };
+use risingwave_common::license::Feature;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_connector::source::cdc::external::{
@@ -185,7 +186,7 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
                 _ => {
                     return Err(ErrorCode::NotSupported(
                         format!("{} is not a collatable data type", data_type),
-                        "The only built-in collatable data types are `varchar`, please check your type".into()
+                        "The only built-in collatable data types are `varchar`, please check your type".into(),
                     ).into());
                 }
             }
@@ -332,12 +333,12 @@ pub fn bind_sql_column_constraints(
                     if let Some(snapshot_value) = rewritten_expr_impl.try_fold_const() {
                         let snapshot_value = snapshot_value?;
 
-                        column_catalogs[idx].column_desc.generated_or_default_column = Some(
-                            GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {
+                        column_catalogs[idx].column_desc.generated_or_default_column =
+                            Some(GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {
                                 snapshot_value: Some(snapshot_value.to_protobuf()),
-                                expr: Some(expr_impl.to_expr_proto()), /* persist the original expression */
-                            }),
-                        );
+                                expr: Some(expr_impl.to_expr_proto()),
+                                // persist the original expression
+                            }));
                     } else {
                         return Err(ErrorCode::BindError(format!(
                             "Default expression used in column `{}` cannot be evaluated. \
@@ -1105,6 +1106,14 @@ async fn derive_schema_for_cdc_table(
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
     if need_auto_schema_map {
+        Feature::CdcTableSchemaMap
+            .check_available()
+            .map_err(|err| {
+                ErrorCode::NotSupported(
+                    err.to_string(),
+                    "Please define the schema manually".to_owned(),
+                )
+            })?;
         let (options, secret_refs) = connect_properties.into_parts();
         let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
             .context("failed to extract external table config")?;
@@ -1328,7 +1337,7 @@ pub async fn generate_stream_graph_for_table(
                     .into(),
                 "Remove the FORMAT and ENCODE specification".into(),
             )
-            .into())
+            .into());
         }
     };
 
