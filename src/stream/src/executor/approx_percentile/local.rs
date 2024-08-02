@@ -54,7 +54,7 @@ impl LocalApproxPercentileExecutor {
             match message? {
                 Message::Chunk(chunk) => {
                     let mut builder =
-                        DataChunkBuilder::new(vec![DataType::Int32, DataType::Int16, DataType::Int32], self.chunk_size);
+                        DataChunkBuilder::new(vec![DataType::Int16, DataType::Int32, DataType::Int32], self.chunk_size);
                     let chunk = chunk.project(&[percentile_index]);
                     let mut pos_counts = HashMap::new();
                     let mut neg_counts = HashMap::new();
@@ -92,8 +92,8 @@ impl LocalApproxPercentileExecutor {
                         .chain(iter::once((0, 0, zero_count)))
                     {
                         let row = [
-                            Datum::from(ScalarImpl::Int32(bucket)),
                             Datum::from(ScalarImpl::Int16(sign)),
+                            Datum::from(ScalarImpl::Int32(bucket)),
                             Datum::from(ScalarImpl::Int32(count)),
                         ];
                         if let Some(data_chunk) = builder.append_one_row(&row) {

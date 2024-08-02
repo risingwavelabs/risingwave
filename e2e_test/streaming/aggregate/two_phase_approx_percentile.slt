@@ -59,7 +59,7 @@ flush;
 query I
 select * from m1;
 ----
-10.074696689511264
+-982.5779489474152
 
 query I
 select approx_percentile(0.01, 0.01) within group (order by p_col) from t group by grp_col;

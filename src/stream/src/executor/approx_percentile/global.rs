@@ -88,10 +88,8 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
                     received_input = true;
                     for (_, row) in chunk.rows() {
                         // Decoding
-                        let bucket_id_datum = row.datum_at(0);
-
-                        let sign_datum = row.datum_at(1);
-
+                        let sign_datum = row.datum_at(0);
+                        let bucket_id_datum = row.datum_at(1);
                         let delta_datum = row.datum_at(2);
                         let delta: i32 = delta_datum.unwrap().into_int32();
 
@@ -108,7 +106,7 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
 
                         let new_value = old_bucket_row_count.checked_add(delta as i64).unwrap();
                         let new_value_datum = Datum::from(ScalarImpl::Int64(new_value));
-                        let new_row = &[bucket_id_datum.map(|d| d.into()), sign_datum.to_owned_datum(), new_value_datum];
+                        let new_row = &[sign_datum.to_owned_datum(), bucket_id_datum.map(|d| d.into()), new_value_datum];
 
                         if old_row.is_none() {
                             bucket_state_table.insert(new_row);
@@ -170,7 +168,6 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
     ///    Output NULL as an INSERT. Persist row count state=0.
     /// 2. We have row count state.
     ///    Output UPDATE (old_state, new_state) to downstream.
-    /// FIXME(kwannoel): Only output updates when there's some input.
     async fn get_output(
         bucket_state_table: &StateTable<S>,
         row_count: u64,
@@ -179,24 +176,31 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
     ) -> StreamExecutorResult<Datum> {
         let quantile_count = (row_count as f64 * quantile).floor() as u64;
         let mut acc_count = 0;
-        let mut neg_acc_count = row_count - quantile_count;
-        let bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (Bound::Unbounded, Bound::Unbounded);
+        let neg_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (Bound::Unbounded, Bound::Excluded((&[Datum::from(ScalarImpl::Int16(0))]).to_owned_row()));
+        let non_neg_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (Bound::Included((&[Datum::from(ScalarImpl::Int16(0))]).to_owned_row()), Bound::Unbounded);
         // Just iterate over the singleton vnode.
+        // TODO(kwannoel): Should we just use separate state tables for
+        // positive and negative counts?
+        // Reverse iterator is not as efficient.
         #[for_await]
         for keyed_row in bucket_state_table
-            .iter_with_prefix(&[Datum::None; 0], &bounds, PrefetchOptions::default())
+            .rev_iter_with_prefix(&[Datum::None; 0], &neg_bounds, PrefetchOptions::default())
             .await?
+            .chain(
+                bucket_state_table
+                    .iter_with_prefix(&[Datum::None; 0], &non_neg_bounds, PrefetchOptions::default())
+                    .await?
+            )
         {
             let row = keyed_row?.into_owned_row();
-            let sign = row.datum_at(1).unwrap().into_int16();
             let count = row.datum_at(2).unwrap().into_int64();
-            neg_acc_count = neg_acc_count.saturating_sub(count as u64);
             acc_count += count as u64;
-            if (sign < 0 && neg_acc_count == 0) || (sign >= 0 && acc_count > quantile_count) {
+            if acc_count > quantile_count {
+                let sign = row.datum_at(0).unwrap().into_int16();
                 if sign == 0 {
                     return Ok(Datum::from(ScalarImpl::Float64(0.0.into())));
                 }
-                let bucket_id = row.datum_at(0).unwrap().into_int32();
+                let bucket_id = row.datum_at(1).unwrap().into_int32();
                 let percentile_value = sign as f64 * 2.0 * base.powi(bucket_id) / (base + 1.0);
                 let percentile_datum = Datum::from(ScalarImpl::Float64(percentile_value.into()));
                 return Ok(percentile_datum);
