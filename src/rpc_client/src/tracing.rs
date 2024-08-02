@@ -61,10 +61,10 @@ pub type Channel = TracingInjectChannel;
 #[cfg(madsim)]
 pub type Channel = tonic::transport::Channel;
 
-/// An extension trait for tonic's `Channel` that wraps it in a [`TracingInject`] service.
+/// An extension trait for tonic's `Channel` that wraps it into a [`TracingInjectChannel`].
 #[easy_ext::ext(TracingInjectedChannelExt)]
 impl tonic::transport::Channel {
-    /// Wraps the channel in a [`TracingInject`] service, so that the [`TracingContext`] obtained
+    /// Wraps the channel into a [`TracingInjectChannel`], so that the [`TracingContext`] obtained
     /// from the current tracing span is injected into the HTTP headers of the request.
     ///
     /// The server can then extract the [`TracingContext`] from the HTTP headers with the
