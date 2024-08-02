@@ -31,7 +31,6 @@ use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, TransactionTrai
 use tokio::sync::oneshot::Sender;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tracing::info;
 
 use crate::controller::SqlMetaStore;
 use crate::manager::{LocalNotification, NotificationManagerRef};
@@ -143,7 +142,7 @@ impl SystemParamsController {
         let params = SystemParameter::find().all(&db).await?;
         let params = merge_params(system_params_from_db(params)?, init_params);
 
-        info!(initial_params = ?SystemParamsReader::new(&params), "initialize system parameters");
+        tracing::info!(initial_params = ?SystemParamsReader::new(&params), "initialize system parameters");
         check_missing_params(&params).map_err(|e| anyhow!(e))?;
 
         let ctl = Self {
