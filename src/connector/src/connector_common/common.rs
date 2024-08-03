@@ -603,7 +603,7 @@ impl NatsCommon {
             }
             "plain" => {}
             _ => {
-                bail!("nats connect mode only accept user_and_password/credential/plain");
+                bail!("nats connect mode only accepts user_and_password/credential/plain");
             }
         };
 

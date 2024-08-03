@@ -15,7 +15,6 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::mem::take;
-use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
@@ -25,8 +24,7 @@ use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
-use super::command::CommandContext;
-use crate::barrier::{Command, CreateStreamingJobCommandInfo, ReplaceTablePlan};
+use crate::barrier::{Command, CreateStreamingJobCommandInfo, EpochNode, ReplaceTablePlan};
 use crate::manager::{
     DdlType, MetadataManager, MetadataManagerV1, MetadataManagerV2, StreamingJob,
 };
@@ -410,6 +408,45 @@ impl CreateMviewProgressTracker {
             .collect()
     }
 
+    /// Apply a collected epoch node command to the tracker
+    /// Return the finished jobs when the barrier kind is `Checkpoint`
+    pub(super) fn apply_collected_command(
+        &mut self,
+        epoch_node: &EpochNode,
+        version_stats: &HummockVersionStats,
+    ) -> Vec<TrackingJob> {
+        let command_ctx = &epoch_node.command_ctx;
+        let new_tracking_job_info = if let Command::CreateStreamingJob {
+            info,
+            replace_table,
+        } = &command_ctx.command
+        {
+            Some((info, replace_table.as_ref()))
+        } else {
+            None
+        };
+        assert!(epoch_node.state.node_to_collect.is_empty());
+        self.update_tracking_jobs(
+            new_tracking_job_info,
+            epoch_node
+                .state
+                .resps
+                .iter()
+                .flat_map(|resp| resp.create_mview_progress.iter()),
+            version_stats,
+        );
+        if let Some(table_id) = command_ctx.command.table_to_cancel() {
+            // the cancelled command is possibly stashed in `finished_commands` and waiting
+            // for checkpoint, we should also clear it.
+            self.cancel_command(table_id);
+        }
+        if command_ctx.kind.is_checkpoint() {
+            self.take_finished_jobs()
+        } else {
+            vec![]
+        }
+    }
+
     /// Stash a command to finish later.
     pub(super) fn stash_command_to_finish(&mut self, finished_job: TrackingJob) {
         self.finished_jobs.push(finished_job);
@@ -447,14 +484,11 @@ impl CreateMviewProgressTracker {
     /// If the actors to track is empty, return the given command as it can be finished immediately.
     pub fn add(
         &mut self,
-        command_ctx: &Arc<CommandContext>,
+        info: &CreateStreamingJobCommandInfo,
+        replace_table: Option<&ReplaceTablePlan>,
         version_stats: &HummockVersionStats,
     ) -> Option<TrackingJob> {
-        let (info, actors, replace_table_info) = if let Command::CreateStreamingJob {
-            info,
-            replace_table,
-        } = &command_ctx.command
-        {
+        let (info, actors, replace_table_info) = {
             let CreateStreamingJobCommandInfo {
                 table_fragments, ..
             } = info;
@@ -463,12 +497,10 @@ impl CreateMviewProgressTracker {
                 // The command can be finished immediately.
                 return Some(TrackingJob::New(TrackingCommand {
                     info: info.clone(),
-                    replace_table_info: replace_table.clone(),
+                    replace_table_info: replace_table.cloned(),
                 }));
             }
-            (info.clone(), actors, replace_table.clone())
-        } else {
-            return None;
+            (info.clone(), actors, replace_table.cloned())
         };
 
         let CreateStreamingJobCommandInfo {

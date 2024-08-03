@@ -23,7 +23,8 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use super::{serialize_pk_to_cache_key, CacheKey, CacheKeySerde, GroupKey, TopNCache};
+use super::top_n_cache::CacheKey;
+use super::{serialize_pk_to_cache_key, CacheKeySerde, GroupKey, TopNCache};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 
@@ -76,8 +77,8 @@ impl<S: StateStore> ManagedTopNState<S> {
     }
 
     /// Update watermark for the managed state table.
-    pub fn update_watermark(&mut self, watermark: ScalarImpl, eager_cleaning: bool) {
-        self.state_table.update_watermark(watermark, eager_cleaning)
+    pub fn update_watermark(&mut self, watermark: ScalarImpl) {
+        self.state_table.update_watermark(watermark)
     }
 
     pub fn insert(&mut self, value: impl Row) {

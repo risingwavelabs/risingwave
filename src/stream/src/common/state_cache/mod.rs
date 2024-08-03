@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use ordered::*;
 use risingwave_common::array::Op;
 use risingwave_common_estimate_size::EstimateSize;
-pub use top_n::*;
 
 mod ordered;
 mod top_n;
+
+pub use ordered::*;
+pub use top_n::*;
 
 /// A common interface for state table cache.
 pub trait StateCache: EstimateSize {

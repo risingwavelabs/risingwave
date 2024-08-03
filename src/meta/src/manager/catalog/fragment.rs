@@ -173,7 +173,7 @@ pub struct FragmentManager {
     core: RwLock<FragmentManagerCore>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct InflightFragmentInfo {
     pub actors: HashMap<ActorId, WorkerNodeId>,
     pub state_table_ids: HashSet<TableId>,
@@ -347,7 +347,7 @@ impl FragmentManager {
         let map = &mut guard.table_fragments;
         let table_id = table_fragment.table_id();
         if map.contains_key(&table_id) {
-            bail!("table_fragment already exist: id={}", table_id);
+            bail!("table_fragment already exists: id={}", table_id);
         }
 
         let mut table_fragments = BTreeMapTransaction::new(map);

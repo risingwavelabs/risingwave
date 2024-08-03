@@ -19,9 +19,7 @@ use utils::*;
 mod top_n_cache;
 mod top_n_state;
 use top_n_cache::{TopNCache, TopNCacheTrait};
-mod topn_cache_state;
 use top_n_state::ManagedTopNState;
-use topn_cache_state::CacheKey;
 
 // `TopN` variants
 mod group_top_n;

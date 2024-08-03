@@ -172,4 +172,10 @@ where
     fn license_key(&self) -> &str {
         self.inner().license_key.as_deref().unwrap_or_default()
     }
+
+    fn time_travel_retention_ms(&self) -> u64 {
+        self.inner()
+            .time_travel_retention_ms
+            .unwrap_or_else(default::time_travel_retention_ms)
+    }
 }

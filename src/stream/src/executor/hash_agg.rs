@@ -489,7 +489,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         if let Some(watermark) = window_watermark {
             // Update watermark of state tables, for state cleaning.
             this.all_state_tables_mut()
-                .for_each(|table| table.update_watermark(watermark.clone(), false));
+                .for_each(|table| table.update_watermark(watermark.clone()));
         }
 
         // Flush distinct dedup state.
