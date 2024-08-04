@@ -2,13 +2,13 @@
 
 
 # default
-cmd_default='RUSTFLAGS="--cfg tokio_unstable" cargo build -p risingwave_cmd_all --timings'
+cmd_default='RUSTFLAGS="--cfg tokio_unstable" cargo build -p risingwave_cmd_all --timings --target-dir=target/default'
 
 # parallel frontend
-cmd_pf='RUSTFLAGS="--cfg tokio_unstable -Z threads=8" cargo build -p risingwave_cmd_all --timings'
+cmd_pf='RUSTFLAGS="--cfg tokio_unstable -Z threads=8" cargo build -p risingwave_cmd_all --timings --target-dir=target/parallel'
 
 # incremental build
-hyperfine -r3 -p  'cargo build -p risingwave_cmd_all && echo >> src/common/src/lib.rs' \
+hyperfine -r3 --show-output -p  'echo >> src/common/src/lib.rs' \
     "$cmd_default" \
     "$cmd_pf"
 

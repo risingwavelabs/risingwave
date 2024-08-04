@@ -210,5 +210,7 @@ internal_table.mjs --name mv_1 --type sourcebackfill
 3,"""Finished"""
 
 
+halt
+
 statement ok
 drop source s0 cascade;
