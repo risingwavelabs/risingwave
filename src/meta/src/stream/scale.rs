@@ -666,6 +666,7 @@ impl ScaleController {
             // correspondence, so we need to clone the reschedule plan to the downstream of all
             // cascading relations.
             if no_shuffle_source_fragment_ids.contains(fragment_id) {
+                // This fragment is a NoShuffle's upstream.
                 let mut queue: VecDeque<_> = fragment_dispatcher_map
                     .get(fragment_id)
                     .unwrap()
@@ -701,12 +702,6 @@ impl ScaleController {
                 let stream_node = fragment.actor_template.nodes.as_ref().unwrap();
                 if stream_node.find_stream_source().is_some() {
                     stream_source_fragment_ids.insert(*fragment_id);
-                }
-            }
-            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::SourceScan as u32) != 0 {
-                let stream_node = fragment.actor_template.nodes.as_ref().unwrap();
-                if stream_node.find_source_backfill().is_some() {
-                    stream_source_backfill_fragment_ids.insert(*fragment_id);
                 }
             }
 
@@ -761,6 +756,17 @@ impl ScaleController {
                 "reschedule plan rewritten with NoShuffle reschedule {:?}",
                 no_shuffle_reschedule
             );
+
+            for noshuffle_downstream in no_shuffle_reschedule.keys() {
+                let fragment = fragment_map.get(noshuffle_downstream).unwrap();
+                // SourceScan is always a NoShuffle downstream, rescheduled together with the upstream Source.
+                if (fragment.get_fragment_type_mask() & FragmentTypeFlag::SourceScan as u32) != 0 {
+                    let stream_node = fragment.actor_template.nodes.as_ref().unwrap();
+                    if stream_node.find_source_backfill().is_some() {
+                        stream_source_backfill_fragment_ids.insert(fragment.fragment_id);
+                    }
+                }
+            }
         }
 
         // Modifications for NoShuffle downstream.
@@ -836,6 +842,7 @@ impl ScaleController {
         HashMap<FragmentId, Reschedule>,
         HashMap<FragmentId, HashSet<ActorId>>,
     )> {
+        tracing::debug!("build_reschedule_context, reschedules: {:#?}", reschedules);
         let ctx = self
             .build_reschedule_context(&mut reschedules, options, table_parallelisms)
             .await?;
@@ -1714,6 +1721,7 @@ impl ScaleController {
             .cloned()
             .collect_vec();
 
+        // TODO: Does SourceBackfill need this?
         fn replace_merge_node_upstream(
             stream_node: &mut StreamNode,
             applied_upstream_fragment_actor_ids: &HashMap<FragmentId, Vec<ActorId>>,
@@ -1991,11 +1999,11 @@ impl ScaleController {
                                         dispatcher.dispatcher_id as FragmentId
                                     );
                                 } else {
-                                    bail!(
-                                        "downstream actor id {} from actor {} not found in fragment_actor_id_map: {actor_fragment_id_map_for_check:?}",
-                                        downstream_actor_id,
-                                        actor.actor_id,
-                                    );
+                                    // bail!(
+                                    //     "downstream actor id {} from actor {} not found in actor_fragment_id_map_for_check: {actor_fragment_id_map_for_check:?}",
+                                    //     downstream_actor_id,
+                                    //     actor.actor_id,
+                                    // );
                                 }
 
                                 no_shuffle_target_fragment_ids
@@ -2051,6 +2059,17 @@ impl ScaleController {
                 )?;
             }
         }
+        tracing::debug!(
+            ?worker_ids,
+            ?table_parallelisms,
+            ?no_shuffle_source_fragment_ids,
+            ?no_shuffle_target_fragment_ids,
+            ?fragment_distribution_map,
+            ?actor_location,
+            ?table_fragment_id_map,
+            ?fragment_actor_id_map,
+            "generate_table_resize_plan, after build_index"
+        );
 
         let mut target_plan = HashMap::new();
 
@@ -2143,7 +2162,10 @@ impl ScaleController {
         }
 
         target_plan.retain(|_, plan| !plan.worker_actor_diff.is_empty());
-
+        tracing::debug!(
+            ?target_plan,
+            "generate_table_resize_plan finished target_plan"
+        );
         Ok(target_plan)
     }
 
@@ -2374,6 +2396,7 @@ impl ScaleController {
 
 /// At present, for table level scaling, we use the strategy `TableResizePolicy`.
 /// Currently, this is used as an internal interface, so it won’t be included in Protobuf.
+#[derive(Debug)]
 pub struct TableResizePolicy {
     pub(crate) worker_ids: BTreeSet<WorkerId>,
     pub(crate) table_parallelisms: HashMap<u32, TableParallelism>,

@@ -31,7 +31,7 @@ pub async fn get_cluster_info(context: &CtlContext) -> anyhow::Result<GetCluster
     Ok(response)
 }
 
-pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
+pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow::Result<()> {
     let GetClusterInfoResponse {
         worker_nodes: _,
         source_infos: _,
@@ -80,9 +80,11 @@ pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
         if table_fragment.actor_splits.is_empty() {
             continue;
         }
-
-        println!("Table #{}", table_fragment.table_id);
-
+        if ignore_id {
+            println!("Table");
+        } else {
+            println!("Table #{}", table_fragment.table_id);
+        }
         for fragment in table_fragment.fragments.values() {
             let fragment_type_mask = fragment.fragment_type_mask;
             if fragment_type_mask & FragmentTypeFlag::Source as u32 == 0
@@ -97,8 +99,12 @@ pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
             }
 
             println!(
-                "\tFragment #{} ({})",
-                fragment.fragment_id,
+                "\tFragment{} ({})",
+                if ignore_id {
+                    "".to_string()
+                } else {
+                    format!(" #{}", fragment.fragment_id)
+                },
                 if fragment_type_mask == FragmentTypeFlag::Source as u32 {
                     "Source"
                 } else {
@@ -108,8 +114,12 @@ pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
             for actor in &fragment.actors {
                 if let Some(splits) = actor_splits_map.get(&actor.actor_id) {
                     println!(
-                        "\t\tActor #{:<3} ({} splits): [{}]{}",
-                        actor.actor_id,
+                        "\t\tActor{} ({} splits): [{}]{}",
+                        if ignore_id {
+                            "".to_string()
+                        } else {
+                            format!(" #{:<3}", actor.actor_id,)
+                        },
                         splits.len(),
                         splits,
                         if !actor.upstream_actor_id.is_empty() {
@@ -120,8 +130,13 @@ pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
                             let upstream_splits =
                                 actor_splits_map.get(&actor.upstream_actor_id[0]).unwrap();
                             format!(
-                                " <- Upstream Actor #{}: [{}]",
-                                actor.upstream_actor_id[0], upstream_splits
+                                " <- Upstream Actor{}: [{}]",
+                                if ignore_id {
+                                    "".to_string()
+                                } else {
+                                    format!(" #{}", actor.upstream_actor_id[0])
+                                },
+                                upstream_splits
                             )
                         } else {
                             "".to_string()
@@ -129,7 +144,7 @@ pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
                     );
                 } else {
                     println!(
-                        "\t\tActor #{:<3} (not found in actor_splits)",
+                        "\t\tError: Actor #{:<3} (not found in actor_splits)",
                         actor.actor_id,
                     )
                 }
