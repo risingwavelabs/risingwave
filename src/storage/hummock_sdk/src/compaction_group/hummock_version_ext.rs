@@ -37,6 +37,7 @@ use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{ReadTableWatermark, TableWatermarks};
 use crate::version::{
     GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo,
+    IntraLevelDelta,
 };
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
@@ -371,9 +372,24 @@ impl HummockVersion {
         split_key: Option<Bytes>,
     ) {
         let mut new_sst_id = new_sst_start_id;
-        if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId
-            || !self.levels.contains_key(&parent_group_id)
-        {
+        if !self.levels.contains_key(&parent_group_id) {
+            warn!(parent_group_id, "non-existing parent group id to init from");
+            return;
+        }
+        if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId {
+            if new_sst_start_id != 0 {
+                if cfg!(debug_assertions) {
+                    panic!(
+                        "non-zero sst start id {} for NewCompactionGroup",
+                        new_sst_start_id
+                    );
+                } else {
+                    warn!(
+                        new_sst_start_id,
+                        "non-zero sst start id for NewCompactionGroup"
+                    );
+                }
+            }
             return;
         }
         let [parent_levels, cur_levels] = self
@@ -712,30 +728,36 @@ impl HummockVersion {
                 let GroupDeltasSummary {
                     delete_sst_levels,
                     delete_sst_ids_set,
-                    insert_sst_level_id,
-                    insert_sub_level_id,
-                    insert_table_infos,
                     ..
                 } = summary;
-                assert!(
-                    insert_sst_level_id == 0 || insert_table_infos.is_empty(),
-                    "we should only add to L0 when we commit an epoch. Inserting into {} {:?}",
-                    insert_sst_level_id,
-                    insert_table_infos
-                );
+
                 assert!(
                     delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty()
                         || group_destroy.is_some(),
                     "no sst should be deleted when committing an epoch"
                 );
-                if !insert_table_infos.is_empty() {
-                    insert_new_sub_level(
-                        &mut levels.l0,
-                        insert_sub_level_id,
-                        PbLevelType::Overlapping,
-                        insert_table_infos,
-                        None,
-                    );
+                for group_delta in &group_deltas.group_deltas {
+                    if let GroupDelta::IntraLevel(IntraLevelDelta {
+                        level_idx,
+                        l0_sub_level_id,
+                        inserted_table_infos,
+                        ..
+                    }) = group_delta
+                    {
+                        assert_eq!(
+                            *level_idx, 0,
+                            "we should only add to L0 when we commit an epoch."
+                        );
+                        if !inserted_table_infos.is_empty() {
+                            insert_new_sub_level(
+                                &mut levels.l0,
+                                *l0_sub_level_id,
+                                PbLevelType::Overlapping,
+                                inserted_table_infos.clone(),
+                                None,
+                            );
+                        }
+                    }
                 }
             } else {
                 // `max_committed_epoch` is not changed. The delta is caused by compaction.

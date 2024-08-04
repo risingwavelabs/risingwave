@@ -177,8 +177,8 @@ impl<S: StateStore> SortBuffer<S> {
         }
 
         // TODO(rc): Need something like `table.range_delete()`. Here we call
-        // `update_watermark(watermark, true)` as an alternative to `range_delete((..watermark))`.
-        buffer_table.update_watermark(watermark, true);
+        // `update_watermark(watermark)` as an alternative to `range_delete((..watermark))`.
+        buffer_table.update_watermark(watermark);
     }
 
     #[try_stream(ok = OwnedRow, error = StreamExecutorError)]

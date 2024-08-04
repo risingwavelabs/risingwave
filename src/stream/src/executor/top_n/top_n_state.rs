@@ -77,8 +77,8 @@ impl<S: StateStore> ManagedTopNState<S> {
     }
 
     /// Update watermark for the managed state table.
-    pub fn update_watermark(&mut self, watermark: ScalarImpl, eager_cleaning: bool) {
-        self.state_table.update_watermark(watermark, eager_cleaning)
+    pub fn update_watermark(&mut self, watermark: ScalarImpl) {
+        self.state_table.update_watermark(watermark)
     }
 
     pub fn insert(&mut self, value: impl Row) {

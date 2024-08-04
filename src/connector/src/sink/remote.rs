@@ -169,7 +169,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
         && param.downstream_pk.len() > 1
         && !param.properties.contains_key(ES_OPTION_DELIMITER)
     {
-        bail!("Es sink only support single pk or pk with delimiter option");
+        bail!("Es sink only supports single pk or pk with delimiter option");
     }
     // FIXME: support struct and array in stream sink
     param.columns.iter().map(|col| {
@@ -194,7 +194,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                     Ok(())
                 } else{
                     Err(SinkError::Remote(anyhow!(
-                        "Remote sink only support list<int16, int32, int64, float, double, varchar>, got {:?}: {:?}",
+                        "Remote sink only supports list<int16, int32, int64, float, double, varchar>, got {:?}: {:?}",
                         col.name,
                         col.data_type,
                     )))
@@ -205,7 +205,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                     Ok(())
                 }else{
                     Err(SinkError::Remote(anyhow!(
-                        "Only Es sink support struct, got {:?}: {:?}",
+                        "Only Es sink supports struct, got {:?}: {:?}",
                         col.name,
                         col.data_type,
                     )))
@@ -347,7 +347,7 @@ impl LogSinker for RemoteLogSinker {
                 })?;
                 if sent_offset != persisted_offset {
                     bail!(
-                        "new response offset {:?} not match the buffer offset {:?}",
+                        "new response offset {:?} does not match the buffer offset {:?}",
                         persisted_offset,
                         sent_offset
                     );
@@ -535,7 +535,7 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
             self.param.clone(),
             writer_param.vnode_bitmap.ok_or_else(|| {
                 SinkError::Remote(anyhow!(
-                    "sink needs coordination should not have singleton input"
+                    "sink needs coordination and should not have singleton input"
                 ))
             })?,
             CoordinatedRemoteSinkWriter::new(self.param.clone(), writer_param.sink_metrics.clone())

@@ -480,7 +480,7 @@ message DynamicFilterNode {
   // When the condition changes, we will tell downstream to insert the LHS records which now match the condition.
   // If this is false, we need to store RHS records which match the condition in the internal table.
   // When the condition changes, we will tell downstream to delete the LHS records which now no longer match the condition.
-  bool condition_always_relax = 5;
+  bool condition_always_relax = 5 [deprecated = true];
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta

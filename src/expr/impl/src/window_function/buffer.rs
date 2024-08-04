@@ -970,7 +970,7 @@ mod tests {
 
         let key = |key: i64| -> StateKey {
             StateKey {
-                order_key: memcmp_encoding::encode_value(&Some(ScalarImpl::from(key)), order_type)
+                order_key: memcmp_encoding::encode_value(Some(ScalarImpl::from(key)), order_type)
                     .unwrap(),
                 pk: OwnedRow::empty().into(),
             }
