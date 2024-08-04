@@ -54,7 +54,7 @@
   </a>
 </div>
 
-RisingWave is a Postgres-compatible SQL query engine engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b>, <b>analyzing</b>, and <b>managing</b> real-time event streaming data.
+RisingWave is a Postgres-compatible SQL engine engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b>, <b>analyzing</b>, and <b>managing</b> real-time event streaming data.
 
 ![RisingWave](https://github.com/risingwavelabs/risingwave/assets/41638002/10c44404-f78b-43ce-bbd9-3646690acc59)
 
