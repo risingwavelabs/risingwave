@@ -235,15 +235,20 @@ struct PulsarPayloadWriter<'w> {
     add_future: DeliveryFutureManagerAddFuture<'w, PulsarDeliveryFuture>,
 }
 
-pub type PulsarDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
+mod opaque_type {
+    use super::*;
+    pub type PulsarDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
 
-fn may_delivery_future(future: SendFuture) -> PulsarDeliveryFuture {
-    future.map(|result| {
-        result
-            .map(|_| ())
-            .map_err(|e: pulsar::Error| SinkError::Pulsar(anyhow!(e)))
-    })
+    pub(super) fn may_delivery_future(future: SendFuture) -> PulsarDeliveryFuture {
+        future.map(|result| {
+            result
+                .map(|_| ())
+                .map_err(|e: pulsar::Error| SinkError::Pulsar(anyhow!(e)))
+        })
+    }
 }
+use opaque_type::may_delivery_future;
+pub use opaque_type::PulsarDeliveryFuture;
 
 impl PulsarSinkWriter {
     pub async fn new(
