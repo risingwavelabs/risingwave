@@ -26,7 +26,7 @@ select count(*) from rw_internal_tables where name like '%s0%';
 ----
 1
 
-# sleep 1s
+sleep 1s
 
 # SourceExecutor's ingestion does not start (state table is empty), even after sleep
 system ok
@@ -39,7 +39,7 @@ statement ok
 create materialized view mv_1 as select * from s0;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
-# sleep 2s
+sleep 2s
 
 # SourceExecutor's ingestion started, but it only starts from latest.
 system ok
@@ -52,7 +52,10 @@ internal_table.mjs --name s0 --type source
 system ok
 internal_table.mjs --name mv_1 --type sourcebackfill
 ----
-(empty)
+0,"{""Backfilling"": ""0""}"
+1,"{""Backfilling"": ""0""}"
+2,"{""Backfilling"": ""0""}"
+3,"{""Backfilling"": ""0""}"
 
 
 # This does not affect the behavior for CREATE MATERIALIZED VIEW below. It also uses the shared source, and creates SourceBackfillExecutor.
@@ -168,7 +171,7 @@ cat <<EOF | rpk topic produce shared_source -f "%p %v\n" -p 0
 EOF
 done
 
-# sleep 3s
+sleep 3s
 
 query ?? rowsort
 select v1, count(*) from s0 group by v1;

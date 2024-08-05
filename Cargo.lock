@@ -11355,6 +11355,7 @@ dependencies = [
  "madsim-etcd-client",
  "madsim-rdkafka",
  "madsim-tokio",
+ "maplit",
  "paste",
  "pin-project",
  "pretty_assertions",
