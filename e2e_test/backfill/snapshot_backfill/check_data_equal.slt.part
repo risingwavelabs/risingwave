@@ -1,0 +1,12 @@
+# the result from batch query and materialized view should be the same
+query T
+select * from v
+except
+select * from mv;
+----
+
+query T
+select * from mv
+except
+select * from v;
+----

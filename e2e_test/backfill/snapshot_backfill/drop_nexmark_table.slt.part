@@ -1,0 +1,8 @@
+statement ok
+drop table bid;
+
+statement ok
+drop table auction;
+
+statement ok
+drop table person;

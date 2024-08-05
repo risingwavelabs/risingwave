@@ -269,7 +269,7 @@ pub(super) struct TrackingCommand {
 /// 2. For each stream job, there are several actors which run its tasks.
 /// 3. With `progress_map` we can use the ID of the `StreamJob` to view its progress.
 /// 4. With `actor_map` we can use an actor's `ActorId` to find the ID of the `StreamJob`.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(super) struct CreateMviewProgressTracker {
     /// Progress of the create-mview DDL indicated by the `TableId`.
     progress_map: HashMap<TableId, (Progress, TrackingJob)>,

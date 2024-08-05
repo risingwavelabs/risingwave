@@ -15,8 +15,9 @@
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::PausedReason;
 
-use crate::barrier::info::InflightActorInfo;
+use crate::barrier::info::{CommandActorChanges, CommandFragmentChanges, InflightActorInfo};
 use crate::barrier::{Command, TracedEpoch};
+use crate::manager::InflightFragmentInfo;
 
 /// `BarrierManagerState` defines the necessary state of `GlobalBarrierManager`.
 pub struct BarrierManagerState {
@@ -77,8 +78,45 @@ impl BarrierManagerState {
     /// will be removed from the state after the info get resolved.
     pub fn apply_command(&mut self, command: &Command) -> InflightActorInfo {
         self.inflight_actor_infos.pre_apply(command);
+        // update the fragment_infos outside pre_apply
+        let fragment_infos = &mut self.inflight_actor_infos.fragment_infos;
+        if !matches!(command, Command::CreateSnapshotBackfillStreamingJob { .. }) {
+            if let Some(CommandActorChanges { fragment_changes }) = command.actor_changes() {
+                for (fragment_id, change) in fragment_changes {
+                    if let CommandFragmentChanges::NewFragment(InflightFragmentInfo {
+                        actors: new_actors,
+                        state_table_ids: table_ids,
+                        is_injectable,
+                    }) = change
+                    {
+                        assert!(fragment_infos
+                            .insert(
+                                fragment_id,
+                                InflightFragmentInfo {
+                                    actors: new_actors,
+                                    state_table_ids: table_ids,
+                                    is_injectable,
+                                }
+                            )
+                            .is_none());
+                    }
+                }
+            }
+        }
+
         let info = self.inflight_actor_infos.clone();
         self.inflight_actor_infos.post_apply(command);
+        if let Command::FinishCreateSnapshotBackfillStreamingJobs(jobs_to_finish) = command {
+            for (_, fragment_info) in jobs_to_finish.values() {
+                for (fragment_id, fragment_info) in fragment_info {
+                    assert!(self
+                        .inflight_actor_infos
+                        .fragment_infos
+                        .insert(*fragment_id, fragment_info.clone())
+                        .is_none());
+                }
+            }
+        }
 
         info
     }

@@ -1,0 +1,38 @@
+include ./create_nexmark_table.slt.part
+
+sleep 10s
+
+statement ok
+set backfill_rate_limit = 200;
+
+statement ok
+set streaming_use_snapshot_backfill = true;
+
+statement ok
+create view v as
+ SELECT P.name,
+        P.city,
+        P.state,
+        A.id
+ FROM auction AS A
+          INNER JOIN person AS P on A.seller = P.id
+ WHERE A.category = 10
+   and (P.state = 'or' OR P.state = 'id' OR P.state = 'ca');
+
+statement ok
+create materialized view mv as select * from v;
+
+include ./check_data_equal.slt.part
+
+sleep 3s
+
+include ./check_data_equal.slt.part
+
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop view v;
+
+include ./drop_nexmark_table.slt.part

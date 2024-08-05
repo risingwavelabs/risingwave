@@ -146,7 +146,6 @@ impl InflightActorInfo {
                         for (actor_id, node_id) in &info.actors {
                             assert!(to_add.insert(*actor_id, *node_id).is_none());
                         }
-                        assert!(self.fragment_infos.insert(fragment_id, info).is_none());
                     }
                     CommandFragmentChanges::Reschedule { new_actors, .. } => {
                         let info = self

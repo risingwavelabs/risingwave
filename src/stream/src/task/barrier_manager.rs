@@ -546,6 +546,9 @@ impl LocalBarrierWorker {
                         .map(TableId::new)
                         .collect(),
                     PartialGraphId::new(req.partial_graph_id),
+                    req.actor_ids_to_pre_sync_barrier_mutation
+                        .into_iter()
+                        .collect(),
                 )?;
                 Ok(())
             }
@@ -736,6 +739,7 @@ impl LocalBarrierWorker {
         to_collect: HashSet<ActorId>,
         table_ids: HashSet<TableId>,
         partial_graph_id: PartialGraphId,
+        actor_ids_to_pre_sync_barrier: HashSet<ActorId>,
     ) -> StreamResult<()> {
         if !cfg!(test) {
             // The barrier might be outdated and been injected after recovery in some certain extreme
@@ -782,8 +786,13 @@ impl LocalBarrierWorker {
             }
         }
 
-        self.state
-            .transform_to_issued(barrier, to_collect, table_ids, partial_graph_id);
+        self.state.transform_to_issued(
+            barrier,
+            to_collect,
+            table_ids,
+            partial_graph_id,
+            actor_ids_to_pre_sync_barrier,
+        );
 
         for actor_id in to_send {
             match self.barrier_senders.get(&actor_id) {
@@ -1216,6 +1225,7 @@ pub(crate) mod barrier_test_utils {
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),
                             table_ids_to_sync: vec![],
                             partial_graph_id: u32::MAX,
+                            actor_ids_to_pre_sync_barrier_mutation: vec![],
                         },
                     )),
                 }))

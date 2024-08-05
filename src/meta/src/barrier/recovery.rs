@@ -390,10 +390,11 @@ impl GlobalBarrierManager {
                         tracing::Span::current(), // recovery span
                     ));
 
-                    let mut node_to_collect = control_stream_manager.inject_barrier(
+                    let mut node_to_collect = control_stream_manager.inject_command_ctx_barrier(
                         &command_ctx,
                         &info.fragment_infos,
                         Some(&info.fragment_infos),
+                        HashMap::new(),
                     )?;
                     while !node_to_collect.is_empty() {
                         let (worker_id, result) = control_stream_manager
