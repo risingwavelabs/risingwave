@@ -262,7 +262,6 @@ impl IntraCompactionPicker {
             }
 
             // do not trivial move if the total file size is too large
-            println!("l0.sub_levels[idx].total_file_size {} self.config.sub_level_max_compaction_bytes {}", l0.sub_levels[idx].total_file_size, self.config.sub_level_max_compaction_bytes);
             if l0.sub_levels[idx].total_file_size > self.config.sub_level_max_compaction_bytes {
                 continue;
             }
