@@ -168,13 +168,10 @@ impl HummockManager {
     /// Currently `purge` is only called during meta service start ups.
     pub async fn purge(&self, valid_ids: &HashSet<TableId>) -> Result<()> {
         let to_unregister = {
-            let versioning = self
-                .versioning
-                .read()
-                .await;
+            let versioning = self.versioning.read().await;
             let mut remaining_valid_ids = valid_ids.iter().cloned().collect::<BTreeSet<_>>();
-            let to_unregister =
-                versioning.current_version
+            let to_unregister = versioning
+                .current_version
                 .state_table_info
                 .info()
                 .keys()
