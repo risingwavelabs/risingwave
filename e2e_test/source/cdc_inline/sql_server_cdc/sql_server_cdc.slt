@@ -3,6 +3,9 @@ control substitution on
 
 # ------------ data prepare stage ------------
 system ok
+echo $SQLCMDUSER $SQLCMDPASSWORD $SQLCMDPORT $SQLCMDSERVER $SQLCMDDBNAME
+
+system ok
 sqlcmd -C -i e2e_test/source/cdc_inline/sql_server_cdc/sql_server_cdc_prepare.sql -b
 
 # ------------ validate stage ------------
@@ -29,10 +32,10 @@ CREATE TABLE orders (
   connector = 'sqlserver-cdc',
   hostname = '${SQLCMDSERVER:sqlserver-server}',
   port = '${SQLCMDPORT:1433}',
-  username = '${SQLCMDUSER:$USER}',
+  username = '${SQLCMDUSER:SA}',
   password = '${SQLCMDPASSWORD}',
   table.name = 'orders',
-  database.name = 'mydb',
+  database.name = '${SQLCMDDBNAME}',
 );
 
 statement error
@@ -44,10 +47,10 @@ CREATE TABLE single_type (
   connector = 'sqlserver-cdc',
   hostname = '${SQLCMDSERVER:sqlserver-server}',
   port = '${SQLCMDPORT:1433}',
-  username = '${SQLCMDUSER:$USER}',
+  username = '${SQLCMDUSER:SA}',
   password = '${SQLCMDPASSWORD}',
   table.name = 'single_type',
-  database.name = 'mydb',
+  database.name = '${SQLCMDDBNAME}',
 );
 
 statement error
@@ -71,10 +74,10 @@ CREATE TABLE sqlserver_all_data_types (
   connector = 'sqlserver-cdc',
   hostname = '${SQLCMDSERVER:sqlserver-server}',
   port = '${SQLCMDPORT:1433}',
-  username = '${SQLCMDUSER:$USER}',
+  username = '${SQLCMDUSER:SA}',
   password = '${SQLCMDPASSWORD}',
   table.name = 'sqlserver_all_data_types',
-  database.name = 'mydb',
+  database.name = '${SQLCMDDBNAME}',
 );
 
 
@@ -85,9 +88,9 @@ CREATE SOURCE mssql_source WITH (
     connector = 'sqlserver-cdc',
     hostname = '${SQLCMDSERVER:sqlserver-server}',
     port = '${SQLCMDPORT:1433}',
-    username = '${SQLCMDUSER:$USER}',
+    username = '${SQLCMDUSER:SA}',
     password = '${SQLCMDPASSWORD}',
-    database.name = 'mydb',
+    database.name = '${SQLCMDDBNAME}',
 );
 
 statement error Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source
