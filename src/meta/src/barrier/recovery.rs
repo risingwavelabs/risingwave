@@ -790,7 +790,7 @@ impl GlobalBarrierManagerContext {
                 .prepare_reschedule_command(
                     plan,
                     RescheduleOptions {
-                        resolve_no_shuffle_upstream: true,
+                        resolve_no_shuffle_upstream: false,
                         skip_create_new_actors: true,
                     },
                     Some(&mut compared_table_parallelisms),
@@ -940,7 +940,7 @@ impl GlobalBarrierManagerContext {
                 .prepare_reschedule_command(
                     plan,
                     RescheduleOptions {
-                        resolve_no_shuffle_upstream: true,
+                        resolve_no_shuffle_upstream: false,
                         skip_create_new_actors: true,
                     },
                     Some(&mut compared_table_parallelisms),
