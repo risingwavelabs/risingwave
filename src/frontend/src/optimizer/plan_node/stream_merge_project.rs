@@ -77,6 +77,7 @@ impl StreamMergeProject {
             }
         }
         let schema = Schema::new(schema_fields);
+        assert!(!schema.is_empty());
         let watermark_columns = FixedBitSet::with_capacity(schema.fields.len());
 
         let base = PlanBase::new_stream(

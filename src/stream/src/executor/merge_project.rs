@@ -92,10 +92,10 @@ impl MergeProjectExecutor {
                             bail!("rhs buffer should not be empty ");
                         };
 
-                        if (1..=2).contains(&lhs_chunk.cardinality()) {
+                        if !(1..=2).contains(&lhs_chunk.cardinality()) {
                             bail!("lhs chunk cardinality should be 1 or 2");
                         }
-                        if (1..=2).contains(&rhs_chunk.cardinality()) {
+                        if !(1..=2).contains(&rhs_chunk.cardinality()) {
                             bail!("rhs chunk cardinality should be 1 or 2");
                         }
                         if lhs_chunk.cardinality() != rhs_chunk.cardinality() {
@@ -105,10 +105,10 @@ impl MergeProjectExecutor {
                         let mut ops = Vec::with_capacity(cardinality);
                         let mut merged_rows = vec![vec![Datum::None; data_types.len()]; cardinality];
                         for (i, (op, lhs_row)) in lhs_chunk.rows().enumerate() {
+                            ops.push(op);
                             for (j, d) in lhs_row.iter().enumerate() {
                                 let out_index = lhs_mapping.map(j);
                                 merged_rows[i][out_index] = d.to_owned_datum();
-                                ops.push(op);
                             }
                         }
 

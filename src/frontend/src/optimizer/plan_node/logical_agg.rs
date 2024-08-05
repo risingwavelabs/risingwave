@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::bail;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
@@ -102,6 +103,12 @@ impl LogicalAgg {
             self.build_approx_percentile_aggs(core.input.clone(), &approx_percentile_agg_calls)?;
 
         // ====== Handle normal aggs
+        if core.agg_calls.is_empty() {
+            if let Some(approx_percentile) = approx_percentile {
+                return Ok(approx_percentile);
+            };
+            bail!("expected at least one agg call");
+        }
         let total_agg_calls = core
             .agg_calls
             .iter()
