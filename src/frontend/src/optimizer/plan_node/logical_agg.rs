@@ -99,7 +99,7 @@ impl LogicalAgg {
         core.agg_calls = non_approx_percentile_agg_calls;
 
         let approx_percentile =
-            self.build_approx_percentile_aggs(core.input.clone(), &approx_percentile_agg_calls);
+            self.build_approx_percentile_aggs(core.input.clone(), &approx_percentile_agg_calls)?;
 
         // ====== Handle normal aggs
         let total_agg_calls = core
@@ -334,14 +334,14 @@ impl LogicalAgg {
         &self,
         input: PlanRef,
         approx_percentile_agg_call: &PlanAggCall,
-    ) -> PlanRef {
+    ) -> Result<PlanRef> {
         let local_approx_percentile =
             StreamLocalApproxPercentile::new(input, approx_percentile_agg_call);
-        let global_approx_percentile = StreamGlobalApproxPercentile::new(
-            local_approx_percentile.into(),
-            approx_percentile_agg_call,
-        );
-        global_approx_percentile.into()
+        let exchange = RequiredDist::single()
+            .enforce_if_not_satisfies(local_approx_percentile.into(), &Order::any())?;
+        let global_approx_percentile =
+            StreamGlobalApproxPercentile::new(exchange, approx_percentile_agg_call);
+        Ok(global_approx_percentile.into())
     }
 
     /// If only 1 approx percentile, just return it.
@@ -361,14 +361,14 @@ impl LogicalAgg {
         &self,
         input: PlanRef,
         approx_percentile_agg_call: &[PlanAggCall],
-    ) -> Option<PlanRef> {
+    ) -> Result<Option<PlanRef>> {
         if approx_percentile_agg_call.is_empty() {
-            return None;
+            return Ok(None);
         }
-        let approx_percentile_plans = approx_percentile_agg_call
+        let approx_percentile_plans: Vec<PlanRef> = approx_percentile_agg_call
             .iter()
             .map(|agg_call| self.build_approx_percentile_agg(input.clone(), agg_call))
-            .collect_vec();
+            .try_collect()?;
         assert!(!approx_percentile_plans.is_empty());
         let mut iter = approx_percentile_plans.into_iter();
         let mut acc = iter.next().unwrap();
@@ -383,7 +383,7 @@ impl LogicalAgg {
             .expect("failed to build keyed merge");
             acc = keyed_merge.into();
         }
-        Some(acc)
+        Ok(Some(acc))
     }
 
     pub fn core(&self) -> &Agg<PlanRef> {

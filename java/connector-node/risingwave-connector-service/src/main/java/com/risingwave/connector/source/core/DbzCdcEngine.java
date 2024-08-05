@@ -47,6 +47,7 @@ public class DbzCdcEngine implements Runnable {
                         sourceId,
                         heartbeatTopicPrefix,
                         transactionTopic,
+                        topicPrefix,
                         new ArrayBlockingQueue<>(DEFAULT_QUEUE_CAPACITY));
 
         // Builds a debezium engine but not start it

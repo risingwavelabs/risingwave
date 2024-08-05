@@ -1,5 +1,5 @@
 #!/usr/bin/env -S cargo -Zscript
-```cargo
+---cargo
 [dependencies]
 anyhow = "1"
 google-cloud-googleapis = { version = "0.13", features = ["pubsub"] }
@@ -13,7 +13,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-```
+---
 
 use google_cloud_googleapis::pubsub::v1::PubsubMessage;
 use google_cloud_pubsub::client::{Client, ClientConfig};

@@ -143,6 +143,7 @@ mod test {
                     added_actors: maplit::hashset! { actor_id },
                     splits: Default::default(),
                     pause: false,
+                    subscriptions_to_add: vec![],
                 }),
             )),
             Message::Chunk(StreamChunk::from_pretty("I\n + 3")),

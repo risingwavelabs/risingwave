@@ -193,21 +193,24 @@ impl<T> ChangeLogValue<T> {
     }
 
     pub fn into_op_value_iter(self) -> impl Iterator<Item = (Op, T)> {
-        std::iter::from_coroutine(move || match self {
-            Self::Insert(row) => {
-                yield (Op::Insert, row);
-            }
-            Self::Delete(row) => {
-                yield (Op::Delete, row);
-            }
-            Self::Update {
-                old_value,
-                new_value,
-            } => {
-                yield (Op::UpdateDelete, old_value);
-                yield (Op::UpdateInsert, new_value);
-            }
-        })
+        std::iter::from_coroutine(
+            #[coroutine]
+            move || match self {
+                Self::Insert(row) => {
+                    yield (Op::Insert, row);
+                }
+                Self::Delete(row) => {
+                    yield (Op::Delete, row);
+                }
+                Self::Update {
+                    old_value,
+                    new_value,
+                } => {
+                    yield (Op::UpdateDelete, old_value);
+                    yield (Op::UpdateInsert, new_value);
+                }
+            },
+        )
     }
 }
 
