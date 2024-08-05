@@ -334,7 +334,6 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
 sqlx = { git = "https://github.com/KveinAxel/sqlx.git", rev = "f7bc5da" }
-madsim = { git = "https://github.com/madsim-rs/madsim.git", rev = "fb3dc13" }
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch to remove preserve_order from serde_json
 deno_core = { git = "https://github.com/bakjos/deno_core", rev = "9b241c6" }

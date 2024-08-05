@@ -1286,6 +1286,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1181e1e0d1fce796a03db1ae795d67167da795f9cf4a39c37589e85ef57f26d3"
 
 [[package]]
+name = "atomic-write-file"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cbf54d4588732bdfc5ebc3eb9f74f20e027112fc31de412fc7ff0cd1c6896dae"
+dependencies = [
+ "nix 0.28.0",
+ "rand",
+]
+
+[[package]]
 name = "auto_enums"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2235,7 +2245,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6362ed55def622cddc70a4746a68554d7b687713770de539e59a739b249f8ed"
 dependencies = [
  "borsh-derive",
- "cfg_aliases",
+ "cfg_aliases 0.2.1",
 ]
 
 [[package]]
@@ -2597,6 +2607,12 @@ dependencies = [
  "quote",
  "syn 2.0.66",
 ]
+
+[[package]]
+name = "cfg_aliases"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
 
 [[package]]
 name = "cfg_aliases"
@@ -5342,18 +5358,6 @@ dependencies = [
 
 [[package]]
 name = "flume"
-version = "0.10.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1657b4441c3403d9f7b3409e47575237dac27b1b5726df654a6ecbf92f0f7577"
-dependencies = [
- "futures-core",
- "futures-sink",
- "pin-project",
- "spin 0.9.8",
-]
-
-[[package]]
-name = "flume"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55ac459de2512911e4b674ce33cf20befaba382d05b62b008afc1c8b57cbf181"
@@ -5405,7 +5409,7 @@ dependencies = [
  "foyer-memory",
  "foyer-storage",
  "futures",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "minitrace",
  "pin-project",
  "tracing",
@@ -5423,7 +5427,7 @@ dependencies = [
  "futures",
  "hashbrown 0.14.3",
  "itertools 0.13.0",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "metrics",
  "minitrace",
  "nix 0.29.0",
@@ -5458,7 +5462,7 @@ dependencies = [
  "hashbrown 0.14.3",
  "itertools 0.13.0",
  "libc",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "minitrace",
  "parking_lot 0.12.1",
  "pin-project",
@@ -5488,7 +5492,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "lz4",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "minitrace",
  "parking_lot 0.12.1",
  "pin-project",
@@ -5771,7 +5775,7 @@ name = "futures-timer"
 version = "3.0.2"
 source = "git+https://github.com/madsim-rs/futures-timer.git?rev=05b33b4#05b33b4ede22b0517f49da59404d6e6d2848a192"
 dependencies = [
- "madsim",
+ "madsim 0.2.30",
 ]
 
 [[package]]
@@ -7273,9 +7277,9 @@ dependencies = [
 
 [[package]]
 name = "libsqlite3-sys"
-version = "0.26.0"
+version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afc22eff61b133b115c6e8c74e818c628d6d5e7a502afea6f64dee076dd94326"
+checksum = "cf4e226dcd58b4be396f7bd3c20da8fdee2911400705297ba7d2d7cc2c30f716"
 dependencies = [
  "cc",
  "pkg-config",
@@ -7462,6 +7466,36 @@ dependencies = [
 
 [[package]]
 name = "madsim"
+version = "0.2.25"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=fb3dc13#fb3dc132bc3a541df3bb64b05a44d538371fbc8c"
+dependencies = [
+ "ahash 0.8.11",
+ "async-channel 2.2.1",
+ "async-stream",
+ "async-task",
+ "bincode 1.3.3",
+ "bytes",
+ "downcast-rs",
+ "futures-util",
+ "lazy_static",
+ "libc",
+ "madsim-macros 0.2.12 (git+https://github.com/madsim-rs/madsim.git?rev=fb3dc13)",
+ "naive-timer",
+ "panic-message",
+ "rand",
+ "rand_xoshiro",
+ "rustversion",
+ "serde",
+ "spin 0.9.8",
+ "tokio",
+ "tokio-util",
+ "toml 0.8.12",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "madsim"
 version = "0.2.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f88753ddf8d3cd43b9cf71a93626dd9aad3c24086a04420beb31922e1f856d02"
@@ -7476,7 +7510,7 @@ dependencies = [
  "futures-util",
  "lazy_static",
  "libc",
- "madsim-macros",
+ "madsim-macros 0.2.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "naive-timer",
  "panic-message",
  "rand",
@@ -7504,7 +7538,7 @@ dependencies = [
  "aws-types",
  "bytes",
  "http 1.1.0",
- "madsim",
+ "madsim 0.2.30",
  "spin 0.9.8",
  "tracing",
 ]
@@ -7518,7 +7552,7 @@ dependencies = [
  "etcd-client",
  "futures-util",
  "http 0.2.9",
- "madsim",
+ "madsim 0.2.30",
  "serde",
  "serde_with 3.8.0",
  "spin 0.9.8",
@@ -7542,6 +7576,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "madsim-macros"
+version = "0.2.12"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=fb3dc13#fb3dc132bc3a541df3bb64b05a44d538371fbc8c"
+dependencies = [
+ "darling 0.14.4",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "madsim-rdkafka"
 version = "0.4.2+0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7553,7 +7598,7 @@ dependencies = [
  "futures-util",
  "libc",
  "log",
- "madsim",
+ "madsim 0.2.30",
  "rdkafka-sys",
  "serde",
  "serde_derive",
@@ -7567,11 +7612,21 @@ dependencies = [
 
 [[package]]
 name = "madsim-tokio"
+version = "0.2.24"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=fb3dc13#fb3dc132bc3a541df3bb64b05a44d538371fbc8c"
+dependencies = [
+ "madsim 0.2.25",
+ "spin 0.9.8",
+ "tokio",
+]
+
+[[package]]
+name = "madsim-tokio"
 version = "0.2.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "569929c869275edc1e2c1f1381a688a6e5a4200302b58caff819e07414ccddb9"
 dependencies = [
- "madsim",
+ "madsim 0.2.30",
  "spin 0.9.8",
  "tokio",
 ]
@@ -7585,7 +7640,7 @@ dependencies = [
  "async-stream",
  "chrono",
  "futures-util",
- "madsim",
+ "madsim 0.2.30",
  "tokio",
  "tonic 0.10.2",
  "tower",
@@ -8129,13 +8184,25 @@ dependencies = [
 
 [[package]]
 name = "nix"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab2156c4fce2f8df6c499cc1c763e4394b7482525bf2a9701c9d79d215f519e4"
+dependencies = [
+ "bitflags 2.6.0",
+ "cfg-if",
+ "cfg_aliases 0.1.1",
+ "libc",
+]
+
+[[package]]
+name = "nix"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
 dependencies = [
  "bitflags 2.6.0",
  "cfg-if",
- "cfg_aliases",
+ "cfg_aliases 0.2.1",
  "libc",
 ]
 
@@ -9110,7 +9177,7 @@ dependencies = [
  "futures",
  "itertools 0.12.1",
  "jsonwebtoken",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "openssl",
  "panic-message",
  "parking_lot 0.12.1",
@@ -9753,7 +9820,7 @@ checksum = "8bdf592881d821b83d471f8af290226c8d51402259e9bb5be7f9f8bdebbb11ac"
 dependencies = [
  "bytes",
  "heck 0.4.1",
- "itertools 0.11.0",
+ "itertools 0.10.5",
  "log",
  "multimap 0.8.3",
  "once_cell",
@@ -9787,7 +9854,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "265baba7fabd416cf5078179f7d2cbeca4ce7a9041111900675ea7c4cb8a4c32"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.66",
@@ -10552,7 +10619,7 @@ dependencies = [
  "indicatif",
  "itertools 0.12.1",
  "madsim-rdkafka",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "redis",
  "regex",
  "reqwest 0.12.4",
@@ -10637,7 +10704,7 @@ dependencies = [
  "hytra",
  "iceberg",
  "itertools 0.12.1",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "madsim-tonic",
  "memcomparable",
  "opendal",
@@ -10692,7 +10759,7 @@ dependencies = [
  "hdrhistogram",
  "itertools 0.12.1",
  "libc",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "nix 0.29.0",
  "opentelemetry",
  "parking_lot 0.12.1",
@@ -10720,7 +10787,7 @@ name = "risingwave_cmd"
 version = "1.11.0-alpha"
 dependencies = [
  "clap",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "prometheus",
  "risingwave_common",
  "risingwave_compactor",
@@ -10745,7 +10812,7 @@ dependencies = [
  "const-str",
  "expect-test",
  "home",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "prometheus",
  "risingwave_cmd",
  "risingwave_common",
@@ -10824,7 +10891,7 @@ dependencies = [
  "libc",
  "lru 0.7.6",
  "mach2",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "memcomparable",
  "more-asserts",
  "num-integer",
@@ -10909,7 +10976,7 @@ version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "parking_lot 0.12.1",
  "risingwave_common",
  "thiserror",
@@ -10934,7 +11001,7 @@ dependencies = [
  "itertools 0.12.1",
  "libc",
  "mach2",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "madsim-tonic",
  "parking_lot 0.12.1",
  "pin-project-lite",
@@ -10986,7 +11053,7 @@ dependencies = [
  "axum 0.7.4",
  "futures",
  "hyper 0.14.27",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "madsim-tonic",
  "prometheus",
  "risingwave_common",
@@ -11010,7 +11077,7 @@ dependencies = [
  "clap",
  "foyer",
  "futures",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "prometheus",
  "rand",
  "risingwave_common",
@@ -11036,7 +11103,7 @@ dependencies = [
  "await-tree",
  "clap",
  "jsonbb",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "madsim-tonic",
  "parking_lot 0.12.1",
  "prost 0.12.1",
@@ -11067,7 +11134,7 @@ dependencies = [
  "futures-async-stream",
  "hyper 0.14.27",
  "itertools 0.12.1",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "madsim-tonic",
  "maplit",
  "pprof",
@@ -11160,7 +11227,7 @@ dependencies = [
  "jsonbb",
  "jsonwebtoken",
  "madsim-rdkafka",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "madsim-tonic",
  "maplit",
  "moka",
@@ -11276,7 +11343,7 @@ dependencies = [
  "inquire",
  "itertools 0.12.1",
  "madsim-etcd-client",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "madsim-tonic",
  "memcomparable",
  "prost 0.12.1",
@@ -11313,7 +11380,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "itertools 0.12.1",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "parking_lot 0.12.1",
  "paste",
  "rand",
@@ -11335,7 +11402,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "pg_interval",
  "rust_decimal",
  "tokio-postgres",
@@ -11383,7 +11450,7 @@ dependencies = [
  "futures-util",
  "itertools 0.12.1",
  "linkme",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "num-traits",
  "parse-display",
  "paste",
@@ -11432,7 +11499,7 @@ dependencies = [
  "itertools 0.12.1",
  "jsonbb",
  "linkme",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "md5",
  "moka",
  "num-traits",
@@ -11504,7 +11571,7 @@ dependencies = [
  "itertools 0.12.1",
  "jsonbb",
  "linkme",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "madsim-tonic",
  "maplit",
  "md5",
@@ -11596,7 +11663,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "itertools 0.12.1",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "parking_lot 0.12.1",
  "rand",
  "risingwave_common",
@@ -11627,7 +11694,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "itertools 0.12.1",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "mockall",
  "parking_lot 0.12.1",
  "prost 0.12.1",
@@ -11648,7 +11715,7 @@ dependencies = [
  "foyer",
  "futures",
  "jni",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "prost 0.12.1",
  "risingwave_common",
  "risingwave_expr",
@@ -11677,7 +11744,7 @@ dependencies = [
  "futures",
  "itertools 0.12.1",
  "jni",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "paste",
  "prost 0.12.1",
  "risingwave_common",
@@ -11712,7 +11779,7 @@ dependencies = [
  "bytes",
  "futures",
  "futures-async-stream",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_hummock_test",
@@ -11750,7 +11817,7 @@ dependencies = [
  "itertools 0.12.1",
  "jsonbb",
  "madsim-etcd-client",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "madsim-tonic",
  "maplit",
  "memcomparable",
@@ -11853,7 +11920,7 @@ dependencies = [
  "hex",
  "itertools 0.12.1",
  "madsim-etcd-client",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "madsim-tonic",
  "otlp-embedded",
  "prometheus-http-query",
@@ -11884,7 +11951,7 @@ dependencies = [
  "either",
  "futures",
  "itertools 0.12.1",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "madsim-tonic",
  "prost 0.12.1",
  "rand",
@@ -11925,9 +11992,9 @@ dependencies = [
  "hyper-rustls 0.24.2",
  "hyper-tls 0.5.0",
  "itertools 0.12.1",
- "madsim",
+ "madsim 0.2.30",
  "madsim-aws-sdk-s3",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "opendal",
  "prometheus",
  "reqwest 0.12.4",
@@ -11969,7 +12036,7 @@ dependencies = [
  "expect-test",
  "itertools 0.12.1",
  "libtest-mimic",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "paste",
  "risingwave_expr_impl",
  "risingwave_frontend",
@@ -11989,7 +12056,7 @@ version = "1.11.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "path-absolutize",
  "similar",
  "tracing",
@@ -12010,7 +12077,7 @@ dependencies = [
  "hyper 0.14.27",
  "itertools 0.12.1",
  "lru 0.7.6",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "madsim-tonic",
  "moka",
  "paste",
@@ -12041,7 +12108,7 @@ dependencies = [
  "either",
  "futures",
  "hostname 0.4.0",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "minitrace",
  "minitrace-opentelemetry",
  "opentelemetry",
@@ -12076,11 +12143,11 @@ dependencies = [
  "glob",
  "itertools 0.12.1",
  "lru 0.7.6",
- "madsim",
+ "madsim 0.2.30",
  "madsim-aws-sdk-s3",
  "madsim-etcd-client",
  "madsim-rdkafka",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "paste",
  "pin-project",
  "pretty_assertions",
@@ -12123,7 +12190,7 @@ dependencies = [
  "console",
  "itertools 0.12.1",
  "libtest-mimic",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "matches",
  "serde",
  "serde_with 3.8.0",
@@ -12146,7 +12213,7 @@ dependencies = [
  "expect-test",
  "itertools 0.12.1",
  "libtest-mimic",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "rand",
  "rand_chacha",
  "regex",
@@ -12171,7 +12238,7 @@ dependencies = [
  "anyhow",
  "clap",
  "futures",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "prometheus",
  "regex",
  "risingwave_rt",
@@ -12214,7 +12281,7 @@ dependencies = [
  "libc",
  "lz4",
  "mach2",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "madsim-tonic",
  "memcomparable",
  "metrics-prometheus",
@@ -12285,7 +12352,7 @@ dependencies = [
  "jsonbb",
  "local_stats_alloc",
  "lru 0.7.6",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "madsim-tonic",
  "maplit",
  "memcomparable",
@@ -12460,7 +12527,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1568e15fab2d546f940ed3a21f48bbbd1c494c90c99c4481339364a497f94a9"
 dependencies = [
  "bytes",
- "flume 0.11.0",
+ "flume",
  "futures-util",
  "log",
  "rustls-native-certs 0.7.0",
@@ -13961,9 +14028,8 @@ dependencies = [
 
 [[package]]
 name = "sqlx"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e58421b6bc416714d5115a2ca953718f6c621a51b68e4f4922aea5a4391a721"
+version = "0.7.3"
+source = "git+https://github.com/KveinAxel/sqlx.git?rev=f7bc5da#f7bc5da9013a6d7866681edff0cda708631739ef"
 dependencies = [
  "sqlx-core",
  "sqlx-macros",
@@ -13974,9 +14040,8 @@ dependencies = [
 
 [[package]]
 name = "sqlx-core"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd4cef4251aabbae751a3710927945901ee1d97ee96d757f6880ebb9a79bfd53"
+version = "0.7.3"
+source = "git+https://github.com/KveinAxel/sqlx.git?rev=f7bc5da#f7bc5da9013a6d7866681edff0cda708631739ef"
 dependencies = [
  "ahash 0.8.11",
  "atoi",
@@ -13986,7 +14051,6 @@ dependencies = [
  "chrono",
  "crc",
  "crossbeam-queue",
- "dotenvy",
  "either",
  "event-listener 2.5.3",
  "futures-channel",
@@ -13998,6 +14062,7 @@ dependencies = [
  "hex",
  "indexmap 2.2.6",
  "log",
+ "madsim-tokio 0.2.24",
  "memchr",
  "native-tls",
  "once_cell",
@@ -14011,7 +14076,6 @@ dependencies = [
  "sqlformat",
  "thiserror",
  "time",
- "tokio",
  "tokio-stream",
  "tracing",
  "url",
@@ -14020,9 +14084,8 @@ dependencies = [
 
 [[package]]
 name = "sqlx-macros"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "208e3165167afd7f3881b16c1ef3f2af69fa75980897aac8874a0696516d12c2"
+version = "0.7.3"
+source = "git+https://github.com/KveinAxel/sqlx.git?rev=f7bc5da#f7bc5da9013a6d7866681edff0cda708631739ef"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -14033,14 +14096,15 @@ dependencies = [
 
 [[package]]
 name = "sqlx-macros-core"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a4a8336d278c62231d87f24e8a7a74898156e34c1c18942857be2acb29c7dfc"
+version = "0.7.3"
+source = "git+https://github.com/KveinAxel/sqlx.git?rev=f7bc5da#f7bc5da9013a6d7866681edff0cda708631739ef"
 dependencies = [
+ "atomic-write-file",
  "dotenvy",
  "either",
  "heck 0.4.1",
  "hex",
+ "madsim-tokio 0.2.24",
  "once_cell",
  "proc-macro2",
  "quote",
@@ -14053,15 +14117,13 @@ dependencies = [
  "sqlx-sqlite",
  "syn 1.0.109",
  "tempfile",
- "tokio",
  "url",
 ]
 
 [[package]]
 name = "sqlx-mysql"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ca69bf415b93b60b80dc8fda3cb4ef52b2336614d8da2de5456cc942a110482"
+version = "0.7.3"
+source = "git+https://github.com/KveinAxel/sqlx.git?rev=f7bc5da#f7bc5da9013a6d7866681edff0cda708631739ef"
 dependencies = [
  "atoi",
  "base64 0.21.7",
@@ -14106,9 +14168,8 @@ dependencies = [
 
 [[package]]
 name = "sqlx-postgres"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0db2df1b8731c3651e204629dd55e52adbae0462fa1bdcbed56a2302c18181e"
+version = "0.7.3"
+source = "git+https://github.com/KveinAxel/sqlx.git?rev=f7bc5da#f7bc5da9013a6d7866681edff0cda708631739ef"
 dependencies = [
  "atoi",
  "base64 0.21.7",
@@ -14151,26 +14212,27 @@ dependencies = [
 
 [[package]]
 name = "sqlx-sqlite"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be4c21bf34c7cae5b283efb3ac1bcc7670df7561124dc2f8bdc0b59be40f79a2"
+version = "0.7.3"
+source = "git+https://github.com/KveinAxel/sqlx.git?rev=f7bc5da#f7bc5da9013a6d7866681edff0cda708631739ef"
 dependencies = [
+ "async-channel 2.2.1",
  "atoi",
  "chrono",
- "flume 0.10.14",
+ "flume",
  "futures-channel",
  "futures-core",
- "futures-executor",
  "futures-intrusive",
  "futures-util",
  "libsqlite3-sys",
  "log",
+ "madsim-tokio 0.2.24",
  "percent-encoding",
  "serde",
  "sqlx-core",
  "time",
  "tracing",
  "url",
+ "urlencoding",
  "uuid",
 ]
 
@@ -14763,7 +14825,7 @@ name = "sync-point"
 version = "0.1.0"
 dependencies = [
  "futures-util",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "spin 0.9.8",
  "thiserror",
 ]
@@ -15191,7 +15253,7 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "log",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "parking_lot 0.12.1",
  "percent-encoding",
  "phf",
@@ -15209,7 +15271,7 @@ name = "tokio-retry"
 version = "0.3.0"
 source = "git+https://github.com/madsim-rs/rust-tokio-retry.git?rev=95e2fd3#95e2fd3c31047093869346f5253335c3876a483f"
 dependencies = [
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "pin-project",
  "rand",
 ]
@@ -15275,7 +15337,7 @@ version = "0.1.14"
 source = "git+https://github.com/madsim-rs/tokio.git?rev=fe39bb8e#fe39bb8e8ab0ed96ee1b4477ab5508c20ce017fb"
 dependencies = [
  "futures-core",
- "madsim-tokio",
+ "madsim-tokio 0.2.28",
  "pin-project-lite",
 ]
 
@@ -17391,13 +17453,3 @@ dependencies = [
  "libc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "madsim"
-version = "0.2.25"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=fb3dc13#fb3dc132bc3a541df3bb64b05a44d538371fbc8c"
-
-[[patch.unused]]
-name = "sqlx"
-version = "0.7.3"
-source = "git+https://github.com/KveinAxel/sqlx.git?rev=f7bc5da#f7bc5da9013a6d7866681edff0cda708631739ef"
