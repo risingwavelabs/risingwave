@@ -277,8 +277,8 @@ impl IcebergConfig {
             self.secret_key.clone().to_string(),
         );
         iceberg_configs.insert(
-            "iceberg.table.io.s3.path_style_access".to_string(),
-            self.path_style_access.to_string(),
+            "iceberg.table.io.enable_virtual_host_style".to_string(),
+            (!self.path_style_access).to_string()
         );
 
         let (bucket, root) = {
