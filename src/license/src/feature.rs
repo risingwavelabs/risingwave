@@ -47,6 +47,7 @@ macro_rules! for_all_features {
             { TimeTravel,           Paid,       "Query historical data within the retention period."},
             { GlueSchemaRegistry,   Paid,       "Use Schema Registry from AWS Glue rather than Confluent." },
             { SecretManagement,     Paid,       "Secret management." },
+            { SqlServerSink,        Paid,       "Sink data from RisingWave to SQL Server." },
         }
     };
 }
