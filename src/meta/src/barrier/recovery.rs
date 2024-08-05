@@ -372,6 +372,7 @@ impl GlobalBarrierManager {
                         added_actors: Default::default(),
                         actor_splits: build_actor_connector_splits(&source_split_assignments),
                         pause: paused_reason.is_some(),
+                        subscriptions_to_add: Default::default(),
                     })));
 
                     // Use a different `curr_epoch` for each recovery attempt.

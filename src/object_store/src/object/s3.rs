@@ -116,10 +116,7 @@ impl S3StreamingUploader {
         /// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html>
         const MIN_PART_SIZE: usize = 5 * 1024 * 1024;
         const MAX_PART_SIZE: usize = 5 * 1024 * 1024 * 1024;
-        let part_size = config
-            .upload_part_size
-            .min(MAX_PART_SIZE)
-            .max(MIN_PART_SIZE);
+        let part_size = config.upload_part_size.clamp(MIN_PART_SIZE, MAX_PART_SIZE);
 
         Self {
             client,
