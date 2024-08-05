@@ -15,7 +15,7 @@ WITH
 (
   connector = 'dynamodb',
   table = 'xx',
-  primary_key = 'xx',
+  primary_key = 'k',
   region = 'xx',
   access_key = 'xx',
   secret_key = 'xx'
@@ -24,8 +24,10 @@ WITH
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: Sink error
-  2: feature DynamoDbSink is only available for tier Paid and above, while the current tier is Free
+  1: gRPC request to meta service failed: Internal error
+  2: failed to validate sink
+  3: Internal error
+  4: feature DynamoDbSink is only available for tier Paid and above, while the current tier is Free
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
@@ -47,8 +49,10 @@ WITH (
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: Sink error
-  2: feature SnowflakeSink is only available for tier Paid and above, while the current tier is Free
+  1: gRPC request to meta service failed: Internal error
+  2: failed to validate sink
+  3: Internal error
+  4: feature SnowflakeSink is only available for tier Paid and above, while the current tier is Free
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
@@ -66,8 +70,9 @@ WITH (
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: Sink error
-  2: feature OpenSearchSink is only available for tier Paid and above, while the current tier is Free
+  1: gRPC request to meta service failed: Internal error
+  2: failed to validate sink
+  3: feature OpenSearchSink is only available for tier Paid and above, while the current tier is Free
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
@@ -122,6 +127,7 @@ WITH (
     url = 'xx',
     username = 'xx',
     password = 'xx',
+    index = 'xx',
 );
 ----
 db error: ERROR: Failed to run the query
@@ -129,7 +135,7 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: gRPC request to meta service failed: Internal error
   2: failed to validate sink
-  3: Java exception was thrown
+  3: sink cannot pass validation: INTERNAL: Connection is closed
 
 
 statement ok

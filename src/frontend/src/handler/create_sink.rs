@@ -29,13 +29,9 @@ use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
-use risingwave_connector::sink::dynamodb::DynamoDbSink;
 use risingwave_connector::sink::iceberg::{IcebergConfig, ICEBERG_SINK};
-use risingwave_connector::sink::remote::OpenSearchSink;
-use risingwave_connector::sink::snowflake::SnowflakeSink;
 use risingwave_connector::sink::{
-    Sink, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
-    SINK_WITHOUT_BACKFILL,
+    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_WITHOUT_BACKFILL,
 };
 use risingwave_pb::catalog::{PbSink, PbSource, Table};
 use risingwave_pb::ddl_service::{ReplaceTablePlan, TableJobType};
@@ -172,24 +168,6 @@ pub async fn gen_sink_plan(
         .get(CONNECTOR_TYPE_KEY)
         .cloned()
         .ok_or_else(|| ErrorCode::BindError(format!("missing field '{CONNECTOR_TYPE_KEY}'")))?;
-
-    if connector == SnowflakeSink::SINK_NAME {
-        risingwave_common::license::Feature::SnowflakeSink
-            .check_available()
-            .map_err(|e| RwError::from(ErrorCode::SinkError(anyhow::Error::from(e).into())))?;
-    }
-
-    if connector == DynamoDbSink::SINK_NAME {
-        risingwave_common::license::Feature::DynamoDbSink
-            .check_available()
-            .map_err(|e| RwError::from(ErrorCode::SinkError(anyhow::Error::from(e).into())))?;
-    }
-
-    if connector == OpenSearchSink::SINK_NAME {
-        risingwave_common::license::Feature::OpenSearchSink
-            .check_available()
-            .map_err(|e| RwError::from(ErrorCode::SinkError(anyhow::Error::from(e).into())))?;
-    }
 
     let format_desc = match stmt.sink_schema {
         // Case A: new syntax `format ... encode ...`
