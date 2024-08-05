@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ops::Deref;
+use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::split_sst;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, to_prost_table_stats_map, PbTableStatsMap,
@@ -104,23 +105,29 @@ impl HummockManager {
         sstables: Vec<impl Into<LocalSstableInfo>>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     ) -> Result<()> {
-        let tables = self
-            .versioning
-            .read()
-            .await
-            .current_version
-            .state_table_info
-            .info()
-            .keys()
-            .cloned()
-            .collect();
+        use itertools::Itertools;
+        let sstables: Vec<LocalSstableInfo> = sstables.into_iter().map(Into::into).collect();
+
+        let mut table_ids_from_sst = sstables
+            .iter()
+            .map(|s| s.sst_info.table_ids.iter().cloned())
+            .flatten()
+            .map(|t| TableId::from(t))
+            .collect_vec();
+        table_ids_from_sst.sort();
+
+        let new_table_fragment_info = NewTableFragmentInfo {
+            table_id: TableId::new(1),
+            mv_table_id: None,
+            internal_table_ids: table_ids_from_sst.clone(),
+        };
         let info = CommitEpochInfo::new(
-            sstables.into_iter().map(Into::into).collect(),
+            sstables,
             HashMap::new(),
             sst_to_context,
-            None,
+            Some(new_table_fragment_info),
             HashMap::new(),
-            BTreeMap::from_iter([(epoch, tables)]),
+            BTreeMap::from_iter([(epoch, table_ids_from_sst.iter().cloned().collect())]),
             epoch,
             vec![],
         );
@@ -143,6 +150,7 @@ impl HummockManager {
             max_committed_epoch: epoch,
             batch_commit_for_new_cg,
         } = commit_info;
+
         let mut versioning_guard = self.versioning.write().await;
         let _timer = start_measure_real_process_timer!(self, "commit_epoch");
         // Prevent commit new epochs if this flag is set
@@ -186,71 +194,115 @@ impl HummockManager {
 
         let mut table_compaction_group_mapping = state_table_info.build_table_compaction_group_id();
 
-        let mut new_table_ids = HashMap::new();
+        // let mut new_table_ids = HashMap::new();
+        // let new_compaction_group;
+        let mut new_tables = None;
+        let mut compaction_group_manager_txn = None;
+        let mut compaction_group_config = None;
+
         // Add new table
         if let Some(new_fragment_table_info) = new_table_fragment_info {
+            let mut new_table_ids = Vec::default();
+            if compaction_group_manager_txn.is_none() {
+                let compaction_group_manager_guard = self.compaction_group_manager.write().await;
+                let config = compaction_group_manager_guard
+                    .default_compaction_config()
+                    .deref()
+                    .clone();
+                compaction_group_config = Some(config);
+                compaction_group_manager_txn =
+                    Some(CompactionGroupManager::start_owned_compaction_groups_txn(
+                        compaction_group_manager_guard,
+                    ));
+            }
+
+            let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
+            compaction_group_manager_txn.as_mut().unwrap().insert(
+                new_compaction_group_id,
+                CompactionGroup {
+                    group_id: new_compaction_group_id,
+                    compaction_config: Arc::new(compaction_group_config.as_ref().unwrap().clone()),
+                },
+            );
+
             if !new_fragment_table_info.internal_table_ids.is_empty() {
                 on_handle_add_new_table(
                     state_table_info,
                     &new_fragment_table_info.internal_table_ids,
-                    StaticCompactionGroupId::StateDefault as u64,
+                    new_compaction_group_id,
                     &mut table_compaction_group_mapping,
-                    &mut new_table_ids,
+                    // &mut new_table_ids,
                 )?;
+
+                new_table_ids.extend_from_slice(&new_fragment_table_info.internal_table_ids);
             }
 
             if let Some(mv_table_id) = new_fragment_table_info.mv_table_id {
                 on_handle_add_new_table(
                     state_table_info,
                     &[mv_table_id],
-                    StaticCompactionGroupId::MaterializedView as u64,
+                    new_compaction_group_id,
                     &mut table_compaction_group_mapping,
-                    &mut new_table_ids,
+                    // &mut new_table_ids,
                 )?;
+
+                new_table_ids.push(mv_table_id);
             }
+
+            new_tables = Some((
+                new_table_ids,
+                new_compaction_group_id,
+                compaction_group_config.as_ref().unwrap().clone(),
+            ));
         }
 
-        let (batch_commit_for_new_cg, compaction_group_manager_txn) =
-            if !batch_commit_for_new_cg.is_empty() {
+        let batch_commit_for_new_cg = if !batch_commit_for_new_cg.is_empty() {
+            if compaction_group_manager_txn.is_none() {
                 let compaction_group_manager_guard = self.compaction_group_manager.write().await;
-                let compaction_group_config =
-                    compaction_group_manager_guard.default_compaction_config();
-                let mut compaction_group_manager =
-                    CompactionGroupManager::start_owned_compaction_groups_txn(
+                let config = compaction_group_manager_guard
+                    .default_compaction_config()
+                    .deref()
+                    .clone();
+                compaction_group_config = Some(config);
+                compaction_group_manager_txn =
+                    Some(CompactionGroupManager::start_owned_compaction_groups_txn(
                         compaction_group_manager_guard,
-                    );
-                let mut batch_commit_info = HashMap::new();
-                for BatchCommitForNewCg {
-                    epoch_to_ssts,
-                    table_ids,
-                } in batch_commit_for_new_cg
-                {
-                    let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
-                    compaction_group_manager.insert(
-                        new_compaction_group_id,
-                        CompactionGroup {
-                            group_id: new_compaction_group_id,
-                            compaction_config: compaction_group_config.clone(),
-                        },
-                    );
+                    ));
+            }
 
-                    on_handle_add_new_table(
-                        state_table_info,
-                        &table_ids,
-                        new_compaction_group_id,
-                        &mut table_compaction_group_mapping,
-                        &mut new_table_ids,
-                    )?;
+            let mut batch_commit_info = HashMap::new();
+            for BatchCommitForNewCg {
+                epoch_to_ssts,
+                table_ids,
+            } in batch_commit_for_new_cg
+            {
+                let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
+                compaction_group_manager_txn.as_mut().unwrap().insert(
+                    new_compaction_group_id,
+                    CompactionGroup {
+                        group_id: new_compaction_group_id,
+                        compaction_config: Arc::new(
+                            compaction_group_config.as_ref().unwrap().clone(),
+                        ),
+                    },
+                );
 
-                    batch_commit_info.insert(new_compaction_group_id, epoch_to_ssts);
-                }
-                (
-                    Some((batch_commit_info, (*compaction_group_config).clone())),
-                    Some(compaction_group_manager),
-                )
-            } else {
-                (None, None)
-            };
+                on_handle_add_new_table(
+                    state_table_info,
+                    &table_ids,
+                    new_compaction_group_id,
+                    &mut table_compaction_group_mapping,
+                )?;
+
+                batch_commit_info.insert(new_compaction_group_id, (epoch_to_ssts, table_ids));
+            }
+            Some((
+                batch_commit_info,
+                compaction_group_config.as_ref().unwrap().clone(),
+            ))
+        } else {
+            None
+        };
 
         let commit_sstables = self
             .correct_commit_ssts(sstables, &table_compaction_group_mapping)
@@ -261,7 +313,7 @@ impl HummockManager {
         let time_travel_delta = version.pre_commit_epoch(
             epoch,
             commit_sstables,
-            new_table_ids,
+            new_tables,
             new_table_watermarks,
             change_log_delta,
             batch_commit_for_new_cg,
@@ -472,7 +524,6 @@ fn on_handle_add_new_table(
     table_ids: &[TableId],
     compaction_group_id: CompactionGroupId,
     table_compaction_group_mapping: &mut HashMap<TableId, CompactionGroupId>,
-    new_table_ids: &mut HashMap<TableId, CompactionGroupId>,
 ) -> Result<()> {
     if table_ids.is_empty() {
         return Err(Error::CompactionGroup("empty table ids".to_string()));
@@ -486,7 +537,6 @@ fn on_handle_add_new_table(
             )));
         }
         table_compaction_group_mapping.insert(*table_id, compaction_group_id);
-        new_table_ids.insert(*table_id, compaction_group_id);
     }
 
     Ok(())

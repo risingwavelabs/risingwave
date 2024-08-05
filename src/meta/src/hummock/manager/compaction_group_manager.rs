@@ -434,14 +434,6 @@ impl HummockManager {
         parent_group_id: CompactionGroupId,
         table_ids: &[StateTableId],
     ) -> Result<CompactionGroupId> {
-        // let result = self
-        //     .move_state_table_to_compaction_group(
-        //         parent_group_id,
-        //         table_ids,
-        //         self.env.opts.partition_vnode_count,
-        //     )
-        //     .await?;
-
         if !table_ids.is_sorted() {
             return Err(Error::CompactionGroup(
                 "table_ids must be sorted".to_string(),
@@ -449,11 +441,7 @@ impl HummockManager {
         }
 
         let result = self
-            .move_state_tables_to_dedicated_compaction_group(
-                parent_group_id,
-                table_ids,
-                self.env.opts.partition_vnode_count,
-            )
+            .move_state_tables_to_dedicated_compaction_group(parent_group_id, table_ids)
             .await?;
 
         Ok(result)
@@ -461,6 +449,7 @@ impl HummockManager {
 
     /// move some table to another compaction-group. Create a new compaction group if it does not
     /// exist.
+    #[expect(deprecated)]
     pub async fn move_state_table_to_compaction_group(
         &self,
         parent_group_id: CompactionGroupId,
@@ -720,10 +709,6 @@ impl HummockManager {
                     .as_ref()
                     .clone();
 
-                // if table_ids_right.len() == 1 {
-                //     config.split_weight_by_vnode = partition_vnode_count;
-                // }
-
                 #[expect(deprecated)]
                 // fill the deprecated field with default value
                 new_version_delta.group_deltas.insert(
@@ -821,7 +806,6 @@ impl HummockManager {
         &self,
         parent_group_id: CompactionGroupId,
         table_ids: &[StateTableId],
-        _partition_vnode_count: u32,
     ) -> Result<CompactionGroupId> {
         if table_ids.is_empty() {
             return Ok(parent_group_id);
@@ -840,6 +824,9 @@ impl HummockManager {
         // 2. table_id = 7, vnode = 0, epoch = 0
         let table_ids = table_ids.iter().cloned().unique().collect_vec();
 
+        // The new compaction group id is always generate on the right side
+        // Hence, we return the first compaction group id as the result
+
         // split 1
         let target_compaction_group_id = self
             .split_compaction_group_v2(
@@ -850,17 +837,12 @@ impl HummockManager {
             .await?;
 
         // split 2
-        let target_compaction_group_id = self
-            .split_compaction_group_v2(
-                target_compaction_group_id,
-                *table_ids.last().unwrap(),
-                group_split::VNODE_SPLIT_TO_LEFT,
-            )
-            .await?;
-
-        if table_ids.len() == 1 {
-            // update compaction config for target_compaction_group_id
-        }
+        self.split_compaction_group_v2(
+            target_compaction_group_id,
+            *table_ids.last().unwrap(),
+            group_split::VNODE_SPLIT_TO_LEFT,
+        )
+        .await?;
 
         Ok(target_compaction_group_id)
     }
@@ -1191,6 +1173,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             }
             MutableConfig::MaxL0CompactLevelCount(c) => {
                 target.max_l0_compact_level_count = Some(*c);
+            }
+            MutableConfig::SplitWeightByVnode(c) => {
+                target.split_weight_by_vnode = *c;
             }
         }
     }

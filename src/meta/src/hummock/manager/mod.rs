@@ -395,12 +395,7 @@ impl HummockManager {
             versioning_guard.checkpoint = c;
             versioning_guard.checkpoint.version.clone()
         } else {
-            let default_compaction_config = self
-                .compaction_group_manager
-                .read()
-                .await
-                .default_compaction_config();
-            let checkpoint_version = HummockVersion::create_init_version(default_compaction_config);
+            let checkpoint_version = HummockVersion::create_init_version();
             tracing::info!("init hummock version checkpoint");
             versioning_guard.checkpoint = HummockVersionCheckpoint {
                 version: checkpoint_version.clone(),
@@ -410,15 +405,7 @@ impl HummockManager {
             checkpoint_version
         };
 
-        // println!("load checkpoint version {:?}", redo_state);
-
-        // println!(
-        //     "check point version cgs {:?}",
-        //     redo_state.levels.keys().cloned().collect_vec()
-        // );
-
         for version_delta in hummock_version_deltas.values() {
-            // println!("version_delta {:?}", version_delta);
             if version_delta.prev_id == redo_state.id {
                 redo_state.apply_version_delta(version_delta);
             }

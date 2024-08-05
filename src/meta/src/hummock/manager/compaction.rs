@@ -42,8 +42,10 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    HummockLevelsExt, TableGroupInfo,
+};
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::level::{InputLevel, Level, Levels};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -56,6 +58,7 @@ use risingwave_hummock_sdk::{
     HummockVersionId,
 };
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
     self, Event as RequestEvent, HeartBeat, PullTask,
 };
@@ -1571,37 +1574,36 @@ impl HummockManager {
         table_write_throughput: &HashMap<u32, VecDeque<u64>>,
         table_id: &u32,
         table_size: &u64,
-        is_creating_table: bool,
         checkpoint_secs: u64,
         parent_group_id: u64,
         group_size: u64,
     ) {
-        let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
-        let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
         let partition_vnode_count = self.env.opts.partition_vnode_count;
         let window_size =
             self.env.opts.table_info_statistic_history_times / (checkpoint_secs as usize);
 
-        let mut is_high_write_throughput = false;
-        let mut is_low_write_throughput = true;
-        if let Some(history) = table_write_throughput.get(table_id) {
-            if history.len() >= window_size {
-                is_high_write_throughput = history.iter().all(|throughput| {
-                    *throughput / checkpoint_secs > self.env.opts.table_write_throughput_threshold
-                });
-                is_low_write_throughput = history.iter().any(|throughput| {
-                    *throughput / checkpoint_secs < self.env.opts.min_table_split_write_throughput
-                });
-            }
-        }
+        let is_high_write_throughput = is_table_high_write_throughput(
+            table_write_throughput,
+            *table_id,
+            checkpoint_secs,
+            window_size,
+            self.env.opts.table_write_throughput_threshold,
+        );
+
+        let is_low_write_throughput = is_table_low_write_throughput(
+            table_write_throughput,
+            *table_id,
+            checkpoint_secs,
+            window_size,
+            self.env.opts.min_table_split_write_throughput,
+        );
 
         let state_table_size = *table_size;
 
         // 1. Avoid splitting a creating table
         // 2. Avoid splitting a is_low_write_throughput creating table
         // 3. Avoid splitting a non-high throughput medium-sized table
-        if is_creating_table
-            || (is_low_write_throughput)
+        if is_low_write_throughput
             || (state_table_size < self.env.opts.min_table_split_size && !is_high_write_throughput)
         {
             return;
@@ -1609,25 +1611,41 @@ impl HummockManager {
 
         // do not split a large table and a small table because it would increase IOPS
         // of small table.
-        if parent_group_id != default_group_id && parent_group_id != mv_group_id {
-            let rest_group_size = group_size - state_table_size;
-            if rest_group_size < state_table_size
-                && rest_group_size < self.env.opts.min_table_split_size
-            {
-                return;
-            }
+        let rest_group_size = group_size - state_table_size;
+        if rest_group_size < state_table_size
+            && rest_group_size < self.env.opts.min_table_split_size
+        {
+            return;
         }
 
         let ret = self
-            .move_state_table_to_compaction_group(
-                parent_group_id,
-                &[*table_id],
-                partition_vnode_count,
-            )
+            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &[*table_id])
             .await;
         match ret {
             Ok(new_group_id) => {
                 tracing::info!("move state table [{}] from group-{} to group-{} success table_vnode_partition_count {:?}", table_id, parent_group_id, new_group_id, partition_vnode_count);
+
+                // update compaction config for target_compaction_group_id
+                let mut compaction_group_manager = self.compaction_group_manager.write().await;
+                let mut compaction_groups_txn =
+                    compaction_group_manager.start_compaction_groups_txn();
+                if let Err(err) = compaction_groups_txn.update_compaction_config(
+                    &[new_group_id],
+                    &[MutableConfig::SplitWeightByVnode(partition_vnode_count)],
+                ) {
+                    tracing::error!(
+                        error = %err.as_report(),
+                        "failed to update compaction config for group-{}",
+                        new_group_id
+                    );
+                }
+                if let Err(err) = commit_multi_var!(self.meta_store_ref(), compaction_groups_txn) {
+                    tracing::error!(
+                        error = %err.as_report(),
+                        "failed to update compaction config for group-{}",
+                        new_group_id
+                    );
+                }
             }
             Err(e) => {
                 tracing::info!(
@@ -1638,6 +1656,110 @@ impl HummockManager {
                 )
             }
         }
+    }
+
+    pub async fn try_merge_compaction_group(
+        &self,
+        table_write_throughput: &HashMap<u32, VecDeque<u64>>,
+        group: &TableGroupInfo,
+        next_group: &TableGroupInfo,
+        checkpoint_secs: u64,
+        created_tables: &HashSet<u32>,
+    ) -> Result<()> {
+        if group.table_statistic.is_empty() || next_group.table_statistic.is_empty() {
+            return Err(Error::CompactionGroup(format!(
+                "group-{} or group-{} is empty",
+                group.group_id, next_group.group_id
+            )));
+        }
+
+        let is_creating_compaction_group = {
+            let table_id = group.table_statistic.keys().next().unwrap();
+            !created_tables.contains(table_id)
+        };
+
+        // do not merge the compaction group which is creating
+        if is_creating_compaction_group {
+            tracing::info!("Not Merge creating group {}", group.group_id);
+            return Err(Error::CompactionGroup(format!(
+                "group-{} is creating",
+                group.group_id
+            )));
+        }
+
+        // do not merge high throughput group
+        let window_size =
+            self.env.opts.table_info_statistic_history_times / (checkpoint_secs as usize);
+
+        if group.table_statistic.keys().any(|table_id| {
+            is_table_high_write_throughput(
+                &table_write_throughput,
+                *table_id,
+                checkpoint_secs,
+                window_size,
+                self.env.opts.table_write_throughput_threshold,
+            )
+        }) {
+            tracing::info!("Not Merge high throughput group {}", group.group_id);
+            return Err(Error::CompactionGroup(format!(
+                "group-{} is high throughput",
+                group.group_id
+            )));
+        }
+
+        // TODO:  do not merge huge group
+
+        let is_next_creating_compaction_group = {
+            let table_id = next_group.table_statistic.keys().next().unwrap();
+            !created_tables.contains(table_id)
+        };
+
+        if is_next_creating_compaction_group {
+            tracing::info!("Not Merge creating group {}", next_group.group_id);
+            return Err(Error::CompactionGroup(format!(
+                "right group-{} is creating",
+                next_group.group_id
+            )));
+        }
+
+        if next_group.table_statistic.keys().any(|table_id| {
+            is_table_high_write_throughput(
+                &table_write_throughput,
+                *table_id,
+                checkpoint_secs,
+                window_size,
+                self.env.opts.table_write_throughput_threshold,
+            )
+        }) {
+            tracing::info!("Not Merge high throughput group {}", next_group.group_id);
+            return Err(Error::CompactionGroup(format!(
+                "right group-{} is high throughput",
+                next_group.group_id
+            )));
+        }
+
+        match self
+            .merge_compaction_group_v2(group.group_id, next_group.group_id)
+            .await
+        {
+            Ok(()) => {
+                tracing::info!(
+                    "merge group-{} to group-{}",
+                    next_group.group_id,
+                    group.group_id,
+                );
+            }
+            Err(e) => {
+                tracing::info!(
+                    error = %e.as_report(),
+                    "failed to merge group-{}  group-{}",
+                    next_group.group_id,
+                    group.group_id,
+                )
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -1686,6 +1808,49 @@ impl HummockManager {
         .await?;
         Ok(())
     }
+}
+
+pub fn is_table_high_write_throughput(
+    table_write_throughput: &HashMap<u32, VecDeque<u64>>,
+    table_id: StateTableId,
+    checkpoint_secs: u64,
+    window_size: usize,
+    threshold: u64,
+) -> bool {
+    // for table_id in table_ids {
+    if let Some(history) = table_write_throughput.get(&table_id) {
+        if history.len() >= window_size {
+            let is_high_write_throughput = history
+                .iter()
+                .all(|throughput| *throughput / checkpoint_secs > threshold);
+            if is_high_write_throughput {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+pub fn is_table_low_write_throughput(
+    table_write_throughput: &HashMap<u32, VecDeque<u64>>,
+    table_id: StateTableId,
+    checkpoint_secs: u64,
+    window_size: usize,
+    threshold: u64,
+) -> bool {
+    if let Some(history) = table_write_throughput.get(&table_id) {
+        if history.len() >= window_size {
+            let is_low_write_throughput = history
+                .iter()
+                .any(|throughput| *throughput / checkpoint_secs < threshold);
+            if is_low_write_throughput {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 pub fn check_cg_write_limit(

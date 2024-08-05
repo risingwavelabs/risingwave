@@ -310,12 +310,6 @@ async fn test_hummock_transaction() {
     {
         // Add tables in epoch1
         let tables_in_epoch1 = generate_test_tables(epoch1, get_sst_ids(&hummock_manager, 2).await);
-        register_sstable_infos_to_compaction_group(
-            &hummock_manager,
-            &tables_in_epoch1,
-            StaticCompactionGroupId::StateDefault.into(),
-        )
-        .await;
         // Get tables before committing epoch1. No tables should be returned.
         let current_version = hummock_manager.get_current_version().await;
         assert_eq!(current_version.max_committed_epoch, INVALID_EPOCH);
@@ -333,6 +327,8 @@ async fn test_hummock_transaction() {
 
         // Get tables after committing epoch1. All tables committed in epoch1 should be returned
         let current_version = hummock_manager.get_current_version().await;
+        println!("current_version {:?}", current_version);
+
         assert_eq!(current_version.max_committed_epoch, epoch1);
         assert_eq!(
             get_sorted_object_ids(&committed_tables),

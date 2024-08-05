@@ -43,7 +43,7 @@ impl HummockManager {
             const COMPACTION_HEARTBEAT_PERIOD_SEC: u64 = 1;
 
             pub enum HummockTimerEvent {
-                GroupSplit,
+                GroupSchedule,
                 CheckDeadTask,
                 Report,
                 CompactionHeartBeatExpiredCheck,
@@ -158,7 +158,7 @@ impl HummockManager {
                     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
                 let split_group_trigger = IntervalStream::new(split_group_trigger_interval)
-                    .map(|_| HummockTimerEvent::GroupSplit);
+                    .map(|_| HummockTimerEvent::GroupSchedule);
                 triggers.push(Box::pin(split_group_trigger));
             }
 
@@ -189,12 +189,12 @@ impl HummockManager {
                                     hummock_manager.check_dead_task().await;
                                 }
 
-                                HummockTimerEvent::GroupSplit => {
+                                HummockTimerEvent::GroupSchedule => {
                                     if hummock_manager.env.opts.compaction_deterministic_test {
                                         continue;
                                     }
 
-                                    hummock_manager.on_handle_check_split_multi_group().await;
+                                    hummock_manager.on_handle_schedule_group().await;
                                 }
 
                                 HummockTimerEvent::Report => {
@@ -443,7 +443,7 @@ impl HummockManager {
     ///   throughput keep larger than `table_write_throughput_threshold` for a long time.
     /// * For state-table whose throughput less than `min_table_split_write_throughput`, do not
     ///   increase it size of base-level.
-    async fn on_handle_check_split_multi_group(&self) {
+    async fn on_handle_schedule_group(&self) {
         let params = self.env.system_params_reader().await;
         let barrier_interval_ms = params.barrier_interval_ms() as u64;
         let checkpoint_secs = std::cmp::max(
@@ -460,11 +460,12 @@ impl HummockManager {
         let created_tables: HashSet<u32> = HashSet::from_iter(created_tables);
         let table_write_throughput = self.history_table_throughput.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
-        group_infos.sort_by_key(|group| group.group_size);
-        group_infos.reverse();
+        group_infos.sort_by_key(|group| group.group_id);
+        // group_infos.reverse();
 
-        for group in &group_infos {
-            if group.table_statistic.len() == 1 {
+        let group_count = group_infos.len();
+        for group in group_infos.iter() {
+            if group.table_statistic.len() <= 1 {
                 // no need to handle the separate compaciton group
                 continue;
             }
@@ -474,12 +475,36 @@ impl HummockManager {
                     &table_write_throughput,
                     table_id,
                     table_size,
-                    !created_tables.contains(table_id),
                     checkpoint_secs,
                     group.group_id,
                     group.group_size,
                 )
                 .await;
+            }
+        }
+
+        if group_count > 1 {
+            let mut left = 0;
+            let mut right = left + 1;
+
+            while left < group_count - 1 && right < group_count {
+                let group = &group_infos[left];
+                let next_group = &group_infos[right];
+                if let Ok(_) = self
+                    .try_merge_compaction_group(
+                        &table_write_throughput,
+                        &group,
+                        &next_group,
+                        checkpoint_secs,
+                        &created_tables,
+                    )
+                    .await
+                {
+                    right += 1
+                } else {
+                    left = right + 1;
+                    right = right + 2;
+                }
             }
         }
     }

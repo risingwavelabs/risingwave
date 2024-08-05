@@ -1098,6 +1098,9 @@ impl HummockVersion {
             // Reinitialise `vnode_partition_count`` to avoid misaligned hierarchies
             // caused by the merge of different compaction groups.(picker might reject the different `vnode_partition_count` sub_level to compact)
             // sub_level.vnode_partition_count = 0;
+
+            // TODO: handle vnode_partition_count for sub level
+            // 1. consider how to safely remove the vnode_partition_count of the sub level
             if let Ok(insert_hint) = left_levels
                 .l0
                 .sub_levels
@@ -1661,12 +1664,14 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
 }
 
 pub fn split_sst(sst_info: &mut SstableInfo, new_sst_id: &mut u64) -> SstableInfo {
-    let mut branch_table_info = sst_info.clone();
-    branch_table_info.sst_id = *new_sst_id;
-    sst_info.sst_id = *new_sst_id + 1;
-    *new_sst_id += 1;
+    // let mut branch_table_info = sst_info.clone();
+    // branch_table_info.sst_id = *new_sst_id;
+    // sst_info.sst_id = *new_sst_id + 1;
+    // *new_sst_id += 1;
 
-    branch_table_info
+    // branch_table_info
+
+    HummockVersion::split_sst_v2(sst_info, new_sst_id, None)
 }
 
 pub fn split_table_ids(table_ids: &Vec<u32>, split_key: Bytes) -> (Vec<u32>, Vec<u32>) {
