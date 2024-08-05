@@ -1,15 +1,20 @@
+skipif parallel
 statement ok
 CREATE TABLE t (v1 int);
 
+skipif parallel
 statement ok
 INSERT INTO t VALUES (1);
 
+skipif parallel
 statement ok
 flush;
 
+skipif parallel
 statement ok
 SET BACKGROUND_DDL=true;
 
+skipif parallel
 statement ok
 CREATE MATERIALIZED VIEW backfill_rate_limit_0 with ( backfill_rate_limit = 0 ) AS SELECT * FROM t;
 
@@ -22,9 +27,11 @@ select btrim(progress, '%')::double from rw_ddl_progress limit 1;
 ----
 0
 
+skipif parallel
 statement ok
 ALTER MATERIALIZED VIEW backfill_rate_limit_0 SET BACKFILL_RATE_LIMIT = 1;
 
+skipif parallel
 statement ok
 wait;
 
@@ -34,8 +41,10 @@ select * from backfill_rate_limit_0;
 ----
 1
 
+skipif parallel
 statement ok
 DROP MATERIALIZED VIEW backfill_rate_limit_0;
 
+skipif parallel
 statement ok
 DROP TABLE t;
