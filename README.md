@@ -62,8 +62,8 @@ RisingWave is a Postgres-compatible SQL engine engineered to provide the <i><b>s
 RisingWave can ingest millions of events per second, continuously join live data streams with historical tables, and serve ad-hoc queries in real-time. Typical use cases include, but are not limited to:
 
 * **Streaming analytics**: Perform streaming analytics and build live dashboards with data freshness under one second, ideal for stock trading, sports betting, IoT monitoring, and more.
-* **Event-Driven applications**: Develop monitoring and alerting applications for fraud detection, anomaly detection, and more.
-* **Real-Time ETL pipelines**: Ingest data from different sources, perform enrichment queries, and deliver results to downstream systems.
+* **Event-driven applications**: Develop monitoring and alerting applications for fraud detection, anomaly detection, and more.
+* **Real-time ETL pipelines**: Ingest data from different sources, perform enrichment queries, and deliver results to downstream systems.
 * **Feature stores**: Transform both batch and streaming data into ML features using the same codebase.
 
 
