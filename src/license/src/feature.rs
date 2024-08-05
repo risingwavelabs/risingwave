@@ -47,6 +47,8 @@ macro_rules! for_all_features {
             { TimeTravel,           Paid,       "Query historical data within the retention period."},
             { GlueSchemaRegistry,   Paid,       "Use Schema Registry from AWS Glue rather than Confluent." },
             { SecretManagement,     Paid,       "Secret management." },
+            { CdcTableSchemaMap,    Paid,       "Automatically map upstream schema to CDC Table."},
+            { SqlServerSink,        Paid,       "Sink data from RisingWave to SQL Server." },
         }
     };
 }
@@ -83,9 +85,9 @@ for_all_features!(def_feature);
 #[derive(Debug, Error)]
 pub enum FeatureNotAvailable {
     #[error(
-        "feature {:?} is only available for tier {:?} and above, while the current tier is {:?}\n\n\
+    "feature {:?} is only available for tier {:?} and above, while the current tier is {:?}\n\n\
         Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.",
-        feature, feature.min_tier(), current_tier,
+    feature, feature.min_tier(), current_tier,
     )]
     InsufficientTier {
         feature: Feature,
