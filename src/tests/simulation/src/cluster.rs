@@ -407,17 +407,19 @@ impl Cluster {
         }
         std::env::set_var("RW_META_ADDR", meta_addrs.join(","));
 
-        let sqlite_dir = conf
-            .sqlite_data_dir
-            .as_ref()
-            .map(|dir| format!("{}/", dir.display()))
-            .unwrap_or("".to_string());
-        let sqlite_path = format!(
-            "sqlite://{}stest-{}.sqlite?mode=rwc",
-            sqlite_dir,
-            Uuid::new_v4()
-        );
+        // let sqlite_dir = conf
+        //     .sqlite_data_dir
+        //     .as_ref()
+        //     .map(|dir| format!("{}/", dir.display()))
+        //     .unwrap_or("".to_string());
+        //
+        // let sqlite_path = format!(
+        //     "sqlite://{}stest-{}.sqlite?mode=rwc",
+        //     sqlite_dir,
+        //     Uuid::new_v4()
+        // );
 
+        let sqlite_path = format!("file:memdb{}?mode=memory&cache=shared", Uuid::new_v4());
         // meta node
         for i in 1..=conf.meta_nodes {
             let opts = risingwave_meta_node::MetaNodeOpts::parse_from([
