@@ -68,7 +68,7 @@ pub async fn handle_alter_streaming_rate_limit(
             let source_id = if let Some(id) = table.associated_source_id {
                 id.table_id()
             } else {
-                bail!("ALTER STREAMING_RATE_LIMIT is not for table without source")
+                bail!("ALTER SOURCE_RATE_LIMIT is not for table without source")
             };
             (StatementType::ALTER_SOURCE, source_id)
         }

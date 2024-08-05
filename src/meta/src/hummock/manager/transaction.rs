@@ -17,13 +17,17 @@ use std::ops::{Deref, DerefMut};
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::{
     GroupDelta, HummockVersion, HummockVersionDelta, IntraLevelDelta,
 };
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId};
-use risingwave_pb::hummock::{HummockVersionStats, StateTableInfoDelta};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId, LocalSstableInfo};
+use risingwave_pb::hummock::{
+    CompactionConfig, CompatibilityVersion, GroupConstruct, HummockVersionStats,
+    StateTableInfoDelta,
+};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use crate::manager::NotificationManager;
@@ -109,18 +113,58 @@ impl<'a> HummockVersionTransaction<'a> {
     }
 
     /// Returns a duplicate delta, used by time travel.
+    #[expect(clippy::type_complexity)]
     pub(super) fn pre_commit_epoch(
         &mut self,
-        epoch: HummockEpoch,
+        max_committed_epoch: HummockEpoch,
         commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>>,
         new_table_ids: HashMap<TableId, CompactionGroupId>,
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         change_log_delta: HashMap<TableId, ChangeLogDelta>,
+        batch_commit_for_new_cg: Option<(
+            HashMap<CompactionGroupId, BTreeMap<u64, Vec<LocalSstableInfo>>>,
+            CompactionConfig,
+        )>,
     ) -> HummockVersionDelta {
         let mut new_version_delta = self.new_delta();
-        new_version_delta.max_committed_epoch = epoch;
+        new_version_delta.max_committed_epoch = max_committed_epoch;
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
+
+        if let Some((batch_commit_for_new_cg, compaction_group_config)) = batch_commit_for_new_cg {
+            for (compaction_group_id, batch_commit_sst) in batch_commit_for_new_cg {
+                let group_deltas = &mut new_version_delta
+                    .group_deltas
+                    .entry(compaction_group_id)
+                    .or_default()
+                    .group_deltas;
+
+                #[expect(deprecated)]
+                group_deltas.push(GroupDelta::GroupConstruct(GroupConstruct {
+                    group_config: Some(compaction_group_config.clone()),
+                    group_id: compaction_group_id,
+                    parent_group_id: StaticCompactionGroupId::NewCompactionGroup
+                        as CompactionGroupId,
+                    new_sst_start_id: 0, // No need to set it when `NewCompactionGroup`
+                    table_ids: vec![],
+                    version: CompatibilityVersion::NoMemberTableIds as i32,
+                }));
+
+                for (epoch, insert_ssts) in batch_commit_sst {
+                    assert!(epoch < max_committed_epoch);
+                    let l0_sub_level_id = epoch;
+                    let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
+                        0,
+                        l0_sub_level_id,
+                        vec![], // default
+                        insert_ssts.into_iter().map(|s| s.sst_info).collect(),
+                        0, // default
+                    ));
+                    group_deltas.push(group_delta);
+                }
+            }
+        }
+
         // Append SSTs to a new version.
         for (compaction_group_id, inserted_table_infos) in commit_sstables {
             let group_deltas = &mut new_version_delta
@@ -128,7 +172,7 @@ impl<'a> HummockVersionTransaction<'a> {
                 .entry(compaction_group_id)
                 .or_default()
                 .group_deltas;
-            let l0_sub_level_id = epoch;
+            let l0_sub_level_id = max_committed_epoch;
             let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
                 0,
                 l0_sub_level_id,
@@ -143,32 +187,33 @@ impl<'a> HummockVersionTransaction<'a> {
         // update state table info
         new_version_delta.with_latest_version(|version, delta| {
             for (table_id, cg_id) in new_table_ids {
+                assert!(
+                    !version.state_table_info.info().contains_key(&table_id),
+                    "newly added table exists previously: {:?}",
+                    table_id
+                );
                 delta.state_table_info_delta.insert(
                     table_id,
                     StateTableInfoDelta {
-                        committed_epoch: epoch,
-                        safe_epoch: epoch,
+                        committed_epoch: max_committed_epoch,
+                        safe_epoch: max_committed_epoch,
                         compaction_group_id: cg_id,
                     },
                 );
             }
 
             for (table_id, info) in version.state_table_info.info() {
-                assert!(
-                    delta
-                        .state_table_info_delta
-                        .insert(
-                            *table_id,
-                            StateTableInfoDelta {
-                                committed_epoch: epoch,
-                                safe_epoch: info.safe_epoch,
-                                compaction_group_id: info.compaction_group_id,
-                            }
-                        )
-                        .is_none(),
-                    "newly added table exists previously: {:?}",
-                    table_id
-                );
+                assert!(delta
+                    .state_table_info_delta
+                    .insert(
+                        *table_id,
+                        StateTableInfoDelta {
+                            committed_epoch: max_committed_epoch,
+                            safe_epoch: info.safe_epoch,
+                            compaction_group_id: info.compaction_group_id,
+                        }
+                    )
+                    .is_none(),);
             }
         });
 

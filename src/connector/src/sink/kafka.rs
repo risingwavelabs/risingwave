@@ -403,7 +403,16 @@ struct KafkaPayloadWriter<'a> {
     config: &'a KafkaConfig,
 }
 
-pub type KafkaSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
+mod opaque_type {
+    use super::*;
+    pub type KafkaSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
+
+    pub(super) fn map_delivery_future(future: DeliveryFuture) -> KafkaSinkDeliveryFuture {
+        future.map(KafkaPayloadWriter::<'static>::map_future_result)
+    }
+}
+use opaque_type::map_delivery_future;
+pub use opaque_type::KafkaSinkDeliveryFuture;
 
 pub struct KafkaSinkWriter {
     formatter: SinkFormatterImpl,
@@ -482,7 +491,7 @@ impl<'w> KafkaPayloadWriter<'w> {
                 Ok(delivery_future) => {
                     if self
                         .add_future
-                        .add_future_may_await(Self::map_delivery_future(delivery_future))
+                        .add_future_may_await(map_delivery_future(delivery_future))
                         .await?
                     {
                         tracing::warn!(
@@ -566,10 +575,6 @@ impl<'w> KafkaPayloadWriter<'w> {
             // Return `KafkaError::Canceled`
             Err(_) => Err(KafkaError::Canceled.into()),
         }
-    }
-
-    fn map_delivery_future(future: DeliveryFuture) -> KafkaSinkDeliveryFuture {
-        future.map(KafkaPayloadWriter::<'static>::map_future_result)
     }
 }
 

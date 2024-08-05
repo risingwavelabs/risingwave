@@ -155,7 +155,6 @@ arrow-select = "50"
 arrow-ord = "50"
 arrow-row = "50"
 arrow-udf-js = "0.3.1"
-arrow-udf-js-deno = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "fa36365" }
 arrow-udf-wasm = { version = "0.2.2", features = ["build"] }
 arrow-udf-python = "0.2"
 arrow-udf-flight = "0.1"
@@ -248,11 +247,16 @@ rw_iter_util = { path = "src/utils/iter_util" }
 [workspace.lints.rust]
 # `forbid` will also prevent the misuse of `#[allow(unused)]`
 unused_must_use = "forbid"
-future_incompatible = "warn"
-nonstandard_style = "warn"
-rust_2018_idioms = "warn"
+future_incompatible = { level = "warn", priority = -1 }
+nonstandard_style = { level = "warn", priority = -1 }
+rust_2018_idioms = { level = "warn", priority = -1 }
 # Backward compatibility is not important for an application.
 async_fn_in_trait = "allow"
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(madsim)',
+    'cfg(coverage)',
+    'cfg(dashboard_built)',
+] }
 
 [workspace.lints.clippy]
 uninlined_format_args = "allow"
@@ -334,15 +338,6 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
-# patch to remove preserve_order from serde_json
-deno_core = { git = "https://github.com/bakjos/deno_core", rev = "9b241c6" }
-# patch to user reqwest 0.12.2
-deno_fetch = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_http = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_net = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_tls = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_web = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_websocket = { git = "https://github.com/bakjos/deno", rev = "787a232" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }
 

@@ -42,6 +42,7 @@ mod rw_meta_snapshot;
 mod rw_relation_info;
 mod rw_relations;
 mod rw_schemas;
+mod rw_secrets;
 mod rw_sinks;
 mod rw_sources;
 mod rw_streaming_parallelism;

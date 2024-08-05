@@ -345,7 +345,7 @@ fn parse_select_count_wildcard() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Function(Function {
-            aggregate: false,
+            scalar_as_agg: false,
             name: ObjectName(vec![Ident::new_unchecked("COUNT")]),
             args: vec![FunctionArg::Unnamed(FunctionArgExpr::Wildcard(None))],
             variadic: false,
@@ -365,7 +365,7 @@ fn parse_select_count_distinct() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Function(Function {
-            aggregate: false,
+            scalar_as_agg: false,
             name: ObjectName(vec![Ident::new_unchecked("COUNT")]),
             args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::UnaryOp {
                 op: UnaryOperator::Plus,
@@ -1164,7 +1164,7 @@ fn parse_select_having() {
     assert_eq!(
         Some(Expr::BinaryOp {
             left: Box::new(Expr::Function(Function {
-                aggregate: false,
+                scalar_as_agg: false,
                 name: ObjectName(vec![Ident::new_unchecked("COUNT")]),
                 args: vec![FunctionArg::Unnamed(FunctionArgExpr::Wildcard(None))],
                 variadic: false,
@@ -1906,7 +1906,7 @@ fn parse_named_argument_function() {
 
     assert_eq!(
         &Expr::Function(Function {
-            aggregate: false,
+            scalar_as_agg: false,
             name: ObjectName(vec![Ident::new_unchecked("FUN")]),
             args: vec![
                 FunctionArg::Named {
@@ -1949,7 +1949,7 @@ fn parse_window_functions() {
     assert_eq!(5, select.projection.len());
     assert_eq!(
         &Expr::Function(Function {
-            aggregate: false,
+            scalar_as_agg: false,
             name: ObjectName(vec![Ident::new_unchecked("row_number")]),
             args: vec![],
             variadic: false,
@@ -1984,7 +1984,7 @@ fn parse_aggregate_with_order_by() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Function(Function {
-            aggregate: false,
+            scalar_as_agg: false,
             name: ObjectName(vec![Ident::new_unchecked("STRING_AGG")]),
             args: vec![
                 FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(
@@ -2022,7 +2022,7 @@ fn parse_aggregate_with_filter() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Function(Function {
-            aggregate: false,
+            scalar_as_agg: false,
             name: ObjectName(vec![Ident::new_unchecked("sum")]),
             args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(
                 Expr::Identifier(Ident::new_unchecked("a"))
@@ -2280,7 +2280,7 @@ fn parse_delimited_identifiers() {
     );
     assert_eq!(
         &Expr::Function(Function {
-            aggregate: false,
+            scalar_as_agg: false,
             name: ObjectName(vec![Ident::with_quote_unchecked('"', "myfun")]),
             args: vec![],
             variadic: false,
