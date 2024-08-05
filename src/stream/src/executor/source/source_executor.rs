@@ -560,6 +560,10 @@ impl<S: StateStore> SourceExecutor<S> {
                                     && *new_rate_limit != self.rate_limit_rps
                                 {
                                     self.rate_limit_rps = *new_rate_limit;
+                                    tracing::info!(
+                                        "source rate limit changed to {:?}",
+                                        new_rate_limit
+                                    );
                                     // recreate from latest_split_info
                                     self.rebuild_stream_reader(&source_desc, &mut stream)
                                         .await?;
