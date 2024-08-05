@@ -419,7 +419,10 @@ impl Cluster {
         //     Uuid::new_v4()
         // );
 
-        let sqlite_path = format!("sqlite::file:memdb{}?mode=memory&cache=shared", Uuid::new_v4());
+        let sqlite_path = format!(
+            "sqlite::file:memdb{}?mode=memory&cache=shared",
+            Uuid::new_v4()
+        );
         // meta node
         for i in 1..=conf.meta_nodes {
             let opts = risingwave_meta_node::MetaNodeOpts::parse_from([
