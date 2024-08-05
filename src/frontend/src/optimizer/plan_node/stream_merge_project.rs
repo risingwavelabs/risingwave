@@ -32,12 +32,12 @@ use crate::optimizer::plan_node::{
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
-/// `StreamKeyedMerge` is used for merging two streams with the same stream key and distribution.
+/// `StreamMergeProject` is used for merging two streams with the same stream key and distribution.
 /// It will buffer the outputs from its input streams until we receive a barrier.
 /// On receiving a barrier, it will `Project` their outputs according
 /// to the provided `lhs_mapping` and `rhs_mapping`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StreamKeyedMerge {
+pub struct StreamMergeProject {
     pub base: PlanBase<Stream>,
     pub lhs_input: PlanRef,
     pub rhs_input: PlanRef,
@@ -47,7 +47,7 @@ pub struct StreamKeyedMerge {
     pub rhs_mapping: ColIndexMapping,
 }
 
-impl StreamKeyedMerge {
+impl StreamMergeProject {
     pub fn new(
         lhs_input: PlanRef,
         rhs_input: PlanRef,
@@ -100,7 +100,7 @@ impl StreamKeyedMerge {
     }
 }
 
-impl Distill for StreamKeyedMerge {
+impl Distill for StreamMergeProject {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let mut out = Vec::with_capacity(1);
 
@@ -109,11 +109,11 @@ impl Distill for StreamKeyedMerge {
             let e = Pretty::Array(self.base.schema().fields().iter().map(f).collect());
             out = vec![("output", e)];
         }
-        childless_record("StreamKeyedMerge", out)
+        childless_record("StreamMergeProject", out)
     }
 }
 
-impl PlanTreeNodeBinary for StreamKeyedMerge {
+impl PlanTreeNodeBinary for StreamMergeProject {
     fn left(&self) -> PlanRef {
         self.lhs_input.clone()
     }
@@ -133,15 +133,15 @@ impl PlanTreeNodeBinary for StreamKeyedMerge {
     }
 }
 
-impl_plan_tree_node_for_binary! { StreamKeyedMerge }
+impl_plan_tree_node_for_binary! { StreamMergeProject }
 
-impl StreamNode for StreamKeyedMerge {
+impl StreamNode for StreamMergeProject {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         todo!()
     }
 }
 
-impl ExprRewritable for StreamKeyedMerge {
+impl ExprRewritable for StreamMergeProject {
     fn has_rewritable_expr(&self) -> bool {
         false
     }
@@ -151,6 +151,6 @@ impl ExprRewritable for StreamKeyedMerge {
     }
 }
 
-impl ExprVisitable for StreamKeyedMerge {
+impl ExprVisitable for StreamMergeProject {
     fn visit_exprs(&self, _v: &mut dyn ExprVisitor) {}
 }

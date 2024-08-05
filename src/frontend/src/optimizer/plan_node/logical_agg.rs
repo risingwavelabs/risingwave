@@ -34,8 +34,8 @@ use crate::expr::{
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::stream_global_approx_percentile::StreamGlobalApproxPercentile;
-use crate::optimizer::plan_node::stream_keyed_merge::StreamKeyedMerge;
 use crate::optimizer::plan_node::stream_local_approx_percentile::StreamLocalApproxPercentile;
+use crate::optimizer::plan_node::stream_merge_project::StreamMergeProject;
 use crate::optimizer::plan_node::{
     gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalDedup, LogicalProject,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -87,11 +87,11 @@ impl LogicalAgg {
             col_mapping: approx_percentile_col_mapping,
         } = approx;
 
-        let needs_keyed_merge = (!non_approx_percentile_agg_calls.is_empty()
+        let needs_merge_project = (!non_approx_percentile_agg_calls.is_empty()
             && !approx_percentile_agg_calls.is_empty())
             || approx_percentile_agg_calls.len() >= 2;
-        core.input = if needs_keyed_merge {
-            // If there's keyed merge, we need to share the input.
+        core.input = if needs_merge_project {
+            // If there's merge project, we need to share the input.
             StreamShare::new_from_input(stream_input.clone()).into()
         } else {
             stream_input
@@ -118,14 +118,14 @@ impl LogicalAgg {
 
         // ====== Merge approx percentile and normal aggs
         if let Some(approx_percentile) = approx_percentile {
-            if needs_keyed_merge {
-                let keyed_merge = StreamKeyedMerge::new(
+            if needs_merge_project {
+                let merge_project = StreamMergeProject::new(
                     approx_percentile,
                     global_agg.into(),
                     approx_percentile_col_mapping,
                     non_approx_percentile_col_mapping,
                 )?;
-                Ok(keyed_merge.into())
+                Ok(merge_project.into())
             } else {
                 Ok(approx_percentile)
             }
@@ -345,15 +345,15 @@ impl LogicalAgg {
     }
 
     /// If only 1 approx percentile, just return it.
-    /// Otherwise build a tree of approx percentile with `KeyedMerge`.
+    /// Otherwise build a tree of approx percentile with `MergeProject`.
     /// e.g.
     /// ApproxPercentile(col1, 0.5) as x,
     /// ApproxPercentile(col2, 0.5) as y,
     /// ApproxPercentile(col3, 0.5) as z
     /// will be built as
-    ///        `KeyedMerge`
+    ///        `MergeProject`
     ///       /          \
-    ///  `KeyedMerge`       z
+    ///  `MergeProject`       z
     ///  /        \
     /// x          y
 
@@ -374,14 +374,14 @@ impl LogicalAgg {
         let mut acc = iter.next().unwrap();
         for (current_size, plan) in iter.enumerate().map(|(i, p)| (i + 1, p)) {
             let new_size = current_size + 1;
-            let keyed_merge = StreamKeyedMerge::new(
+            let merge_project = StreamMergeProject::new(
                 acc,
                 plan,
                 ColIndexMapping::identity_or_none(current_size, new_size),
                 ColIndexMapping::new(vec![Some(current_size)], new_size),
             )
-            .expect("failed to build keyed merge");
-            acc = keyed_merge.into();
+            .expect("failed to build merge project");
+            acc = merge_project.into();
         }
         Ok(Some(acc))
     }
@@ -1312,7 +1312,7 @@ impl ToStream for LogicalAgg {
                 .into());
             }
             (plan.clone(), 1)
-        } else if let Some(stream_keyed_merge) = plan.as_stream_keyed_merge() {
+        } else if let Some(stream_merge_project) = plan.as_stream_merge_project() {
             if eowc {
                 return Err(ErrorCode::InvalidInputSyntax(
                     "`EMIT ON WINDOW CLOSE` cannot be used for aggregation without `GROUP BY`"
@@ -1320,9 +1320,9 @@ impl ToStream for LogicalAgg {
                 )
                 .into());
             }
-            (plan.clone(), stream_keyed_merge.base.schema().len())
+            (plan.clone(), stream_merge_project.base.schema().len())
         } else {
-            panic!("the root PlanNode must be StreamHashAgg, StreamSimpleAgg, StreamGlobalApproxPercentile, or StreamKeyedMerge");
+            panic!("the root PlanNode must be StreamHashAgg, StreamSimpleAgg, StreamGlobalApproxPercentile, or StreamMergeProject");
         };
 
         if self.agg_calls().len() == n_final_agg_calls {

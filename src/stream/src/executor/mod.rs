@@ -105,6 +105,8 @@ mod wrapper;
 
 mod approx_percentile;
 
+mod merge_project;
+
 #[cfg(test)]
 mod integration_tests;
 pub mod test_utils;
@@ -134,6 +136,7 @@ pub use join::JoinType;
 pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
 pub use merge::MergeExecutor;
+pub use merge_project::MergeProjectExecutor;
 pub use mview::*;
 pub use no_op::NoOpExecutor;
 pub use now::*;
