@@ -113,6 +113,7 @@ impl ClickHouseEngine {
         match self {
             ClickHouseEngine::ReplacingMergeTree(delete_col) => delete_col.is_some(),
             ClickHouseEngine::ReplicatedReplacingMergeTree(delete_col) => delete_col.is_some(),
+            ClickHouseEngine::SharedReplacingMergeTree(delete_col) => delete_col.is_some(),
             _ => false,
         }
     }
@@ -121,6 +122,9 @@ impl ClickHouseEngine {
         match self {
             ClickHouseEngine::ReplacingMergeTree(Some(delete_col)) => Some(delete_col.to_string()),
             ClickHouseEngine::ReplicatedReplacingMergeTree(Some(delete_col)) => {
+                Some(delete_col.to_string())
+            }
+            ClickHouseEngine::SharedReplacingMergeTree(Some(delete_col)) => {
                 Some(delete_col.to_string())
             }
             _ => None,
@@ -139,14 +143,25 @@ impl ClickHouseEngine {
             ClickHouseEngine::ReplicatedVersionedCollapsingMergeTree(sign_name) => {
                 Some(sign_name.to_string())
             }
-            ClickHouseEngine::SharedCollapsingMergeTree(sign_name) => {
-                Some(sign_name.to_string())
-            }
+            ClickHouseEngine::SharedCollapsingMergeTree(sign_name) => Some(sign_name.to_string()),
             ClickHouseEngine::SharedVersionedCollapsingMergeTree(sign_name) => {
                 Some(sign_name.to_string())
             }
             _ => None,
         }
+    }
+
+    pub fn is_shared_tree(&self) -> bool {
+        matches!(
+            self,
+            ClickHouseEngine::SharedMergeTree
+                | ClickHouseEngine::SharedReplacingMergeTree(_)
+                | ClickHouseEngine::SharedSummingMergeTree
+                | ClickHouseEngine::SharedAggregatingMergeTree
+                | ClickHouseEngine::SharedCollapsingMergeTree(_)
+                | ClickHouseEngine::SharedVersionedCollapsingMergeTree(_)
+                | ClickHouseEngine::SharedGraphiteMergeTree
+        )
     }
 
     pub fn from_query_engine(
@@ -214,7 +229,9 @@ impl ClickHouseEngine {
                     .ok_or_else(|| SinkError::ClickHouse("must have index 1".to_string()))?
                     .trim()
                     .to_string();
-                Ok(ClickHouseEngine::ReplicatedVersionedCollapsingMergeTree(sign_name))
+                Ok(ClickHouseEngine::ReplicatedVersionedCollapsingMergeTree(
+                    sign_name,
+                ))
             }
             // ReplicatedCollapsingMergeTree("a","b",sign_name)
             "ReplicatedCollapsingMergeTree" => {
@@ -237,14 +254,10 @@ impl ClickHouseEngine {
             "SharedMergeTree" => Ok(ClickHouseEngine::SharedMergeTree),
             "SharedReplacingMergeTree" => {
                 let delete_column = config.common.delete_column.clone();
-                Ok(ClickHouseEngine::SharedReplacingMergeTree(
-                    delete_column,
-                ))
+                Ok(ClickHouseEngine::SharedReplacingMergeTree(delete_column))
             }
             "SharedSummingMergeTree" => Ok(ClickHouseEngine::SharedSummingMergeTree),
-            "SharedAggregatingMergeTree" => {
-                Ok(ClickHouseEngine::SharedAggregatingMergeTree)
-            }
+            "SharedAggregatingMergeTree" => Ok(ClickHouseEngine::SharedAggregatingMergeTree),
             // SharedVersionedCollapsingMergeTree("a","b",sign_name,"c")
             "SharedVersionedCollapsingMergeTree" => {
                 let sign_name = engine_name
@@ -258,7 +271,9 @@ impl ClickHouseEngine {
                     .ok_or_else(|| SinkError::ClickHouse("must have index 1".to_string()))?
                     .trim()
                     .to_string();
-                Ok(ClickHouseEngine::SharedVersionedCollapsingMergeTree(sign_name))
+                Ok(ClickHouseEngine::SharedVersionedCollapsingMergeTree(
+                    sign_name,
+                ))
             }
             // SharedCollapsingMergeTree("a","b",sign_name)
             "SharedCollapsingMergeTree" => {
@@ -509,6 +524,11 @@ impl Sink for ClickHouseSink {
 
         let (clickhouse_column, clickhouse_engine) =
             query_column_engine_from_ck(client, &self.config).await?;
+        if clickhouse_engine.is_shared_tree() {
+            risingwave_common::license::Feature::ClickHouseSharedEngine
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
 
         if !self.is_append_only
             && !clickhouse_engine.is_collapsing_engine()
