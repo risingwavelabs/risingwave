@@ -261,6 +261,12 @@ impl IntraCompactionPicker {
                 continue;
             }
 
+            // do not trivial move if the total file size is too large
+            println!("l0.sub_levels[idx].total_file_size {} self.config.sub_level_max_compaction_bytes {}", l0.sub_levels[idx].total_file_size, self.config.sub_level_max_compaction_bytes);
+            if l0.sub_levels[idx].total_file_size > self.config.sub_level_max_compaction_bytes {
+                continue;
+            }
+
             if l0.sub_levels[idx + 1].vnode_partition_count
                 != l0.sub_levels[idx].vnode_partition_count
             {
@@ -867,5 +873,30 @@ pub mod tests {
             levels.l0.sub_levels[1].table_infos.len(),
             input.input_levels[1].table_infos.len()
         );
+    }
+
+    #[test]
+    fn test_avoid_trivial_move_to_large_level() {
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .level0_max_compact_file_number(20)
+                .sub_level_max_compaction_bytes(50)
+                .level0_sub_level_compact_level_count(2)
+                .build(),
+        );
+
+        let l0 = generate_l0_nonoverlapping_multi_sublevels(vec![
+            vec![generate_table(2, 1, 300, 400, 1)],
+            vec![generate_table(1, 1, 100, 200, 1)],
+        ]);
+        let picker = IntraCompactionPicker::new_with_validator(
+            config,
+            Arc::new(CompactionTaskValidator::unused()),
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
+        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let mut local_stats = LocalPickerStatistic::default();
+        let ret = picker.pick_l0_trivial_move_file(&l0, &levels_handler, &mut local_stats);
+        assert!(ret.is_none());
     }
 }
