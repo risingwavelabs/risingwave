@@ -31,3 +31,9 @@ query I
 select * from backfill_rate_limit_0;
 ----
 1
+
+statement ok
+DROP MATERIALIZED VIEW backfill_rate_limit_0;
+
+statement ok
+DROP TABLE t;
