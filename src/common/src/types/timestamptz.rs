@@ -21,7 +21,7 @@ use byteorder::{BigEndian, ReadBytesExt};
 use bytes::BytesMut;
 use chrono::{DateTime, Datelike, TimeZone, Utc};
 use chrono_tz::Tz;
-use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
+use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::ZeroHeapSize;
 use serde::{Deserialize, Serialize};
 

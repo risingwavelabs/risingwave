@@ -1384,8 +1384,7 @@ pub fn bind_connector_props(
         return Err(RwError::from(ProtocolError(format!(
             "connector {} does not support `CREATE TABLE`, please use `CREATE SOURCE` instead",
             with_properties.get_connector().unwrap(),
-        )))
-        .into());
+        ))));
     }
     if is_create_source && create_cdc_source_job {
         // set connector to backfill mode
