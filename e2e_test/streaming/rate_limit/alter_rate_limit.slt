@@ -11,7 +11,7 @@ statement ok
 SET BACKGROUND_DDL=true;
 
 statement ok
-CREATE MATERIALIZED VIEW streaming_rate_limit_0 with ( streaming_rate_limit = 0 ) AS SELECT * FROM t;
+CREATE MATERIALIZED VIEW backfill_rate_limit_0 with ( backfill_rate_limit = 0 ) AS SELECT * FROM t;
 
 skipif in-memory
 sleep 1s
@@ -22,12 +22,12 @@ select progress from rw_ddl_progress;
 0.00%
 
 statement ok
-ALTER MATERIALIZED VIEW streaming_rate_limit_0 SET STREAMING_RATE_LIMIT = 1;
+ALTER MATERIALIZED VIEW backfill_rate_limit_0 SET BACKFILL_RATE_LIMIT = 1;
 
 statement ok
 wait;
 
 query I
-select * from streaming_rate_limit_0;
+select * from backfill_rate_limit_0;
 ----
 1
