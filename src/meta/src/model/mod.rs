@@ -207,7 +207,8 @@ macro_rules! for_all_metadata_models {
     ($macro:ident) => {
         $macro! {
             // These items should be included in a meta snapshot.
-            // So be sure to update meta backup/restore when adding new items.
+            // Make sure to update the meta backup&restore methods accordingly when adding new items,
+            // referring to https://github.com/risingwavelabs/risingwave/pull/15371/commits/c5a75320845a38cfb43241ddee16fd5c0e47833b
             { risingwave_pb::hummock::HummockVersionStats },
             { crate::hummock::model::CompactionGroup },
             { risingwave_pb::catalog::Database },
