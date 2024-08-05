@@ -18,9 +18,9 @@ sleep 1s
 
 skipif in-memory
 query I
-select progress from rw_ddl_progress limit 1;
+select btrim(progress, '%')::double from rw_ddl_progress limit 1;
 ----
-0.0%
+0
 
 statement ok
 ALTER MATERIALIZED VIEW backfill_rate_limit_0 SET BACKFILL_RATE_LIMIT = 1;
