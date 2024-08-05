@@ -904,7 +904,10 @@ impl FragmentManager {
         let mut table_id_to_apply = HashSet::new();
         for (table_id, table_fragments) in map.iter() {
             for fragment in table_fragments.fragments.values() {
-                if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0 {
+                if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0
+                    || (fragment.get_fragment_type_mask() & FragmentTypeFlag::SourceScan as u32)
+                        != 0
+                {
                     table_id_to_apply.insert(*table_id);
                 }
             }
@@ -930,6 +933,12 @@ impl FragmentManager {
                                     && node_inner.source_id == source_id as u32
                                 {
                                     node_inner.rate_limit = rate_limit;
+                                    actor_to_apply.push(actor.actor_id);
+                                }
+                            }
+                            if let NodeBody::SourceBackfill(ref mut node) = node_body {
+                                if node.upstream_source_id == source_id as u32 {
+                                    node.rate_limit = rate_limit;
                                     actor_to_apply.push(actor.actor_id);
                                 }
                             }
