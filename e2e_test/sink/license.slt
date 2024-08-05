@@ -77,6 +77,32 @@ Caused by these errors (recent errors listed first):
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
 
+statement error
+CREATE SINK bigquery_sink
+FROM
+  t
+WITH
+(
+  connector = 'bigquery',
+  type = 'append-only',
+  force_append_only='true',
+  bigquery.local.path= 'xx',
+  bigquery.project= 'xx',
+  bigquery.dataset= 'xx',
+  bigquery.table= 'xx'
+);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service failed: Internal error
+  2: failed to validate sink
+  3: Internal error
+  4: feature BigQuerySink is only available for tier Paid and above, while the current tier is Free
+
+Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
+
+
 statement ok
 ALTER SYSTEM SET license_key TO DEFAULT;
 
@@ -136,6 +162,30 @@ Caused by these errors (recent errors listed first):
   1: gRPC request to meta service failed: Internal error
   2: failed to validate sink
   3: sink cannot pass validation: INTERNAL: Connection is closed
+
+
+statement error
+CREATE SINK bigquery_sink
+FROM
+  t
+WITH
+(
+  connector = 'bigquery',
+  type = 'append-only',
+  force_append_only='true',
+  bigquery.local.path= 'xx',
+  bigquery.project= 'xx',
+  bigquery.dataset= 'xx',
+  bigquery.table= 'xx'
+);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service failed: Internal error
+  2: failed to validate sink
+  3: BigQuery error
+  4: No such file or directory (os error 2)
 
 
 statement ok

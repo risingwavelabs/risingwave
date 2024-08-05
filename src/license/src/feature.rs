@@ -49,6 +49,7 @@ macro_rules! for_all_features {
             { SnowflakeSink,        Paid,       "Delivering data to SnowFlake." },
             { DynamoDbSink,         Paid,       "Delivering data to DynamoDb." },
             { OpenSearchSink,       Paid,       "Delivering data to OpenSearch." },
+            { BigQuerySink,         Paid,       "Delivering data to BigQuery." },
             { SecretManagement,     Paid,       "Secret management." },
             { SqlServerSink,        Paid,       "Sink data from RisingWave to SQL Server." },
         }
