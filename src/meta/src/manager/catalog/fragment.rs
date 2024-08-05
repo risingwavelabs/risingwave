@@ -40,6 +40,7 @@ use risingwave_pb::stream_plan::{
 };
 use risingwave_pb::stream_service::BuildActorInfo;
 use tokio::sync::{RwLock, RwLockReadGuard};
+use tracing::error;
 
 use crate::barrier::Reschedule;
 use crate::manager::cluster::WorkerId;
@@ -351,12 +352,22 @@ impl FragmentManager {
         }
 
         let mut table_fragments = BTreeMapTransaction::new(map);
+        let state_table_ids = table_fragment
+            .fragments()
+            .flat_map(|fragment| fragment.state_table_ids.iter())
+            .cloned()
+            .collect_vec();
         table_fragments.insert(table_id, table_fragment);
         let mut trx = Transaction::default();
 
         let next_revision = current_revision.next();
         next_revision.store(&mut trx);
         commit_meta_with_trx!(self, trx, table_fragments)?;
+        error!(
+            table_id = table_id.table_id,
+            ?state_table_ids,
+            "register new table fragments"
+        );
         guard.table_revision = next_revision;
         Ok(())
     }

@@ -34,7 +34,7 @@ use risingwave_pb::hummock::{
     PbGroupDestroy, PbStateTableInfoDelta,
 };
 use tokio::sync::OnceCell;
-use tracing::warn;
+use tracing::error;
 
 use crate::hummock::compaction::compaction_config::{
     validate_compaction_config, CompactionConfigBuilder,
@@ -181,9 +181,11 @@ impl HummockManager {
                     !valid_ids.contains(table_id)
                 })
                 .collect_vec();
-            if !remaining_valid_ids.is_empty() {
-                warn!(?remaining_valid_ids, "unregistered valid table ids");
-            }
+            error!(
+                ?valid_ids,
+                ?remaining_valid_ids,
+                "un-purged valid table ids"
+            );
             to_unregister
         };
         // As we have released versioning lock, the version that `to_unregister` is calculated from

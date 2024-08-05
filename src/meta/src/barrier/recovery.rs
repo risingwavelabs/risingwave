@@ -87,7 +87,10 @@ impl GlobalBarrierManagerContext {
                     .iter()
                     .map(|t| t.table_id())
                     .collect();
-                debug!("clean dirty table fragments: {:?}", to_drop_streaming_ids);
+                debug!(
+                    ?stream_job_ids,
+                    "clean dirty table fragments: {:?}", to_drop_streaming_ids
+                );
 
                 let _unregister_table_ids = mgr
                     .fragment_manager
