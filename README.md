@@ -64,7 +64,7 @@ RisingWave can ingest millions of events per second, continuously join live data
 * **Streaming analytics**: Perform streaming analytics and build live dashboards with <1s data freshness, ideal for stock trading, sports betting, IoT monitoring, and more.
 * **Event-Driven applications**: Develop monitoring and alerting applications for fraud detection, anomaly detection, and more.
 * **Real-Time ETL pipelines**: Ingest data from different sources, perform enrichment queries, and deliver results to downstream systems.
-* **Feature stores**: Transform both batch and streaming data into MLfeatures using the same codebase.
+* **Feature stores**: Transform both batch and streaming data into ML features using the same codebase.
 
 
 ## Try it out in 60 seconds
