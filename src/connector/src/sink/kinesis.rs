@@ -201,8 +201,36 @@ impl KinesisSinkWriter {
     }
 }
 
-pub type KinesisSinkPayloadWriterDeliveryFuture =
-    impl TryFuture<Ok = (), Error = SinkError> + Unpin + Send + 'static;
+mod opaque_type {
+    use super::*;
+    pub type KinesisSinkPayloadWriterDeliveryFuture =
+        impl TryFuture<Ok = (), Error = SinkError> + Unpin + Send + 'static;
+
+    impl KinesisSinkPayloadWriter {
+        pub(super) fn finish(self) -> KinesisSinkPayloadWriterDeliveryFuture {
+            async move {
+                let builder = self.builder.expect("should not be None");
+                let context_fmt = format!(
+                    "failed to put record to {}",
+                    builder
+                        .get_stream_name()
+                        .as_ref()
+                        .expect("should have set stream name")
+                );
+                Retry::spawn(
+                    ExponentialBackoff::from_millis(100).map(jitter).take(3),
+                    || builder.clone().send(),
+                )
+                .await
+                .with_context(|| context_fmt.clone())
+                .map_err(SinkError::Kinesis)?;
+                Ok(())
+            }
+            .boxed()
+        }
+    }
+}
+pub use opaque_type::KinesisSinkPayloadWriterDeliveryFuture;
 
 impl KinesisSinkPayloadWriter {
     fn put_record(&mut self, key: String, payload: Vec<u8>) {
@@ -215,28 +243,6 @@ impl KinesisSinkPayloadWriter {
                     .expect("should not fail because we have set `data` and `partition_key`"),
             ),
         );
-    }
-
-    fn finish(self) -> KinesisSinkPayloadWriterDeliveryFuture {
-        async move {
-            let builder = self.builder.expect("should not be None");
-            let context_fmt = format!(
-                "failed to put record to {}",
-                builder
-                    .get_stream_name()
-                    .as_ref()
-                    .expect("should have set stream name")
-            );
-            Retry::spawn(
-                ExponentialBackoff::from_millis(100).map(jitter).take(3),
-                || builder.clone().send(),
-            )
-            .await
-            .with_context(|| context_fmt.clone())
-            .map_err(SinkError::Kinesis)?;
-            Ok(())
-        }
-        .boxed()
     }
 }
 

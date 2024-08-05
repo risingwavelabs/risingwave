@@ -89,6 +89,7 @@ mod unified;
 mod upsert_parser;
 mod util;
 
+use debezium::schema_change::SchemaChangeEnvelope;
 pub use debezium::DEBEZIUM_IGNORE_KEY;
 use risingwave_common::bitmap::BitmapBuilder;
 pub use unified::{AccessError, AccessResult};
@@ -579,6 +580,9 @@ pub enum ParseResult {
     Rows,
     /// A transaction control message is parsed.
     TransactionControl(TransactionControl),
+
+    /// A schema change message is parsed.
+    SchemaChange(SchemaChangeEnvelope),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -829,6 +833,10 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                         }
                     }
                 },
+
+                Ok(ParseResult::SchemaChange(_)) => {
+                    // TODO
+                }
             }
         }
 
