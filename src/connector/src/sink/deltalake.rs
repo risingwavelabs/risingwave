@@ -135,7 +135,7 @@ impl DeltaLakeCommon {
             Ok(DeltaTableUrl::Local(path.to_string()))
         } else {
             Err(SinkError::DeltaLake(anyhow!(
-                "path need to start with 's3://','s3a://'(s3) ,gs://(gcs) or file://(local)"
+                "path should start with 's3://','s3a://'(s3) ,gs://(gcs) or file://(local)"
             )))
         }
     }
@@ -356,7 +356,7 @@ impl Sink for DeltaLakeSink {
             .collect();
         if deltalake_fields.len() != self.param.schema().fields().len() {
             return Err(SinkError::DeltaLake(anyhow!(
-                "column count not match, rw is {}, deltalake is {}",
+                "Columns mismatch. RisingWave is {}, DeltaLake is {}",
                 self.param.schema().fields().len(),
                 deltalake_fields.len()
             )));

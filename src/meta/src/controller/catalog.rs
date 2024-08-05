@@ -2683,7 +2683,7 @@ impl CatalogController {
             .into_iter()
             .map(|(subscription, obj)| ObjectModel(subscription, obj.unwrap()).into())
             .find_or_first(|_| true)
-            .ok_or_else(|| anyhow!("cant find subscription with id {}", subscription_id))?;
+            .ok_or_else(|| anyhow!("cannot find subscription with id {}", subscription_id))?;
 
         Ok(subscription)
     }

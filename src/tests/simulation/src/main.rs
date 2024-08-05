@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #![cfg_attr(not(madsim), allow(dead_code))]
-#![feature(lazy_cell)]
 
 use std::path::PathBuf;
 

@@ -48,6 +48,7 @@ macro_rules! for_all_features {
             { GlueSchemaRegistry,   Paid,       "Use Schema Registry from AWS Glue rather than Confluent." },
             { SecretManagement,     Paid,       "Secret management." },
             { CdcTableSchemaMap,    Paid,       "Automatically map upstream schema to CDC Table."},
+            { SqlServerSink,        Paid,       "Sink data from RisingWave to SQL Server." },
         }
     };
 }
