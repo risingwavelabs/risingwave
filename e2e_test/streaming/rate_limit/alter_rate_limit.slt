@@ -13,10 +13,10 @@ SET BACKGROUND_DDL=true;
 statement ok
 CREATE MATERIALIZED VIEW backfill_rate_limit_0 with ( backfill_rate_limit = 0 ) AS SELECT * FROM t;
 
-skipif in-memory
+skipif parallel
 sleep 1s
 
-skipif in-memory
+skipif parallel
 query I
 select btrim(progress, '%')::double from rw_ddl_progress limit 1;
 ----
@@ -28,7 +28,7 @@ ALTER MATERIALIZED VIEW backfill_rate_limit_0 SET BACKFILL_RATE_LIMIT = 1;
 statement ok
 wait;
 
-skipif in-memory
+skipif parallel
 query I
 select * from backfill_rate_limit_0;
 ----
