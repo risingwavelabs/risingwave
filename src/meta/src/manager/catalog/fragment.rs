@@ -221,7 +221,7 @@ impl FragmentManager {
 
     pub async fn list_dirty_table_fragments(
         &self,
-        check_dirty: impl Fn(&TableFragments) -> bool,
+        mut check_dirty: impl FnMut(&TableFragments) -> bool,
     ) -> Vec<TableFragments> {
         self.core
             .read()

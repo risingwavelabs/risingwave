@@ -77,9 +77,15 @@ impl GlobalBarrierManagerContext {
 
                 // Clean dirty fragments.
                 let stream_job_ids = mgr.catalog_manager.list_stream_job_ids().await?;
+                let stream_job_ids = &stream_job_ids;
+                let mut all_table_fragments = Vec::<u32>::new();
+                // let ptr = ((&mut all_table_fragments) as *mut Vec<u32>) as usize;
                 let to_drop_table_fragments = mgr
                     .fragment_manager
                     .list_dirty_table_fragments(|tf| {
+                        // // SAFETY: trust me
+                        // let all_table_fragments: &mut Vec<_> = unsafe { &mut *(ptr as *mut Vec<u32>) };
+                        all_table_fragments.push(tf.table_id().table_id);
                         !stream_job_ids.contains(&tf.table_id().table_id)
                     })
                     .await;
@@ -89,7 +95,9 @@ impl GlobalBarrierManagerContext {
                     .collect();
                 debug!(
                     ?stream_job_ids,
-                    "clean dirty table fragments: {:?}", to_drop_streaming_ids
+                    ?all_table_fragments,
+                    "clean dirty table fragments: {:?}",
+                    to_drop_streaming_ids
                 );
 
                 let _unregister_table_ids = mgr
