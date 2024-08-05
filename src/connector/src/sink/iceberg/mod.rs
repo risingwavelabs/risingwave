@@ -278,7 +278,7 @@ impl IcebergConfig {
         );
         iceberg_configs.insert(
             "iceberg.table.io.enable_virtual_host_style".to_string(),
-            (!self.path_style_access).to_string()
+            (!self.path_style_access).to_string(),
         );
 
         let (bucket, root) = {
