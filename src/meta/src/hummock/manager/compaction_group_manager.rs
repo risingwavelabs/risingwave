@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::Arc;
 
@@ -34,6 +34,7 @@ use risingwave_pb::hummock::{
     PbGroupDestroy, PbStateTableInfoDelta,
 };
 use tokio::sync::OnceCell;
+use tracing::warn;
 
 use crate::hummock::compaction::compaction_config::{
     validate_compaction_config, CompactionConfigBuilder,
@@ -166,17 +167,28 @@ impl HummockManager {
     /// The caller should ensure `table_fragments_list` remain unchanged during `purge`.
     /// Currently `purge` is only called during meta service start ups.
     pub async fn purge(&self, valid_ids: &HashSet<TableId>) -> Result<()> {
-        let to_unregister = self
-            .versioning
-            .read()
-            .await
-            .current_version
-            .state_table_info
-            .info()
-            .keys()
-            .cloned()
-            .filter(|table_id| !valid_ids.contains(table_id))
-            .collect_vec();
+        let to_unregister = {
+            let versioning = self
+                .versioning
+                .read()
+                .await;
+            let mut remaining_valid_ids = valid_ids.iter().cloned().collect::<BTreeSet<_>>();
+            let to_unregister =
+                versioning.current_version
+                .state_table_info
+                .info()
+                .keys()
+                .cloned()
+                .filter(|table_id| {
+                    remaining_valid_ids.remove(table_id);
+                    !valid_ids.contains(table_id)
+                })
+                .collect_vec();
+            if !remaining_valid_ids.is_empty() {
+                warn!(?remaining_valid_ids, "unregistered valid table ids");
+            }
+            to_unregister
+        };
         // As we have released versioning lock, the version that `to_unregister` is calculated from
         // may not be the same as the one used in unregister_table_ids. It is OK.
         self.unregister_table_ids(to_unregister).await
