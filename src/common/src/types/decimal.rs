@@ -21,7 +21,7 @@ use bytes::{BufMut, BytesMut};
 use num_traits::{
     CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Zero,
 };
-use postgres_types::{accepts, to_sql_checked, IsNull, ToSql};
+use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::ZeroHeapSize;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::{Decimal as RustDecimal, Error, MathematicalOps as _, RoundingStrategy};
@@ -96,7 +96,7 @@ impl ToSql for Decimal {
 
     fn to_sql(
         &self,
-        ty: &postgres_types::Type,
+        ty: &Type,
         out: &mut BytesMut,
     ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
     where
@@ -132,9 +132,9 @@ impl ToSql for Decimal {
     }
 }
 
-impl<'a> postgres_types::FromSql<'a> for Decimal {
+impl<'a> FromSql<'a> for Decimal {
     fn from_sql(
-        ty: &postgres_types::Type,
+        ty: &Type,
         raw: &'a [u8],
     ) -> Result<Self, Box<dyn std::error::Error + 'static + Sync + Send>> {
         let mut rdr = Cursor::new(raw);
@@ -145,16 +145,14 @@ impl<'a> postgres_types::FromSql<'a> for Decimal {
             0xC000 => Ok(Self::NaN),
             0xD000 => Ok(Self::PositiveInf),
             0xF000 => Ok(Self::NegativeInf),
-            _ => <RustDecimal as postgres_types::FromSql>::from_sql(ty, raw).map(Self::Normalized),
+            _ => RustDecimal::from_sql(ty, raw).map(Self::Normalized),
         }
     }
 
-    fn accepts(ty: &postgres_types::Type) -> bool {
-        matches!(*ty, postgres_types::Type::NUMERIC)
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::NUMERIC)
     }
 }
-
-
 
 macro_rules! impl_convert_int {
     ($T:ty) => {
