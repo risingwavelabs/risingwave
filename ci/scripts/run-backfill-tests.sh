@@ -288,6 +288,9 @@ main() {
   test_replication_with_column_pruning
   test_sink_backfill_recovery
 
+  echo "--- e2e, snapshot backfill test"
+  sqllogictest -p 4566 -d dev './e2e_test/backfill/snapshot_backfill/**/*.slt'
+
   # Only if profile is "ci-release", run it.
   if [[ ${profile:-} == "ci-release" ]]; then
     echo "--- Using release profile, running backfill performance tests."
