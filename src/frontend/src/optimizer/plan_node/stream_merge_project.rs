@@ -137,7 +137,10 @@ impl_plan_tree_node_for_binary! { StreamMergeProject }
 
 impl StreamNode for StreamMergeProject {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        todo!()
+        PbNodeBody::MergeProject(risingwave_pb::stream_plan::MergeProjectNode {
+            lhs_mapping: Some(self.lhs_mapping.to_protobuf()),
+            rhs_mapping: Some(self.rhs_mapping.to_protobuf()),
+        })
     }
 }
 

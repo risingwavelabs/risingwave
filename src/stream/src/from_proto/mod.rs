@@ -53,6 +53,8 @@ mod union;
 mod values;
 mod watermark_filter;
 
+mod merge_project;
+
 mod approx_percentile;
 
 // import for submodules
@@ -97,6 +99,7 @@ use self::stream_scan::*;
 use self::temporal_join::*;
 use self::top_n::*;
 use self::union::*;
+use self::merge_project::*;
 use self::watermark_filter::WatermarkFilterBuilder;
 use crate::error::StreamResult;
 use crate::executor::{Execute, Executor, ExecutorInfo};
@@ -181,5 +184,6 @@ pub async fn create_executor(
         NodeBody::Changelog => ChangeLogExecutorBuilder,
         NodeBody::GlobalApproxPercentile => GlobalApproxPercentileExecutorBuilder,
         NodeBody::LocalApproxPercentile => LocalApproxPercentileExecutorBuilder,
+        NodeBody::MergeProject => MergeProjectExecutorBuilder,
     }
 }
