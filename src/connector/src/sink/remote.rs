@@ -73,7 +73,7 @@ macro_rules! def_remote_sink {
     () => {
         def_remote_sink! {
             { ElasticSearch, ElasticSearchSink, "elasticsearch" }
-            { Opensearch, OpensearchSink, "opensearch"}
+            { Opensearch, OpenSearchSink, "opensearch"}
             { Cassandra, CassandraSink, "cassandra" }
             { Jdbc, JdbcSink, "jdbc", |desc| {
                 desc.sink_type.is_append_only()
@@ -165,6 +165,11 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
 }
 
 async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorResult<()> {
+    if sink_name == OpenSearchSink::SINK_NAME {
+        risingwave_common::license::Feature::OpenSearchSink
+            .check_available()
+            .map_err(|e| anyhow::anyhow!(e))?;
+    }
     if is_es_sink(sink_name)
         && param.downstream_pk.len() > 1
         && !param.properties.contains_key(ES_OPTION_DELIMITER)
