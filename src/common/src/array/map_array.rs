@@ -20,8 +20,8 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{PbArray, PbArrayType};
 
 use super::{
-    Array, ArrayBuilder, ArrayImpl, ArrayResult, DatumRef, ListArray, ListArrayBuilder, ListRef,
-    ListValue, MapType, ScalarRef, ScalarRefImpl, StructArray,
+    Array, ArrayBuilder, ArrayImpl, ArrayResult, DatumRef, DefaultOrdered, ListArray,
+    ListArrayBuilder, ListRef, ListValue, MapType, ScalarRef, ScalarRefImpl, StructArray,
 };
 use crate::bitmap::Bitmap;
 use crate::types::{DataType, Scalar, ToText};
@@ -53,7 +53,7 @@ impl ArrayBuilder for MapArrayBuilder {
     }
 
     fn append_n(&mut self, n: usize, value: Option<MapRef<'_>>) {
-        self.inner.append_n(n, value.map(|v| v.0));
+        self.inner.append_n(n, value.map(|v| v.into_inner()));
     }
 
     fn append_array(&mut self, other: &MapArray) {
@@ -77,19 +77,41 @@ impl ArrayBuilder for MapArrayBuilder {
 /// `MapArray` is physically just a `List<Struct<key: K, value: V>>` array, but with some additional restrictions.
 ///
 /// Type:
-/// - `key`'s datatype can only be string & integral types. (See [`MapType::assert_key_type_valid`].)
+/// - `key`'s datatype can only be string & integral types. (See [`MapType::check_key_type_valid`].)
 /// - `value` can be any type.
 ///
 /// Value (for each map value in the array):
 /// - `key`s are non-null and unique.
+///
 /// - `key`s and `value`s must be of the same length.
 ///   For a `MapArray`, it's sliced by the `ListArray`'s offsets, so it essentially means the
 ///   `key` and `value` children arrays have the same length.
-/// - The lists are not sorted by `key`.
-/// - Map values are not comparable.
-///   And the map type should not be used as (primary/group/join/order) keys.
-///   Such usages should be banned in the frontend, and the implementation of `PartialEq`, `Ord` etc. are `unreachable!()`. (See [`cmp`].)
-///   Note that this decision is not definitive. Just be conservative at the beginning.
+///
+/// - The lists are NOT sorted by `key`.
+///
+/// - `Eq` / `Hash` / `Ord` for map:
+///
+///   It's controversial due to the physicial representation is just an unordered list.
+///   In many systems (e.g., `DuckDB` and `ClickHouse`), `{"k1":"v1","k2":"v2"} != {"k2":"v2","k1":"v1"}`.
+///   But the reverse definition might be more intuitive, especially when ingesting Avro/Protobuf data.
+///
+///   To avoid controversy, we wanted to ban all usages and make the implementation `unreachable!()`,
+///   but it's hard since these implementations can be used in different places:
+///   * Explicit in User-facing functions (e.g., comparison operators). These could be avoided completely.
+///   * Implicit in Keys (group by / order by / primary key). These could also be banned, but it's harder.
+///   * Some internal usages. One example is `_row_id`. See <https://github.com/risingwavelabs/risingwave/issues/7981#issuecomment-2257661749>.
+///     It might be solvable, but we are not sure whether it's depended somewhere else.
+///
+///   Considering these, it might be better to still choose a _well-defined_ behavior instead
+///   of using `unreachable`. We should try to have a consistent definition for these operations to minimize possible surprises.
+///   And we could still try our best to ban it to prevent misuse.
+///
+///   Currently we choose the second behavior. i.e., first sort the map by key, then compare/hash.
+///
+///   See more discussion in <https://github.com/risingwavelabs/risingwave/issues/7981>.
+///
+///
+/// Note that decisions above are not definitive. Just be conservative at the beginning.
 #[derive(Debug, Clone, Eq)]
 pub struct MapArray {
     pub(super) inner: ListArray,
@@ -108,7 +130,7 @@ impl Array for MapArray {
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
         let list = self.inner.raw_value_at_unchecked(idx);
-        MapRef(list)
+        MapRef::new_unchecked(list)
     }
 
     fn len(&self) -> usize {
@@ -156,21 +178,132 @@ impl MapArray {
     }
 }
 
-/// Refer to [`MapArray`] for the invariants of a map value.
-#[derive(Clone, Eq, EstimateSize)]
-pub struct MapValue(ListValue);
+pub use scalar::{MapRef, MapValue};
+
+/// We can enforce the invariants (see [`MapArray`]) in too many places
+/// (both `MapValue`, `MapRef` and `MapArray`).
+///
+/// So we define the types and constructors in a separated `mod`
+/// to prevent direct construction.
+/// We only check the invariants in the constructors.
+/// After they are constructed, we assume the invariants holds.
+mod scalar {
+    use super::*;
+
+    /// Refer to [`MapArray`] for the invariants of a map value.
+    #[derive(Clone, Eq, EstimateSize)]
+    pub struct MapValue(ListValue);
+
+    /// A map is just a slice of the underlying struct array.
+    ///
+    /// Refer to [`MapArray`] for the invariants of a map value.
+    ///
+    /// XXX: perhaps we can make it `MapRef<'a, 'b>(ListRef<'a>, ListRef<'b>);`.
+    /// Then we can build a map ref from 2 list refs without copying the data.
+    /// Currently it's impossible.
+    /// <https://github.com/risingwavelabs/risingwave/issues/17863>
+    #[derive(Copy, Clone, Eq)]
+    pub struct MapRef<'a>(ListRef<'a>);
+
+    impl MapValue {
+        pub fn inner(&self) -> &ListValue {
+            &self.0
+        }
+
+        pub fn into_inner(self) -> ListValue {
+            self.0
+        }
+
+        /// # Panics
+        /// Panics if [map invariants](`super::MapArray`) are violated.
+        pub fn from_list_entries(list: ListValue) -> Self {
+            // validates list type is valid
+            _ = MapType::from_list_entries(list.data_type());
+            // TODO: validate the values is valid
+            MapValue(list)
+        }
+
+        /// # Panics
+        /// Panics if [map invariants](`super::MapArray`) are violated.
+        pub fn from_kv(keys: ListValue, values: ListValue) -> Self {
+            assert_eq!(
+                keys.len(),
+                values.len(),
+                "keys: {keys:?}, values: {values:?}"
+            );
+            let unique_keys = keys.iter().unique().collect_vec();
+            assert!(
+                unique_keys.len() == keys.len(),
+                "non unique keys in map: {keys:?}"
+            );
+            assert!(!unique_keys.contains(&None), "null key in map: {keys:?}");
+
+            let len = keys.len();
+            let key_type = keys.data_type();
+            let value_type = values.data_type();
+            let struct_array = StructArray::new(
+                MapType::struct_type_for_map(key_type, value_type),
+                vec![keys.into_array().into_ref(), values.into_array().into_ref()],
+                Bitmap::ones(len),
+            );
+            MapValue(ListValue::new(struct_array.into()))
+        }
+    }
+
+    impl<'a> MapRef<'a> {
+        /// # Safety
+        /// The caller must ensure the invariants of a map value.
+        pub unsafe fn new_unchecked(list: ListRef<'a>) -> Self {
+            MapRef(list)
+        }
+
+        pub fn inner(&self) -> &ListRef<'a> {
+            &self.0
+        }
+
+        pub fn into_inner(self) -> ListRef<'a> {
+            self.0
+        }
+    }
+
+    impl Scalar for MapValue {
+        type ScalarRefType<'a> = MapRef<'a>;
+
+        fn as_scalar_ref(&self) -> MapRef<'_> {
+            // MapValue is assumed to be valid, so we just construct directly without check invariants.
+            MapRef(self.0.as_scalar_ref())
+        }
+    }
+
+    impl<'a> ScalarRef<'a> for MapRef<'a> {
+        type ScalarType = MapValue;
+
+        fn to_owned_scalar(&self) -> MapValue {
+            // MapRef is assumed to be valid, so we just construct directly without check invariants.
+            MapValue(self.0.to_owned_scalar())
+        }
+
+        fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+            for (k, v) in self.iter_sorted() {
+                super::super::hash_datum(Some(k), state);
+                super::super::hash_datum(v, state);
+            }
+        }
+    }
+}
 
 mod cmp {
     use super::*;
+    use crate::array::DefaultOrd;
     impl PartialEq for MapArray {
-        fn eq(&self, _other: &Self) -> bool {
-            unreachable!("map is not comparable. Such usage should be banned in frontend.")
+        fn eq(&self, other: &Self) -> bool {
+            self.iter().eq(other.iter())
         }
     }
 
     impl PartialEq for MapValue {
-        fn eq(&self, _other: &Self) -> bool {
-            unreachable!("map is not comparable. Such usage should be banned in frontend.")
+        fn eq(&self, other: &Self) -> bool {
+            self.as_scalar_ref().eq(&other.as_scalar_ref())
         }
     }
 
@@ -181,20 +314,23 @@ mod cmp {
     }
 
     impl Ord for MapValue {
-        fn cmp(&self, _other: &Self) -> Ordering {
-            unreachable!("map is not comparable. Such usage should be banned in frontend.")
+        fn cmp(&self, other: &Self) -> Ordering {
+            self.as_scalar_ref().cmp(&other.as_scalar_ref())
         }
     }
 
     impl PartialEq for MapRef<'_> {
-        fn eq(&self, _other: &Self) -> bool {
-            unreachable!("map is not comparable. Such usage should be banned in frontend.")
+        fn eq(&self, other: &Self) -> bool {
+            self.iter_sorted().eq(other.iter_sorted())
         }
     }
 
     impl Ord for MapRef<'_> {
-        fn cmp(&self, _other: &Self) -> Ordering {
-            unreachable!("map is not comparable. Such usage should be banned in frontend.")
+        fn cmp(&self, other: &Self) -> Ordering {
+            self.iter_sorted()
+                .cmp_by(other.iter_sorted(), |(k1, v1), (k2, v2)| {
+                    k1.default_cmp(&k2).then_with(|| v1.default_cmp(&v2))
+                })
         }
     }
 
@@ -217,61 +353,13 @@ impl Display for MapValue {
     }
 }
 
-impl MapValue {
-    pub fn from_list_entries(list: ListValue) -> Self {
-        if cfg!(debug_assertions) {
-            // validates list type is valid
-            _ = MapType::from_list_entries(list.data_type());
-        }
-        // TODO: validate the values is valid
-        MapValue(list)
-    }
-
-    pub fn from_kv(keys: ListValue, values: ListValue) -> Self {
-        if cfg!(debug_assertions) {
-            assert_eq!(
-                keys.len(),
-                values.len(),
-                "keys: {keys:?}, values: {values:?}"
-            );
-            let unique_keys = keys.iter().unique().collect_vec();
-            assert!(
-                unique_keys.len() == keys.len(),
-                "non unique keys in map: {keys:?}"
-            );
-            assert!(!unique_keys.contains(&None), "null key in map: {keys:?}");
-        }
-
-        let len = keys.len();
-        let key_type = keys.data_type();
-        let value_type = values.data_type();
-        let struct_array = StructArray::new(
-            MapType::struct_type_for_map(key_type, value_type),
-            vec![keys.into_array().into_ref(), values.into_array().into_ref()],
-            Bitmap::ones(len),
-        );
-        MapValue(ListValue::new(struct_array.into()))
-    }
-}
-
-/// A map is just a slice of the underlying struct array.
-///
-/// Refer to [`MapArray`] for the invariants of a map value.
-///
-/// XXX: perhaps we can make it `MapRef<'a, 'b>(ListRef<'a>, ListRef<'b>);`.
-/// Then we can build a map ref from 2 list refs without copying the data.
-/// Currently it's impossible.
-/// <https://github.com/risingwavelabs/risingwave/issues/17863>
-#[derive(Copy, Clone, Eq)]
-pub struct MapRef<'a>(pub(crate) ListRef<'a>);
-
 impl<'a> MapRef<'a> {
     /// Iterates over the elements of the map.
     pub fn iter(
         self,
     ) -> impl DoubleEndedIterator + ExactSizeIterator<Item = (ScalarRefImpl<'a>, DatumRef<'a>)> + 'a
     {
-        self.0.iter().map(|list_elem| {
+        self.inner().iter().map(|list_elem| {
             let list_elem = list_elem.expect("the list element in map should not be null");
             let struct_ = list_elem.into_struct();
             let (k, v) = struct_
@@ -281,32 +369,18 @@ impl<'a> MapRef<'a> {
             (k.expect("map key should not be null"), v)
         })
     }
-}
 
-impl Scalar for MapValue {
-    type ScalarRefType<'a> = MapRef<'a>;
-
-    fn as_scalar_ref(&self) -> MapRef<'_> {
-        MapRef(self.0.as_scalar_ref())
-    }
-}
-
-impl<'a> ScalarRef<'a> for MapRef<'a> {
-    type ScalarType = MapValue;
-
-    fn to_owned_scalar(&self) -> MapValue {
-        MapValue(self.0.to_owned_scalar())
-    }
-
-    fn hash_scalar<H: std::hash::Hasher>(&self, _state: &mut H) {
-        // FIXME: this is not ok.
-        unreachable!("map is not hashable. Such usage should be banned in frontend.")
+    pub fn iter_sorted(
+        self,
+    ) -> impl DoubleEndedIterator + ExactSizeIterator<Item = (ScalarRefImpl<'a>, DatumRef<'a>)> + 'a
+    {
+        self.iter().sorted_by_key(|(k, _v)| DefaultOrdered(*k))
     }
 }
 
 impl Debug for MapRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_list().entries(self.0.iter()).finish()
+        f.debug_list().entries(self.inner().iter()).finish()
     }
 }
 

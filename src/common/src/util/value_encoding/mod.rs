@@ -227,7 +227,7 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::Jsonb(v) => serialize_str(&v.value_serialize(), buf),
         ScalarRefImpl::Struct(s) => serialize_struct(s, buf),
         ScalarRefImpl::List(v) => serialize_list(v, buf),
-        ScalarRefImpl::Map(m) => serialize_list(m.0, buf),
+        ScalarRefImpl::Map(m) => serialize_list(m.into_inner(), buf),
     }
 }
 
@@ -253,7 +253,7 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Jsonb(v) => v.capacity(),
         ScalarRefImpl::Struct(s) => estimate_serialize_struct_size(s),
         ScalarRefImpl::List(v) => estimate_serialize_list_size(v),
-        ScalarRefImpl::Map(v) => estimate_serialize_list_size(v.0),
+        ScalarRefImpl::Map(v) => estimate_serialize_list_size(v.into_inner()),
     }
 }
 
