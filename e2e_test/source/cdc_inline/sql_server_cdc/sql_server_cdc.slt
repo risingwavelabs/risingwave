@@ -3,6 +3,9 @@ control substitution on
 
 # ------------ data prepare stage ------------
 system ok
+sqlcmd -d master -Q 'create database mydb;' -b
+
+system ok
 sqlcmd -C -i e2e_test/source/cdc_inline/sql_server_cdc/sql_server_cdc_prepare.sql -b
 
 # ------------ validate stage ------------
@@ -190,8 +193,8 @@ SELECT * from shared_sqlserver_all_data_types order by id;
 3 t 127 32767 2147483647 9223372036854775807 -10 10000 10000 zzzz \xffffffff 2999-12-31 23:59:59.999 2099-12-31 23:59:59.999 2999-12-31 23:59:59.999+00:00
 
 # ------------ kill cluster ------------
-# system ok
-# risedev kill
+system ok
+risedev kill
 
 sleep 30s
 
@@ -202,8 +205,8 @@ sqlcmd -C -i e2e_test/source/cdc_inline/sql_server_cdc/sql_server_cdc_insert.sql
 # sleep 10s
 
 # ------------ recover cluster ------------
-# system ok
-# risedev dev ci-1cn-1fe-with-recovery
+system ok
+risedev dev ci-1cn-1fe-with-recovery
 
 sleep 20s
 

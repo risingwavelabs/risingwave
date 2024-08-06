@@ -26,7 +26,7 @@ use bytes::BytesMut;
 use chrono::{
     DateTime, Datelike, Days, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday,
 };
-use postgres_types::{accepts, to_sql_checked, IsNull, Type};
+use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::ZeroHeapSize;
 use thiserror::Error;
 
@@ -68,7 +68,7 @@ macro_rules! impl_chrono_wrapper {
 
         impl ZeroHeapSize for $variant_name {}
 
-        impl postgres_types::ToSql for $variant_name {
+        impl ToSql for $variant_name {
             accepts!($pg_type);
 
             to_sql_checked!();
@@ -85,12 +85,12 @@ macro_rules! impl_chrono_wrapper {
             }
         }
 
-        impl<'a> postgres_types::FromSql<'a> for $variant_name {
+        impl<'a> FromSql<'a> for $variant_name {
             fn from_sql(
                 ty: &Type,
                 raw: &'a [u8],
             ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-                let instant = <$chrono as postgres_types::FromSql>::from_sql(ty, raw)?;
+                let instant = <$chrono>::from_sql(ty, raw)?;
                 Ok(Self::from(instant))
             }
 
