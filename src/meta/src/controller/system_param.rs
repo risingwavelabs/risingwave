@@ -143,7 +143,7 @@ impl SystemParamsController {
         let params = SystemParameter::find().all(&db).await?;
         let params = merge_params(system_params_from_db(params)?, init_params);
 
-        info!("system parameters: {:?}", params);
+        info!(initial_params = ?SystemParamsReader::new(&params), "initialize system parameters");
         check_missing_params(&params).map_err(|e| anyhow!(e))?;
 
         let ctl = Self {

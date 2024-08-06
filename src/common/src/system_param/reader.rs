@@ -38,10 +38,11 @@ macro_rules! define_system_params_read_trait {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $doc:literal, $($rest:tt)* },)*) => {
         /// The trait delegating reads on [`risingwave_pb::meta::SystemParams`].
         ///
-        /// For 2 purposes:
+        /// Purposes:
         /// - Avoid misuse of deprecated fields by hiding their getters.
         /// - Abstract fallback logic for fields that might not be provided by meta service due to backward
         ///   compatibility.
+        /// - Redact sensitive fields by returning a newtype around the original value.
         pub trait SystemParamsRead {
             $(
                 #[doc = $doc]
@@ -70,10 +71,32 @@ for_all_params!(define_system_params_read_trait);
 /// The wrapper delegating reads on [`risingwave_pb::meta::SystemParams`].
 ///
 /// See [`SystemParamsRead`] for more details.
-#[derive(Clone, Debug, PartialEq)]
+// TODO: should we manually impl `PartialEq` by comparing each field with read functions?
+#[derive(Clone, PartialEq)]
 pub struct SystemParamsReader<I = PbSystemParams> {
     inner: I,
 }
+
+// TODO: should ban `Debug` for inner `SystemParams`.
+// https://github.com/risingwavelabs/risingwave/pull/17906#discussion_r1705056943
+macro_rules! impl_system_params_reader_debug {
+    ($({ $field:ident, $($rest:tt)* },)*) => {
+        impl<I> std::fmt::Debug for SystemParamsReader<I>
+        where
+            I: Borrow<PbSystemParams>,
+        {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct("SystemParamsReader")
+                    $(
+                        .field(stringify!($field), &self.$field())
+                    )*
+                    .finish()
+            }
+        }
+    };
+}
+
+for_all_params!(impl_system_params_reader_debug);
 
 impl<I> From<I> for SystemParamsReader<I>
 where
