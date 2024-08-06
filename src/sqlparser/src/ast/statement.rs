@@ -214,7 +214,6 @@ impl Encode {
             _ => parser_err!(
                 "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE | PARQUET | NONE after Encode"
             ),
-
         })
     }
 }

@@ -23,8 +23,7 @@ use opendal::{FuturesAsyncWriter, Operator, Writer as OpendalWriter};
 use parquet::arrow::AsyncArrowWriter;
 use parquet::file::properties::WriterProperties;
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::bitmap::Bitmap;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use tokio_util::compat::{Compat, FuturesAsyncWriteCompatExt};
 
@@ -293,10 +292,7 @@ impl OpenDalSinkWriter {
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        let (mut chunk, ops) = chunk.compact().into_parts();
-        let filters =
-            chunk.visibility() & ops.iter().map(|op| *op == Op::Insert).collect::<Bitmap>();
-        chunk.set_visibility(filters);
+        let (data_chunk, _) = chunk.compact().into_parts();
 
         match self
             .sink_writer
@@ -305,7 +301,7 @@ impl OpenDalSinkWriter {
         {
             FileWriterEnum::ParquetFileWriter(w) => {
                 let batch =
-                    IcebergArrowConvert.to_record_batch(self.schema.clone(), &chunk.compact())?;
+                    IcebergArrowConvert.to_record_batch(self.schema.clone(), &data_chunk)?;
                 w.write(&batch).await?;
             }
         }

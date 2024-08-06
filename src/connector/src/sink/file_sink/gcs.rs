@@ -32,7 +32,7 @@ pub struct GcsCommon {
 
     /// The base64 encoded credential key. If not set, ADC will be used.
     #[serde(rename = "gcs.credential")]
-    pub credential: Option<String>,
+    pub credential: String,
 
     /// If credential/ADC is not set. The service account can be used to provide the credential info.
     #[serde(rename = "gcs.service_account", default)]
@@ -61,15 +61,7 @@ impl<S: OpendalSinkBackend> FileSink<S> {
 
         builder.bucket(&config.common.bucket_name);
 
-        // if credential env is set, use it. Otherwise, ADC will be used.
-        if let Some(cred) = config.common.credential {
-            builder.credential(&cred);
-        } else {
-            let cred = std::env::var("GOOGLE_APPLICATION_CREDENTIALS");
-            if let Ok(cred) = cred {
-                builder.credential(&cred);
-            }
-        }
+        builder.credential(&config.common.credential);
 
         builder.service_account(&config.common.service_account);
 
