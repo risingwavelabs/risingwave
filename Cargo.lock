@@ -11095,6 +11095,7 @@ name = "risingwave_meta_model_migration"
 version = "1.11.0-alpha"
 dependencies = [
  "async-std",
+ "sea-orm",
  "sea-orm-migration",
  "serde",
  "serde_json",
