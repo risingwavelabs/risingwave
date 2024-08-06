@@ -106,8 +106,7 @@ pub struct TableFragments {
     /// The status of actors
     pub actor_status: BTreeMap<ActorId, ActorStatus>,
 
-    /// The splits of actors,
-    /// incl. both `Source` and `SourceBackfill` actors.
+    /// The splits of actors
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
     /// The streaming context associated with this stream plan and its fragments

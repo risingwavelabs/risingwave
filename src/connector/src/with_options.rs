@@ -113,10 +113,6 @@ pub trait WithPropertiesExt: Get + Sized {
         self.is_cdc_connector() && CdcTableType::from_properties(self).can_backfill()
     }
 
-    fn is_shareable_non_cdc_connector(&self) -> bool {
-        self.is_kafka_connector()
-    }
-
     #[inline(always)]
     fn is_iceberg_connector(&self) -> bool {
         let Some(connector) = self.get_connector() else {

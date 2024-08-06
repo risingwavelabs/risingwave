@@ -76,7 +76,6 @@ pub struct Reschedule {
 
     /// Reassigned splits for source actors.
     /// It becomes the `actor_splits` in [`UpdateMutation`].
-    /// `Source` and `SourceBackfill` are handled together here.
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
     /// Whether this fragment is injectable. The injectable means whether the fragment contains
