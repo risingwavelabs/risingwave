@@ -1157,6 +1157,13 @@ where
         op_consistency_level: StateTableOpConsistencyLevel,
     ) -> StreamExecutorResult<()> {
         if self.op_consistency_level != op_consistency_level {
+            info!(
+                ?new_epoch,
+                prev_op_consistency_level = ?self.op_consistency_level,
+                ?op_consistency_level,
+                table_id = self.table_id.table_id,
+                "switch to new op consistency level"
+            );
             self.commit_inner(new_epoch, Some(op_consistency_level))
                 .await
         } else {

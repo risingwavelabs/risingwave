@@ -95,6 +95,7 @@ enum ClickHouseEngine {
     SharedCollapsingMergeTree(String),
     SharedVersionedCollapsingMergeTree(String),
     SharedGraphiteMergeTree,
+    Null,
 }
 impl ClickHouseEngine {
     pub fn is_collapsing_engine(&self) -> bool {
@@ -170,6 +171,7 @@ impl ClickHouseEngine {
     ) -> Result<Self> {
         match engine_name.engine.as_str() {
             "MergeTree" => Ok(ClickHouseEngine::MergeTree),
+            "Null" => Ok(ClickHouseEngine::Null),
             "ReplacingMergeTree" => {
                 let delete_column = config.common.delete_column.clone();
                 Ok(ClickHouseEngine::ReplacingMergeTree(delete_column))
