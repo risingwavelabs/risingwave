@@ -22,7 +22,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::barrier::command::CommandContext;
 use crate::barrier::progress::CreateMviewProgressTracker;
