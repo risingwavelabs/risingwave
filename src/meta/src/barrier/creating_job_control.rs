@@ -45,6 +45,7 @@ pub(super) enum CreatingStreamingJobStatus {
     ConsumingSnapshot {
         prev_epoch_fake_physical_time: u64,
         pending_commands: Vec<Arc<CommandContext>>,
+        version_stats: HummockVersionStats,
         create_mview_tracker: CreateMviewProgressTracker,
         fragment_info: HashMap<FragmentId, InflightFragmentInfo>,
         /// The `prev_epoch` of pending non checkpoint barriers
@@ -102,6 +103,7 @@ impl CreatingStreamingJobControl {
             status: CreatingStreamingJobStatus::ConsumingSnapshot {
                 prev_epoch_fake_physical_time: 0,
                 pending_commands: vec![],
+                version_stats: version_stat.clone(),
                 create_mview_tracker,
                 fragment_info,
                 pending_non_checkpoint_barriers: vec![],
@@ -343,7 +345,6 @@ impl CreatingStreamingJobControl {
         epoch: u64,
         worker_id: WorkerId,
         resp: BarrierCompleteResponse,
-        version_stats: &HummockVersionStats,
     ) -> Option<u64> {
         debug!(
             epoch,
@@ -354,6 +355,7 @@ impl CreatingStreamingJobControl {
 
         if let CreatingStreamingJobStatus::ConsumingSnapshot {
             create_mview_tracker,
+            version_stats,
             ..
         } = &mut self.status
         {

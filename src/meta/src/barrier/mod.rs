@@ -323,7 +323,9 @@ impl CheckpointControl {
                 CreatingStreamingJobStatus::ConsumingSnapshot { .. }
                 | CreatingStreamingJobStatus::ConsumingLogStore { .. } => {}
                 CreatingStreamingJobStatus::Finishing(prev_epoch) => {
-                    if prev_epoch != command_ctx.prev_epoch.value().0 {
+                    if command_ctx.kind.is_checkpoint()
+                        && prev_epoch != command_ctx.prev_epoch.value().0
+                    {
                         // skip the job that has just marked as Finishing
                         newly_finished_table_ids.insert(*table_id);
                         creating_streaming_job.status =
@@ -409,7 +411,7 @@ impl CheckpointControl {
                 .creating_streaming_job_controls
                 .get_mut(&creating_table_id)
                 .expect("should exist")
-                .collect(prev_epoch, worker_id, resp, &self.hummock_version_stats)
+                .collect(prev_epoch, worker_id, resp)
             {
                 debug!(finished_epoch, ?creating_table_id, "finish creating job");
                 let creating_streaming_job = self
