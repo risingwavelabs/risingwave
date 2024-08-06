@@ -22,7 +22,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::barrier::command::CommandContext;
 use crate::barrier::progress::CreateMviewProgressTracker;
@@ -77,7 +77,11 @@ impl CreatingStreamingJobControl {
         backfill_epoch: Epoch,
         version_stat: &HummockVersionStats,
     ) -> Self {
-        error!(?info, "new creating job");
+        info!(
+            table_id = info.table_fragments.table_id().table_id,
+            definition = info.definition,
+            "new creating job"
+        );
         let mut create_mview_tracker = CreateMviewProgressTracker::default();
         create_mview_tracker.update_tracking_jobs(Some((&info, None)), [], version_stat);
         let fragment_info: HashMap<_, _> = info.new_fragment_info().collect();
@@ -293,7 +297,7 @@ impl CreatingStreamingJobControl {
                 let node_to_collect = control_stream_manager.inject_barrier(
                     Some(table_id),
                     &command_ctx.info.node_map,
-                    command_ctx.to_mutation(),
+                    None,
                     (&command_ctx.curr_epoch, &command_ctx.prev_epoch),
                     &command_ctx.kind,
                     fragment_info,

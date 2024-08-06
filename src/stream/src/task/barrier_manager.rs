@@ -521,18 +521,6 @@ impl LocalBarrierWorker {
         create_actor_result: StreamResult<CreateActorOutput>,
     ) {
         let result = create_actor_result.map(|output| {
-            // TODO: should be removed before merged
-            let actors = output
-                .actors
-                .iter()
-                .map(|actor| actor.actor_context.id)
-                .collect_vec();
-            let senders = output
-                .senders
-                .iter()
-                .map(|(actor_id, senders)| (*actor_id, senders.len()))
-                .collect::<HashMap<_, _>>();
-            error!(?actors, ?senders, "actor created");
             for (actor_id, senders) in output.senders {
                 self.register_sender(actor_id, senders);
             }
@@ -727,7 +715,11 @@ impl LocalBarrierWorker {
 
     /// Register sender for source actors, used to send barriers.
     fn register_sender(&mut self, actor_id: ActorId, senders: Vec<UnboundedSender<Barrier>>) {
-        tracing::error!(actor_id = actor_id, "register sender");
+        tracing::debug!(
+            target: "events::stream::barrier::manager",
+            actor_id = actor_id,
+            "register sender"
+        );
         self.barrier_senders
             .entry(actor_id)
             .or_default()
@@ -773,9 +765,12 @@ impl LocalBarrierWorker {
                 .watermark_epoch
                 .store(barrier.epoch.curr, std::sync::atomic::Ordering::SeqCst);
         }
-        error!(
+        debug!(
+            target: "events::stream::barrier::manager::send",
             "send barrier {:?}, senders = {:?}, actor_ids_to_collect = {:?}",
-            barrier, to_send, to_collect
+            barrier,
+            to_send,
+            to_collect
         );
 
         for actor_id in &to_collect {
@@ -825,7 +820,11 @@ impl LocalBarrierWorker {
 
         // Actors to stop should still accept this barrier, but won't get sent to in next times.
         if let Some(actors) = barrier.all_stop_actors() {
-            error!("remove actors {:?} from senders", actors);
+            debug!(
+                target: "events::stream::barrier::manager",
+                "remove actors {:?} from senders",
+                actors
+            );
             for actor in actors {
                 self.barrier_senders.remove(actor);
             }
