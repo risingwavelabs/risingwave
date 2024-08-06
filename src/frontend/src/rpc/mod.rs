@@ -88,7 +88,7 @@ async fn get_new_table_plan(
         .expect("session manager has been initialized");
 
     // get a session object for the corresponding user and database
-    let session = session_mgr.get_session(database_id, owner)?;
+    let session = session_mgr.create_dummy_session(database_id, owner)?;
 
     let new_columns = table_change.columns.into_iter().map(|c| c.into()).collect();
     let table_name = ObjectName::from(vec![table_name.as_str().into()]);

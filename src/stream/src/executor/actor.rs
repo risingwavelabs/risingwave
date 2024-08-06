@@ -57,7 +57,7 @@ pub struct ActorContext {
     // mv_table_id to subscription id
     pub related_subscriptions: HashMap<TableId, HashSet<u32>>,
 
-    // Meta client. currently used for auto schema change
+    // Meta client. currently used for auto schema change. `None` for test only
     pub meta_client: Option<MetaClient>,
 }
 

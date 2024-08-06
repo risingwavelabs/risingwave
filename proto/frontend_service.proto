@@ -18,7 +18,6 @@ message GetTableReplacePlanResponse {
   ddl_service.ReplaceTablePlan replace_plan = 1;
 }
 
-// Frontend will start a background worker to
 service FrontendService {
   rpc GetTableReplacePlan(GetTableReplacePlanRequest) returns (GetTableReplacePlanResponse);
 }

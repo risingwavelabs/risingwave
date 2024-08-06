@@ -409,6 +409,9 @@ message Table {
   // conflict" operations.
   optional uint32 version_column_index = 38;
 
+  // This field stores the full name of the upstream table for a CDC table,
+  // which is used in auto schema change to query Tables that are mapped to the
+  // same upstream table.
   optional string cdc_table_name = 39;
 
   // Per-table catalog version, used by schema change. `None` for internal

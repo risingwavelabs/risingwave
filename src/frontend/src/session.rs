@@ -261,7 +261,7 @@ impl FrontendEnv {
             .unwrap();
         info!("advertise addr is {}", frontend_address);
 
-        let frontend_rpc_addr = opts.health_check_listener_addr.parse().unwrap();
+        let frontend_rpc_addr = opts.frontend_rpc_listener_addr.parse().unwrap();
         // Register in meta by calling `AddWorkerNode` RPC.
         // Use the rpc server address as the frontend address, since Meta needs to get frontend rpc
         // client based on this address.
@@ -358,7 +358,7 @@ impl FrontendEnv {
 
         let health_srv = HealthServiceImpl::new();
         let frontend_srv = FrontendServiceImpl::new();
-        let frontend_rpc_addr = opts.health_check_listener_addr.parse().unwrap();
+        let frontend_rpc_addr = opts.frontend_rpc_listener_addr.parse().unwrap();
 
         let telemetry_manager = TelemetryManager::new(
             Arc::new(meta_client.clone()),
@@ -385,7 +385,7 @@ impl FrontendEnv {
         });
         info!(
             "Frontend RPC Listener is set up on {}",
-            opts.health_check_listener_addr.clone()
+            opts.frontend_rpc_listener_addr.clone()
         );
 
         let creating_streaming_job_tracker =
@@ -1138,19 +1138,19 @@ pub struct SessionManagerImpl {
 impl SessionManager for SessionManagerImpl {
     type Session = SessionImpl;
 
-    fn get_session(
+    fn create_dummy_session(
         &self,
         database_id: u32,
         user_id: u32,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
-        let dumb_addr = Address::Tcp(SocketAddr::new(
+        let dummy_addr = Address::Tcp(SocketAddr::new(
             IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
             5691, // port of meta
         ));
         let user_reader = self.env.user_info_reader();
         let reader = user_reader.read_guard();
         if let Some(user_name) = reader.get_user_name_by_id(user_id) {
-            self.connect_inner(database_id, user_name.as_str(), Arc::new(dumb_addr))
+            self.connect_inner(database_id, user_name.as_str(), Arc::new(dummy_addr))
         } else {
             Err(Box::new(Error::new(
                 ErrorKind::InvalidInput,

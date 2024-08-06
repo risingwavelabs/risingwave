@@ -121,10 +121,11 @@ pub struct FrontendOpts {
 
     #[clap(
         long,
+        alias = "health-check-listener-addr",
         env = "RW_HEALTH_CHECK_LISTENER_ADDR",
         default_value = "127.0.0.1:6786"
     )]
-    pub health_check_listener_addr: String,
+    pub frontend_rpc_listener_addr: String,
 
     /// The path of `risingwave.toml` configuration file.
     ///

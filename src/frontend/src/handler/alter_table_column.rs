@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -94,18 +94,24 @@ pub async fn get_new_table_definition_for_cdc_table(
         source_schema.is_none(),
         "source schema should be None for CDC table"
     );
-    if original_columns.is_empty() {
-        Err(ErrorCode::NotSupported(
-            "alter a table with empty column definitions".to_string(),
-            "Please recreate the table with column definitions.".to_string(),
-        ))?
-    }
 
-    // replace the original columns with new version columns
+    let orig_column_map: HashMap<String, ColumnDef> = HashMap::from_iter(
+        original_columns
+            .iter()
+            .map(|col| (col.name.real_value(), col.clone())),
+    );
+
+    // update the original columns with new version columns
     let mut new_column_defs = vec![];
     for col in new_columns {
-        let ty = to_ast_data_type(col.data_type())?;
-        new_column_defs.push(ColumnDef::new(col.name().into(), ty, None, vec![]));
+        // if the column exists in the original definitoins, use the original column definition.
+        // since we don't support altering the column type right now
+        if let Some(original_col) = orig_column_map.get(&col.name().to_string()) {
+            new_column_defs.push(original_col.clone());
+        } else {
+            let ty = to_ast_data_type(col.data_type())?;
+            new_column_defs.push(ColumnDef::new(col.name().into(), ty, None, vec![]));
+        }
     }
     *original_columns = new_column_defs;
 
@@ -120,6 +126,8 @@ fn to_ast_data_type(ty: &DataType) -> Result<AstDataType> {
         DataType::Int64 => Ok(AstDataType::BigInt),
         DataType::Float32 => Ok(AstDataType::Real),
         DataType::Float64 => Ok(AstDataType::Double),
+        // TODO: handle precision and scale for decimal
+        DataType::Decimal => Ok(AstDataType::Decimal(None, None)),
         DataType::Date => Ok(AstDataType::Date),
         DataType::Varchar => Ok(AstDataType::Varchar),
         DataType::Time => Ok(AstDataType::Time(false)),
@@ -141,7 +149,9 @@ fn to_ast_data_type(ty: &DataType) -> Result<AstDataType> {
                 .try_collect()?;
             Ok(AstDataType::Struct(fields))
         }
-        _ => Err(anyhow!("unsupported data type: {:?}", ty).context("to_ast_data_type"))?,
+        DataType::Serial | DataType::Int256 => {
+            Err(anyhow!("unsupported data type: {:?}", ty).context("to_ast_data_type"))?
+        }
     }
 }
 

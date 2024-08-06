@@ -23,7 +23,8 @@ create source mysql_source with (
  username = 'root',
  password = '${MYSQL_PWD:}',
  database.name = 'mytest',
- server.id = '5701'
+ server.id = '5701',
+ auto.schema.change = 'true'
 );
 
 statement ok

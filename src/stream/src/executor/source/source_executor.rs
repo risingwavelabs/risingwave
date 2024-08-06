@@ -126,26 +126,28 @@ impl<S: StateStore> SourceExecutor<S> {
 
         let (schema_change_tx, mut schema_change_rx) =
             tokio::sync::mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
-        let meta_client = self.actor_ctx.meta_client.clone();
+        let meta_client = self
+            .actor_ctx
+            .meta_client
+            .clone()
+            .expect("A meta client is required for auto schema change.");
         // spawn a task to handle schema change event from source parser
         let _join_handle = tokio::task::spawn(async move {
             while let Some((schema_change, finish_tx)) = schema_change_rx.recv().await {
                 let table_names = schema_change.table_names();
                 tracing::info!("recv a schema change event for tables: {:?}", table_names);
-                if let Some(ref meta_client) = meta_client {
-                    // TODO: retry on rpc error
-                    match meta_client
-                        .auto_schema_change(schema_change.to_protobuf())
-                        .await
-                    {
-                        Ok(_) => {
-                            tracing::info!("schema change success for tables: {:?}", table_names);
-                            finish_tx.send(()).unwrap();
-                        }
-                        Err(e) => {
-                            tracing::error!(error = ?e.as_report(), "schema change error");
-                            finish_tx.send(()).unwrap();
-                        }
+                // TODO: retry on rpc error
+                match meta_client
+                    .auto_schema_change(schema_change.to_protobuf())
+                    .await
+                {
+                    Ok(_) => {
+                        tracing::info!("schema change success for tables: {:?}", table_names);
+                        finish_tx.send(()).unwrap();
+                    }
+                    Err(e) => {
+                        tracing::error!(error = ?e.as_report(), "schema change error");
+                        finish_tx.send(()).unwrap();
                     }
                 }
             }

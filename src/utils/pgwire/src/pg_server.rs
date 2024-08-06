@@ -47,8 +47,13 @@ pub type SessionId = (ProcessId, SecretKey);
 pub trait SessionManager: Send + Sync + 'static {
     type Session: Session;
 
-    fn get_session(&self, database_id: u32, user_id: u32)
-        -> Result<Arc<Self::Session>, BoxedError>;
+    /// In the process of auto schema change, we need a dummy session to access
+    /// catalog information in frontend and build a replace plan for the table.
+    fn create_dummy_session(
+        &self,
+        database_id: u32,
+        user_id: u32,
+    ) -> Result<Arc<Self::Session>, BoxedError>;
 
     fn connect(
         &self,
@@ -382,12 +387,12 @@ mod tests {
     impl SessionManager for MockSessionManager {
         type Session = MockSession;
 
-        fn get_session(
+        fn create_dummy_session(
             &self,
             _database_id: u32,
             _user_name: u32,
         ) -> Result<Arc<Self::Session>, BoxedError> {
-            todo!()
+            unimplemented!()
         }
 
         fn connect(

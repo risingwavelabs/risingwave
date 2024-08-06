@@ -85,7 +85,7 @@ pub struct LocalFrontend {
 impl SessionManager for LocalFrontend {
     type Session = SessionImpl;
 
-    fn get_session(
+    fn create_dummy_session(
         &self,
         _database_id: u32,
         _user_name: u32,

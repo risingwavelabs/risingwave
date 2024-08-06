@@ -931,13 +931,12 @@ impl DdlService for DdlServiceImpl {
         let req = request.into_inner();
 
         // randomly select a frontend worker to get the replace table plan
-        let mut workers = self
+        let workers = self
             .metadata_manager
             .list_worker_node(Some(WorkerType::Frontend), Some(State::Running))
             .await?;
-        workers.shuffle(&mut thread_rng());
         let worker = workers
-            .first()
+            .choose(&mut thread_rng())
             .ok_or_else(|| MetaError::from(anyhow!("no frontend worker available")))?;
 
         let client = self
