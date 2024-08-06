@@ -44,6 +44,25 @@ impl MigratorTrait for Migrator {
             Box::new(m20240702_084927_unnecessary_fk::Migration),
             Box::new(m20240806_143329_add_rate_limit_to_source_catalog::Migration),
         ]
+    }
+}
+
+#[macro_export]
+macro_rules! assert_not_has_tables {
+    ($manager:expr, $( $table:ident ),+) => {
+        $(
+            assert!(
+                !$manager
+                    .has_table($table::Table.to_string())
+                    .await?,
+                "Table `{}` already exists",
+                $table::Table.to_string()
+            );
+        )+
+    };
+}
+
+#[macro_export]
 macro_rules! drop_tables {
     ($manager:expr, $( $table:ident ),+) => {
         $(
