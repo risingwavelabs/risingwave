@@ -83,10 +83,6 @@ where
             session_data,
         }
     }
-
-    pub fn set_formats(&mut self, formats: Vec<Format>) {
-        self.formats = formats;
-    }
 }
 
 impl<VS> Stream for DataChunkToRowSetAdapter<VS>

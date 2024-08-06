@@ -638,11 +638,14 @@ impl SubscriptionCursor {
         session: Arc<SessionImpl>,
     ) {
         let mut formats = formats.clone();
+        let mut fields = fields.clone();
         formats.pop();
+        fields.pop();
         if *from_snapshot {
             formats.pop();
+            fields.pop();
         }
-        chunk_stream.init_row_stream(fields, &formats, session);
+        chunk_stream.init_row_stream(&fields, &formats, session);
     }
 }
 

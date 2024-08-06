@@ -328,6 +328,7 @@ def test_rebuild_table():
     check_rows_data([1,1],row[0],1)
     check_rows_data([1,1],row[1],4)
     check_rows_data([1,100],row[2],3)
+    drop_table_subscription()
 
 if __name__ == "__main__":
     test_cursor_snapshot()
