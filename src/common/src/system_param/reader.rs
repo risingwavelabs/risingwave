@@ -21,9 +21,15 @@ use super::{default, ParamValue};
 use crate::for_all_params;
 
 /// Information about a system parameter.
+///
+/// Used to display to users through `pg_settings` system table and `SHOW PARAMETERS` command.
 pub struct ParameterInfo {
     pub name: &'static str,
     pub mutable: bool,
+    /// The [`ToString`] representation of the parameter value.
+    ///
+    /// Certain parameters, such as `license_key`, may be sensitive, and redaction is applied to them in their newtypes.
+    /// As a result, we get the redacted value here for display.
     pub value: String,
     pub description: &'static str,
 }
