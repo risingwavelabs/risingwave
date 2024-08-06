@@ -120,6 +120,11 @@ impl<'a> From<LicenseKeyRef<'a>> for LicenseKey {
 }
 
 impl LicenseKey {
+    /// Create an empty license key, which means no license key is set.
+    pub fn empty() -> Self {
+        Self(String::new())
+    }
+
     /// Convert to a reference.
     pub fn as_ref(&self) -> LicenseKeyRef<'_> {
         LicenseKey(self.0.as_ref())

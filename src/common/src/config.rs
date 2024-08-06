@@ -2379,12 +2379,15 @@ pub struct CompactionConfig {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_license::LicenseKey;
+
     use super::*;
 
     fn default_config_for_docs() -> RwConfig {
-        // Although we have `license_key` default to a test-only value in the code,
-        // it gets redacted during serialization, so we don't need to do anything special here.
-        RwConfig::default()
+        let mut config = RwConfig::default();
+        // Set `license_key` to empty in the docs to avoid any confusion.
+        config.system.license_key = Some(LicenseKey::empty());
+        config
     }
 
     /// This test ensures that `config/example.toml` is up-to-date with the default values specified
