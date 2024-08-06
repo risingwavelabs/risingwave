@@ -98,7 +98,7 @@ select * from t1 union corresponding by (vxx) select * from t2
 statement ok
 create table txx (vxx int);
 
-statement error Invalid input syntax: At least one column of the left side shall have a <column name> that is the <column name> of some column of the right side
+statement error Invalid input syntax: When CORRESPONDING is specified, at least one column of the left side shall have a <column name> that is the <column name> of some column of the right side
 select * from t1 union corresponding select * from txx
 
 statement ok

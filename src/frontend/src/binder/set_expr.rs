@@ -281,7 +281,7 @@ impl Binder {
 
             if corresponding_col_idx_l.is_empty() {
                 return Err(ErrorCode::InvalidInputSyntax(
-                    "At least one column of the left side shall have a <column name> that is the \
+                    "When CORRESPONDING is specified, at least one column of the left side shall have a <column name> that is the \
                     <column name> of some column of the right side"
                         .to_string(),
                 )
