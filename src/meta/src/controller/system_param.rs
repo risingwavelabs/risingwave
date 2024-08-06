@@ -60,7 +60,7 @@ macro_rules! impl_system_params_from_db {
                 match model.name.as_str() {
                     $(
                         key_of!($field) => {
-                            params.$field = Some(model.value.parse::<$type>().unwrap());
+                            params.$field = Some(model.value.parse::<$type>().unwrap().into());
                             false
                         }
                     )*

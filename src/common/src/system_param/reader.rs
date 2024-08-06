@@ -14,6 +14,7 @@
 
 use std::borrow::Borrow;
 
+use risingwave_license::LicenseKeyRef;
 use risingwave_pb::meta::PbSystemParams;
 
 use super::{default, ParamValue};
@@ -169,8 +170,12 @@ where
             .unwrap_or_else(default::enable_tracing)
     }
 
-    fn license_key(&self) -> &str {
-        self.inner().license_key.as_deref().unwrap_or_default()
+    fn license_key(&self) -> LicenseKeyRef<'_> {
+        self.inner()
+            .license_key
+            .as_deref()
+            .unwrap_or_default()
+            .into()
     }
 
     fn time_travel_retention_ms(&self) -> u64 {

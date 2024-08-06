@@ -19,6 +19,8 @@ use serde::Deserialize;
 use thiserror::Error;
 use thiserror_ext::AsReport;
 
+use crate::LicenseKeyRef;
+
 /// License tier.
 ///
 /// Each enterprise [`Feature`](super::Feature) is available for a specific tier and above.
@@ -130,7 +132,8 @@ impl LicenseManager {
     }
 
     /// Refresh the license with the given license key.
-    pub fn refresh(&self, license_key: &str) {
+    pub fn refresh(&self, license_key: LicenseKeyRef<'_>) {
+        let license_key = license_key.0;
         let mut inner = self.inner.write().unwrap();
 
         // Empty license key means unset. Use the default one here.
@@ -190,10 +193,11 @@ mod tests {
     use expect_test::expect;
 
     use super::*;
+    use crate::LicenseKey;
 
     fn do_test(key: &str, expect: expect_test::Expect) {
         let manager = LicenseManager::new();
-        manager.refresh(key);
+        manager.refresh(LicenseKey(key));
 
         match manager.license() {
             Ok(license) => expect.assert_debug_eq(&license),

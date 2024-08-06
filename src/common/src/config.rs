@@ -1249,7 +1249,7 @@ impl SystemConfig {
         macro_rules! fields {
             ($({ $field:ident, $($rest:tt)* },)*) => {
                 SystemParams {
-                    $($field: self.$field,)*
+                    $($field: self.$field.map(Into::into),)*
                     ..Default::default() // deprecated fields
                 }
             };
@@ -2382,10 +2382,9 @@ mod tests {
     use super::*;
 
     fn default_config_for_docs() -> RwConfig {
-        let mut config = RwConfig::default();
-        // Set `license_key` to empty to avoid showing the test-only license key in the docs.
-        config.system.license_key = Some("".to_owned());
-        config
+        // Although we have `license_key` default to a test-only value in the code,
+        // it gets redacted during serialization, so we don't need to do anything special here.
+        RwConfig::default()
     }
 
     /// This test ensures that `config/example.toml` is up-to-date with the default values specified
