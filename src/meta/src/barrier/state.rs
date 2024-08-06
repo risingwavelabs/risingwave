@@ -16,7 +16,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::PausedReason;
 
 use crate::barrier::info::{CommandActorChanges, CommandFragmentChanges, InflightActorInfo};
-use crate::barrier::{Command, TracedEpoch};
+use crate::barrier::{Command, CreateStreamingJobType, TracedEpoch};
 use crate::manager::InflightFragmentInfo;
 
 /// `BarrierManagerState` defines the necessary state of `GlobalBarrierManager`.
@@ -80,7 +80,13 @@ impl BarrierManagerState {
         self.inflight_actor_infos.pre_apply(command);
         // update the fragment_infos outside pre_apply
         let fragment_infos = &mut self.inflight_actor_infos.fragment_infos;
-        if !matches!(command, Command::CreateSnapshotBackfillStreamingJob { .. }) {
+        if !matches!(
+            command,
+            Command::CreateStreamingJob {
+                job_type: CreateStreamingJobType::SnapshotBackfill(_),
+                ..
+            }
+        ) {
             if let Some(CommandActorChanges { fragment_changes }) = command.actor_changes() {
                 for (fragment_id, change) in fragment_changes {
                     if let CommandFragmentChanges::NewFragment(InflightFragmentInfo {

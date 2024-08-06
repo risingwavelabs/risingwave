@@ -86,8 +86,8 @@ mod state;
 mod trace;
 
 pub use self::command::{
-    BarrierKind, Command, CreateStreamingJobCommandInfo, ReplaceTablePlan, Reschedule,
-    SnapshotBackfillInfo,
+    BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType, ReplaceTablePlan,
+    Reschedule, SnapshotBackfillInfo,
 };
 pub use self::rpc::StreamRpcManager;
 pub use self::schedule::BarrierScheduler;
@@ -955,9 +955,9 @@ impl GlobalBarrierManager {
         let (prev_epoch, curr_epoch) = self.state.next_epoch_pair();
 
         // Insert newly added creating job
-        if let Command::CreateSnapshotBackfillStreamingJob {
+        if let Command::CreateStreamingJob {
+            job_type: CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info),
             info,
-            snapshot_backfill_info,
         } = &command
         {
             self.checkpoint_control

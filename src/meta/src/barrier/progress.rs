@@ -24,7 +24,9 @@ use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
-use crate::barrier::{Command, CreateStreamingJobCommandInfo, EpochNode, ReplaceTablePlan};
+use crate::barrier::{
+    Command, CreateStreamingJobCommandInfo, CreateStreamingJobType, EpochNode, ReplaceTablePlan,
+};
 use crate::manager::{
     DdlType, MetadataManager, MetadataManagerV1, MetadataManagerV2, StreamingJob,
 };
@@ -416,15 +418,16 @@ impl CreateMviewProgressTracker {
         version_stats: &HummockVersionStats,
     ) -> Vec<TrackingJob> {
         let command_ctx = &epoch_node.command_ctx;
-        let new_tracking_job_info = if let Command::CreateStreamingJob {
-            info,
-            replace_table,
-        } = &command_ctx.command
-        {
-            Some((info, replace_table.as_ref()))
-        } else {
-            None
-        };
+        let new_tracking_job_info =
+            if let Command::CreateStreamingJob { info, job_type } = &command_ctx.command {
+                if let CreateStreamingJobType::SinkIntoTable(replace_table) = job_type {
+                    Some((info, Some(replace_table)))
+                } else {
+                    Some((info, None))
+                }
+            } else {
+                None
+            };
         assert!(epoch_node.state.node_to_collect.is_empty());
         self.update_tracking_jobs(
             new_tracking_job_info,

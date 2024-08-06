@@ -185,8 +185,7 @@ impl BarrierScheduler {
         let queue = &mut self.inner.queue.lock();
 
         if let Some(idx) = queue.queue.iter().position(|scheduled| {
-            if let Command::CreateStreamingJob { info, .. }
-            | Command::CreateSnapshotBackfillStreamingJob { info, .. } = &scheduled.command
+            if let Command::CreateStreamingJob { info, .. } = &scheduled.command
                 && info.table_fragments.table_id() == table_id
             {
                 true

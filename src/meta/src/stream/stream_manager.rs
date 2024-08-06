@@ -30,8 +30,8 @@ use tracing::Instrument;
 
 use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{
-    BarrierScheduler, Command, CreateStreamingJobCommandInfo, ReplaceTablePlan,
-    SnapshotBackfillInfo, StreamRpcManager,
+    BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
+    ReplaceTablePlan, SnapshotBackfillInfo, StreamRpcManager,
 };
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob};
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
@@ -497,15 +497,22 @@ impl GlobalStreamManager {
                 ?snapshot_backfill_info,
                 "sending Command::CreateSnapshotBackfillStreamingJob"
             );
-            Command::CreateSnapshotBackfillStreamingJob {
+            Command::CreateStreamingJob {
                 info,
-                snapshot_backfill_info,
+                job_type: CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info),
             }
         } else {
             tracing::debug!("sending Command::CreateStreamingJob");
-            Command::CreateStreamingJob {
-                info,
-                replace_table: replace_table_command,
+            if let Some(replace_table_command) = replace_table_command {
+                Command::CreateStreamingJob {
+                    info,
+                    job_type: CreateStreamingJobType::SinkIntoTable(replace_table_command),
+                }
+            } else {
+                Command::CreateStreamingJob {
+                    info,
+                    job_type: CreateStreamingJobType::Normal,
+                }
             }
         };
         let result: MetaResult<NotificationVersion> = try {
