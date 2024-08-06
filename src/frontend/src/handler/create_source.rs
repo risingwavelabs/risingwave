@@ -85,7 +85,9 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
-use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options, OverwriteOptions};
+use crate::utils::{
+    resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options, OverwriteOptions,
+};
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions, WithOptionsSecResolved};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -1563,7 +1565,6 @@ pub async fn bind_create_source_or_table_with_connector(
     } else {
         Some(TableId::placeholder())
     };
-    let rate_limit =
     let source = SourceCatalog {
         id: TableId::placeholder().table_id,
         name: source_name,
