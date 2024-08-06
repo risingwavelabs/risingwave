@@ -279,8 +279,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
         middle_last_key.or_else(|| {
             self.low
                 .as_ref()
-                .map(Cache::last_key_value)
-                .flatten()
+                .and_then(Cache::last_key_value)
                 .map(|(k, _)| k)
         })
     }
