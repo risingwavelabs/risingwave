@@ -152,7 +152,6 @@ async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResp
         .meta_client()
         .get_system_params()
         .await?;
-    // TODO: for secret params (like `license_key`), redact the value in the response.
     let rows = params
         .get_all()
         .into_iter()
