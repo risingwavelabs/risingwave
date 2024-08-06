@@ -380,7 +380,7 @@ impl CreatingStreamingJobControl {
                 break;
             }
         }
-        error!(
+        debug!(
             epoch,
             worker_id,
             collected = ?self.collected_barrier.iter().map(|(epoch, _)| *epoch).collect_vec(),

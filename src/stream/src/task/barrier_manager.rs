@@ -521,6 +521,18 @@ impl LocalBarrierWorker {
         create_actor_result: StreamResult<CreateActorOutput>,
     ) {
         let result = create_actor_result.map(|output| {
+            // TODO: should be removed before merged
+            let actors = output
+                .actors
+                .iter()
+                .map(|actor| actor.actor_context.id)
+                .collect_vec();
+            let senders = output
+                .senders
+                .iter()
+                .map(|(actor_id, senders)| (*actor_id, senders.len()))
+                .collect::<HashMap<_, _>>();
+            error!(?actors, ?senders, "actor created");
             for (actor_id, senders) in output.senders {
                 self.register_sender(actor_id, senders);
             }
@@ -715,7 +727,7 @@ impl LocalBarrierWorker {
 
     /// Register sender for source actors, used to send barriers.
     fn register_sender(&mut self, actor_id: ActorId, senders: Vec<UnboundedSender<Barrier>>) {
-        tracing::debug!(
+        tracing::error!(
             target: "events::stream::barrier::manager",
             actor_id = actor_id,
             "register sender"
@@ -765,7 +777,7 @@ impl LocalBarrierWorker {
                 .watermark_epoch
                 .store(barrier.epoch.curr, std::sync::atomic::Ordering::SeqCst);
         }
-        debug!(
+        error!(
             target: "events::stream::barrier::manager::send",
             "send barrier {:?}, senders = {:?}, actor_ids_to_collect = {:?}",
             barrier,

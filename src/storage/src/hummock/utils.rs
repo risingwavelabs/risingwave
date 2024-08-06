@@ -597,7 +597,7 @@ pub(crate) async fn wait_for_epoch(
 ) -> StorageResult<()> {
     let mut receiver = notifier.subscribe();
     // avoid unnecessary check in the loop if the value does not change
-    let max_committed_epoch = *receiver.borrow_and_update();
+    let mut max_committed_epoch = *receiver.borrow_and_update();
     if max_committed_epoch >= wait_epoch {
         return Ok(());
     }
@@ -615,6 +615,7 @@ pub(crate) async fn wait_for_epoch(
                 // See #3845 for more details.
                 tracing::warn!(
                     epoch = wait_epoch,
+                    max_committed_epoch,
                     "wait_epoch timeout when waiting for version update",
                 );
                 continue;
@@ -623,7 +624,7 @@ pub(crate) async fn wait_for_epoch(
                 return Err(HummockError::wait_epoch("tx dropped").into());
             }
             Ok(Ok(_)) => {
-                let max_committed_epoch = *receiver.borrow();
+                max_committed_epoch = *receiver.borrow();
                 if max_committed_epoch >= wait_epoch {
                     return Ok(());
                 }
