@@ -77,11 +77,16 @@ enum ClickHouseEngine {
     ReplicatedReplacingMergeTree,
     ReplicatedSummingMergeTree,
     ReplicatedAggregatingMergeTree,
-    #[expect(dead_code)]
     ReplicatedCollapsingMergeTree(String),
-    #[expect(dead_code)]
     ReplicatedVersionedCollapsingMergeTree(String),
     ReplicatedGraphiteMergeTree,
+    SharedMergeTree,
+    SharedReplacingMergeTree,
+    SharedSummingMergeTree,
+    SharedAggregatingMergeTree,
+    SharedCollapsingMergeTree(String),
+    SharedVersionedCollapsingMergeTree(String),
+    SharedGraphiteMergeTree,
 }
 impl ClickHouseEngine {
     pub fn is_collapsing_engine(&self) -> bool {
@@ -91,6 +96,8 @@ impl ClickHouseEngine {
                 | ClickHouseEngine::VersionedCollapsingMergeTree(_)
                 | ClickHouseEngine::ReplicatedCollapsingMergeTree(_)
                 | ClickHouseEngine::ReplicatedVersionedCollapsingMergeTree(_)
+                | ClickHouseEngine::SharedCollapsingMergeTree(_)
+                | ClickHouseEngine::SharedVersionedCollapsingMergeTree(_)
         )
     }
 
@@ -104,6 +111,10 @@ impl ClickHouseEngine {
                 Some(sign_name.to_string())
             }
             ClickHouseEngine::ReplicatedVersionedCollapsingMergeTree(sign_name) => {
+                Some(sign_name.to_string())
+            }
+            ClickHouseEngine::SharedCollapsingMergeTree(sign_name) => Some(sign_name.to_string()),
+            ClickHouseEngine::SharedVersionedCollapsingMergeTree(sign_name) => {
                 Some(sign_name.to_string())
             }
             _ => None,
@@ -164,7 +175,9 @@ impl ClickHouseEngine {
                     .ok_or_else(|| SinkError::ClickHouse("must have index 1".to_string()))?
                     .trim()
                     .to_string();
-                Ok(ClickHouseEngine::VersionedCollapsingMergeTree(sign_name))
+                Ok(ClickHouseEngine::ReplicatedVersionedCollapsingMergeTree(
+                    sign_name,
+                ))
             }
             // ReplicatedCollapsingMergeTree("a","b",sign_name)
             "ReplicatedCollapsingMergeTree" => {
@@ -181,9 +194,48 @@ impl ClickHouseEngine {
                     .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
                     .trim()
                     .to_string();
-                Ok(ClickHouseEngine::CollapsingMergeTree(sign_name))
+                Ok(ClickHouseEngine::ReplicatedCollapsingMergeTree(sign_name))
             }
             "ReplicatedGraphiteMergeTree" => Ok(ClickHouseEngine::ReplicatedGraphiteMergeTree),
+            "SharedMergeTree" => Ok(ClickHouseEngine::SharedMergeTree),
+            "SharedReplacingMergeTree" => Ok(ClickHouseEngine::SharedReplacingMergeTree),
+            "SharedSummingMergeTree" => Ok(ClickHouseEngine::SharedSummingMergeTree),
+            "SharedAggregatingMergeTree" => Ok(ClickHouseEngine::SharedAggregatingMergeTree),
+            // SharedVersionedCollapsingMergeTree("a","b",sign_name,"c")
+            "SharedVersionedCollapsingMergeTree" => {
+                let sign_name = engine_name
+                    .create_table_query
+                    .split("SharedVersionedCollapsingMergeTree(")
+                    .last()
+                    .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                    .split(',')
+                    .rev()
+                    .nth(1)
+                    .ok_or_else(|| SinkError::ClickHouse("must have index 1".to_string()))?
+                    .trim()
+                    .to_string();
+                Ok(ClickHouseEngine::SharedVersionedCollapsingMergeTree(
+                    sign_name,
+                ))
+            }
+            // SharedCollapsingMergeTree("a","b",sign_name)
+            "SharedCollapsingMergeTree" => {
+                let sign_name = engine_name
+                    .create_table_query
+                    .split("SharedCollapsingMergeTree(")
+                    .last()
+                    .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                    .split(')')
+                    .next()
+                    .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
+                    .split(',')
+                    .last()
+                    .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                    .trim()
+                    .to_string();
+                Ok(ClickHouseEngine::SharedCollapsingMergeTree(sign_name))
+            }
+            "SharedGraphiteMergeTree" => Ok(ClickHouseEngine::SharedGraphiteMergeTree),
             _ => Err(SinkError::ClickHouse(format!(
                 "Cannot find clickhouse engine {:?}",
                 engine_name.engine
@@ -906,7 +958,7 @@ pub fn build_fields_name_type_from_schema(schema: &Schema) -> Result<Vec<(String
             for i in &field.sub_fields {
                 if matches!(i.data_type, DataType::Struct(_)) {
                     return Err(SinkError::ClickHouse(
-                        "Only one level of nesting is supported for sturct".to_string(),
+                        "Only one level of nesting is supported for struct".to_string(),
                     ));
                 } else {
                     vec.push((
