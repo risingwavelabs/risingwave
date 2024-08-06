@@ -16,7 +16,6 @@ use std::mem;
 
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
-use iceberg::arrow::ArrowReader;
 use iceberg::scan::FileScanTask;
 use iceberg::spec::TableMetadata;
 use risingwave_common::array::arrow::IcebergArrowConvert;
@@ -80,7 +79,6 @@ impl IcebergScanExecutor {
             .await?;
         let data_types = self.schema.data_types();
 
-        let tasks_len = self.file_scan_tasks.len();
         let file_scan_tasks = mem::take(&mut self.file_scan_tasks);
 
         let file_scan_stream = {
