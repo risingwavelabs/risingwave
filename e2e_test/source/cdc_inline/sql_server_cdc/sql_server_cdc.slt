@@ -3,9 +3,6 @@ control substitution on
 
 # ------------ data prepare stage ------------
 system ok
-echo $SQLCMDUSER $SQLCMDPASSWORD $SQLCMDPORT $SQLCMDSERVER $SQLCMDDBNAME
-
-system ok
 sqlcmd -C -i e2e_test/source/cdc_inline/sql_server_cdc/sql_server_cdc_prepare.sql -b
 
 # ------------ validate stage ------------

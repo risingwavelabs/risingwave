@@ -72,8 +72,7 @@ export PATH="/opt/mssql-tools/bin/:$PATH"
 sleep 2
 
 export SQLCMDSERVER=sqlserver-server SQLCMDUSER=SA SQLCMDPASSWORD="SomeTestOnly@SA" SQLCMDDBNAME=mydb SQLCMDPORT=1433
-sqlcmd -S sqlserver-server -U SA -P SomeTestOnly@SA -Q "SELECT 1"
-sqlcmd -Q "SELECT 1"
+sqlcmd -d master -Q 'create database mydb;' -b
 
 echo "--- mongodb cdc test"
 # install the mongo shell
