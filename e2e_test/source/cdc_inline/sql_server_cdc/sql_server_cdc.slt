@@ -202,13 +202,13 @@ sleep 30s
 system ok
 sqlcmd -C -i e2e_test/source/cdc_inline/sql_server_cdc/sql_server_cdc_insert.sql -b
 
-# sleep 10s
+sleep 10s
 
 # ------------ recover cluster ------------
 system ok
 risedev dev ci-1cn-1fe-with-recovery
 
-sleep 20s
+sleep 30s
 
 # ------------ check after recovery stage ------------
 
