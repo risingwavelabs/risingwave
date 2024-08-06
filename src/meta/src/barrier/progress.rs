@@ -420,10 +420,15 @@ impl CreateMviewProgressTracker {
         let command_ctx = &epoch_node.command_ctx;
         let new_tracking_job_info =
             if let Command::CreateStreamingJob { info, job_type } = &command_ctx.command {
-                if let CreateStreamingJobType::SinkIntoTable(replace_table) = job_type {
-                    Some((info, Some(replace_table)))
-                } else {
-                    Some((info, None))
+                match job_type {
+                    CreateStreamingJobType::Normal => Some((info, None)),
+                    CreateStreamingJobType::SinkIntoTable(replace_table) => {
+                        Some((info, Some(replace_table)))
+                    }
+                    CreateStreamingJobType::SnapshotBackfill(_) => {
+                        // The progress of SnapshotBackfill won't be tracked here
+                        None
+                    }
                 }
             } else {
                 None

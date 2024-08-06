@@ -580,13 +580,28 @@ impl CommandContext {
                         .values()
                         .flat_map(build_actor_connector_splits)
                         .collect();
+                    let subscriptions_to_add =
+                        if let CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info) =
+                            job_type
+                        {
+                            snapshot_backfill_info
+                                .upstream_mv_table_ids
+                                .iter()
+                                .map(|table_id| SubscriptionUpstreamInfo {
+                                    subscriber_id: table_fragments.table_id().table_id,
+                                    upstream_mv_table_id: table_id.table_id,
+                                })
+                                .collect()
+                        } else {
+                            Default::default()
+                        };
                     let add = Some(Mutation::Add(AddMutation {
                         actor_dispatchers,
                         added_actors,
                         actor_splits,
                         // If the cluster is already paused, the new actors should be paused too.
                         pause: self.current_paused_reason.is_some(),
-                        subscriptions_to_add: Default::default(),
+                        subscriptions_to_add,
                     }));
 
                     if let CreateStreamingJobType::SinkIntoTable(ReplaceTablePlan {

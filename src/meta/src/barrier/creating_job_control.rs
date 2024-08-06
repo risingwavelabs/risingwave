@@ -297,7 +297,12 @@ impl CreatingStreamingJobControl {
                 let node_to_collect = control_stream_manager.inject_barrier(
                     Some(table_id),
                     &command_ctx.info.node_map,
-                    None,
+                    if to_finish {
+                        // erase the mutation on upstream except the last Finish command
+                        command_ctx.to_mutation()
+                    } else {
+                        None
+                    },
                     (&command_ctx.curr_epoch, &command_ctx.prev_epoch),
                     &command_ctx.kind,
                     fragment_info,

@@ -1596,21 +1596,23 @@ fn collect_commit_epoch_info(
         old_value_ssts.extend(resp.old_value_sstables.into_iter().map(|s| s.into()));
     }
 
-    let new_table_fragment_info =
-        if let Command::CreateStreamingJob { info, .. } = &command_ctx.command {
-            let table_fragments = &info.table_fragments;
-            Some(NewTableFragmentInfo {
-                table_id: table_fragments.table_id(),
-                mv_table_id: table_fragments.mv_table_id().map(TableId::new),
-                internal_table_ids: table_fragments
-                    .internal_table_ids()
-                    .into_iter()
-                    .map(TableId::new)
-                    .collect(),
-            })
-        } else {
-            None
-        };
+    let new_table_fragment_info = if let Command::CreateStreamingJob { info, job_type } =
+        &command_ctx.command
+        && !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_))
+    {
+        let table_fragments = &info.table_fragments;
+        Some(NewTableFragmentInfo {
+            table_id: table_fragments.table_id(),
+            mv_table_id: table_fragments.mv_table_id().map(TableId::new),
+            internal_table_ids: table_fragments
+                .internal_table_ids()
+                .into_iter()
+                .map(TableId::new)
+                .collect(),
+        })
+    } else {
+        None
+    };
 
     let mut mv_log_store_truncate_epoch = HashMap::new();
     let mut update_truncate_epoch =
