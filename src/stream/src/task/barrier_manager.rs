@@ -832,7 +832,7 @@ impl LocalBarrierWorker {
 
         // Actors to stop should still accept this barrier, but won't get sent to in next times.
         if let Some(actors) = barrier.all_stop_actors() {
-            debug!(
+            error!(
                 target: "events::stream::barrier::manager",
                 "remove actors {:?} from senders",
                 actors
