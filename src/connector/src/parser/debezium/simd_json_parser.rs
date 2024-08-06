@@ -37,6 +37,13 @@ impl DebeziumJsonAccessBuilder {
             json_parse_options: JsonParseOptions::new_for_debezium(timestamptz_handling),
         })
     }
+
+    pub fn new_for_schema_event() -> ConnectorResult<Self> {
+        Ok(Self {
+            value: None,
+            json_parse_options: JsonParseOptions::default(),
+        })
+    }
 }
 
 impl AccessBuilder for DebeziumJsonAccessBuilder {

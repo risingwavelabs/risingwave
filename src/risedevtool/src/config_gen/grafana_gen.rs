@@ -50,7 +50,7 @@ org_role = Admin
         let provide_prometheus = config.provide_prometheus.as_ref().unwrap();
         if provide_prometheus.len() != 1 {
             return Err(anyhow!(
-                "expect 1 prometheus nodes, found {}",
+                "expect 1 prometheus node, found {}",
                 provide_prometheus.len()
             ));
         }
@@ -84,7 +84,7 @@ datasources:
         let provide_tempo = config.provide_tempo.as_ref().unwrap();
         if provide_tempo.len() != 1 {
             return Err(anyhow!(
-                "expect 1 tempo nodes, found {}",
+                "expect 1 tempo node, found {}",
                 provide_tempo.len()
             ));
         }
@@ -120,7 +120,7 @@ datasources:
         let provide_prometheus = config.provide_prometheus.as_ref().unwrap();
         if provide_prometheus.len() != 1 {
             return Err(anyhow!(
-                "expect 1 prometheus nodes, found {}",
+                "expect 1 prometheus node, found {}",
                 provide_prometheus.len()
             ));
         };
@@ -170,7 +170,7 @@ providers:
         let provide_prometheus = config.provide_prometheus.as_ref().unwrap();
         if provide_prometheus.len() != 1 {
             return Err(anyhow!(
-                "expect 1 prometheus nodes, found {}",
+                "expect 1 prometheus node, found {}",
                 provide_prometheus.len()
             ));
         };

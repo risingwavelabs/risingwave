@@ -311,6 +311,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
             added_actors: HashSet::new(),
             splits,
             pause: false,
+            subscriptions_to_add: vec![],
         }));
 
     tx.send_barrier(init_barrier);

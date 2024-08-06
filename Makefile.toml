@@ -369,7 +369,7 @@ ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "$
 
 [tasks.post-build-risingwave]
 category = "RiseDev - Build"
-description = "Copy RisngWave binaries to bin"
+description = "Copy RisingWave binaries to bin"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
 dependencies = [
     "link-all-in-one-binaries",
