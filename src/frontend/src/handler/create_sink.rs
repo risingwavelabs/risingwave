@@ -683,9 +683,10 @@ fn derive_sink_to_table_expr(
 
     if target_type != input_type {
         bail!(
-            "column type mismatch: {:?} vs {:?}",
+            "column type mismatch: {:?} vs {:?}, column name: {:?}",
             target_type,
-            input_type
+            input_type,
+            sink_schema.fields()[idx].name
         );
     } else {
         Ok(ExprImpl::InputRef(Box::new(InputRef::new(
