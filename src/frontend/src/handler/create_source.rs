@@ -1156,12 +1156,30 @@ pub fn validate_compatibility(
     }
 
     if connector == POSTGRES_CDC_CONNECTOR || connector == CITUS_CDC_CONNECTOR {
-        if !props.contains_key("slot.name") {
-            // Build a random slot name with UUID
-            // e.g. "rw_cdc_f9a3567e6dd54bf5900444c8b1c03815"
-            let uuid = uuid::Uuid::new_v4().to_string().replace('-', "");
-            props.insert("slot.name".into(), format!("rw_cdc_{}", uuid));
+        match props.get("slot.name") {
+            None => {
+                // Build a random slot name with UUID
+                // e.g. "rw_cdc_f9a3567e6dd54bf5900444c8b1c03815"
+                let uuid = uuid::Uuid::new_v4().to_string().replace('-', "");
+                props.insert("slot.name".into(), format!("rw_cdc_{}", uuid));
+            }
+            Some(slot_name) => {
+                // please refer to
+                // - https://github.com/debezium/debezium/blob/97956ce25b7612e3413d363658661896b7d2e0a2/debezium-connector-postgres/src/main/java/io/debezium/connector/postgresql/PostgresConnectorConfig.java#L1179
+                // - https://doxygen.postgresql.org/slot_8c.html#afac399f07320b9adfd2c599cf822aaa3
+                if !slot_name
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                    || slot_name.len() > 63
+                {
+                    return Err(RwError::from(ProtocolError(format!(
+                        "Invalid replication slot name: {:?}. Valid replication slot name must contain only digits, lowercase characters and underscores with length <= 63",
+                        slot_name
+                    ))));
+                }
+            }
         }
+
         if !props.contains_key("schema.name") {
             // Default schema name is "public"
             props.insert("schema.name".into(), "public".into());
