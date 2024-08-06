@@ -109,8 +109,8 @@ impl StreamNode for StreamGlobalApproxPercentile {
         bucket_table_builder.add_column(&Field::with_name(DataType::Int16, "sign"));
         bucket_table_builder.add_column(&Field::with_name(DataType::Int32, "bucket_id"));
         bucket_table_builder.add_column(&Field::with_name(DataType::Int64, "count"));
-        bucket_table_builder.add_order_column(0, OrderType::ascending()); // bucket_id
-        bucket_table_builder.add_order_column(1, OrderType::ascending()); // sign
+        bucket_table_builder.add_order_column(0, OrderType::ascending()); // sign
+        bucket_table_builder.add_order_column(1, OrderType::ascending()); // bucket_id
 
         // setup table: total_count
         let mut count_table_builder = TableCatalogBuilder::default();
