@@ -46,6 +46,7 @@ macro_rules! for_all_features {
             { TestPaid,             Paid,       "A dummy feature that's only available on paid tier for testing purposes." },
             { TimeTravel,           Paid,       "Query historical data within the retention period."},
             { GlueSchemaRegistry,   Paid,       "Use Schema Registry from AWS Glue rather than Confluent." },
+            { ClickHouseSharedEngine,Paid,      "Delivering data to Shared tree on clickhouse cloud"},
             { SecretManagement,     Paid,       "Secret management." },
             { CdcTableSchemaMap,    Paid,       "Automatically map upstream schema to CDC Table."},
             { SqlServerSink,        Paid,       "Sink data from RisingWave to SQL Server." },
