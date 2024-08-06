@@ -30,7 +30,6 @@ use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_meta_model_v2::{actor, fragment, ObjectId, StreamingParallelism};
 use risingwave_pb::common::{ActorInfo, Buffer, PbActorLocation, WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -566,6 +565,7 @@ impl ScaleController {
                     mut actor_dispatchers,
                     fragment_downstreams: _,
                     fragment_upstreams: _,
+                    related_jobs,
                 } = mgr
                     .catalog_controller
                     .resolve_working_set_for_reschedule_fragments(fragment_ids)
@@ -661,7 +661,7 @@ impl ScaleController {
                             dispatcher,
                             upstream_actor_id,
                             vnode_bitmap,
-                            mview_definition: "".to_string(),
+                            mview_definition: "todo".to_string(),
                             expr_context: expr_contexts
                                 .get(&actor_id)
                                 .cloned()
@@ -674,8 +674,12 @@ impl ScaleController {
 
                     fragment_to_table.insert(fragment_id as _, TableId::from(job_id as u32));
 
-                    // todo
-                    fragment_state.insert(fragment_id, table_fragments::State::Created);
+                    let related_job = related_jobs.get(&job_id).expect("");
+
+                    fragment_state.insert(
+                        fragment_id,
+                        table_fragments::PbState::from(related_job.job_status),
+                    );
                 }
             }
         };
@@ -2096,6 +2100,7 @@ impl ScaleController {
                     actor_dispatchers: _,
                     fragment_downstreams,
                     fragment_upstreams: _,
+                    related_jobs,
                 } = mgr
                     .catalog_controller
                     .resolve_working_set_for_reschedule_tables(table_ids)

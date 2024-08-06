@@ -20,8 +20,10 @@ use risingwave_meta_model_migration::{
     UnionType, WithClause, WithQuery,
 };
 use risingwave_meta_model_v2::actor_dispatcher::DispatcherType;
-use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment};
-use risingwave_meta_model_v2::{actor, actor_dispatcher, fragment, ActorId, FragmentId, ObjectId};
+use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, StreamingJob};
+use risingwave_meta_model_v2::{
+    actor, actor_dispatcher, fragment, streaming_job, ActorId, FragmentId, ObjectId,
+};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DbErr, EntityTrait, JoinType, QueryFilter, QuerySelect,
     QueryTrait, RelationTrait, Statement, TransactionTrait,
@@ -154,6 +156,8 @@ pub struct RescheduleWorkingSet {
 
     pub fragment_downstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>>,
     pub fragment_upstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>>,
+
+    pub related_jobs: HashMap<ObjectId, streaming_job::Model>,
 }
 
 async fn resolve_no_shuffle_query<C>(
@@ -298,7 +302,7 @@ impl CatalogController {
             .await?;
 
         let actor_and_dispatchers: Vec<(_, _)> = Actor::find()
-            .filter(actor::Column::FragmentId.is_in(all_fragment_ids))
+            .filter(actor::Column::FragmentId.is_in(all_fragment_ids.clone()))
             .find_with_related(ActorDispatcher)
             .all(txn)
             .await?;
@@ -312,9 +316,22 @@ impl CatalogController {
             actor_dispatchers.insert(actor_id, dispatchers);
         }
 
-        let fragments = fragments
+        let fragments: HashMap<FragmentId, _> = fragments
             .into_iter()
             .map(|fragment| (fragment.fragment_id, fragment))
+            .collect();
+
+        let related_job_ids: HashSet<_> =
+            fragments.values().map(|fragment| fragment.job_id).collect();
+
+        let related_jobs = StreamingJob::find()
+            .filter(streaming_job::Column::JobId.is_in(related_job_ids))
+            .all(txn)
+            .await?;
+
+        let related_jobs = related_jobs
+            .into_iter()
+            .map(|job| (job.job_id, job))
             .collect();
 
         Ok(RescheduleWorkingSet {
@@ -323,6 +340,7 @@ impl CatalogController {
             actor_dispatchers,
             fragment_downstreams,
             fragment_upstreams,
+            related_jobs,
         })
     }
 }
