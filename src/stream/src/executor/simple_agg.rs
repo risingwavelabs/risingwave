@@ -197,7 +197,8 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         }
 
         // Retrieve modified states and put the changes into the builders.
-        let chunk = vars.agg_group
+        let chunk = vars
+            .agg_group
             .build_change(&this.storages, &this.agg_funcs)
             .await?
             .map(|change| change.to_stream_chunk(&this.info.schema.data_types()));
@@ -431,7 +432,7 @@ mod tests {
             vec![2],
             1,
         )
-            .await;
+        .await;
         let mut simple_agg = simple_agg.execute();
 
         // Consume the init barrier

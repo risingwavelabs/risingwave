@@ -68,9 +68,7 @@ impl Strategy for AlwaysOutput {
                 // Generate output no matter whether current row count is 0 or not.
                 Some(RecordType::Insert)
             }
-            Some(_prev_outputs) => {
-                Some(RecordType::Update)
-            }
+            Some(_prev_outputs) => Some(RecordType::Update),
         }
     }
 }
