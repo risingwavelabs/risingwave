@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::bail;
 use risingwave_common::types::ToOwnedDatum;
-
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_common::bail;
 
 use super::barrier_align::*;
-
 use crate::executor::prelude::*;
 
 pub struct MergeProjectExecutor {
@@ -57,7 +55,12 @@ impl MergeProjectExecutor {
     pub async fn execute_inner(self) {
         let lhs_mapping = self.lhs_mapping;
         let rhs_mapping = self.rhs_mapping;
-        let data_types = self.schema.fields().iter().map(|f| f.data_type()).collect::<Vec<_>>();
+        let data_types = self
+            .schema
+            .fields()
+            .iter()
+            .map(|f| f.data_type())
+            .collect::<Vec<_>>();
 
         {
             let mut lhs_buffer: Option<StreamChunk> = None;
@@ -103,7 +106,8 @@ impl MergeProjectExecutor {
                         }
                         let cardinality = lhs_chunk.cardinality();
                         let mut ops = Vec::with_capacity(cardinality);
-                        let mut merged_rows = vec![vec![Datum::None; data_types.len()]; cardinality];
+                        let mut merged_rows =
+                            vec![vec![Datum::None; data_types.len()]; cardinality];
                         for (i, (op, lhs_row)) in lhs_chunk.rows().enumerate() {
                             ops.push(op);
                             for (j, d) in lhs_row.iter().enumerate() {
@@ -118,10 +122,7 @@ impl MergeProjectExecutor {
                                 merged_rows[i][out_index] = d.to_owned_datum();
                             }
                         }
-                        let mut builder = DataChunkBuilder::new(
-                            data_types.clone(),
-                            cardinality,
-                        );
+                        let mut builder = DataChunkBuilder::new(data_types.clone(), cardinality);
                         for row in merged_rows {
                             if let Some(chunk) = builder.append_one_row(&row[..]) {
                                 yield Message::Chunk(StreamChunk::from_parts(ops, chunk));

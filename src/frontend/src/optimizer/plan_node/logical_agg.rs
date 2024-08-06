@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::bail;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_common::{bail_not_implemented, not_implemented};
+use risingwave_common::{bail, bail_not_implemented, not_implemented};
 use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
 
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
