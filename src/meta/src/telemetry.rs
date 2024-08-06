@@ -19,11 +19,14 @@ use risingwave_common::telemetry::report::{
     report_event_common, TelemetryInfoFetcher, TelemetryReportCreator,
 };
 use risingwave_common::telemetry::{
-    current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase, TelemetryResult,
+    current_timestamp, telemetry_cluster_type_from_env_var, SystemData, TelemetryNodeType,
+    TelemetryReportBase, TelemetryResult,
 };
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
+use risingwave_pb::telemetry::{
+    PbTelemetryClusterType, PbTelemetryDatabaseObject, PbTelemetryEventStage,
+};
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 
@@ -88,6 +91,9 @@ pub struct MetaTelemetryReport {
     meta_backend: MetaBackend,
     rw_version: RwVersion,
     job_desc: Vec<MetaTelemetryJobDesc>,
+
+    // Get the ENV from key `TELEMETRY_CLUSTER_TYPE`
+    cluster_type: PbTelemetryClusterType,
 }
 
 impl From<MetaTelemetryJobDesc> for risingwave_pb::telemetry::StreamJobDesc {
@@ -133,6 +139,7 @@ impl TelemetryToProtobuf for MetaTelemetryReport {
             }),
             stream_job_count: self.streaming_job_count as u32,
             stream_jobs: self.job_desc.into_iter().map(|job| job.into()).collect(),
+            cluster_type: self.cluster_type as i32,
         };
         pb_report.encode_to_vec()
     }
@@ -219,6 +226,7 @@ impl TelemetryReportCreator for MetaReportCreator {
             streaming_job_count,
             meta_backend: self.meta_backend,
             job_desc: stream_job_desc,
+            cluster_type: telemetry_cluster_type_from_env_var(),
         })
     }
 
@@ -233,6 +241,7 @@ mod test {
     use risingwave_common::telemetry::{
         current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase,
     };
+    use risingwave_pb::telemetry::PbTelemetryClusterType;
 
     use crate::telemetry::{MetaTelemetryReport, NodeCount, RwVersion};
 
@@ -244,7 +253,7 @@ mod test {
 
         use crate::telemetry::TELEMETRY_META_REPORT_TYPE;
 
-        // we don't call `create_report` here because it rely on the metadata manager
+        // we don't call `create_report` here because it relies on the metadata manager
         let report = MetaTelemetryReport {
             base: TelemetryReportBase {
                 tracking_id: "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_owned(),
@@ -268,6 +277,7 @@ mod test {
                 git_sha: "git_sha".to_owned(),
             },
             job_desc: vec![],
+            cluster_type: PbTelemetryClusterType::Unspecified,
         };
 
         let pb_bytes = report.to_pb_bytes();
