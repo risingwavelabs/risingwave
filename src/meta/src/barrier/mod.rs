@@ -756,7 +756,7 @@ impl GlobalBarrierManager {
                                 }
                                 self.failure_recovery(err).await;
                             } else {
-                                warn!(e = ?e.as_report(), worker_id, "no barrier to collect from worker, ignore err");
+                                warn!(e = %e.as_report(), worker_id, "no barrier to collect from worker, ignore err");
                             }
                         }
                     }

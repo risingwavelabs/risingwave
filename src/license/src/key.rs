@@ -107,9 +107,9 @@ impl FromStr for LicenseKey {
     }
 }
 
-impl<T: AsRef<str>> Into<String> for LicenseKey<T> {
-    fn into(self) -> String {
-        self.0.as_ref().to_owned()
+impl<T: AsRef<str>> From<LicenseKey<T>> for String {
+    fn from(val: LicenseKey<T>) -> Self {
+        val.0.as_ref().to_owned()
     }
 }
 
