@@ -437,7 +437,7 @@ fn deserialize_timestamp(data: &mut impl Buf) -> Result<Timestamp> {
 
 fn deserialize_date(data: &mut impl Buf) -> Result<Date> {
     let days = data.get_i32_le();
-    Date::with_days(days).map_err(|_e| ValueEncodingError::InvalidDateEncoding(days))
+    Date::with_days_since_ce(days).map_err(|_e| ValueEncodingError::InvalidDateEncoding(days))
 }
 
 fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {

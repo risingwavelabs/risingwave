@@ -12,13 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::AggKind;
 
 use super::{infer_type, Expr, ExprImpl, Literal, OrderBy};
-use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 use crate::error::Result;
 use crate::utils::Condition;
 
@@ -31,8 +28,6 @@ pub struct AggCall {
     pub order_by: OrderBy,
     pub filter: Condition,
     pub direct_args: Vec<Literal>,
-    /// Catalog of user defined aggregate function.
-    pub user_defined: Option<Arc<FunctionCatalog>>,
 }
 
 impl std::fmt::Debug for AggCall {
@@ -43,6 +38,9 @@ impl std::fmt::Debug for AggCall {
                 .field("return_type", &self.return_type)
                 .field("args", &self.args)
                 .field("filter", &self.filter)
+                .field("distinct", &self.distinct)
+                .field("order_by", &self.order_by)
+                .field("direct_args", &self.direct_args)
                 .finish()
         } else {
             let mut builder = f.debug_tuple(&format!("{}", self.agg_kind));
@@ -65,7 +63,11 @@ impl AggCall {
         filter: Condition,
         direct_args: Vec<Literal>,
     ) -> Result<Self> {
-        let return_type = infer_type(agg_kind.into(), &mut args)?;
+        let return_type = match &agg_kind {
+            AggKind::Builtin(kind) => infer_type((*kind).into(), &mut args)?,
+            AggKind::UserDefined(udf) => udf.return_type.as_ref().unwrap().into(),
+            AggKind::WrapScalar(expr) => expr.return_type.as_ref().unwrap().into(),
+        };
         Ok(AggCall {
             agg_kind,
             return_type,
@@ -74,7 +76,6 @@ impl AggCall {
             order_by,
             filter,
             direct_args,
-            user_defined: None,
         })
     }
 
@@ -92,36 +93,11 @@ impl AggCall {
             order_by: OrderBy::any(),
             filter: Condition::true_cond(),
             direct_args: vec![],
-            user_defined: None,
-        })
-    }
-
-    /// Create a user-defined `AggCall`.
-    pub fn new_user_defined(
-        args: Vec<ExprImpl>,
-        distinct: bool,
-        order_by: OrderBy,
-        filter: Condition,
-        direct_args: Vec<Literal>,
-        user_defined: Arc<FunctionCatalog>,
-    ) -> Result<Self> {
-        let FunctionKind::Aggregate = &user_defined.kind else {
-            panic!("not an aggregate function");
-        };
-        Ok(AggCall {
-            agg_kind: AggKind::UserDefined,
-            return_type: user_defined.return_type.clone(),
-            args,
-            distinct,
-            order_by,
-            filter,
-            direct_args,
-            user_defined: Some(user_defined),
         })
     }
 
     pub fn agg_kind(&self) -> AggKind {
-        self.agg_kind
+        self.agg_kind.clone()
     }
 
     /// Get a reference to the agg call's arguments.

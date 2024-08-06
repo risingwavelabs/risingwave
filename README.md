@@ -54,10 +54,17 @@
   </a>
 </div>
 
-RisingWave is a Postgres-compatible streaming database engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b>, <b>analyzing</b>, and <b>managing</b> real-time event streaming data.
-
+RisingWave is a Postgres-compatible SQL engine engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b>, <b>analyzing</b>, and <b>managing</b> real-time event streaming data.
 
 ![RisingWave](https://github.com/risingwavelabs/risingwave/assets/41638002/10c44404-f78b-43ce-bbd9-3646690acc59)
+
+## When to use RisingWave?
+RisingWave can ingest millions of events per second, continuously join live data streams with historical tables, and serve ad-hoc queries in real-time. Typical use cases include, but are not limited to:
+
+* **Streaming analytics**: Perform streaming analytics and build live dashboards with data freshness under one second, ideal for stock trading, sports betting, IoT monitoring, and more.
+* **Event-driven applications**: Develop monitoring and alerting applications for fraud detection, anomaly detection, and more.
+* **Real-time ETL pipelines**: Ingest data from different sources, perform enrichment queries, and deliver results to downstream systems.
+* **Feature stores**: Transform both batch and streaming data into ML features using the same codebase.
 
 
 ## Try it out in 60 seconds
@@ -126,16 +133,6 @@ RisingWave is fundamentally a database that **extends beyond basic streaming dat
 * Schema change
 * Processing of semi-structured data
 
-## In-production use cases
-Within your data stack, RisingWave can assist with:
-
-* Processing and transforming event streaming data in real time
-* Offloading event-driven queries (e.g., materialized views, triggers) from operational databases
-* Performing real-time ETL (Extract, Transform, Load)
-* Supporting real-time feature stores
-
-Read more at [use cases](https://risingwave.com/use-cases/). RisingWave is extensively utilized in real-time applications such as monitoring, alerting, dashboard reporting, machine learning, among others. It has already been adopted in fields such as financial trading, manufacturing, new media, logistics, gaming, and more. Check out [customer stories](https://risingwave.com/resources/?filter=customer-stories).
-
 ## Community
 
 Looking for help, discussions, collaboration opportunities, or a casual afternoon chat with our fellow engineers and community members? Join our [Slack workspace](https://risingwave.com/slack)!
@@ -150,4 +147,4 @@ RisingWave is distributed under the Apache License (Version 2.0). Please refer t
 
 ## Contributing
 
-Thanks for your interest in contributing to the project! Please refer to [RisingWave Developer Guide](https://risingwavelabs.github.io/risingwave/)for more information.
+Thanks for your interest in contributing to the project! Please refer to [RisingWave Developer Guide](https://risingwavelabs.github.io/risingwave/) for more information.

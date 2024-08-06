@@ -86,7 +86,7 @@ impl RandValue for Date {
         let max_day = chrono::NaiveDate::MAX.num_days_from_ce();
         let min_day = chrono::NaiveDate::MIN.num_days_from_ce();
         let days = rand.gen_range(min_day..=max_day);
-        Date::with_days(days).unwrap()
+        Date::with_days_since_ce(days).unwrap()
     }
 }
 

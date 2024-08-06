@@ -16,17 +16,17 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
-use risingwave_pb::hummock::group_delta::DeltaType;
-use risingwave_pb::hummock::hummock_version::PbLevels;
-use risingwave_pb::hummock::hummock_version_delta::{ChangeLogDelta, PbGroupDeltas};
-use risingwave_pb::hummock::{
-    EpochNewChangeLog, PbGroupDelta, PbHummockVersion, PbHummockVersionDelta, PbIntraLevelDelta,
-    PbLevel, PbOverlappingLevel, PbSstableInfo, SstableInfo, StateTableInfoDelta,
-};
+use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
+use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta, PbStateTableInfoDelta};
 
-use crate::change_log::TableChangeLog;
+use crate::change_log::{ChangeLogDelta, EpochNewChangeLog, TableChangeLog};
+use crate::level::{Level, Levels, OverlappingLevel};
+use crate::sstable_info::SstableInfo;
 use crate::table_watermark::TableWatermarks;
-use crate::version::{HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo};
+use crate::version::{
+    GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo,
+    IntraLevelDelta,
+};
 use crate::{CompactionGroupId, HummockSstableId};
 
 /// [`IncompleteHummockVersion`] is incomplete because `SSTableInfo` only has the `sst_id` set in the following fields:
@@ -35,7 +35,7 @@ use crate::{CompactionGroupId, HummockSstableId};
 #[derive(Debug, Clone, PartialEq)]
 pub struct IncompleteHummockVersion {
     pub id: u64,
-    pub levels: HashMap<CompactionGroupId, PbLevels>,
+    pub levels: HashMap<CompactionGroupId, Levels>,
     pub max_committed_epoch: u64,
     safe_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
@@ -78,8 +78,8 @@ fn stripped_change_log_delta(origin: &ChangeLogDelta) -> ChangeLogDelta {
     }
 }
 
-fn stripped_level(origin: &PbLevel) -> PbLevel {
-    PbLevel {
+fn stripped_level(origin: &Level) -> Level {
+    Level {
         level_idx: origin.level_idx,
         level_type: origin.level_type,
         table_infos: origin
@@ -96,13 +96,11 @@ fn stripped_level(origin: &PbLevel) -> PbLevel {
 
 pub fn refill_version(
     version: &mut HummockVersion,
-    sst_id_to_info: &HashMap<HummockSstableId, PbSstableInfo>,
+    sst_id_to_info: &HashMap<HummockSstableId, SstableInfo>,
 ) {
     for level in version.levels.values_mut().flat_map(|level| {
         level
             .l0
-            .as_mut()
-            .unwrap()
             .sub_levels
             .iter_mut()
             .rev()
@@ -116,7 +114,7 @@ pub fn refill_version(
     }
 }
 
-fn refill_level(level: &mut PbLevel, sst_id_to_info: &HashMap<HummockSstableId, PbSstableInfo>) {
+fn refill_level(level: &mut Level, sst_id_to_info: &HashMap<HummockSstableId, SstableInfo>) {
     for s in &mut level.table_infos {
         refill_sstable_info(s, sst_id_to_info);
     }
@@ -124,7 +122,7 @@ fn refill_level(level: &mut PbLevel, sst_id_to_info: &HashMap<HummockSstableId, 
 
 fn refill_table_change_log(
     table_change_log: &mut TableChangeLog,
-    sst_id_to_info: &HashMap<HummockSstableId, PbSstableInfo>,
+    sst_id_to_info: &HashMap<HummockSstableId, SstableInfo>,
 ) {
     for c in &mut table_change_log.0 {
         for s in &mut c.old_value {
@@ -138,8 +136,8 @@ fn refill_table_change_log(
 
 /// Caller should ensure `sst_id_to_info` includes an entry corresponding to `sstable_info`.
 fn refill_sstable_info(
-    sstable_info: &mut PbSstableInfo,
-    sst_id_to_info: &HashMap<HummockSstableId, PbSstableInfo>,
+    sstable_info: &mut SstableInfo,
+    sst_id_to_info: &HashMap<HummockSstableId, SstableInfo>,
 ) {
     *sstable_info = sst_id_to_info
         .get(&sstable_info.sst_id)
@@ -147,8 +145,8 @@ fn refill_sstable_info(
         .clone();
 }
 
-fn stripped_l0(origin: &PbOverlappingLevel) -> PbOverlappingLevel {
-    PbOverlappingLevel {
+fn stripped_l0(origin: &OverlappingLevel) -> OverlappingLevel {
+    OverlappingLevel {
         sub_levels: origin.sub_levels.iter().map(stripped_level).collect(),
         total_file_size: origin.total_file_size,
         uncompressed_file_size: origin.uncompressed_file_size,
@@ -156,18 +154,18 @@ fn stripped_l0(origin: &PbOverlappingLevel) -> PbOverlappingLevel {
 }
 
 #[allow(deprecated)]
-fn stripped_levels(origin: &PbLevels) -> PbLevels {
-    PbLevels {
+fn stripped_levels(origin: &Levels) -> Levels {
+    Levels {
         levels: origin.levels.iter().map(stripped_level).collect(),
-        l0: origin.l0.as_ref().map(stripped_l0),
+        l0: stripped_l0(&origin.l0),
         group_id: origin.group_id,
         parent_group_id: origin.parent_group_id,
         member_table_ids: Default::default(),
     }
 }
 
-fn stripped_intra_level_delta(origin: &PbIntraLevelDelta) -> PbIntraLevelDelta {
-    PbIntraLevelDelta {
+fn stripped_intra_level_delta(origin: &IntraLevelDelta) -> IntraLevelDelta {
+    IntraLevelDelta {
         level_idx: origin.level_idx,
         l0_sub_level_id: origin.l0_sub_level_id,
         removed_table_ids: origin.removed_table_ids.clone(),
@@ -180,21 +178,20 @@ fn stripped_intra_level_delta(origin: &PbIntraLevelDelta) -> PbIntraLevelDelta {
     }
 }
 
-fn stripped_group_delta(origin: &PbGroupDelta) -> PbGroupDelta {
-    let delta_type = origin.delta_type.as_ref().map(|d| match d {
-        DeltaType::IntraLevel(l) => DeltaType::IntraLevel(stripped_intra_level_delta(l)),
+fn stripped_group_delta(origin: &GroupDelta) -> GroupDelta {
+    match origin {
+        GroupDelta::IntraLevel(l) => GroupDelta::IntraLevel(stripped_intra_level_delta(l)),
         _ => panic!("time travel expects DeltaType::IntraLevel only"),
-    });
-    PbGroupDelta { delta_type }
+    }
 }
 
-fn stripped_group_deltas(origin: &PbGroupDeltas) -> PbGroupDeltas {
+fn stripped_group_deltas(origin: &GroupDeltas) -> GroupDeltas {
     let group_deltas = origin
         .group_deltas
         .iter()
         .map(stripped_group_delta)
         .collect();
-    PbGroupDeltas { group_deltas }
+    GroupDeltas { group_deltas }
 }
 
 /// `SStableInfo` will be stripped.
@@ -243,7 +240,7 @@ impl IncompleteHummockVersion {
             levels: self
                 .levels
                 .iter()
-                .map(|(group_id, levels)| (*group_id as _, levels.clone()))
+                .map(|(group_id, levels)| (*group_id as _, levels.to_protobuf()))
                 .collect(),
             max_committed_epoch: self.max_committed_epoch,
             safe_epoch: self.safe_epoch,
@@ -276,7 +273,7 @@ pub struct IncompleteHummockVersionDelta {
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub removed_table_ids: HashSet<TableId>,
     pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
-    pub state_table_info_delta: HashMap<TableId, StateTableInfoDelta>,
+    pub state_table_info_delta: HashMap<TableId, PbStateTableInfoDelta>,
 }
 
 /// `SStableInfo` will be stripped.
@@ -291,7 +288,7 @@ impl From<(&HummockVersionDelta, &HashSet<CompactionGroupId>)> for IncompleteHum
                 .iter()
                 .filter_map(|(cg_id, deltas)| {
                     if select_group.contains(cg_id) {
-                        Some((*cg_id, stripped_group_deltas(deltas)))
+                        Some((*cg_id, stripped_group_deltas(deltas).to_protobuf()))
                     } else {
                         None
                     }
@@ -336,7 +333,7 @@ impl IncompleteHummockVersionDelta {
             change_log_delta: self
                 .change_log_delta
                 .iter()
-                .map(|(table_id, log_delta)| (table_id.table_id, log_delta.clone()))
+                .map(|(table_id, log_delta)| (table_id.table_id, log_delta.into()))
                 .collect(),
             state_table_info_delta: self
                 .state_table_info_delta

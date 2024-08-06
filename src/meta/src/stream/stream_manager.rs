@@ -821,7 +821,8 @@ mod tests {
     use std::time::Duration;
 
     use futures::{Stream, TryStreamExt};
-    use risingwave_common::hash::ParallelUnitMapping;
+    use risingwave_common::hash;
+    use risingwave_common::hash::{ActorMapping, WorkerSlotId};
     use risingwave_common::system_param::reader::SystemParamsRead;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::add_worker_node_request::Property;
@@ -840,7 +841,6 @@ mod tests {
     #[cfg(feature = "failpoints")]
     use tokio::sync::Notify;
     use tokio::task::JoinHandle;
-    use tokio::time::sleep;
     use tokio_stream::wrappers::UnboundedReceiverStream;
     use tonic::{Request, Response, Status, Streaming};
 
@@ -850,7 +850,7 @@ mod tests {
     use crate::manager::sink_coordination::SinkCoordinatorManager;
     use crate::manager::{
         CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, FragmentManagerRef,
-        RelationIdEnum, StreamingClusterInfo,
+        RelationIdEnum, StreamingClusterInfo, WorkerId,
     };
     use crate::rpc::ddl_controller::DropMode;
     use crate::rpc::metrics::MetaMetrics;
@@ -864,6 +864,7 @@ mod tests {
     }
 
     struct FakeStreamService {
+        worker_id: WorkerId,
         inner: Arc<FakeFragmentState>,
     }
 
@@ -931,6 +932,7 @@ mod tests {
             let (tx, rx) = unbounded_channel();
             let mut request_stream = request.into_inner();
             let inner = self.inner.clone();
+            let worker_id = self.worker_id;
             let _join_handle = spawn(async move {
                 while let Ok(Some(request)) = request_stream.try_next().await {
                     match request.request.unwrap() {
@@ -944,15 +946,21 @@ mod tests {
                                 )),
                             }));
                         }
-                        streaming_control_stream_request::Request::InjectBarrier(_) => {
+                        streaming_control_stream_request::Request::InjectBarrier(req) => {
                             let _ = tx.send(Ok(StreamingControlStreamResponse {
                                 response: Some(
                                     streaming_control_stream_response::Response::CompleteBarrier(
-                                        BarrierCompleteResponse::default(),
+                                        BarrierCompleteResponse {
+                                            epoch: req.barrier.unwrap().epoch.unwrap().prev,
+                                            worker_id,
+                                            partial_graph_id: req.partial_graph_id,
+                                            ..BarrierCompleteResponse::default()
+                                        },
                                     ),
                                 ),
                             }));
                         }
+                        streaming_control_stream_request::Request::RemovePartialGraph(..) => {}
                     }
                 }
             });
@@ -984,21 +992,7 @@ mod tests {
                 actor_infos: Mutex::new(HashMap::new()),
             });
 
-            let fake_service = FakeStreamService {
-                inner: state.clone(),
-            };
-
             let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-            let stream_srv = StreamServiceServer::new(fake_service);
-            let join_handle = tokio::spawn(async move {
-                tonic::transport::Server::builder()
-                    .add_service(stream_srv)
-                    .serve_with_shutdown(addr, async move { shutdown_rx.await.unwrap() })
-                    .await
-                    .unwrap();
-            });
-
-            sleep(Duration::from_secs(1)).await;
 
             let env = MetaSrvEnv::for_test_opts(MetaOpts::test(enable_recovery)).await;
             let system_params = env.system_params_reader().await;
@@ -1010,7 +1004,7 @@ mod tests {
                 port: port as i32,
             };
             let fake_parallelism = 4;
-            cluster_manager
+            let worker_node = cluster_manager
                 .add_worker_node(
                     WorkerType::ComputeNode,
                     host.clone(),
@@ -1024,6 +1018,19 @@ mod tests {
                 )
                 .await?;
             cluster_manager.activate_worker_node(host).await?;
+
+            let fake_service = FakeStreamService {
+                worker_id: worker_node.id,
+                inner: state.clone(),
+            };
+            let stream_srv = StreamServiceServer::new(fake_service);
+            let join_handle = tokio::spawn(async move {
+                tonic::transport::Server::builder()
+                    .add_service(stream_srv)
+                    .serve_with_shutdown(addr, async move { shutdown_rx.await.unwrap() })
+                    .await
+                    .unwrap();
+            });
 
             let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await?);
             let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
@@ -1083,7 +1090,8 @@ mod tests {
                 meta_metrics.clone(),
                 stream_rpc_manager.clone(),
                 scale_controller.clone(),
-            );
+            )
+            .await;
 
             let stream_manager = GlobalStreamManager::new(
                 env.clone(),
@@ -1121,24 +1129,22 @@ mod tests {
             table_id: TableId,
             fragments: BTreeMap<FragmentId, Fragment>,
         ) -> MetaResult<()> {
-            // Create fake locations where all actors are scheduled to the same parallel unit.
+            // Create fake locations where all actors are scheduled to the same worker.
             let locations = {
-                let StreamingClusterInfo {
-                    worker_nodes,
-                    parallel_units,
-                    unschedulable_parallel_units: _,
-                }: StreamingClusterInfo = self
+                let StreamingClusterInfo { worker_nodes, .. }: StreamingClusterInfo = self
                     .global_stream_manager
                     .metadata_manager
                     .get_streaming_cluster_info()
                     .await?;
+
+                let (worker_id, _worker_node) = worker_nodes.iter().exactly_one().unwrap();
 
                 let actor_locations = fragments
                     .values()
                     .flat_map(|f| &f.actors)
                     .sorted_by(|a, b| a.actor_id.cmp(&b.actor_id))
                     .enumerate()
-                    .map(|(idx, a)| (a.actor_id, parallel_units[&(idx as u32)].clone()))
+                    .map(|(idx, a)| (a.actor_id, WorkerSlotId::new(*worker_id, idx)))
                     .collect();
 
                 Locations {
@@ -1213,9 +1219,17 @@ mod tests {
     }
 
     fn make_mview_stream_actors(table_id: &TableId, count: usize) -> Vec<StreamActor> {
+        let mut actor_bitmaps: HashMap<_, _> =
+            ActorMapping::new_uniform((0..count).map(|i| i as hash::ActorId))
+                .to_bitmaps()
+                .into_iter()
+                .map(|(actor_id, bitmap)| (actor_id, bitmap.to_protobuf()))
+                .collect();
+
         (0..count)
             .map(|i| StreamActor {
                 actor_id: i as u32,
+                vnode_bitmap: actor_bitmaps.remove(&(i as u32)),
                 // A dummy node to avoid panic.
                 nodes: Some(StreamNode {
                     node_body: Some(NodeBody::Materialize(MaterializeNode {
@@ -1237,15 +1251,8 @@ mod tests {
         let table_id = TableId::new(0);
         let actors = make_mview_stream_actors(&table_id, 4);
 
-        let StreamingClusterInfo { parallel_units, .. } = services
-            .global_stream_manager
-            .metadata_manager
-            .get_streaming_cluster_info()
-            .await?;
-
-        let parallel_unit_ids = parallel_units.keys().cloned().sorted().collect_vec();
-
         let mut fragments = BTreeMap::default();
+
         fragments.insert(
             0,
             Fragment {
@@ -1254,9 +1261,6 @@ mod tests {
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
                 state_table_ids: vec![0],
-                vnode_mapping: Some(
-                    ParallelUnitMapping::new_uniform(parallel_unit_ids.into_iter()).to_protobuf(),
-                ),
                 ..Default::default()
             },
         );
@@ -1314,7 +1318,6 @@ mod tests {
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
                 state_table_ids: vec![0],
-                vnode_mapping: Some(ParallelUnitMapping::new_single(0).to_protobuf()),
                 ..Default::default()
             },
         );

@@ -15,8 +15,10 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::split_sst;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, to_prost_table_stats_map, PbTableStatsMap,
 };
@@ -26,12 +28,11 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::hummock::compact_task::{self};
-use risingwave_pb::hummock::hummock_version_delta::ChangeLogDelta;
-use risingwave_pb::hummock::{HummockSnapshot, SstableInfo};
+use risingwave_pb::hummock::HummockSnapshot;
 use sea_orm::TransactionTrait;
 
 use crate::hummock::error::{Error, Result};
-use crate::hummock::manager::time_travel::require_sql_meta_store_err;
+use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::transaction::{
     HummockVersionStatsTransaction, HummockVersionTransaction,
 };
@@ -39,7 +40,8 @@ use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::metrics_utils::{
     get_or_create_local_table_stat, trigger_local_table_stat, trigger_sst_stat,
 };
-use crate::hummock::sequence::next_sstable_object_id;
+use crate::hummock::model::CompactionGroup;
+use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
 use crate::hummock::{
     commit_multi_var, commit_multi_var_with_provided_txn, start_measure_real_process_timer,
     HummockManager,
@@ -52,6 +54,11 @@ pub struct NewTableFragmentInfo {
     pub internal_table_ids: Vec<TableId>,
 }
 
+pub struct BatchCommitForNewCg {
+    pub epoch_to_ssts: BTreeMap<HummockEpoch, Vec<LocalSstableInfo>>,
+    pub table_ids: Vec<TableId>,
+}
+
 pub struct CommitEpochInfo {
     pub sstables: Vec<LocalSstableInfo>,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
@@ -60,6 +67,9 @@ pub struct CommitEpochInfo {
     pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
     pub table_committed_epoch: BTreeMap<HummockEpoch, HashSet<TableId>>,
     pub max_committed_epoch: HummockEpoch,
+
+    // commit multi Epoch and SSTs for new compaction group
+    pub batch_commit_for_new_cg: Vec<BatchCommitForNewCg>,
 }
 
 impl CommitEpochInfo {
@@ -71,6 +81,7 @@ impl CommitEpochInfo {
         change_log_delta: HashMap<TableId, ChangeLogDelta>,
         table_committed_epoch: BTreeMap<HummockEpoch, HashSet<TableId>>,
         max_committed_epoch: HummockEpoch,
+        batch_commit_for_new_cg: Vec<BatchCommitForNewCg>,
     ) -> Self {
         Self {
             sstables,
@@ -80,6 +91,7 @@ impl CommitEpochInfo {
             change_log_delta,
             table_committed_epoch,
             max_committed_epoch,
+            batch_commit_for_new_cg,
         }
     }
 }
@@ -110,6 +122,7 @@ impl HummockManager {
             HashMap::new(),
             BTreeMap::from_iter([(epoch, tables)]),
             epoch,
+            vec![],
         );
         self.commit_epoch(info).await?;
         Ok(())
@@ -128,6 +141,7 @@ impl HummockManager {
             change_log_delta,
             table_committed_epoch,
             max_committed_epoch: epoch,
+            batch_commit_for_new_cg,
         } = commit_info;
         let mut versioning_guard = self.versioning.write().await;
         let _timer = start_measure_real_process_timer!(self, "commit_epoch");
@@ -154,6 +168,13 @@ impl HummockManager {
             );
         }
 
+        let previous_time_travel_toggle_check = versioning.time_travel_toggle_check;
+        versioning.time_travel_toggle_check = self.time_travel_enabled().await;
+        if !previous_time_travel_toggle_check && versioning.time_travel_toggle_check {
+            // Take a snapshot for the first commit epoch after enabling time travel.
+            versioning.mark_next_time_travel_version_snapshot();
+        }
+
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
@@ -162,6 +183,7 @@ impl HummockManager {
         );
 
         let state_table_info = &version.latest_version().state_table_info;
+
         let mut table_compaction_group_mapping = state_table_info.build_table_compaction_group_id();
 
         let mut new_table_ids = HashMap::new();
@@ -188,6 +210,48 @@ impl HummockManager {
             }
         }
 
+        let (batch_commit_for_new_cg, compaction_group_manager_txn) =
+            if !batch_commit_for_new_cg.is_empty() {
+                let compaction_group_manager_guard = self.compaction_group_manager.write().await;
+                let compaction_group_config =
+                    compaction_group_manager_guard.default_compaction_config();
+                let mut compaction_group_manager =
+                    CompactionGroupManager::start_owned_compaction_groups_txn(
+                        compaction_group_manager_guard,
+                    );
+                let mut batch_commit_info = HashMap::new();
+                for BatchCommitForNewCg {
+                    epoch_to_ssts,
+                    table_ids,
+                } in batch_commit_for_new_cg
+                {
+                    let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
+                    compaction_group_manager.insert(
+                        new_compaction_group_id,
+                        CompactionGroup {
+                            group_id: new_compaction_group_id,
+                            compaction_config: compaction_group_config.clone(),
+                        },
+                    );
+
+                    on_handle_add_new_table(
+                        state_table_info,
+                        &table_ids,
+                        new_compaction_group_id,
+                        &mut table_compaction_group_mapping,
+                        &mut new_table_ids,
+                    )?;
+
+                    batch_commit_info.insert(new_compaction_group_id, epoch_to_ssts);
+                }
+                (
+                    Some((batch_commit_info, (*compaction_group_config).clone())),
+                    Some(compaction_group_manager),
+                )
+            } else {
+                (None, None)
+            };
+
         let commit_sstables = self
             .correct_commit_ssts(sstables, &table_compaction_group_mapping)
             .await?;
@@ -200,6 +264,7 @@ impl HummockManager {
             new_table_ids,
             new_table_watermarks,
             change_log_delta,
+            batch_commit_for_new_cg,
         );
 
         // TODO: remove the sanity check when supporting partial checkpoint
@@ -250,7 +315,9 @@ impl HummockManager {
             );
             table_metrics.inc_write_throughput(stats_value as u64);
         }
-        if self.env.opts.enable_hummock_time_travel {
+        if versioning.time_travel_toggle_check
+            && let Some(sql_store) = self.sql_store()
+        {
             let mut time_travel_version = None;
             if versioning.time_travel_snapshot_interval_counter
                 >= self.env.opts.hummock_time_travel_snapshot_interval
@@ -268,7 +335,6 @@ impl HummockManager {
                 .values()
                 .map(|g| (g.group_id, g.parent_group_id))
                 .collect();
-            let sql_store = self.sql_store().ok_or_else(require_sql_meta_store_err)?;
             let mut txn = sql_store.conn.begin().await?;
             let version_snapshot_sst_ids = self
                 .write_time_travel_metadata(
@@ -279,12 +345,22 @@ impl HummockManager {
                     &versioning.last_time_travel_snapshot_sst_ids,
                 )
                 .await?;
-            commit_multi_var_with_provided_txn!(txn, version, version_stats)?;
+            commit_multi_var_with_provided_txn!(
+                txn,
+                version,
+                version_stats,
+                compaction_group_manager_txn
+            )?;
             if let Some(version_snapshot_sst_ids) = version_snapshot_sst_ids {
                 versioning.last_time_travel_snapshot_sst_ids = version_snapshot_sst_ids;
             }
         } else {
-            commit_multi_var!(self.meta_store_ref(), version, version_stats)?;
+            commit_multi_var!(
+                self.meta_store_ref(),
+                version,
+                version_stats,
+                compaction_group_manager_txn
+            )?;
         }
 
         let snapshot = HummockSnapshot {
@@ -349,7 +425,7 @@ impl HummockManager {
         let mut sst_to_cg_vec = Vec::with_capacity(sstables.len());
         for commit_sst in sstables {
             let mut group_table_ids: BTreeMap<u64, Vec<u32>> = BTreeMap::new();
-            for table_id in commit_sst.sst_info.get_table_ids() {
+            for table_id in &commit_sst.sst_info.table_ids {
                 match table_compaction_group_mapping.get(&TableId::new(*table_id)) {
                     Some(cg_id_from_meta) => {
                         group_table_ids
@@ -361,7 +437,7 @@ impl HummockManager {
                         tracing::warn!(
                             "table {} in SST {} doesn't belong to any compaction group",
                             table_id,
-                            commit_sst.sst_info.get_object_id(),
+                            commit_sst.sst_info.object_id,
                         );
                     }
                 }

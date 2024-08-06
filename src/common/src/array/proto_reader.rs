@@ -291,7 +291,7 @@ mod tests {
         let mut builder = DateArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder.append(Date::with_days(i as i32).ok());
+                builder.append(Date::with_days_since_ce(i as i32).ok());
             } else {
                 builder.append(None);
             }
@@ -302,7 +302,7 @@ mod tests {
         let arr: &DateArray = new_col.as_date();
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {
-                assert_eq!(Date::with_days(i as i32).ok().unwrap(), x.unwrap());
+                assert_eq!(Date::with_days_since_ce(i as i32).ok().unwrap(), x.unwrap());
             } else {
                 assert!(x.is_none());
             }

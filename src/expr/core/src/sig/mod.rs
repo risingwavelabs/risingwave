@@ -21,10 +21,11 @@ use std::sync::LazyLock;
 
 use itertools::Itertools;
 use risingwave_common::types::DataType;
+use risingwave_pb::expr::agg_call::PbType as AggregateFunctionType;
 use risingwave_pb::expr::expr_node::PbType as ScalarFunctionType;
 use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 
-use crate::aggregate::{AggCall, AggKind as AggregateFunctionType, BoxedAggregateFunction};
+use crate::aggregate::{AggCall, BoxedAggregateFunction};
 use crate::error::Result;
 use crate::expr::BoxedExpression;
 use crate::table_function::BoxedTableFunction;
@@ -358,7 +359,7 @@ impl FuncName {
         match self {
             Self::Scalar(ty) => ty.as_str_name().into(),
             Self::Table(ty) => ty.as_str_name().into(),
-            Self::Aggregate(ty) => ty.to_protobuf().as_str_name().into(),
+            Self::Aggregate(ty) => ty.as_str_name().into(),
             Self::Udf(name) => name.clone().into(),
         }
     }

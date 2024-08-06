@@ -15,13 +15,13 @@
 use std::collections::{HashMap, HashSet};
 use std::process::exit;
 
-use anyhow::{anyhow, Error, Result};
+use anyhow::{anyhow, Result};
 use inquire::Confirm;
 use itertools::Itertools;
-use regex::{Match, Regex};
+use regex::Regex;
+use risingwave_meta::manager::WorkerId;
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::meta::table_fragments::ActorStatus;
-use risingwave_pb::meta::{GetClusterInfoResponse, Reschedule};
+use risingwave_pb::meta::{GetClusterInfoResponse, PbWorkerReschedule};
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 
@@ -33,16 +33,13 @@ pub struct ReschedulePayload {
     pub reschedule_revision: u64,
 
     #[serde(rename = "reschedule_plan")]
-    pub reschedule_plan: HashMap<u32, FragmentReschedulePlan>,
+    pub worker_reschedule_plan: HashMap<u32, WorkerReschedulePlan>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct FragmentReschedulePlan {
-    #[serde(rename = "added_parallel_units")]
-    pub added_parallel_units: Vec<u32>,
-
-    #[serde(rename = "removed_parallel_units")]
-    pub removed_parallel_units: Vec<u32>,
+pub struct WorkerReschedulePlan {
+    #[serde(rename = "actor_count_diff")]
+    pub actor_count_diff: HashMap<WorkerId, i32>,
 }
 
 #[derive(Debug)]
@@ -51,66 +48,34 @@ pub enum RescheduleInput {
     FilePath(String),
 }
 
-impl From<FragmentReschedulePlan> for Reschedule {
-    fn from(value: FragmentReschedulePlan) -> Self {
-        let FragmentReschedulePlan {
-            added_parallel_units,
-            removed_parallel_units,
-        } = value;
+impl From<WorkerReschedulePlan> for PbWorkerReschedule {
+    fn from(value: WorkerReschedulePlan) -> Self {
+        let WorkerReschedulePlan { actor_count_diff } = value;
 
-        Reschedule {
-            added_parallel_units,
-            removed_parallel_units,
+        PbWorkerReschedule {
+            worker_actor_diff: actor_count_diff
+                .into_iter()
+                .map(|(k, v)| (k as _, v as _))
+                .collect(),
         }
     }
 }
 
-impl From<Reschedule> for FragmentReschedulePlan {
-    fn from(value: Reschedule) -> Self {
-        let Reschedule {
-            added_parallel_units,
-            removed_parallel_units,
+impl From<PbWorkerReschedule> for WorkerReschedulePlan {
+    fn from(value: PbWorkerReschedule) -> Self {
+        let PbWorkerReschedule {
+            worker_actor_diff: actor_count_diff,
         } = value;
 
-        FragmentReschedulePlan {
-            added_parallel_units,
-            removed_parallel_units,
+        WorkerReschedulePlan {
+            actor_count_diff: actor_count_diff
+                .into_iter()
+                .map(|(k, v)| (k as _, v as _))
+                .collect(),
         }
     }
 }
 
-const RESCHEDULE_MATCH_REGEXP: &str =
-    r"^(?P<fragment>\d+)(?:-\[(?P<removed>\d+(?:,\d+)*)])?(?:\+\[(?P<added>\d+(?:,\d+)*)])?$";
-const RESCHEDULE_FRAGMENT_KEY: &str = "fragment";
-const RESCHEDULE_REMOVED_KEY: &str = "removed";
-const RESCHEDULE_ADDED_KEY: &str = "added";
-
-// For plan `100-[1,2,3]+[4,5];101-[1];102+[3]`, the following reschedule request will be generated
-// {
-//     100: Reschedule {
-//         added_parallel_units: [
-//             4,
-//             5,
-//         ],
-//         removed_parallel_units: [
-//             1,
-//             2,
-//             3,
-//         ],
-//     },
-//     101: Reschedule {
-//         added_parallel_units: [],
-//         removed_parallel_units: [
-//             1,
-//         ],
-//     },
-//     102: Reschedule {
-//         added_parallel_units: [
-//             3,
-//         ],
-//         removed_parallel_units: [],
-//     },
-// }
 pub async fn reschedule(
     context: &CtlContext,
     plan: Option<String>,
@@ -127,13 +92,13 @@ pub async fn reschedule(
             let file = std::fs::File::open(path)?;
             let ReschedulePayload {
                 reschedule_revision,
-                reschedule_plan,
+                worker_reschedule_plan,
             } = serde_yaml::from_reader(file)?;
             (
-                reschedule_plan
+                worker_reschedule_plan
                     .into_iter()
-                    .map(|(fragment_id, fragment_reschedule_plan)| {
-                        (fragment_id, fragment_reschedule_plan.into())
+                    .map(|(fragment_id, worker_reschedule_plan)| {
+                        (fragment_id, worker_reschedule_plan.into())
                     })
                     .collect(),
                 reschedule_revision,
@@ -142,14 +107,14 @@ pub async fn reschedule(
         _ => unreachable!(),
     };
 
+    if reschedules.is_empty() {
+        return Ok(());
+    }
+
     for (fragment_id, reschedule) in &reschedules {
         println!("For fragment #{}", fragment_id);
-        if !reschedule.removed_parallel_units.is_empty() {
-            println!("\tRemove: {:?}", reschedule.removed_parallel_units);
-        }
-
-        if !reschedule.added_parallel_units.is_empty() {
-            println!("\tAdd:    {:?}", reschedule.added_parallel_units);
+        if !reschedule.get_worker_actor_diff().is_empty() {
+            println!("\tChange: {:?}", reschedule.get_worker_actor_diff());
         }
 
         println!();
@@ -176,49 +141,45 @@ pub async fn reschedule(
     Ok(())
 }
 
-fn parse_plan(mut plan: String) -> Result<HashMap<u32, Reschedule>, Error> {
+// It will match formats like `1:[1:+1,2:-1,3:1];2:[1:1,2:1]`, indicating which workers' actors need to change in quantity for each fragment.
+fn parse_plan(mut plan: String) -> Result<HashMap<u32, PbWorkerReschedule>> {
     let mut reschedules = HashMap::new();
-
-    let regex = Regex::new(RESCHEDULE_MATCH_REGEXP)?;
-
+    let regex = Regex::new(r"^(\d+):\[((?:\d+:[+-]?\d+,?)+)]$")?;
     plan.retain(|c| !c.is_whitespace());
 
     for fragment_reschedule_plan in plan.split(';') {
+        if fragment_reschedule_plan.is_empty() {
+            continue;
+        }
+
         let captures = regex
             .captures(fragment_reschedule_plan)
             .ok_or_else(|| anyhow!("plan \"{}\" format illegal", fragment_reschedule_plan))?;
 
         let fragment_id = captures
-            .name(RESCHEDULE_FRAGMENT_KEY)
+            .get(1)
             .and_then(|mat| mat.as_str().parse::<u32>().ok())
             .ok_or_else(|| anyhow!("plan \"{}\" does not have a valid fragment id", plan))?;
 
-        let split_fn = |mat: Match<'_>| {
-            mat.as_str()
-                .split(',')
-                .map(|id_str| id_str.parse::<u32>().map_err(Error::msg))
-                .collect::<Result<Vec<_>>>()
-        };
+        let worker_changes: Vec<&str> = captures[2].split(',').collect();
 
-        let removed_parallel_units = captures
-            .name(RESCHEDULE_REMOVED_KEY)
-            .map(split_fn)
-            .transpose()?
-            .unwrap_or_default();
-        let added_parallel_units = captures
-            .name(RESCHEDULE_ADDED_KEY)
-            .map(split_fn)
-            .transpose()?
-            .unwrap_or_default();
+        let mut worker_actor_diff = HashMap::new();
+        for worker_change in &worker_changes {
+            let (worker_id, count) = worker_change
+                .split(':')
+                .map(|v| v.parse::<i32>().unwrap())
+                .collect_tuple::<(_, _)>()
+                .unwrap();
 
-        if !(removed_parallel_units.is_empty() && added_parallel_units.is_empty()) {
-            reschedules.insert(
-                fragment_id,
-                Reschedule {
-                    added_parallel_units,
-                    removed_parallel_units,
-                },
-            );
+            if let Some(dup_change) = worker_actor_diff.insert(worker_id as u32, count) {
+                anyhow::bail!(
+                    "duplicate worker id {worker_id} in plan, prev {worker_id} -> {dup_change}",
+                );
+            }
+        }
+
+        if !worker_actor_diff.is_empty() {
+            reschedules.insert(fragment_id, PbWorkerReschedule { worker_actor_diff });
         }
     }
     Ok(reschedules)
@@ -303,9 +264,8 @@ pub async fn unregister_workers(
                     table_fragments
                         .actor_status
                         .get(&actor.actor_id)
-                        .and_then(|ActorStatus { parallel_unit, .. }| parallel_unit.clone())
+                        .map(|actor_status| actor_status.worker_id())
                         .unwrap()
-                        .worker_node_id
                 })
                 .collect();
 

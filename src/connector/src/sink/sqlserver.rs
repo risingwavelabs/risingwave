@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
@@ -144,6 +144,10 @@ impl Sink for SqlServerSink {
     const SINK_NAME: &'static str = SQLSERVER_SINK;
 
     async fn validate(&self) -> Result<()> {
+        risingwave_common::license::Feature::SqlServerSink
+            .check_available()
+            .map_err(|e| anyhow::anyhow!(e))?;
+
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
                 "Primary key not defined for upsert SQL Server sink (please define in `primary_key` field)")));
@@ -504,8 +508,13 @@ impl SqlClient {
         config.database(&msconfig.database);
         config.trust_cert();
 
-        let tcp = TcpStream::connect(config.get_addr()).await.unwrap();
-        tcp.set_nodelay(true).unwrap();
+        let tcp = TcpStream::connect(config.get_addr())
+            .await
+            .context("failed to connect to sql server")
+            .map_err(SinkError::SqlServer)?;
+        tcp.set_nodelay(true)
+            .context("failed to setting nodelay when connecting to sql server")
+            .map_err(SinkError::SqlServer)?;
         let client = Client::connect(config, tcp.compat_write()).await?;
         Ok(Self { client })
     }

@@ -464,6 +464,24 @@ impl TableCatalog {
         }
     }
 
+    pub fn default_column_exprs(columns: &[ColumnCatalog]) -> Vec<ExprImpl> {
+        columns
+            .iter()
+            .map(|c| {
+                if let Some(GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {
+                    expr,
+                    ..
+                })) = c.column_desc.generated_or_default_column.as_ref()
+                {
+                    ExprImpl::from_expr_proto(expr.as_ref().unwrap())
+                        .expect("expr in default columns corrupted")
+                } else {
+                    ExprImpl::literal_null(c.data_type().clone())
+                }
+            })
+            .collect()
+    }
+
     pub fn default_columns(&self) -> impl Iterator<Item = (usize, ExprImpl)> + '_ {
         self.columns.iter().enumerate().filter_map(|(i, c)| {
             if let Some(GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {

@@ -19,10 +19,9 @@ use std::time::{Duration, Instant};
 
 use auto_enums::auto_enum;
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::level::{Level, Levels};
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::PbLevel;
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::error::TryRecvError;
@@ -133,7 +132,7 @@ impl PinnedVersion {
         self.version.levels.get(&compaction_group_id).unwrap()
     }
 
-    pub fn levels(&self, table_id: TableId) -> impl Iterator<Item = &PbLevel> {
+    pub fn levels(&self, table_id: TableId) -> impl Iterator<Item = &Level> {
         #[auto_enum(Iterator)]
         match self.version.state_table_info.info().get(&table_id) {
             Some(info) => {
@@ -141,8 +140,6 @@ impl PinnedVersion {
                 let levels = self.levels_by_compaction_groups_id(compaction_group_id);
                 levels
                     .l0
-                    .as_ref()
-                    .unwrap()
                     .sub_levels
                     .iter()
                     .rev()

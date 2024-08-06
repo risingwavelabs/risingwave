@@ -19,7 +19,7 @@ use parking_lot::{MappedMutexGuard, Mutex, MutexGuard, RwLock};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::ActorInfo;
-use risingwave_rpc_client::ComputeClientPool;
+use risingwave_rpc_client::ComputeClientPoolRef;
 
 use crate::error::StreamResult;
 use crate::executor::exchange::permit::{self, Receiver, Sender};
@@ -39,6 +39,25 @@ pub type FragmentId = u32;
 pub type DispatcherId = u64;
 pub type UpDownActorIds = (ActorId, ActorId);
 pub type UpDownFragmentIds = (FragmentId, FragmentId);
+
+#[derive(Hash, Eq, PartialEq, Copy, Clone, Debug)]
+struct PartialGraphId(u32);
+
+impl PartialGraphId {
+    fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    fn is_global_graph(&self) -> bool {
+        self.0 == u32::MAX
+    }
+}
+
+impl From<PartialGraphId> for u32 {
+    fn from(val: PartialGraphId) -> u32 {
+        val.0
+    }
+}
 
 /// Stores the information which may be modified from the data plane.
 ///
@@ -76,10 +95,10 @@ pub struct SharedContext {
     /// between two actors/actors.
     pub(crate) addr: HostAddr,
 
-    /// The pool of compute clients.
+    /// Compute client pool for streaming gRPC exchange.
     // TODO: currently the client pool won't be cleared. Should remove compute clients when
     // disconnected.
-    pub(crate) compute_client_pool: ComputeClientPool,
+    pub(crate) compute_client_pool: ComputeClientPoolRef,
 
     pub(crate) config: StreamingConfig,
 
@@ -95,30 +114,28 @@ impl std::fmt::Debug for SharedContext {
 }
 
 impl SharedContext {
-    pub fn new(
-        addr: HostAddr,
-        config: &StreamingConfig,
-        local_barrier_manager: LocalBarrierManager,
-    ) -> Self {
+    pub fn new(env: &StreamEnvironment, local_barrier_manager: LocalBarrierManager) -> Self {
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
-            addr,
-            compute_client_pool: ComputeClientPool::default(),
-            config: config.clone(),
+            addr: env.server_address().clone(),
+            config: env.config().as_ref().to_owned(),
+            compute_client_pool: env.client_pool(),
             local_barrier_manager,
         }
     }
 
     #[cfg(test)]
     pub fn for_test() -> Self {
+        use std::sync::Arc;
+
         use risingwave_common::config::StreamingDeveloperConfig;
+        use risingwave_rpc_client::ComputeClientPool;
 
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr: LOCAL_TEST_ADDR.clone(),
-            compute_client_pool: ComputeClientPool::default(),
             config: StreamingConfig {
                 developer: StreamingDeveloperConfig {
                     exchange_initial_permits: permit::for_test::INITIAL_PERMITS,
@@ -128,6 +145,7 @@ impl SharedContext {
                 },
                 ..Default::default()
             },
+            compute_client_pool: Arc::new(ComputeClientPool::for_test()),
             local_barrier_manager: LocalBarrierManager::for_test(),
         }
     }

@@ -226,7 +226,7 @@ impl Transactional<Transaction> for HummockVersionDelta {
             max_committed_epoch: Set(self.max_committed_epoch.try_into().unwrap()),
             safe_epoch: Set(self.visible_table_safe_epoch().try_into().unwrap()),
             trivial_move: Set(self.trivial_move),
-            full_version_delta: Set(FullVersionDelta::from(&self.to_protobuf())),
+            full_version_delta: Set(FullVersionDelta::from(&self.into())),
         };
         hummock_version_delta::Entity::insert(m)
             .on_conflict(

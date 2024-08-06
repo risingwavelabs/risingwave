@@ -106,6 +106,13 @@ impl StoreLocalStatistic {
         }
     }
 
+    pub fn discard(self) {
+        #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
+        {
+            self.reported.fetch_or(true, Ordering::Relaxed);
+        }
+    }
+
     pub fn report_compactor(&self, metrics: &CompactorMetrics) {
         let t = self.remote_io_time.load(Ordering::Relaxed) as f64;
         if t > 0.0 {

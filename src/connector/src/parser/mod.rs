@@ -89,6 +89,7 @@ mod unified;
 mod upsert_parser;
 mod util;
 
+use debezium::schema_change::SchemaChangeEnvelope;
 pub use debezium::DEBEZIUM_IGNORE_KEY;
 use risingwave_common::bitmap::BitmapBuilder;
 pub use unified::{AccessError, AccessResult};
@@ -579,6 +580,9 @@ pub enum ParseResult {
     Rows,
     /// A transaction control message is parsed.
     TransactionControl(TransactionControl),
+
+    /// A schema change message is parsed.
+    SchemaChange(SchemaChangeEnvelope),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -829,6 +833,10 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                         }
                     }
                 },
+
+                Ok(ParseResult::SchemaChange(_)) => {
+                    // TODO
+                }
             }
         }
 
@@ -869,14 +877,11 @@ pub enum AccessBuilderImpl {
 }
 
 impl AccessBuilderImpl {
-    pub async fn new_default(
-        config: EncodingProperties,
-        kv: EncodingType,
-    ) -> ConnectorResult<Self> {
+    pub async fn new_default(config: EncodingProperties) -> ConnectorResult<Self> {
         let accessor = match config {
             EncodingProperties::Avro(_) => {
                 let config = AvroParserConfig::new(config).await?;
-                AccessBuilderImpl::Avro(AvroAccessBuilder::new(config, kv)?)
+                AccessBuilderImpl::Avro(AvroAccessBuilder::new(config)?)
             }
             EncodingProperties::Protobuf(_) => {
                 let config = ProtobufParserConfig::new(config).await?;
@@ -1072,7 +1077,6 @@ impl SpecificParserConfig {
 #[derive(Debug, Default, Clone)]
 pub struct AvroProperties {
     pub schema_location: SchemaLocation,
-    pub enable_upsert: bool,
     pub record_name: Option<String>,
     pub key_record_name: Option<String>,
     pub map_handling: Option<MapHandling>,
@@ -1224,12 +1228,12 @@ impl SpecificParserConfig {
                     map_handling: MapHandling::from_options(&format_encode_options_with_secret)?,
                     ..Default::default()
                 };
-                if format == SourceFormat::Upsert {
-                    config.enable_upsert = true;
-                }
                 config.schema_location = if let Some(schema_arn) =
                     format_encode_options_with_secret.get(AWS_GLUE_SCHEMA_ARN_KEY)
                 {
+                    risingwave_common::license::Feature::GlueSchemaRegistry
+                        .check_available()
+                        .map_err(anyhow::Error::from)?;
                     SchemaLocation::Glue {
                         schema_arn: schema_arn.clone(),
                         aws_auth_props: serde_json::from_value::<AwsAuthProps>(

@@ -16,8 +16,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::time_travel::{
     refill_version, IncompleteHummockVersion, IncompleteHummockVersionDelta,
 };
@@ -25,11 +27,12 @@ use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableId, HummockSstableObjectId,
 };
+use risingwave_meta_model_v2::hummock_sstable_info::SstableInfoV2Backend;
 use risingwave_meta_model_v2::{
     hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
     hummock_time_travel_version,
 };
-use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta, PbSstableInfo};
+use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -51,10 +54,16 @@ impl HummockManager {
         }
     }
 
+    pub(crate) async fn time_travel_enabled(&self) -> bool {
+        self.env
+            .system_params_reader()
+            .await
+            .time_travel_retention_ms()
+            > 0
+            && self.sql_store().is_some()
+    }
+
     pub(crate) async fn init_time_travel_state(&self) -> Result<()> {
-        if self.env.opts.enable_hummock_time_travel && self.sql_store().is_none() {
-            return Err(require_sql_meta_store_err());
-        }
         let Some(sql_store) = self.sql_store() else {
             return Ok(());
         };
@@ -323,7 +332,7 @@ impl HummockManager {
                 .all(&sql_store.conn)
                 .await?;
             for sst_info in sst_infos {
-                let sst_info = sst_info.sstable_info.to_protobuf();
+                let sst_info: SstableInfo = sst_info.sstable_info.to_protobuf().into();
                 sst_id_to_info.insert(sst_info.sst_id, sst_info);
             }
         }
@@ -346,7 +355,7 @@ impl HummockManager {
         skip_sst_ids: &HashSet<HummockSstableId>,
     ) -> Result<Option<HashSet<HummockSstableId>>> {
         async fn write_sstable_infos(
-            sst_infos: impl Iterator<Item = &PbSstableInfo>,
+            sst_infos: impl Iterator<Item = &SstableInfo>,
             txn: &DatabaseTransaction,
         ) -> Result<usize> {
             let mut count = 0;
@@ -354,7 +363,7 @@ impl HummockManager {
                 let m = hummock_sstable_info::ActiveModel {
                     sst_id: Set(sst_info.sst_id.try_into().unwrap()),
                     object_id: Set(sst_info.object_id.try_into().unwrap()),
-                    sstable_info: Set(sst_info.into()),
+                    sstable_info: Set(SstableInfoV2Backend::from(&sst_info.to_protobuf())),
                 };
                 hummock_sstable_info::Entity::insert(m)
                     .on_conflict(
@@ -501,6 +510,6 @@ fn should_ignore_group(root_group_id: CompactionGroupId) -> bool {
     root_group_id == StaticCompactionGroupId::StateDefault as CompactionGroupId
 }
 
-pub(crate) fn require_sql_meta_store_err() -> Error {
-    Error::TimeTravel(anyhow!("time travel requires SQL meta store"))
+pub fn require_sql_meta_store_err() -> Error {
+    Error::TimeTravel(anyhow!("require SQL meta store"))
 }

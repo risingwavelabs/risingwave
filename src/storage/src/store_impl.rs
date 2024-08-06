@@ -42,9 +42,27 @@ use crate::monitor::{
 use crate::opts::StorageOpts;
 use crate::StateStore;
 
-pub type HummockStorageType = impl StateStore + AsHummock;
-pub type MemoryStateStoreType = impl StateStore + AsHummock;
-pub type SledStateStoreType = impl StateStore + AsHummock;
+mod opaque_type {
+    use super::*;
+
+    pub type HummockStorageType = impl StateStore + AsHummock;
+    pub type MemoryStateStoreType = impl StateStore + AsHummock;
+    pub type SledStateStoreType = impl StateStore + AsHummock;
+
+    pub fn in_memory(state_store: MemoryStateStore) -> MemoryStateStoreType {
+        may_dynamic_dispatch(state_store)
+    }
+
+    pub fn hummock(state_store: HummockStorage) -> HummockStorageType {
+        may_dynamic_dispatch(may_verify(state_store))
+    }
+
+    pub fn sled(state_store: SledStateStore) -> SledStateStoreType {
+        may_dynamic_dispatch(state_store)
+    }
+}
+use opaque_type::{hummock, in_memory, sled};
+pub use opaque_type::{HummockStorageType, MemoryStateStoreType, SledStateStoreType};
 
 /// The type erased [`StateStore`].
 #[derive(Clone, EnumAsInner)]
@@ -114,7 +132,7 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
         // The specific type of MemoryStateStoreType in deducted here.
-        Self::MemoryStateStore(may_dynamic_dispatch(state_store).monitored(storage_metrics))
+        Self::MemoryStateStore(in_memory(state_store).monitored(storage_metrics))
     }
 
     pub fn hummock(
@@ -122,16 +140,14 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
         // The specific type of HummockStateStoreType in deducted here.
-        Self::HummockStateStore(
-            may_dynamic_dispatch(may_verify(state_store)).monitored(storage_metrics),
-        )
+        Self::HummockStateStore(hummock(state_store).monitored(storage_metrics))
     }
 
     pub fn sled(
         state_store: SledStateStore,
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
-        Self::SledStateStore(may_dynamic_dispatch(state_store).monitored(storage_metrics))
+        Self::SledStateStore(sled(state_store).monitored(storage_metrics))
     }
 
     pub fn shared_in_memory_store(storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
@@ -216,6 +232,7 @@ pub mod verify {
     use bytes::Bytes;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
@@ -537,6 +554,14 @@ pub mod verify {
             }
             ret
         }
+
+        fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+            let ret = self.actual.get_table_watermark(vnode);
+            if let Some(expected) = &self.expected {
+                assert_eq!(ret, expected.get_table_watermark(vnode));
+            }
+            ret
+        }
     }
 
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
@@ -827,6 +852,7 @@ pub mod boxed_state_store {
     use futures::FutureExt;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
 
@@ -979,6 +1005,8 @@ pub mod boxed_state_store {
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
 
         fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap>;
+
+        fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes>;
     }
 
     #[async_trait::async_trait]
@@ -1047,6 +1075,10 @@ pub mod boxed_state_store {
         fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
             self.update_vnode_bitmap(vnodes)
         }
+
+        fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+            self.get_table_watermark(vnode)
+        }
     }
 
     pub type BoxDynamicDispatchedLocalStateStore = Box<dyn DynamicDispatchedLocalStateStore>;
@@ -1077,6 +1109,10 @@ pub mod boxed_state_store {
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
             self.deref().rev_iter(key_range, read_options)
+        }
+
+        fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+            self.deref().get_table_watermark(vnode)
         }
 
         fn insert(
