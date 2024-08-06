@@ -92,14 +92,26 @@ select * from t1 union corresponding by (v4) select * from t2
 ----
 3
 
-statement error Invalid input syntax: Every <column name> in the <corresponding column list> shall be a <column name> of both left and right side. Missing column: `vxx`
+statement error
 select * from t1 union corresponding by (vxx) select * from t2
+---
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Every column name in the corresponding column list shall be a column name of both left and right side query in a UNION operation. Column name `vxx` in the corresponding column list is not found in a query column list: ("v1", "v2", "v4").
+
 
 statement ok
 create table txx (vxx int);
 
-statement error Invalid input syntax: When CORRESPONDING is specified, at least one column of the left side shall have a <column name> that is the <column name> of some column of the right side
+statement error
 select * from t1 union corresponding select * from txx
+---
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: When CORRESPONDING is specified, at least one column of the left side shall have a column name that is the column name of some column of the right side in a UNION operation. Left side query column list: ("v1", "v2", "v4"). Right side query column list: ("vxx").
+
 
 statement ok
 drop table t1;

@@ -107,11 +107,19 @@
     - stream_plan
     - stream_dist_plan
 
-- name: test corresponding union error
+- name: test corresponding union error - corresponding list
   sql: |
     create table t1 (a int, b numeric, c bigint);
     create table t2 (a int, b numeric, y bigint);
     create table t3 (x int, b numeric, c bigint);
     select * from t1 union corresponding select * from t2 union all corresponding by (c) select * from t3;
+  expected_outputs:
+    - binder_error
+
+- name: test corresponding union error - duplicate names
+  sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create table t2 (a int, b numeric, y bigint);
+    select a, b as a from t1 union corresponding select * from t2;
   expected_outputs:
     - binder_error

@@ -225,14 +225,15 @@ impl Binder {
         left: &BoundSetExpr,
         right: &BoundSetExpr,
         corresponding: Corresponding,
+        op: &SetOperator,
     ) -> Result<(ColIndexMapping, ColIndexMapping)> {
         let check_duplicate_name = |set_expr: &BoundSetExpr| {
             let mut name2idx = HashMap::new();
             for (idx, field) in set_expr.schema().fields.iter().enumerate() {
                 if name2idx.insert(field.name.clone(), idx).is_some() {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "duplicated column name `{}` in a select list of a set operation",
-                        field.name,
+                        "Duplicated column name `{}` in a column list of the query in a {} operation. Column list of the query: ({}).",
+                        field.name, op, set_expr.schema().formatted_col_names(),
                     )));
                 }
             }
@@ -247,22 +248,30 @@ impl Binder {
         let mut corresponding_col_idx_l = vec![];
         let mut corresponding_col_idx_r = vec![];
 
+        fn corr_by_err(op: &SetOperator, col_name: &str, set_expr: &BoundSetExpr) -> Result<()> {
+            Err(ErrorCode::InvalidInputSyntax(format!(
+                "Every column name in the corresponding column list shall be a \
+                column name of both left and right side query in a {} operation. \
+                Column name `{}` in the corresponding column list is not found in a query column list: ({}).",
+                op,
+                col_name,
+                set_expr.schema().formatted_col_names(),
+            )).into())
+        }
+
         if let Some(column_list) = corresponding.column_list() {
             // The select list of the corresponding set operation should be in the order of <corresponding column list>
             for column in column_list {
                 let col_name = column.real_value();
-                if let Some(idx_l) = name2idx_l.get(&col_name)
-                    && let Some(idx_r) = name2idx_r.get(&col_name)
-                {
+                if let Some(idx_l) = name2idx_l.get(&col_name) {
                     corresponding_col_idx_l.push(*idx_l);
+                } else {
+                    corr_by_err(op, &col_name, left)?
+                }
+                if let Some(idx_r) = name2idx_r.get(&col_name) {
                     corresponding_col_idx_r.push(*idx_r);
                 } else {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "Every <column name> in the <corresponding column list> shall be a \
-                        <column name> of both left and right side. Missing column: `{}`",
-                        col_name
-                    ))
-                    .into());
+                    corr_by_err(op, &col_name, right)?
                 }
             }
         } else {
@@ -281,9 +290,15 @@ impl Binder {
 
             if corresponding_col_idx_l.is_empty() {
                 return Err(ErrorCode::InvalidInputSyntax(
-                    "When CORRESPONDING is specified, at least one column of the left side shall have a <column name> that is the \
-                    <column name> of some column of the right side"
-                        .to_string(),
+                    format!(
+                        "When CORRESPONDING is specified, at least one column of the left side \
+                        shall have a column name that is the column name of some column of the right side in a {} operation. \
+                        Left side query column list: ({}). \
+                        Right side query column list: ({}).",
+                        op,
+                        left.schema().formatted_col_names(),
+                        right.schema().formatted_col_names(),
+                    )
                 )
                 .into());
             }
@@ -320,7 +335,13 @@ impl Binder {
                         let mut right = self.bind_set_expr(*right)?;
 
                         let corresponding_col_indices = if corresponding.is_corresponding() {
-                            Some(Self::corresponding(self, &left, &right, corresponding)?)
+                            Some(Self::corresponding(
+                                self,
+                                &left,
+                                &right,
+                                corresponding,
+                                &op,
+                            )?)
                             // TODO: Align schema
                         } else {
                             Self::align_schema(&mut left, &mut right, op.clone())?;
