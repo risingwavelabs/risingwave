@@ -30,7 +30,7 @@ use std::ops::RangeBounds;
 use std::str::FromStr;
 
 use paste::paste;
-use risingwave_license::{LicenseKey, LicenseKeyRef, TEST_PAID_LICENSE_KEY};
+use risingwave_license::{LicenseKey, LicenseKeyRef};
 use risingwave_pb::meta::PbSystemParams;
 
 use self::diff::SystemParamsDiff;
@@ -62,15 +62,6 @@ impl_param_value!(f64);
 impl_param_value!(String => &'a str);
 impl_param_value!(LicenseKey => LicenseKeyRef<'a>);
 
-/// Set the default value of `license_key` to [`TEST_PAID_LICENSE_KEY`] in debug mode.
-fn default_license_key() -> LicenseKey {
-    if cfg!(debug_assertions) {
-        TEST_PAID_LICENSE_KEY.to_owned()
-    } else {
-        "".to_owned()
-    }.into()
-}
-
 /// Define all system parameters here.
 ///
 /// To match all these information, write the match arm as follows:
@@ -99,7 +90,7 @@ macro_rules! for_all_params {
             { pause_on_next_bootstrap,                  bool,                           Some(false),                    true,   "Whether to pause all data sources on next bootstrap.", },
             { enable_tracing,                           bool,                           Some(false),                    true,   "Whether to enable distributed tracing.", },
             { use_new_object_prefix_strategy,           bool,                           None,                           false,  "Whether to split object prefix.", },
-            { license_key,                              risingwave_license::LicenseKey, Some(default_license_key()),    true,   "The license key to activate enterprise features.", },
+            { license_key,                              risingwave_license::LicenseKey, Some(Default::default()),       true,   "The license key to activate enterprise features.", },
             { time_travel_retention_ms,                 u64,                            Some(0_u64),                    true,   "The data retention period for time travel, where 0 indicates that it's disabled.", },
         }
     };
@@ -160,8 +151,6 @@ macro_rules! def_default {
 /// Default values for all parameters.
 pub mod default {
     use std::sync::LazyLock;
-
-    use super::*;
 
     for_all_params!(def_default_opt);
     for_all_params!(def_default);

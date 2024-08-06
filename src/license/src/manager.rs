@@ -180,12 +180,6 @@ impl LicenseManager {
     }
 }
 
-/// A license key with the paid tier that only works in tests.
-pub const TEST_PAID_LICENSE_KEY: &str =
- "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
-  eyJzdWIiOiJydy10ZXN0IiwidGllciI6InBhaWQiLCJpc3MiOiJ0ZXN0LnJpc2luZ3dhdmUuY29tIiwiZXhwIjo5OTk5OTk5OTk5fQ.\
-  c6Gmb6xh3dBDYX_4cOnHUbwRXJbUCM7W3mrJA77nLC5FkoOLpGstzvQ7qfnPVBu412MFtKRDvh-Lk8JwG7pVa0WLw16DeHTtVHxZukMTZ1Q_ciZ1xKeUx_pwUldkVzv6c9j99gNqPSyTjzOXTdKlidBRLer2zP0v3Lf-ZxnMG0tEcIbTinTb3BNCtAQ8bwBSRP-X48cVTWafjaZxv_zGiJT28uV3bR6jwrorjVB4VGvqhsJi6Fd074XOmUlnOleoAtyzKvjmGC5_FvnL0ztIe_I0z_pyCMfWpyJ_J4C7rCP1aVWUImyoowLmVDA-IKjclzOW5Fvi0wjXsc6OckOc_A";
-
 // Tests below only work in debug mode.
 #[cfg(debug_assertions)]
 #[cfg(test)]
@@ -193,7 +187,7 @@ mod tests {
     use expect_test::expect;
 
     use super::*;
-    use crate::LicenseKey;
+    use crate::{LicenseKey, TEST_PAID_LICENSE_KEY_CONTENT};
 
     fn do_test(key: &str, expect: expect_test::Expect) {
         let manager = LicenseManager::new();
@@ -208,7 +202,7 @@ mod tests {
     #[test]
     fn test_paid_license_key() {
         do_test(
-            TEST_PAID_LICENSE_KEY,
+            TEST_PAID_LICENSE_KEY_CONTENT,
             expect![[r#"
                 License {
                     sub: "rw-test",
