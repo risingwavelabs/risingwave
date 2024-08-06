@@ -29,9 +29,9 @@ use arrow_schema_iceberg::{
 };
 use async_trait::async_trait;
 use iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
+use iceberg::spec::TableMetadata;
 use iceberg::table::Table as TableV2;
 use iceberg::{Catalog as CatalogV2, TableIdent};
-use iceberg::spec::TableMetadata;
 use icelake::catalog::{
     load_catalog, load_iceberg_base_catalog_config, BaseCatalogConfig, CatalogRef, CATALOG_NAME,
     CATALOG_TYPE,
@@ -580,7 +580,10 @@ impl IcebergConfig {
         catalog.load_table(&table_id).await.map_err(Into::into)
     }
 
-    pub async fn load_table_v2_with_metadata(&self, metadata: TableMetadata) -> ConnectorResult<TableV2> {
+    pub async fn load_table_v2_with_metadata(
+        &self,
+        metadata: TableMetadata,
+    ) -> ConnectorResult<TableV2> {
         match self.catalog_type() {
             "storage" => {
                 let config = StorageCatalogConfig::builder()
@@ -604,9 +607,7 @@ impl IcebergConfig {
                     .readonly(true)
                     .build())
             }
-            _ => {
-                self.load_table_v2().await
-            }
+            _ => self.load_table_v2().await,
         }
     }
 }

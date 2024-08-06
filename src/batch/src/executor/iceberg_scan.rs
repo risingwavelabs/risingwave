@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::mem;
+
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
+use iceberg::arrow::ArrowReader;
 use iceberg::scan::FileScanTask;
 use iceberg::spec::TableMetadata;
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use std::mem;
 use risingwave_common::catalog::Schema;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 
@@ -72,8 +74,10 @@ impl IcebergScanExecutor {
 
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(mut self: Box<Self>) {
-        let start = std::time::Instant::now();
-        let table = self.iceberg_config.load_table_v2_with_metadata(self.table_meta).await?;
+        let table = self
+            .iceberg_config
+            .load_table_v2_with_metadata(self.table_meta)
+            .await?;
         let data_types = self.schema.data_types();
 
         let tasks_len = self.file_scan_tasks.len();
@@ -97,19 +101,12 @@ impl IcebergScanExecutor {
             .read(Box::pin(file_scan_stream))
             .map_err(BatchError::Iceberg)?;
 
-        let mut cnt = 0;
-
-        let load_elapsed = start.elapsed();
-        let start = std::time::Instant::now();
-
         #[for_await]
         for record_batch in record_batch_stream {
             let record_batch = record_batch.map_err(BatchError::Iceberg)?;
             let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
             debug_assert_eq!(chunk.data_types(), data_types);
             yield chunk;
-            cnt += record_batch.num_rows();
         }
-        println!("Total rows: {}, load_elapsed {:?},  elapsed {:?} for task len {}", cnt, load_elapsed, start.elapsed(), tasks_len);
     }
 }
