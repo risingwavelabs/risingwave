@@ -727,11 +727,7 @@ impl LocalBarrierWorker {
 
     /// Register sender for source actors, used to send barriers.
     fn register_sender(&mut self, actor_id: ActorId, senders: Vec<UnboundedSender<Barrier>>) {
-        tracing::error!(
-            target: "events::stream::barrier::manager",
-            actor_id = actor_id,
-            "register sender"
-        );
+        tracing::error!(actor_id = actor_id, "register sender");
         self.barrier_senders
             .entry(actor_id)
             .or_default()
@@ -778,11 +774,8 @@ impl LocalBarrierWorker {
                 .store(barrier.epoch.curr, std::sync::atomic::Ordering::SeqCst);
         }
         error!(
-            target: "events::stream::barrier::manager::send",
             "send barrier {:?}, senders = {:?}, actor_ids_to_collect = {:?}",
-            barrier,
-            to_send,
-            to_collect
+            barrier, to_send, to_collect
         );
 
         for actor_id in &to_collect {
@@ -832,11 +825,7 @@ impl LocalBarrierWorker {
 
         // Actors to stop should still accept this barrier, but won't get sent to in next times.
         if let Some(actors) = barrier.all_stop_actors() {
-            error!(
-                target: "events::stream::barrier::manager",
-                "remove actors {:?} from senders",
-                actors
-            );
+            error!("remove actors {:?} from senders", actors);
             for actor in actors {
                 self.barrier_senders.remove(actor);
             }
