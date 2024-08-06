@@ -46,6 +46,10 @@ pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
 
 const AWS_MSK_IAM_AUTH: &str = "AWS_MSK_IAM";
 
+/// The environment variable to disable using default credential from environment.
+/// It's recommended to set this variable to `false` in cloud hosting environment.
+const DISABLE_DEFAULT_CREDENTIAL: &str = "DISABLE_DEFAULT_CREDENTIAL";
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct AwsPrivateLinkItem {
     pub az_id: Option<String>,
@@ -57,6 +61,7 @@ use aws_config::sts::AssumeRoleProvider;
 use aws_credential_types::provider::SharedCredentialsProvider;
 use aws_types::region::Region;
 use aws_types::SdkConfig;
+use risingwave_common::util::env_var::env_var_is_true;
 
 /// A flatten config map for aws auth.
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -113,10 +118,12 @@ impl AwsAuthProps {
                     self.session_token.clone(),
                 ),
             ))
-        } else {
+        } else if !env_var_is_true(DISABLE_DEFAULT_CREDENTIAL) {
             Ok(SharedCredentialsProvider::new(
                 aws_config::default_provider::credentials::default_provider().await,
             ))
+        } else {
+            bail!("Both \"access_key\" and \"secret_key\" are required.")
         }
     }
 
