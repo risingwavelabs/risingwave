@@ -35,7 +35,7 @@ use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::stream_global_approx_percentile::StreamGlobalApproxPercentile;
 use crate::optimizer::plan_node::stream_local_approx_percentile::StreamLocalApproxPercentile;
-use crate::optimizer::plan_node::stream_merge_project::StreamMergeProject;
+use crate::optimizer::plan_node::stream_row_merge::StreamRowMerge;
 use crate::optimizer::plan_node::{
     gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalDedup, LogicalProject,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -87,11 +87,11 @@ impl LogicalAgg {
             col_mapping: approx_percentile_col_mapping,
         } = approx;
 
-        let needs_merge_project = (!non_approx_percentile_agg_calls.is_empty()
+        let needs_row_merge = (!non_approx_percentile_agg_calls.is_empty()
             && !approx_percentile_agg_calls.is_empty())
             || approx_percentile_agg_calls.len() >= 2;
-        core.input = if needs_merge_project {
-            // If there's merge project, we need to share the input.
+        core.input = if needs_row_merge {
+            // If there's row merge, we need to share the input.
             StreamShare::new_from_input(stream_input.clone()).into()
         } else {
             stream_input
@@ -124,14 +124,14 @@ impl LogicalAgg {
 
         // ====== Merge approx percentile and normal aggs
         if let Some(approx_percentile) = approx_percentile {
-            if needs_merge_project {
-                let merge_project = StreamMergeProject::new(
+            if needs_row_merge {
+                let row_merge = StreamRowMerge::new(
                     approx_percentile,
                     global_agg.into(),
                     approx_percentile_col_mapping,
                     non_approx_percentile_col_mapping,
                 )?;
-                Ok(merge_project.into())
+                Ok(row_merge.into())
             } else {
                 Ok(approx_percentile)
             }
@@ -380,14 +380,14 @@ impl LogicalAgg {
         let mut acc = iter.next().unwrap();
         for (current_size, plan) in iter.enumerate().map(|(i, p)| (i + 1, p)) {
             let new_size = current_size + 1;
-            let merge_project = StreamMergeProject::new(
+            let row_merge = StreamRowMerge::new(
                 acc,
                 plan,
                 ColIndexMapping::identity_or_none(current_size, new_size),
                 ColIndexMapping::new(vec![Some(current_size)], new_size),
             )
-            .expect("failed to build merge project");
-            acc = merge_project.into();
+            .expect("failed to build row merge");
+            acc = row_merge.into();
         }
         Ok(Some(acc))
     }
@@ -1318,7 +1318,7 @@ impl ToStream for LogicalAgg {
                 .into());
             }
             (plan.clone(), 1)
-        } else if let Some(stream_merge_project) = plan.as_stream_merge_project() {
+        } else if let Some(stream_row_merge) = plan.as_stream_row_merge() {
             if eowc {
                 return Err(ErrorCode::InvalidInputSyntax(
                     "`EMIT ON WINDOW CLOSE` cannot be used for aggregation without `GROUP BY`"
@@ -1326,9 +1326,9 @@ impl ToStream for LogicalAgg {
                 )
                 .into());
             }
-            (plan.clone(), stream_merge_project.base.schema().len())
+            (plan.clone(), stream_row_merge.base.schema().len())
         } else {
-            panic!("the root PlanNode must be StreamHashAgg, StreamSimpleAgg, StreamGlobalApproxPercentile, or StreamMergeProject");
+            panic!("the root PlanNode must be StreamHashAgg, StreamSimpleAgg, StreamGlobalApproxPercentile, or StreamRowMerge");
         };
 
         if self.agg_calls().len() == n_final_agg_calls {

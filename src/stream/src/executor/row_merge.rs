@@ -20,7 +20,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use super::barrier_align::*;
 use crate::executor::prelude::*;
 
-pub struct MergeProjectExecutor {
+pub struct RowMergeExecutor {
     ctx: ActorContextRef,
     pub lhs_input: Executor,
     pub rhs_input: Executor,
@@ -32,7 +32,7 @@ pub struct MergeProjectExecutor {
     pub schema: Schema,
 }
 
-impl MergeProjectExecutor {
+impl RowMergeExecutor {
     pub fn new(
         ctx: ActorContextRef,
         lhs_input: Executor,
@@ -146,7 +146,7 @@ impl MergeProjectExecutor {
     }
 }
 
-impl Execute for MergeProjectExecutor {
+impl Execute for RowMergeExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }

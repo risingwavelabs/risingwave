@@ -802,7 +802,7 @@ message GlobalApproxPercentileNode {
   catalog.Table count_state_table = 4;
 }
 
-message MergeProjectNode {
+message RowMergeNode {
   catalog.ColIndexMapping lhs_mapping = 1;
   catalog.ColIndexMapping rhs_mapping = 2;
 }
@@ -854,7 +854,7 @@ message StreamNode {
     ChangeLogNode changelog = 143;
     LocalApproxPercentileNode local_approx_percentile = 144;
     GlobalApproxPercentileNode global_approx_percentile = 145;
-    MergeProjectNode merge_project = 146;
+    RowMergeNode row_merge = 146;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

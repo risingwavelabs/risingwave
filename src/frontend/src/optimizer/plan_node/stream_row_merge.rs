@@ -32,12 +32,12 @@ use crate::optimizer::plan_node::{
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
-/// `StreamMergeProject` is used for merging two streams with the same stream key and distribution.
+/// `StreamRowMerge` is used for merging two streams with the same stream key and distribution.
 /// It will buffer the outputs from its input streams until we receive a barrier.
 /// On receiving a barrier, it will `Project` their outputs according
 /// to the provided `lhs_mapping` and `rhs_mapping`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StreamMergeProject {
+pub struct StreamRowMerge {
     pub base: PlanBase<Stream>,
     pub lhs_input: PlanRef,
     pub rhs_input: PlanRef,
@@ -47,7 +47,7 @@ pub struct StreamMergeProject {
     pub rhs_mapping: ColIndexMapping,
 }
 
-impl StreamMergeProject {
+impl StreamRowMerge {
     pub fn new(
         lhs_input: PlanRef,
         rhs_input: PlanRef,
@@ -101,7 +101,7 @@ impl StreamMergeProject {
     }
 }
 
-impl Distill for StreamMergeProject {
+impl Distill for StreamRowMerge {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let mut out = Vec::with_capacity(1);
 
@@ -110,11 +110,11 @@ impl Distill for StreamMergeProject {
             let e = Pretty::Array(self.base.schema().fields().iter().map(f).collect());
             out = vec![("output", e)];
         }
-        childless_record("StreamMergeProject", out)
+        childless_record("StreamRowMerge", out)
     }
 }
 
-impl PlanTreeNodeBinary for StreamMergeProject {
+impl PlanTreeNodeBinary for StreamRowMerge {
     fn left(&self) -> PlanRef {
         self.lhs_input.clone()
     }
@@ -134,18 +134,18 @@ impl PlanTreeNodeBinary for StreamMergeProject {
     }
 }
 
-impl_plan_tree_node_for_binary! { StreamMergeProject }
+impl_plan_tree_node_for_binary! { StreamRowMerge }
 
-impl StreamNode for StreamMergeProject {
+impl StreamNode for StreamRowMerge {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        PbNodeBody::MergeProject(risingwave_pb::stream_plan::MergeProjectNode {
+        PbNodeBody::RowMerge(risingwave_pb::stream_plan::RowMergeNode {
             lhs_mapping: Some(self.lhs_mapping.to_protobuf()),
             rhs_mapping: Some(self.rhs_mapping.to_protobuf()),
         })
     }
 }
 
-impl ExprRewritable for StreamMergeProject {
+impl ExprRewritable for StreamRowMerge {
     fn has_rewritable_expr(&self) -> bool {
         false
     }
@@ -155,6 +155,6 @@ impl ExprRewritable for StreamMergeProject {
     }
 }
 
-impl ExprVisitable for StreamMergeProject {
+impl ExprVisitable for StreamRowMerge {
     fn visit_exprs(&self, _v: &mut dyn ExprVisitor) {}
 }

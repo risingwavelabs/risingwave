@@ -53,7 +53,7 @@ mod union;
 mod values;
 mod watermark_filter;
 
-mod merge_project;
+mod row_merge;
 
 mod approx_percentile;
 
@@ -81,7 +81,7 @@ use self::hop_window::*;
 use self::lookup::*;
 use self::lookup_union::*;
 use self::merge::*;
-use self::merge_project::*;
+use self::row_merge::*;
 use self::mview::*;
 use self::no_op::*;
 use self::now::NowExecutorBuilder;
@@ -184,6 +184,6 @@ pub async fn create_executor(
         NodeBody::Changelog => ChangeLogExecutorBuilder,
         NodeBody::GlobalApproxPercentile => GlobalApproxPercentileExecutorBuilder,
         NodeBody::LocalApproxPercentile => LocalApproxPercentileExecutorBuilder,
-        NodeBody::MergeProject => MergeProjectExecutorBuilder,
+        NodeBody::RowMerge => RowMergeExecutorBuilder,
     }
 }

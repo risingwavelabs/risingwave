@@ -13,15 +13,15 @@
 // limitations under the License.
 
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_pb::stream_plan::MergeProjectNode;
+use risingwave_pb::stream_plan::RowMergeNode;
 
-use crate::executor::MergeProjectExecutor;
+use crate::executor::RowMergeExecutor;
 use crate::from_proto::*;
 
-pub struct MergeProjectExecutorBuilder;
+pub struct RowMergeExecutorBuilder;
 
-impl ExecutorBuilder for MergeProjectExecutorBuilder {
-    type Node = MergeProjectNode;
+impl ExecutorBuilder for RowMergeExecutorBuilder {
+    type Node = RowMergeNode;
 
     async fn new_boxed_executor(
         params: ExecutorParams,
@@ -32,7 +32,7 @@ impl ExecutorBuilder for MergeProjectExecutorBuilder {
         let lhs_mapping = ColIndexMapping::from_protobuf(node.lhs_mapping.as_ref().unwrap());
         let rhs_mapping = ColIndexMapping::from_protobuf(node.rhs_mapping.as_ref().unwrap());
 
-        let exec = MergeProjectExecutor::new(
+        let exec = RowMergeExecutor::new(
             params.actor_context,
             lhs_input,
             rhs_input,
