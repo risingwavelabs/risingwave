@@ -364,20 +364,14 @@ pub struct MonitoredStreamingUploader<U: StreamingUploader> {
     object_store_metrics: Arc<ObjectStoreMetrics>,
     /// Length of data uploaded with this uploader.
     operation_size: usize,
-    media_type: &'static str,
 }
 
 impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
-    pub fn new(
-        media_type: &'static str,
-        handle: U,
-        object_store_metrics: Arc<ObjectStoreMetrics>,
-    ) -> Self {
+    pub fn new(handle: U, object_store_metrics: Arc<ObjectStoreMetrics>) -> Self {
         Self {
             inner: handle,
             object_store_metrics,
             operation_size: 0,
-            media_type,
         }
     }
 }
@@ -390,27 +384,15 @@ impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
         let operation_type_str = operation_type.as_str();
         let data_len = data.len();
 
-        let res = if self.media_type == "s3" {
-            // TODO: we should avoid this special case after fully migrating to opeandal for s3.
-            self.inner
-                .write_bytes(data)
-                .verbose_instrument_await(operation_type_str)
-                .await
-        } else {
-            let _timer = self
-                .object_store_metrics
-                .operation_latency
-                .with_label_values(&[self.media_type, operation_type_str])
-                .start_timer();
-
-            self.inner
-                .write_bytes(data)
-                .verbose_instrument_await(operation_type_str)
-                .await
-        };
+        let res = self
+            .inner
+            .write_bytes(data)
+            .verbose_instrument_await(operation_type_str)
+            .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
 
+        // duration metrics is collected and reported inside the specific implementation of the streaming uploader.
         self.object_store_metrics
             .write_bytes
             .inc_by(data_len as u64);
@@ -427,26 +409,16 @@ impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
         let operation_type = OperationType::StreamingUploadFinish;
         let operation_type_str = operation_type.as_str();
 
-        let res = if self.media_type == "s3" {
+        let res =
             // TODO: we should avoid this special case after fully migrating to opeandal for s3.
             self.inner
                 .finish()
                 .verbose_instrument_await(operation_type_str)
-                .await
-        } else {
-            let _timer = self
-                .object_store_metrics
-                .operation_latency
-                .with_label_values(&[self.media_type, operation_type_str])
-                .start_timer();
-
-            self.inner
-                .finish()
-                .verbose_instrument_await(operation_type_str)
-                .await
-        };
+                .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
+
+        // duration metrics is collected and reported inside the specific implementation of the streaming uploader.
         self.object_store_metrics
             .operation_size
             .with_label_values(&[operation_type_str])
@@ -639,7 +611,6 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
 
         Ok(MonitoredStreamingUploader::new(
-            media_type,
             res?,
             self.object_store_metrics.clone(),
         ))
@@ -866,9 +837,13 @@ pub async fn build_remote_object_store(
                 let bucket = s3.strip_prefix("s3://").unwrap();
                 tracing::info!("Using OpenDAL to access s3, bucket is {}", bucket);
                 ObjectStoreImpl::Opendal(
-                    OpendalObjectStore::new_s3_engine(bucket.to_string(), config.clone())
-                        .unwrap()
-                        .monitored(metrics, config),
+                    OpendalObjectStore::new_s3_engine(
+                        bucket.to_string(),
+                        config.clone(),
+                        metrics.clone(),
+                    )
+                    .unwrap()
+                    .monitored(metrics, config),
                 )
             } else {
                 ObjectStoreImpl::S3(
@@ -891,6 +866,7 @@ pub async fn build_remote_object_store(
                     namenode.to_string(),
                     root.to_string(),
                     config.clone(),
+                    metrics.clone(),
                 )
                 .unwrap()
                 .monitored(metrics, config),
@@ -904,6 +880,7 @@ pub async fn build_remote_object_store(
                     bucket.to_string(),
                     root.to_string(),
                     config.clone(),
+                    metrics.clone(),
                 )
                 .unwrap()
                 .monitored(metrics, config),
@@ -917,6 +894,7 @@ pub async fn build_remote_object_store(
                     bucket.to_string(),
                     root.to_string(),
                     config.clone(),
+                    metrics.clone(),
                 )
                 .unwrap()
                 .monitored(metrics, config),
@@ -931,6 +909,7 @@ pub async fn build_remote_object_store(
                     bucket.to_string(),
                     root.to_string(),
                     config.clone(),
+                    metrics.clone(),
                 )
                 .unwrap()
                 .monitored(metrics, config),
@@ -944,6 +923,7 @@ pub async fn build_remote_object_store(
                     namenode.to_string(),
                     root.to_string(),
                     config.clone(),
+                    metrics.clone(),
                 )
                 .unwrap()
                 .monitored(metrics, config),
@@ -957,6 +937,7 @@ pub async fn build_remote_object_store(
                     container_name.to_string(),
                     root.to_string(),
                     config.clone(),
+                    metrics.clone(),
                 )
                 .unwrap()
                 .monitored(metrics, config),
@@ -965,7 +946,7 @@ pub async fn build_remote_object_store(
         fs if fs.starts_with("fs://") => {
             let fs = fs.strip_prefix("fs://").unwrap();
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_fs_engine(fs.to_string(), config.clone())
+                OpendalObjectStore::new_fs_engine(fs.to_string(), config.clone(), metrics.clone())
                     .unwrap()
                     .monitored(metrics, config),
             )
@@ -981,7 +962,7 @@ pub async fn build_remote_object_store(
             if config.s3.developer.use_opendal {
                 tracing::info!("Using OpenDAL to access minio.");
                 ObjectStoreImpl::Opendal(
-                    OpendalObjectStore::new_minio_engine(minio, config.clone())
+                    OpendalObjectStore::new_minio_engine(minio, config.clone(), metrics.clone())
                         .unwrap()
                         .monitored(metrics, config),
                 )

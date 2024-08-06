@@ -261,7 +261,7 @@ pub(crate) fn new_input(
     } else {
         RemoteInput::new(
             context.local_barrier_manager.clone(),
-            context.compute_client_pool.clone(),
+            context.compute_client_pool.as_ref().to_owned(),
             upstream_addr,
             (upstream_actor_id, actor_id),
             (upstream_fragment_id, fragment_id),

@@ -299,7 +299,7 @@ impl FormattedSink for RedisSinkPayloadWriter {
     type V = Vec<u8>;
 
     async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
-        let k = k.unwrap();
+        let k = k.ok_or_else(|| SinkError::Redis("The redis key cannot be null".to_string()))?;
         match v {
             Some(v) => self.pipe.set(k, v),
             None => self.pipe.del(k),

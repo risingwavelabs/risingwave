@@ -2630,7 +2630,7 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let table_obj = Table::find()
             .find_also_related(Object)
-            .join(JoinType::InnerJoin, object::Relation::Database.def())
+            .join(JoinType::InnerJoin, object::Relation::Database2.def())
             .filter(
                 table::Column::Name
                     .eq(table_name)
@@ -2671,6 +2671,30 @@ impl CatalogController {
             .ok_or_else(|| anyhow!("cant find subscription with id {}", subscription_id))?;
 
         Ok(subscription)
+    }
+
+    pub async fn get_mv_depended_subscriptions(
+        &self,
+    ) -> MetaResult<HashMap<risingwave_common::catalog::TableId, HashMap<u32, u64>>> {
+        let inner = self.inner.read().await;
+        let subscription_objs = Subscription::find()
+            .find_also_related(Object)
+            .all(&inner.db)
+            .await?;
+        let mut map = HashMap::new();
+        // Write object at the same time we write subscription, so we must be able to get obj
+        for subscription in subscription_objs
+            .into_iter()
+            .map(|(subscription, obj)| ObjectModel(subscription, obj.unwrap()).into())
+        {
+            let subscription: PbSubscription = subscription;
+            map.entry(risingwave_common::catalog::TableId::from(
+                subscription.dependent_table_id,
+            ))
+            .or_insert(HashMap::new())
+            .insert(subscription.id, subscription.retention_seconds);
+        }
+        Ok(map)
     }
 
     pub async fn find_creating_streaming_job_ids(

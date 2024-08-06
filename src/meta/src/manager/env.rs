@@ -358,7 +358,7 @@ impl MetaSrvEnv {
         let notification_manager =
             Arc::new(NotificationManager::new(meta_store_impl.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
-        let stream_client_pool = Arc::new(StreamClientPool::default());
+        let stream_client_pool = Arc::new(StreamClientPool::new(1)); // typically no need for plural clients
         let event_log_manager = Arc::new(start_event_log_manager(
             opts.event_log_enabled,
             opts.event_log_channel_max_size,

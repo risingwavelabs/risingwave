@@ -18,7 +18,6 @@ use std::sync::Arc;
 use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Schema};
 use risingwave_common::try_match_expand;
-use risingwave_pb::catalog::PbSchemaRegistryNameStrategy;
 use risingwave_pb::plan_common::ColumnDesc;
 
 use crate::error::ConnectorResult;
@@ -28,7 +27,7 @@ use crate::parser::unified::avro::{
     avro_extract_field_schema, avro_schema_skip_union, AvroAccess, AvroParseOptions,
 };
 use crate::parser::unified::AccessImpl;
-use crate::parser::{AccessBuilder, EncodingProperties, EncodingType};
+use crate::parser::{AccessBuilder, EncodingProperties, EncodingType, SchemaLocation};
 use crate::schema::schema_registry::{
     extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
 };
@@ -95,14 +94,19 @@ pub struct DebeziumAvroParserConfig {
 impl DebeziumAvroParserConfig {
     pub async fn new(encoding_config: EncodingProperties) -> ConnectorResult<Self> {
         let avro_config = try_match_expand!(encoding_config, EncodingProperties::Avro)?;
-        let schema_location = &avro_config.row_schema_location;
-        let client_config = &avro_config.client_config;
-        let kafka_topic = &avro_config.topic;
+        let SchemaLocation::Confluent {
+            urls: schema_location,
+            client_config,
+            name_strategy,
+            topic: kafka_topic,
+        } = &avro_config.schema_location
+        else {
+            unreachable!()
+        };
         let url = handle_sr_list(schema_location)?;
         let client = Client::new(url, client_config)?;
         let resolver = ConfluentSchemaCache::new(client);
 
-        let name_strategy = &PbSchemaRegistryNameStrategy::Unspecified;
         let key_subject = get_subject_by_strategy(name_strategy, kafka_topic, None, true)?;
         let val_subject = get_subject_by_strategy(name_strategy, kafka_topic, None, false)?;
         let key_schema = resolver.get_by_subject(&key_subject).await?;

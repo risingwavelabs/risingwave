@@ -175,7 +175,10 @@ pub enum MetaBackend {
     #[default]
     Mem,
     Etcd,
-    Sql,
+    Sql, // keep for backward compatibility
+    Sqlite,
+    Postgres,
+    Mysql,
 }
 
 /// The section `[meta]` in `risingwave.toml`.
@@ -469,8 +472,14 @@ pub struct ServerConfig {
     #[serde(default = "default::server::heartbeat_interval_ms")]
     pub heartbeat_interval_ms: u32,
 
+    /// The default number of the connections when connecting to a gRPC server.
+    ///
+    /// For the connections used in streaming or batch exchange, please refer to the entries in
+    /// `[stream.developer]` and `[batch.developer]` sections. This value will be used if they
+    /// are not specified.
     #[serde(default = "default::server::connection_pool_size")]
-    pub connection_pool_size: u16,
+    // Intentionally made private to avoid abuse. Check the related methods on `RwConfig`.
+    connection_pool_size: u16,
 
     /// Used for control the metrics level, similar to log level.
     #[serde(default = "default::server::metrics_level")]
@@ -844,6 +853,9 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::compression")]
     pub compression: String,
 
+    #[serde(default = "default::file_cache::flush_buffer_threshold_mb")]
+    pub flush_buffer_threshold_mb: Option<usize>,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -985,6 +997,11 @@ pub struct StreamingDeveloperConfig {
     /// If number of hash join matches exceeds this threshold number,
     /// it will be logged.
     pub high_join_amplification_threshold: usize,
+
+    /// The number of the connections for streaming remote exchange between two nodes.
+    /// If not specified, the value of `server.connection_pool_size` will be used.
+    #[serde(default = "default::developer::stream_exchange_connection_pool_size")]
+    pub exchange_connection_pool_size: Option<u16>,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1004,6 +1021,11 @@ pub struct BatchDeveloperConfig {
     /// The size of a chunk produced by `RowSeqScanExecutor`
     #[serde(default = "default::developer::batch_chunk_size")]
     pub chunk_size: usize,
+
+    /// The number of the connections for batch remote exchange between two nodes.
+    /// If not specified, the value of `server.connection_pool_size` will be used.
+    #[serde(default = "default::developer::batch_exchange_connection_pool_size")]
+    exchange_connection_pool_size: Option<u16>,
 }
 
 macro_rules! define_system_config {
@@ -1045,6 +1067,17 @@ pub struct ObjectStoreConfig {
     /// Some special configuration of S3 Backend
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
+
+    // TODO: the following field will be deprecated after opendal is stablized
+    #[serde(default = "default::object_store_config::opendal_upload_concurrency")]
+    pub opendal_upload_concurrency: usize,
+
+    // TODO: the following field will be deprecated after opendal is stablized
+    #[serde(default)]
+    pub opendal_writer_abort_on_err: bool,
+
+    #[serde(default = "default::object_store_config::upload_part_size")]
+    pub upload_part_size: usize,
 }
 
 impl ObjectStoreConfig {
@@ -1103,6 +1136,7 @@ pub struct S3ObjectStoreDeveloperConfig {
     )]
     pub retryable_service_error_codes: Vec<String>,
 
+    // TODO: the following field will be deprecated after opendal is stablized
     #[serde(default = "default::object_store_config::s3::developer::use_opendal")]
     pub use_opendal: bool,
 }
@@ -1228,6 +1262,30 @@ impl SystemConfig {
             }
         }
         system_params
+    }
+}
+
+impl RwConfig {
+    pub const fn default_connection_pool_size(&self) -> u16 {
+        self.server.connection_pool_size
+    }
+
+    /// Returns [`StreamingDeveloperConfig::exchange_connection_pool_size`] if set,
+    /// otherwise [`ServerConfig::connection_pool_size`].
+    pub fn streaming_exchange_connection_pool_size(&self) -> u16 {
+        self.streaming
+            .developer
+            .exchange_connection_pool_size
+            .unwrap_or_else(|| self.default_connection_pool_size())
+    }
+
+    /// Returns [`BatchDeveloperConfig::exchange_connection_pool_size`] if set,
+    /// otherwise [`ServerConfig::connection_pool_size`].
+    pub fn batch_exchange_connection_pool_size(&self) -> u16 {
+        self.batch
+            .developer
+            .exchange_connection_pool_size
+            .unwrap_or_else(|| self.default_connection_pool_size())
     }
 }
 
@@ -1565,6 +1623,18 @@ pub mod default {
         pub fn compactor_concurrent_uploading_sst_count() -> Option<usize> {
             None
         }
+
+        pub fn table_info_statistic_history_times() -> usize {
+            240
+        }
+
+        pub fn block_file_cache_flush_buffer_threshold_mb() -> usize {
+            256
+        }
+
+        pub fn meta_file_cache_flush_buffer_threshold_mb() -> usize {
+            64
+        }
     }
 
     pub mod streaming {
@@ -1624,6 +1694,10 @@ pub mod default {
 
         pub fn compression() -> String {
             "none".to_string()
+        }
+
+        pub fn flush_buffer_threshold_mb() -> Option<usize> {
+            None
         }
     }
 
@@ -1686,6 +1760,12 @@ pub mod default {
 
         pub fn batch_chunk_size() -> usize {
             1024
+        }
+
+        /// Default to unset to be compatible with the behavior before this config is introduced,
+        /// that is, follow the value of `server.connection_pool_size`.
+        pub fn batch_exchange_connection_pool_size() -> Option<u16> {
+            None
         }
 
         pub fn stream_enable_executor_row_count() -> bool {
@@ -1782,6 +1862,11 @@ pub mod default {
 
         pub fn stream_high_join_amplification_threshold() -> usize {
             2048
+        }
+
+        /// Default to 1 to be compatible with the behavior before this config is introduced.
+        pub fn stream_exchange_connection_pool_size() -> Option<u16> {
+            Some(1)
         }
     }
 
@@ -2004,6 +2089,15 @@ pub mod default {
             DEFAULT_REQ_MAX_RETRY_ATTEMPTS
         }
 
+        pub fn opendal_upload_concurrency() -> usize {
+            8
+        }
+
+        pub fn upload_part_size() -> usize {
+            // 16m
+            16 * 1024 * 1024
+        }
+
         pub mod s3 {
             const DEFAULT_IDENTITY_RESOLUTION_TIMEOUT_S: u64 = 5;
 
@@ -2089,6 +2183,8 @@ pub struct StorageMemoryConfig {
     pub prefetch_buffer_capacity_mb: usize,
     pub block_cache_eviction_config: EvictionConfig,
     pub meta_cache_eviction_config: EvictionConfig,
+    pub block_file_cache_flush_buffer_threshold_mb: usize,
+    pub meta_file_cache_flush_buffer_threshold_mb: usize,
 }
 
 pub const MAX_META_CACHE_SHARD_BITS: usize = 4;
@@ -2200,6 +2296,17 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
                 }
             });
 
+    let block_file_cache_flush_buffer_threshold_mb = s
+        .storage
+        .data_file_cache
+        .flush_buffer_threshold_mb
+        .unwrap_or(default::storage::block_file_cache_flush_buffer_threshold_mb());
+    let meta_file_cache_flush_buffer_threshold_mb = s
+        .storage
+        .meta_file_cache
+        .flush_buffer_threshold_mb
+        .unwrap_or(default::storage::block_file_cache_flush_buffer_threshold_mb());
+
     StorageMemoryConfig {
         block_cache_capacity_mb,
         block_cache_shard_num,
@@ -2210,6 +2317,8 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
         meta_cache_eviction_config,
+        block_file_cache_flush_buffer_threshold_mb,
+        meta_file_cache_flush_buffer_threshold_mb,
     }
 }
 

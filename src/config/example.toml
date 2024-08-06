@@ -122,6 +122,7 @@ stream_memory_controller_sequence_tls_step = 128
 stream_memory_controller_sequence_tls_lag = 32
 stream_enable_arrangement_backfill = true
 stream_high_join_amplification_threshold = 2048
+stream_exchange_connection_pool_size = 1
 
 [storage]
 share_buffers_sync_parallelism = 1
@@ -191,6 +192,9 @@ recent_filter_rotate_interval_ms = 10000
 
 [storage.object_store]
 set_atomic_write_dir = false
+opendal_upload_concurrency = 8
+opendal_writer_abort_on_err = false
+upload_part_size = 16777216
 
 [storage.object_store.retry]
 req_backoff_interval_ms = 1000

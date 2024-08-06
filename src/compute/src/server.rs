@@ -336,7 +336,9 @@ pub async fn compute_node_serve(
     ));
 
     // Initialize batch environment.
-    let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
+    let batch_client_pool = Arc::new(ComputeClientPool::new(
+        config.batch_exchange_connection_pool_size(),
+    ));
     let batch_env = BatchEnvironment::new(
         batch_mgr.clone(),
         advertise_addr.clone(),
@@ -345,13 +347,16 @@ pub async fn compute_node_serve(
         state_store.clone(),
         batch_task_metrics.clone(),
         batch_executor_metrics.clone(),
-        client_pool,
+        batch_client_pool,
         dml_mgr.clone(),
         source_metrics.clone(),
         config.server.metrics_level,
     );
 
     // Initialize the streaming environment.
+    let stream_client_pool = Arc::new(ComputeClientPool::new(
+        config.streaming_exchange_connection_pool_size(),
+    ));
     let stream_env = StreamEnvironment::new(
         advertise_addr.clone(),
         stream_config,
@@ -361,6 +366,7 @@ pub async fn compute_node_serve(
         system_params_manager.clone(),
         source_metrics,
         meta_client.clone(),
+        stream_client_pool,
     );
 
     let stream_mgr = LocalStreamManager::new(
@@ -394,7 +400,9 @@ pub async fn compute_node_serve(
 
     // Clean up the spill directory.
     #[cfg(not(madsim))]
-    SpillOp::clean_spill_directory().await.unwrap();
+    if config.batch.enable_spill {
+        SpillOp::clean_spill_directory().await.unwrap();
+    }
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {

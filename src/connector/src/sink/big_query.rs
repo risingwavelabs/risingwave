@@ -17,7 +17,7 @@ use core::time::Duration;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use gcp_bigquery_client::model::query_request::QueryRequest;
 use gcp_bigquery_client::Client;
@@ -371,7 +371,7 @@ impl BigQuerySinkWriter {
             descriptor_proto.field.push(field);
         }
 
-        let descriptor_pool = build_protobuf_descriptor_pool(&descriptor_proto);
+        let descriptor_pool = build_protobuf_descriptor_pool(&descriptor_proto)?;
         let message_descriptor = descriptor_pool
             .get_message_by_name(&config.common.table)
             .ok_or_else(|| {
@@ -602,7 +602,7 @@ impl StorageWriterClient {
     }
 }
 
-fn build_protobuf_descriptor_pool(desc: &DescriptorProto) -> prost_reflect::DescriptorPool {
+fn build_protobuf_descriptor_pool(desc: &DescriptorProto) -> Result<prost_reflect::DescriptorPool> {
     let file_descriptor = FileDescriptorProto {
         message_type: vec![desc.clone()],
         name: Some("bigquery".to_string()),
@@ -612,7 +612,8 @@ fn build_protobuf_descriptor_pool(desc: &DescriptorProto) -> prost_reflect::Desc
     prost_reflect::DescriptorPool::from_file_descriptor_set(FileDescriptorSet {
         file: vec![file_descriptor],
     })
-    .unwrap()
+    .context("failed to build descriptor pool")
+    .map_err(SinkError::BigQuery)
 }
 
 fn build_protobuf_schema<'a>(
@@ -745,7 +746,7 @@ mod test {
             .iter()
             .map(|f| (f.name.as_str(), &f.data_type));
         let desc = build_protobuf_schema(fields, "t1".to_string()).unwrap();
-        let pool = build_protobuf_descriptor_pool(&desc);
+        let pool = build_protobuf_descriptor_pool(&desc).unwrap();
         let t1_message = pool.get_message_by_name("t1").unwrap();
         assert_matches!(
             t1_message.get_field_by_name("v1").unwrap().kind(),
