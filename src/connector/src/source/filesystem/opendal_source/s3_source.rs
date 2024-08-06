@@ -14,7 +14,7 @@
 
 use std::marker::PhantomData;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::S3;
 use opendal::Operator;
@@ -72,7 +72,13 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             (None, None)
         };
         let compression_format = s3_properties.compression_format;
-        let op: Operator = Operator::new(builder)?
+        let op: Operator = Operator::new(builder)
+            .map_err(|e| {
+                anyhow!(
+                    "Fail to create s3 source, please check your s3 config. {}",
+                    e.to_string()
+                )
+            })?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
             .finish();
