@@ -175,7 +175,7 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
 
                     yield Message::Barrier(barrier);
                 }
-                m => yield m,
+                Message::Watermark(_) => {}
             }
         }
     }

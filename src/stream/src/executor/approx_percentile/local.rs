@@ -112,7 +112,8 @@ impl LocalApproxPercentileExecutor {
                         yield Message::Chunk(chunk);
                     }
                 }
-                m => yield m,
+                b @ Message::Barrier(_) => yield b,
+                Message::Watermark(_) => {}
             }
         }
     }
