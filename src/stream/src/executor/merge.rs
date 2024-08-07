@@ -466,52 +466,59 @@ impl SelectReceivers {
     }
 }
 
-struct BufferChunks {
-    pub inner: SelectReceivers,
+/// A wrapper that buffers the `StreamChunk`s from upstreams. Any message other than `StreamChunk`
+/// will trigger the buffered `StreamChunk`s to be emitted immediately, as well as the message itself.
+struct BufferChunks<S: Stream> {
+    inner: S,
     cap: usize,
+
+    /// Don't know the data types yet. Will build it upon the first chunk.
+    builder: Option<StreamChunkBuilder>,
+
+    pending_items: VecDeque<S::Item>,
 }
 
-impl BufferChunks {
-    pub(super) fn new(inner: SelectReceivers, capacity: usize) -> Self {
+impl<S: Stream> BufferChunks<S> {
+    pub(super) fn new(inner: S, capacity: usize) -> Self {
         assert!(capacity > 0);
         Self {
             inner,
             cap: capacity,
+            builder: None,
+            pending_items: VecDeque::new(),
         }
     }
 }
 
-impl std::ops::Deref for BufferChunks {
-    type Target = SelectReceivers;
+impl<S: Stream> std::ops::Deref for BufferChunks<S> {
+    type Target = S;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
 
-impl std::ops::DerefMut for BufferChunks {
+impl<S: Stream> std::ops::DerefMut for BufferChunks<S> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
     }
 }
 
-impl Stream for BufferChunks {
+impl<S: Stream> Stream for BufferChunks<S>
+where
+    S: Stream<Item = std::result::Result<Message, StreamExecutorError>> + Unpin,
+{
     type Item = std::result::Result<Message, StreamExecutorError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // Don't know the data types yet. Let's build it upon the first chunk.
-        let mut builder: Option<StreamChunkBuilder> = None;
-
-        let mut pending: VecDeque<Self::Item> = VecDeque::new();
-
         loop {
-            if let Some(item) = pending.pop_front() {
+            if let Some(item) = self.pending_items.pop_front() {
                 return Poll::Ready(Some(item));
             }
 
             match self.inner.poll_next_unpin(cx) {
                 Poll::Pending => {
-                    return if let Some(b) = &mut builder
+                    return if let Some(b) = &mut self.builder
                         && b.size() > 0
                     {
                         Poll::Ready(Some(Ok(Message::Chunk(b.take().unwrap()))))
@@ -522,20 +529,25 @@ impl Stream for BufferChunks {
 
                 Poll::Ready(Some(result)) => {
                     if let Ok(Message::Chunk(chunk)) = result {
-                        if builder.is_none() {
+                        if self.builder.is_none() {
                             // initialize with the input data types
-                            builder = Some(StreamChunkBuilder::new(self.cap, chunk.data_types()));
+                            self.builder =
+                                Some(StreamChunkBuilder::new(self.cap, chunk.data_types()));
                         }
                         for row in chunk.records() {
-                            if let Some(chunk_out) = builder.as_mut().unwrap().append_record(row) {
-                                pending.push_back(Ok(Message::Chunk(chunk_out)));
+                            if let Some(chunk_out) =
+                                self.builder.as_mut().unwrap().append_record(row)
+                            {
+                                self.pending_items.push_back(Ok(Message::Chunk(chunk_out)));
                             }
                         }
                     } else {
-                        return if let Some(b) = &mut builder
+                        return if let Some(b) = &mut self.builder
                             && b.size() > 0
                         {
-                            Poll::Ready(Some(Ok(Message::Chunk(b.take().unwrap()))))
+                            let chunk_out = b.take().unwrap();
+                            self.pending_items.push_back(result);
+                            Poll::Ready(Some(Ok(Message::Chunk(chunk_out))))
                         } else {
                             Poll::Ready(Some(result))
                         };
@@ -573,7 +585,7 @@ mod tests {
     use tonic::{Request, Response, Status, Streaming};
 
     use super::*;
-    use crate::executor::exchange::input::{Input, RemoteInput};
+    use crate::executor::exchange::input::{Input, LocalInput, RemoteInput};
     use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::{BarrierInner as Barrier, MessageInner as Message};
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
@@ -583,6 +595,88 @@ mod tests {
         // The number of items in `ops` is the epoch count.
         let ops = vec![Op::Insert; epoch as usize];
         StreamChunk::new(ops, vec![])
+    }
+
+    #[tokio::test]
+    async fn test_buffer_chunks() {
+        let test_env = LocalBarrierTestEnv::for_test().await;
+
+        let (tx, rx) = channel_for_test();
+        let input = LocalInput::new(
+            rx,
+            1,
+            2,
+            test_env.shared_context.local_barrier_manager.clone(),
+        )
+        .boxed_input();
+        let mut buffer = BufferChunks::new(input, 1024);
+
+        // Send a chunk
+        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
+        assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
+            assert_eq!(chunk.ops().len() as u64, 10);
+        });
+
+        // Send 2 chunks and expect them to be merged.
+        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
+        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
+        assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
+            assert_eq!(chunk.ops().len() as u64, 20);
+        });
+
+        // Send a watermark.
+        tx.send(Message::Watermark(Watermark {
+            col_idx: 0,
+            data_type: DataType::Int64,
+            val: ScalarImpl::Int64(233),
+        }))
+        .await
+        .unwrap();
+        assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Watermark(watermark) => {
+            assert_eq!(watermark.val, ScalarImpl::Int64(233));
+        });
+
+        // Send 2 chunks before a watermark. Expect the 2 chunks to be merged and the watermark to be emitted.
+        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
+        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
+        tx.send(Message::Watermark(Watermark {
+            col_idx: 0,
+            data_type: DataType::Int64,
+            val: ScalarImpl::Int64(233),
+        }))
+        .await
+        .unwrap();
+        assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
+            assert_eq!(chunk.ops().len() as u64, 20);
+        });
+        assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Watermark(watermark) => {
+            assert_eq!(watermark.val, ScalarImpl::Int64(233));
+        });
+
+        // Send a barrier.
+        let barrier = Barrier::new_test_barrier(test_epoch(1));
+        test_env.inject_barrier(&barrier, [], [2]);
+        tx.send(Message::Barrier(barrier.clone().into_dispatcher()))
+            .await
+            .unwrap();
+        assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
+            assert_eq!(barrier_epoch.curr, test_epoch(1));
+        });
+
+        // Send 2 chunks before a barrier. Expect the 2 chunks to be merged and the barrier to be emitted.
+        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
+        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
+        let barrier = Barrier::new_test_barrier(test_epoch(2));
+        test_env.inject_barrier(&barrier, [], [2]);
+        tx.send(Message::Barrier(barrier.clone().into_dispatcher()))
+            .await
+            .unwrap();
+        assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
+            assert_eq!(chunk.ops().len() as u64, 20);
+        });
+        assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
+            assert_eq!(barrier_epoch.curr, test_epoch(2));
+        });
     }
 
     #[tokio::test]
