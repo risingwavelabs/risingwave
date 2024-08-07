@@ -19,6 +19,9 @@ from
     connector = 'kafka'
 );
 
+# topic may not be created yet
+sleep 4
+
 ############## Source from kafka (rate_limit = 0)
 
 statement ok
