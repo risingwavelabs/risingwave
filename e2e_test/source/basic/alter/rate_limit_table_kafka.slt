@@ -67,10 +67,6 @@ query I
 alter table kafka_source set source_rate_limit to 1000;
 
 skipif in-memory
-query I
-alter table kafka_source set source_rate_limit to default;
-
-skipif in-memory
 sleep 3s
 
 skipif in-memory
@@ -78,6 +74,20 @@ query I
 select count(*) > 1 from kafka_source;
 ----
 t
+
+############## New MV created should have rate limit = 1000.
+
+statement ok
+create materialized view mv as select * from kafka_source;
+
+skipif in-memory
+sleep 3s
+
+skipif in-memory
+query I
+select count(*) > 1 from mv;
+----
+1000
 
 ############## Cleanup
 
