@@ -14,7 +14,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Formatter;
-use std::sync::Arc;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
@@ -26,6 +25,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::catalog::{CreateType, Table};
+use risingwave_pb::common::PbWorkerNode;
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
@@ -42,7 +42,7 @@ use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use thiserror_ext::AsReport;
 use tracing::warn;
 
-use super::info::{CommandFragmentChanges, InflightActorInfo};
+use super::info::CommandFragmentChanges;
 use super::trace::TracedEpoch;
 use crate::barrier::{GlobalBarrierManagerContext, InflightSubscriptionInfo};
 use crate::manager::{DdlType, InflightFragmentInfo, MetadataManager, StreamingJob, WorkerId};
@@ -418,7 +418,7 @@ impl BarrierKind {
 /// [`Command`].
 pub struct CommandContext {
     /// Resolved info in this barrier loop.
-    pub info: Arc<InflightActorInfo>,
+    pub node_map: HashMap<WorkerId, PbWorkerNode>,
     pub subscription_info: InflightSubscriptionInfo,
     pub table_ids_to_commit: HashSet<TableId>,
 
@@ -455,7 +455,7 @@ impl std::fmt::Debug for CommandContext {
 impl CommandContext {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
-        info: InflightActorInfo,
+        node_map: HashMap<WorkerId, PbWorkerNode>,
         subscription_info: InflightSubscriptionInfo,
         table_ids_to_commit: HashSet<TableId>,
         prev_epoch: TracedEpoch,
@@ -467,7 +467,7 @@ impl CommandContext {
         span: tracing::Span,
     ) -> Self {
         Self {
-            info: Arc::new(info),
+            node_map,
             subscription_info,
             table_ids_to_commit,
             prev_epoch,
@@ -862,9 +862,8 @@ impl CommandContext {
         self.barrier_manager_context
             .stream_rpc_manager
             .drop_actors(
-                &self.info.node_map,
-                self.info
-                    .node_map
+                &self.node_map,
+                self.node_map
                     .keys()
                     .map(|worker_id| (*worker_id, actors.clone())),
             )
@@ -872,7 +871,7 @@ impl CommandContext {
     }
 
     pub async fn wait_epoch_commit(&self, epoch: HummockEpoch) -> MetaResult<()> {
-        let futures = self.info.node_map.values().map(|worker_node| async {
+        let futures = self.node_map.values().map(|worker_node| async {
             let client = self
                 .barrier_manager_context
                 .env

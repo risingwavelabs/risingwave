@@ -52,7 +52,7 @@ use tracing::{error, info, warn, Instrument};
 
 use self::command::CommandContext;
 use self::notifier::Notifier;
-use crate::barrier::info::InflightActorInfo;
+use crate::barrier::info::InflightGraphInfo;
 use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
@@ -61,8 +61,8 @@ use crate::error::MetaErrorInner;
 use crate::hummock::{CommitEpochInfo, HummockManagerRef, NewTableFragmentInfo};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
-    ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, InflightGraphInfo, LocalNotification,
-    MetaSrvEnv, MetadataManager, SystemParamsManagerImpl, WorkerId,
+    ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
+    MetadataManager, SystemParamsManagerImpl, WorkerId,
 };
 use crate::rpc::metrics::MetaMetrics;
 use crate::stream::{ScaleControllerRef, SourceManagerRef};
@@ -490,7 +490,6 @@ impl GlobalBarrierManager {
 
         let initial_invalid_state = BarrierManagerState::new(
             TracedEpoch::new(Epoch(INVALID_EPOCH)),
-            InflightActorInfo::default(),
             InflightGraphInfo::default(),
             InflightSubscriptionInfo::default(),
             None,
@@ -719,8 +718,6 @@ impl GlobalBarrierManager {
 
                     info!(?changed_worker, "worker changed");
 
-                    self.state
-                        .resolve_worker_nodes(self.active_streaming_nodes.current().values().cloned());
                     if let ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) = changed_worker {
                         self.control_stream_manager.add_worker(node).await;
                     }
@@ -751,7 +748,7 @@ impl GlobalBarrierManager {
                         Err(e) => {
                             let failed_command = self.checkpoint_control.command_wait_collect_from_worker(worker_id);
                             if failed_command.is_some()
-                                || self.state.inflight_actor_infos.actor_map.contains_key(&worker_id) {
+                                || self.state.inflight_actor_infos.contains_worker(worker_id) {
                                 let errors = self.control_stream_manager.collect_errors(worker_id, e).await;
                                 let err = merge_node_rpc_errors("get error from control stream", errors);
                                 if let Some(failed_command) = failed_command {
@@ -802,7 +799,7 @@ impl GlobalBarrierManager {
             span,
         } = scheduled;
 
-        let (pre_applied_actor_info, pre_applied_graph_info, pre_applied_subscription_info) =
+        let (pre_applied_actor_info, pre_applied_subscription_info) =
             self.state.apply_command(&command);
 
         let (prev_epoch, curr_epoch) = self.state.next_epoch_pair();
@@ -822,9 +819,9 @@ impl GlobalBarrierManager {
         span.record("epoch", curr_epoch.value().0);
 
         let command_ctx = Arc::new(CommandContext::new(
-            pre_applied_actor_info,
+            self.active_streaming_nodes.current().clone(),
             pre_applied_subscription_info,
-            pre_applied_graph_info.existing_table_ids().collect(),
+            pre_applied_actor_info.existing_table_ids().collect(),
             prev_epoch.clone(),
             curr_epoch.clone(),
             self.state.paused_reason(),
@@ -838,8 +835,8 @@ impl GlobalBarrierManager {
 
         let node_to_collect = match self.control_stream_manager.inject_barrier(
             &command_ctx,
-            &pre_applied_graph_info,
-            Some(&self.state.inflight_graph_info),
+            &pre_applied_actor_info,
+            Some(&self.state.inflight_actor_infos),
         ) {
             Ok(node_to_collect) => node_to_collect,
             Err(err) => {
@@ -1192,10 +1189,18 @@ impl GlobalBarrierManagerContext {
     /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
     /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor
     /// will create or drop before this barrier flow through them.
-    async fn load_graph_info(&self) -> MetaResult<InflightGraphInfo> {
+    async fn resolve_actor_info(&self) -> MetaResult<InflightGraphInfo> {
         let info = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.fragment_manager.load_graph_info().await,
-            MetadataManager::V2(mgr) => mgr.catalog_controller.load_graph_info().await?,
+            MetadataManager::V1(mgr) => {
+                let all_actor_infos = mgr.fragment_manager.load_all_actors().await;
+
+                InflightGraphInfo::resolve(all_actor_infos)
+            }
+            MetadataManager::V2(mgr) => {
+                let all_actor_infos = mgr.catalog_controller.load_all_actors().await?;
+
+                InflightGraphInfo::resolve(all_actor_infos)
+            }
         };
 
         Ok(info)

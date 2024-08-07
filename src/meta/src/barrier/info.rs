@@ -12,16 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::TableId;
-use risingwave_pb::common::PbWorkerNode;
 use tracing::warn;
 
 use crate::barrier::Command;
-use crate::manager::{
-    ActiveStreamingWorkerNodes, InflightFragmentInfo, InflightGraphInfo, WorkerId,
-};
+use crate::manager::{ActorInfos, InflightFragmentInfo, WorkerId};
 use crate::model::{ActorId, FragmentId};
 
 #[derive(Debug, Clone)]
@@ -40,31 +37,25 @@ pub struct InflightSubscriptionInfo {
     pub mv_depended_subscriptions: HashMap<TableId, HashMap<u32, u64>>,
 }
 
-/// [`InflightActorInfo`] resolves the actor info read from meta store for
+/// [`InflightGraphInfo`] resolves the actor info read from meta store for
 /// [`crate::barrier::GlobalBarrierManager`].
 #[derive(Default, Clone)]
-pub struct InflightActorInfo {
-    /// `node_id` => node
-    pub node_map: HashMap<WorkerId, PbWorkerNode>,
-
+pub(super) struct InflightGraphInfo {
     /// `node_id` => actors
     pub actor_map: HashMap<WorkerId, HashSet<ActorId>>,
 
     /// `actor_id` => `WorkerId`
     pub actor_location_map: HashMap<ActorId, WorkerId>,
+
+    pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
 }
 
-impl InflightActorInfo {
+impl InflightGraphInfo {
     /// Resolve inflight actor info from given nodes and actors that are loaded from meta store. It will be used during recovery to rebuild all streaming actors.
-    pub fn resolve(
-        active_nodes: &ActiveStreamingWorkerNodes,
-        graph_info: &InflightGraphInfo,
-    ) -> Self {
-        let node_map = active_nodes.current().clone();
-
+    pub fn resolve(actor_infos: ActorInfos) -> Self {
         let actor_map = {
             let mut map: HashMap<_, HashSet<_>> = HashMap::new();
-            for info in graph_info.fragment_infos.values() {
+            for info in actor_infos.fragment_infos.values() {
                 for (actor_id, worker_id) in &info.actors {
                     map.entry(*worker_id).or_default().insert(*actor_id);
                 }
@@ -72,7 +63,7 @@ impl InflightActorInfo {
             map
         };
 
-        let actor_location_map = graph_info
+        let actor_location_map = actor_infos
             .fragment_infos
             .values()
             .flat_map(|fragment| {
@@ -84,49 +75,18 @@ impl InflightActorInfo {
             .collect();
 
         Self {
-            node_map,
             actor_map,
             actor_location_map,
+            fragment_infos: actor_infos.fragment_infos,
         }
     }
 
-    /// Update worker nodes snapshot. We need to support incremental updates for it in the future.
-    pub fn resolve_worker_nodes(&mut self, all_nodes: impl IntoIterator<Item = PbWorkerNode>) {
-        let new_node_map = all_nodes
-            .into_iter()
-            .map(|node| (node.id, node))
-            .collect::<HashMap<_, _>>();
-
-        let mut deleted_actors = BTreeMap::new();
-        for (&actor_id, &location) in &self.actor_location_map {
-            if !new_node_map.contains_key(&location) {
-                deleted_actors
-                    .entry(location)
-                    .or_insert_with(BTreeSet::new)
-                    .insert(actor_id);
-            }
-        }
-        for (node_id, actors) in deleted_actors {
-            let node = self.node_map.get(&node_id);
-            warn!(
-                node_id,
-                ?node,
-                ?actors,
-                "node with running actors is deleted"
-            );
-        }
-
-        self.node_map = new_node_map;
-    }
-}
-
-impl InflightGraphInfo {
     /// Apply some actor changes before issuing a barrier command, if the command contains any new added actors, we should update
     /// the info correspondingly.
     pub(crate) fn pre_apply(
         &mut self,
         fragment_changes: &HashMap<FragmentId, CommandFragmentChanges>,
-    ) -> HashMap<ActorId, WorkerId> {
+    ) {
         {
             let mut to_add = HashMap::new();
             for (fragment_id, change) in fragment_changes {
@@ -154,16 +114,7 @@ impl InflightGraphInfo {
                     CommandFragmentChanges::RemoveFragment => {}
                 }
             }
-            to_add
-        }
-    }
-}
-
-impl InflightActorInfo {
-    pub fn pre_apply(&mut self, actors_to_add: Option<HashMap<ActorId, WorkerId>>) {
-        {
-            for (actor_id, node_id) in actors_to_add.into_iter().flatten() {
-                assert!(self.node_map.contains_key(&node_id));
+            for (actor_id, node_id) in to_add {
                 assert!(
                     self.actor_map.entry(node_id).or_default().insert(actor_id),
                     "duplicate actor in command changes"
@@ -203,7 +154,7 @@ impl InflightGraphInfo {
     pub(crate) fn post_apply(
         &mut self,
         fragment_changes: &HashMap<FragmentId, CommandFragmentChanges>,
-    ) -> HashSet<ActorId> {
+    ) {
         {
             let mut all_to_remove = HashSet::new();
             for (fragment_id, changes) in fragment_changes {
@@ -224,21 +175,13 @@ impl InflightGraphInfo {
                             .fragment_infos
                             .remove(fragment_id)
                             .expect("should exist");
-                        for actor_id in info.actors.keys() {
-                            assert!(all_to_remove.insert(*actor_id));
+                        for (actor_id, _) in info.actors {
+                            assert!(all_to_remove.insert(actor_id));
                         }
                     }
                 }
             }
-            all_to_remove
-        }
-    }
-}
-
-impl InflightActorInfo {
-    pub fn post_apply(&mut self, actors_to_remove: Option<HashSet<ActorId>>) {
-        {
-            for actor_id in actors_to_remove.into_iter().flatten() {
+            for actor_id in all_to_remove {
                 let node_id = self
                     .actor_location_map
                     .remove(&actor_id)
@@ -313,5 +256,13 @@ impl InflightGraphInfo {
         self.fragment_infos
             .values()
             .flat_map(|info| info.state_table_ids.iter().cloned())
+    }
+
+    pub fn worker_ids(&self) -> impl Iterator<Item = WorkerId> + '_ {
+        self.actor_map.keys().cloned()
+    }
+
+    pub fn contains_worker(&self, worker_id: WorkerId) -> bool {
+        self.actor_map.contains_key(&worker_id)
     }
 }

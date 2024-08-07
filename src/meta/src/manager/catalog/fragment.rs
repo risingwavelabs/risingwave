@@ -180,12 +180,11 @@ pub struct InflightFragmentInfo {
     pub is_injectable: bool,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct InflightGraphInfo {
+pub struct ActorInfos {
     pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
 }
 
-impl InflightGraphInfo {
+impl ActorInfos {
     pub fn new(fragment_infos: HashMap<FragmentId, InflightFragmentInfo>) -> Self {
         Self { fragment_infos }
     }
@@ -774,7 +773,7 @@ impl FragmentManager {
 
     /// Used in [`crate::barrier::GlobalBarrierManager`], load all running actor that need to be sent or
     /// collected
-    pub async fn load_graph_info(&self) -> InflightGraphInfo {
+    pub async fn load_all_actors(&self) -> ActorInfos {
         let mut fragment_infos = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
@@ -807,7 +806,7 @@ impl FragmentManager {
             }
         }
 
-        InflightGraphInfo::new(fragment_infos)
+        ActorInfos::new(fragment_infos)
     }
 
     async fn migrate_fragment_actors_inner(

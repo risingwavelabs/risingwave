@@ -45,7 +45,8 @@ use uuid::Uuid;
 
 use super::command::CommandContext;
 use super::GlobalBarrierManagerContext;
-use crate::manager::{InflightGraphInfo, MetaSrvEnv, WorkerId};
+use crate::barrier::info::InflightGraphInfo;
+use crate::manager::{MetaSrvEnv, WorkerId};
 use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
@@ -254,10 +255,16 @@ impl ControlStreamManager {
             "inject_barrier_err"
         ));
         let mutation = command_context.to_mutation();
-        let info = command_context.info.clone();
         let mut node_need_collect = HashSet::new();
 
-        info.node_map
+        for worker_id in pre_applied_graph_info.worker_ids() {
+            if !command_context.node_map.contains_key(&worker_id) {
+                return Err(anyhow!("worker id {} not exist", worker_id).into());
+            }
+        }
+
+        command_context
+            .node_map
             .iter()
             .map(|(node_id, worker_node)| {
                 let actor_ids_to_send: Vec<_> =
