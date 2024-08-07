@@ -96,11 +96,11 @@ impl Inner {
         &self,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let chunk = if chunk.selectivity() <= self.materialize_selectivity_threshold {
-            chunk.compact()
-        } else {
-            chunk
-        };
+        // let chunk = if chunk.selectivity() <= self.materialize_selectivity_threshold {
+        //     chunk.compact()
+        // } else {
+        //     chunk
+        // };
         let (data_chunk, ops) = chunk.into_parts();
         let mut projected_columns = Vec::new();
 

@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use anyhow::Context as _;
 use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
 use prometheus::Histogram;
+use risingwave_common::array::StreamChunkBuilder;
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::LabelGuardedMetric;
 use tokio::time::Instant;
@@ -126,6 +127,7 @@ impl MergeExecutor {
             self.upstreams,
             merge_barrier_align_duration.clone(),
         );
+        let select_all = BufferChunks::new(select_all, 1024);
         let actor_id = self.actor_context.id;
 
         let mut metrics = self.metrics.new_actor_input_metrics(
@@ -461,6 +463,78 @@ impl SelectReceivers {
             .map(|s| s.into_inner().unwrap())
             .filter(|u| !upstream_actor_ids.contains(&u.actor_id()));
         self.extend_active(new_upstreams);
+    }
+}
+
+struct BufferChunks {
+    stream: SelectReceivers,
+    cap: usize,
+}
+
+impl BufferChunks {
+    pub(super) fn new(stream: SelectReceivers, capacity: usize) -> Self {
+        assert!(capacity > 0);
+        Self {
+            stream,
+            cap: capacity,
+        }
+    }
+}
+
+impl Stream for BufferChunks {
+    type Item = std::result::Result<Message, StreamExecutorError>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // Don't know the data types yet. Let's build it upon the first chunk.
+        let mut builder: Option<StreamChunkBuilder> = None;
+
+        // StreamChunks to be returned.
+        let mut pending_chunks: VecDeque<StreamChunk> = VecDeque::new();
+
+        loop {
+            if let Some(chunk) = pending_chunks.pop_front() {
+                return Poll::Ready(Some(Ok(Message::Chunk(chunk))));
+            }
+
+            match self.stream.poll_next(cx) {
+                Poll::Pending => {
+                    return if let Some(b) = &mut builder
+                        && b.size() > 0
+                    {
+                        Poll::Ready(Some(Message::Chunk(b.take().unwrap())))
+                    } else {
+                        Poll::Pending
+                    }
+                }
+
+                Poll::Ready(Some(result)) => {
+                    if let Ok(Message::Chunk(chunk)) = result {
+                        if builder.is_none() {
+                            // initialize with the input data types
+                            builder = Some(StreamChunkBuilder::new(self.cap, chunk.data_types()));
+                        }
+                        for row in chunk.records() {
+                            if let Some(chunk_out) = builder.as_mut().unwrap().append_record(row) {
+                                pending_chunks.push_back(chunk_out);
+                            }
+                        }
+                    } else {
+                        return Poll::Ready(Some(result));
+                    }
+                }
+
+                Poll::Ready(None) => {
+                    // NOTE: I don't think these lines are reachable...
+                    return if let Some(b) = &mut builder
+                        && b.size() > 0
+                    {
+                        Poll::Ready(Some(Message::Chunk(b.take().unwrap())))
+                    } else {
+                        Poll::Ready(None)
+                    };
+                }
+            }
+        }
     }
 }
 
