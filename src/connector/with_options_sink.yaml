@@ -225,7 +225,7 @@ GcsConfig:
   - name: gcs.credential
     field_type: String
     comments: The base64 encoded credential key. If not set, ADC will be used.
-    required: false
+    required: true
   - name: gcs.service_account
     field_type: String
     comments: If credential/ADC is not set. The service account can be used to provide the credential info.
