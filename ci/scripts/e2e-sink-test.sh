@@ -68,6 +68,7 @@ echo "--- testing remote sinks"
 # check sink destination postgres
 sqllogictest -p 4566 -d dev './e2e_test/sink/remote/jdbc.load.slt'
 sleep 1
+export RUST_MIN_STACK=4194304
 sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt'
 sleep 1
 
