@@ -136,7 +136,10 @@ impl KinesisSplitReader {
             }
             match self.get_records().await {
                 Ok(resp) => {
-                    if resp.millis_behind_latest.is_none() && resp.child_shards.is_some() {
+                    if resp.millis_behind_latest.is_none()
+                        && let Some(shard) = &resp.child_shards
+                        && !shard.is_empty()
+                    {
                         // according to the doc https://docs.rs/aws-sdk-kinesis/latest/aws_sdk_kinesis/operation/get_records/struct.GetRecordsOutput.html
                         //
                         // > The list of the current shard's child shards, returned in the GetRecords API's response only when the end of the current shard is reached.
