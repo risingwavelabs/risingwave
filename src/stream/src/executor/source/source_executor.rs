@@ -941,6 +941,7 @@ mod tests {
                     ],
                 },
                 pause: false,
+                subscriptions_to_add: vec![],
             }));
         barrier_tx.send(init_barrier).unwrap();
 
@@ -1030,6 +1031,7 @@ mod tests {
                     ],
                 },
                 pause: false,
+                subscriptions_to_add: vec![],
             }));
         barrier_tx.send(init_barrier).unwrap();
 

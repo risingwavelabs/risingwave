@@ -207,6 +207,7 @@ mod tests {
                 added_actors: maplit::hashset! {actor_id},
                 splits: Default::default(),
                 pause: false,
+                subscriptions_to_add: vec![],
             }));
         tx.send(first_message).unwrap();
 
