@@ -1927,23 +1927,6 @@ impl ScaleController {
         Ok(())
     }
 
-    // FIXME: should be removed
-    pub(crate) async fn list_all_table_fragments(&self) -> MetaResult<Vec<model::TableFragments>> {
-        use crate::model::MetadataModel;
-        let all_table_fragments = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => mgr.fragment_manager.list_table_fragments().await,
-            MetadataManager::V2(mgr) => mgr
-                .catalog_controller
-                .table_fragments()
-                .await?
-                .into_values()
-                .map(model::TableFragments::from_protobuf)
-                .collect(),
-        };
-
-        Ok(all_table_fragments)
-    }
-
     pub async fn generate_table_resize_plan(
         &self,
         policy: TableResizePolicy,
@@ -2097,10 +2080,10 @@ impl ScaleController {
                 let RescheduleWorkingSet {
                     fragments,
                     actors,
-                    actor_dispatchers: _,
+                    actor_dispatchers: _actor_dispatchers,
                     fragment_downstreams,
-                    fragment_upstreams: _,
-                    related_jobs,
+                    fragment_upstreams: _fragment_upstreams,
+                    related_jobs: _related_jobs,
                 } = mgr
                     .catalog_controller
                     .resolve_working_set_for_reschedule_tables(table_ids)
