@@ -52,6 +52,7 @@ use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
+pub use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_connector::source::{
     ConnectorProperties, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
     KINESIS_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR,
@@ -73,7 +74,7 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::{DatabaseId, SchemaId};
-use crate::error::ErrorCode::{self, Deprecated, InvalidInputSyntax, NotSupported, ProtocolError};
+use crate::error::ErrorCode::{self, InvalidInputSyntax, NotSupported, ProtocolError};
 use crate::error::{Result, RwError};
 use crate::expr::Expr;
 use crate::handler::create_table::{
@@ -87,8 +88,6 @@ use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
 use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options};
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions, WithOptionsSecResolved};
-
-pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 
 /// Map a JSON schema to a relational schema
 async fn extract_json_table_schema(
@@ -1117,7 +1116,7 @@ pub fn validate_compatibility(
     source_schema: &ConnectorSchema,
     props: &mut BTreeMap<String, String>,
 ) -> Result<()> {
-    let connector = props
+    let mut connector = props
         .get_connector()
         .ok_or_else(|| RwError::from(ProtocolError("missing field 'connector'".to_string())))?;
 
@@ -1151,10 +1150,11 @@ pub fn validate_compatibility(
     }
 
     if connector == S3_CONNECTOR {
-        return Err(RwError::from(Deprecated(
-            S3_CONNECTOR.to_string(),
-            OPENDAL_S3_CONNECTOR.to_string(),
-        )));
+        let entry = props
+            .get_mut(risingwave_connector::source::UPSTREAM_SOURCE_KEY)
+            .unwrap();
+        *entry = OPENDAL_S3_CONNECTOR.to_string();
+        connector = OPENDAL_S3_CONNECTOR.to_string();
     }
 
     let compatible_encodes = compatible_formats
