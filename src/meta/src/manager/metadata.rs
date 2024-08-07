@@ -32,7 +32,7 @@ use tokio::sync::oneshot;
 use tokio::time::{sleep, Instant};
 use tracing::warn;
 
-use crate::barrier::Reschedule;
+use crate::barrier::{InflightSubscriptionInfo, Reschedule};
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, WorkerExtraInfo};
 use crate::manager::{
@@ -733,12 +733,15 @@ impl MetadataManager {
     pub async fn all_node_actors(
         &self,
         include_inactive: bool,
+        subscription_info: &InflightSubscriptionInfo,
     ) -> MetaResult<HashMap<WorkerId, Vec<BuildActorInfo>>> {
-        let subscriptions = self.get_mv_depended_subscriptions().await?;
         match &self {
             MetadataManager::V1(mgr) => Ok(mgr
                 .fragment_manager
-                .all_node_actors(include_inactive, &subscriptions)
+                .all_node_actors(
+                    include_inactive,
+                    &subscription_info.mv_depended_subscriptions,
+                )
                 .await),
             MetadataManager::V2(mgr) => {
                 let table_fragments = mgr.catalog_controller.table_fragments().await?;
@@ -748,11 +751,13 @@ impl MetadataManager {
                     let table_id = tf.table_id();
                     for (node_id, actors) in tf.worker_actors(include_inactive) {
                         let node_actors = actor_maps.entry(node_id).or_insert_with(Vec::new);
-                        node_actors.extend(
-                            actors
-                                .into_iter()
-                                .map(|actor| to_build_actor_info(actor, &subscriptions, table_id)),
-                        )
+                        node_actors.extend(actors.into_iter().map(|actor| {
+                            to_build_actor_info(
+                                actor,
+                                &subscription_info.mv_depended_subscriptions,
+                                table_id,
+                            )
+                        }))
                     }
                 }
                 Ok(actor_maps)

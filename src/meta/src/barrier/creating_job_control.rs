@@ -30,8 +30,8 @@ use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, SnapshotBackfillInfo, TracedEpoch,
 };
-use crate::manager::{InflightFragmentInfo, WorkerId};
-use crate::model::{ActorId, FragmentId};
+use crate::manager::{InflightGraphInfo, WorkerId};
+use crate::model::ActorId;
 use crate::MetaResult;
 
 #[derive(Debug)]
@@ -47,13 +47,13 @@ pub(super) enum CreatingStreamingJobStatus {
         pending_commands: Vec<Arc<CommandContext>>,
         version_stats: HummockVersionStats,
         create_mview_tracker: CreateMviewProgressTracker,
-        fragment_info: HashMap<FragmentId, InflightFragmentInfo>,
+        graph_info: InflightGraphInfo,
         /// The `prev_epoch` of pending non checkpoint barriers
         pending_non_checkpoint_barriers: Vec<u64>,
         snapshot_backfill_actors: HashMap<WorkerId, HashSet<ActorId>>,
     },
     ConsumingLogStore {
-        fragment_info: HashMap<FragmentId, InflightFragmentInfo>,
+        graph_info: InflightGraphInfo,
     },
     Finishing(u64), // The prev epoch that marks it as Finishing
     Finished(u64),  // The prev epoch that marks it as Finished
@@ -109,7 +109,7 @@ impl CreatingStreamingJobControl {
                 pending_commands: vec![],
                 version_stats: version_stat.clone(),
                 create_mview_tracker,
-                fragment_info,
+                graph_info: InflightGraphInfo::new(fragment_info),
                 pending_non_checkpoint_barriers: vec![],
                 snapshot_backfill_actors,
             },
@@ -201,7 +201,7 @@ impl CreatingStreamingJobControl {
             prev_epoch_fake_physical_time,
             pending_commands,
             create_mview_tracker,
-            fragment_info,
+            graph_info,
             pending_non_checkpoint_barriers,
             ..
         } = &mut self.status
@@ -220,11 +220,11 @@ impl CreatingStreamingJobControl {
                         &TracedEpoch::new(prev_epoch),
                     ),
                     &BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers)),
-                    fragment_info,
-                    Some(fragment_info),
+                    graph_info,
+                    Some(graph_info),
                     HashMap::new(),
                 )?;
-                let fragment_info = take(fragment_info);
+                let graph_info = take(graph_info);
                 let pending_commands = take(pending_commands);
                 self.enqueue_epoch(prev_epoch.0, node_to_collect);
                 // finish consuming snapshot
@@ -235,13 +235,13 @@ impl CreatingStreamingJobControl {
                         command.to_mutation(),
                         (&command.curr_epoch, &command.prev_epoch),
                         &command.kind,
-                        &fragment_info,
-                        Some(&fragment_info),
+                        &graph_info,
+                        Some(&graph_info),
                         HashMap::new(),
                     )?;
                     self.enqueue_epoch(command.prev_epoch.value().0, node_to_collect);
                 }
-                self.status = CreatingStreamingJobStatus::ConsumingLogStore { fragment_info };
+                self.status = CreatingStreamingJobStatus::ConsumingLogStore { graph_info };
             } else {
                 let prev_epoch =
                     TracedEpoch::new(Epoch::from_physical_time(*prev_epoch_fake_physical_time));
@@ -260,8 +260,8 @@ impl CreatingStreamingJobControl {
                     None,
                     (&curr_epoch, &prev_epoch),
                     &kind,
-                    fragment_info,
-                    Some(fragment_info),
+                    graph_info,
+                    Some(graph_info),
                     HashMap::new(),
                 )?;
                 self.enqueue_epoch(prev_epoch.value().0, node_to_collect);
@@ -293,7 +293,7 @@ impl CreatingStreamingJobControl {
                 );
                 pending_commands.push(command_ctx.clone());
             }
-            CreatingStreamingJobStatus::ConsumingLogStore { fragment_info } => {
+            CreatingStreamingJobStatus::ConsumingLogStore { graph_info } => {
                 let node_to_collect = control_stream_manager.inject_barrier(
                     Some(table_id),
                     &command_ctx.info.node_map,
@@ -305,8 +305,8 @@ impl CreatingStreamingJobControl {
                     },
                     (&command_ctx.curr_epoch, &command_ctx.prev_epoch),
                     &command_ctx.kind,
-                    fragment_info,
-                    if to_finish { None } else { Some(fragment_info) },
+                    graph_info,
+                    if to_finish { None } else { Some(graph_info) },
                     HashMap::new(),
                 )?;
                 self.enqueue_epoch(command_ctx.prev_epoch.value().0, node_to_collect);
@@ -407,8 +407,8 @@ impl CreatingStreamingJobControl {
         }
     }
 
-    pub(super) fn should_finish(&self) -> Option<HashMap<FragmentId, InflightFragmentInfo>> {
-        if let CreatingStreamingJobStatus::ConsumingLogStore { fragment_info } = &self.status {
+    pub(super) fn should_finish(&self) -> Option<InflightGraphInfo> {
+        if let CreatingStreamingJobStatus::ConsumingLogStore { graph_info } = &self.status {
             // TODO: should have a new policy before merged
             let len = self
                 .collected_barrier
@@ -417,7 +417,7 @@ impl CreatingStreamingJobControl {
                 .count();
             warn!(len, "jobs finished, waiting to collect more");
             if len > 10 {
-                Some(fragment_info.clone())
+                Some(graph_info.clone())
             } else {
                 None
             }

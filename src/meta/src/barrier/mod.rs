@@ -66,10 +66,9 @@ use crate::hummock::{
 };
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
-    ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, InflightFragmentInfo,
-    LocalNotification, MetaSrvEnv, MetadataManager, SystemParamsManagerImpl, WorkerId,
+    ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, InflightGraphInfo, LocalNotification,
+    MetaSrvEnv, MetadataManager, SystemParamsManagerImpl, WorkerId,
 };
-use crate::model::FragmentId;
 use crate::rpc::metrics::MetaMetrics;
 use crate::stream::{ScaleControllerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -89,6 +88,7 @@ pub use self::command::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType, ReplaceTablePlan,
     Reschedule, SnapshotBackfillInfo,
 };
+pub use self::info::InflightSubscriptionInfo;
 pub use self::rpc::StreamRpcManager;
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
@@ -273,27 +273,16 @@ impl CheckpointControl {
             .set(self.total_command_num() as i64);
     }
 
-    #[expect(clippy::type_complexity)]
-    fn job_to_finish(
-        &self,
-    ) -> Option<
-        HashMap<
-            TableId,
-            (
-                SnapshotBackfillInfo,
-                HashMap<FragmentId, InflightFragmentInfo>,
-            ),
-        >,
-    > {
+    fn job_to_finish(&self) -> Option<HashMap<TableId, (SnapshotBackfillInfo, InflightGraphInfo)>> {
         let mut table_ids_to_finish = HashMap::new();
 
         for (table_id, creating_streaming_job) in &self.creating_streaming_job_controls {
-            if let Some(fragment_info) = creating_streaming_job.should_finish() {
+            if let Some(graph_info) = creating_streaming_job.should_finish() {
                 table_ids_to_finish.insert(
                     *table_id,
                     (
                         creating_streaming_job.snapshot_backfill_info.clone(),
-                        fragment_info,
+                        graph_info,
                     ),
                 );
             }
@@ -619,6 +608,8 @@ impl GlobalBarrierManager {
         let initial_invalid_state = BarrierManagerState::new(
             TracedEpoch::new(Epoch(INVALID_EPOCH)),
             InflightActorInfo::default(),
+            InflightGraphInfo::default(),
+            InflightSubscriptionInfo::default(),
             None,
         );
 
@@ -1004,7 +995,8 @@ impl GlobalBarrierManager {
             command = Command::FinishCreateSnapshotBackfillStreamingJobs(jobs_to_finish);
         }
 
-        let info = self.state.apply_command(&command);
+        let (pre_applied_actor_info, pre_applied_graph_info, pre_applied_subscription_info) =
+            self.state.apply_command(&command);
 
         // Tracing related stuff
         prev_epoch.span().in_scope(|| {
@@ -1013,7 +1005,9 @@ impl GlobalBarrierManager {
         span.record("epoch", curr_epoch.value().0);
 
         let command_ctx = Arc::new(CommandContext::new(
-            info,
+            pre_applied_actor_info,
+            pre_applied_subscription_info,
+            pre_applied_graph_info.existing_table_ids().collect(),
             prev_epoch.clone(),
             curr_epoch.clone(),
             self.state.paused_reason(),
@@ -1049,8 +1043,8 @@ impl GlobalBarrierManager {
 
         let node_to_collect = match self.control_stream_manager.inject_command_ctx_barrier(
             &command_ctx,
-            &command_ctx.info.fragment_infos,
-            Some(&self.state.inflight_actor_infos.fragment_infos),
+            &pre_applied_graph_info,
+            Some(&self.state.inflight_graph_info),
             all_snapshot_backfilling_actors,
         ) {
             Ok(node_to_collect) => node_to_collect,
@@ -1462,25 +1456,10 @@ impl GlobalBarrierManagerContext {
     /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
     /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor
     /// will create or drop before this barrier flow through them.
-    async fn resolve_actor_info(
-        &self,
-        active_nodes: &ActiveStreamingWorkerNodes,
-    ) -> MetaResult<InflightActorInfo> {
-        let subscriptions = self
-            .metadata_manager
-            .get_mv_depended_subscriptions()
-            .await?;
+    async fn load_graph_info(&self) -> MetaResult<InflightGraphInfo> {
         let info = match &self.metadata_manager {
-            MetadataManager::V1(mgr) => {
-                let all_actor_infos = mgr.fragment_manager.load_all_actors().await;
-
-                InflightActorInfo::resolve(active_nodes, all_actor_infos, subscriptions)
-            }
-            MetadataManager::V2(mgr) => {
-                let all_actor_infos = mgr.catalog_controller.load_all_actors().await?;
-
-                InflightActorInfo::resolve(active_nodes, all_actor_infos, subscriptions)
-            }
+            MetadataManager::V1(mgr) => mgr.fragment_manager.load_graph_info().await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.load_graph_info().await?,
         };
 
         Ok(info)
@@ -1629,7 +1608,7 @@ fn collect_commit_epoch_info(
                 entry.insert(truncate_epoch);
             }
         };
-    for (mv_table_id, subscriptions) in &command_ctx.info.mv_depended_subscriptions {
+    for (mv_table_id, subscriptions) in &command_ctx.subscription_info.mv_depended_subscriptions {
         if let Some(truncate_epoch) = subscriptions
             .values()
             .max()
@@ -1671,10 +1650,7 @@ fn collect_commit_epoch_info(
         sst_to_worker,
         new_table_fragment_info,
         table_new_change_log,
-        BTreeMap::from_iter([(
-            epoch,
-            InflightActorInfo::existing_table_ids(&command_ctx.info.fragment_infos).collect(),
-        )]),
+        BTreeMap::from_iter([(epoch, command_ctx.table_ids_to_commit.clone())]),
         epoch,
         batch_commit_creating_job_ssts,
     )

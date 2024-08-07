@@ -48,9 +48,7 @@ use uuid::Uuid;
 
 use super::command::CommandContext;
 use super::{BarrierKind, GlobalBarrierManagerContext, TracedEpoch};
-use crate::barrier::info::InflightActorInfo;
-use crate::manager::{InflightFragmentInfo, MetaSrvEnv, WorkerId};
-use crate::model::FragmentId;
+use crate::manager::{InflightGraphInfo, MetaSrvEnv, WorkerId};
 use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
@@ -251,8 +249,8 @@ impl ControlStreamManager {
     pub(super) fn inject_command_ctx_barrier(
         &mut self,
         command_ctx: &CommandContext,
-        pre_applied_fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
-        applied_fragment_infos: Option<&HashMap<FragmentId, InflightFragmentInfo>>,
+        pre_applied_graph_info: &InflightGraphInfo,
+        applied_graph_info: Option<&InflightGraphInfo>,
         actor_ids_to_pre_sync_mutation: HashMap<WorkerId, Vec<ActorId>>,
     ) -> MetaResult<HashSet<WorkerId>> {
         self.inject_barrier(
@@ -261,8 +259,8 @@ impl ControlStreamManager {
             command_ctx.to_mutation(),
             (&command_ctx.curr_epoch, &command_ctx.prev_epoch),
             &command_ctx.kind,
-            pre_applied_fragment_infos,
-            applied_fragment_infos,
+            pre_applied_graph_info,
+            applied_graph_info,
             actor_ids_to_pre_sync_mutation,
         )
     }
@@ -274,8 +272,8 @@ impl ControlStreamManager {
         mutation: Option<Mutation>,
         (curr_epoch, prev_epoch): (&TracedEpoch, &TracedEpoch),
         kind: &BarrierKind,
-        pre_applied_fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
-        applied_fragment_infos: Option<&HashMap<FragmentId, InflightFragmentInfo>>,
+        pre_applied_graph_info: &InflightGraphInfo,
+        applied_graph_info: Option<&InflightGraphInfo>,
         actor_ids_to_pre_sync_mutation: HashMap<WorkerId, Vec<ActorId>>,
     ) -> MetaResult<HashSet<WorkerId>> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
@@ -294,17 +292,17 @@ impl ControlStreamManager {
             .iter()
             .map(|(node_id, worker_node)| {
                 let actor_ids_to_send: Vec<_> =
-                    InflightActorInfo::actor_ids_to_send(pre_applied_fragment_infos, *node_id)
-                        .collect();
-                let actor_ids_to_collect: Vec<_> =
-                    InflightActorInfo::actor_ids_to_collect(pre_applied_fragment_infos, *node_id)
-                        .collect();
+                    pre_applied_graph_info.actor_ids_to_send(*node_id).collect();
+                let actor_ids_to_collect: Vec<_> = pre_applied_graph_info
+                    .actor_ids_to_collect(*node_id)
+                    .collect();
                 if actor_ids_to_collect.is_empty() {
                     // No need to send or collect barrier for this node.
                     assert!(actor_ids_to_send.is_empty());
                 }
-                let table_ids_to_sync = if let Some(fragment_infos) = applied_fragment_infos {
-                    InflightActorInfo::existing_table_ids(fragment_infos)
+                let table_ids_to_sync = if let Some(graph_info) = applied_graph_info {
+                    graph_info
+                        .existing_table_ids()
                         .map(|table_id| table_id.table_id)
                         .collect()
                 } else {
