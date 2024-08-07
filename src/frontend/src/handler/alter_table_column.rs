@@ -106,7 +106,7 @@ pub async fn get_new_table_definition_for_cdc_table(
     for col in new_columns {
         // if the column exists in the original definitoins, use the original column definition.
         // since we don't support altering the column type right now
-        if let Some(original_col) = orig_column_map.get(&col.name().to_string()) {
+        if let Some(original_col) = orig_column_map.get(col.name()) {
             new_column_defs.push(original_col.clone());
         } else {
             let ty = to_ast_data_type(col.data_type())?;
