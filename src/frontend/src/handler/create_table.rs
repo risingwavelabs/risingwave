@@ -857,7 +857,7 @@ fn derive_connect_properties(
     source_with_properties: &WithOptionsSecResolved,
     external_table_name: String,
 ) -> Result<WithOptionsSecResolved> {
-    use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR};
+    use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR};
     // we should remove the prefix from `full_table_name`
     let mut connect_properties = source_with_properties.clone();
     if let Some(connector) = source_with_properties.get(UPSTREAM_SOURCE_KEY) {
@@ -876,6 +876,16 @@ fn derive_connect_properties(
                 let (schema_name, table_name) = external_table_name
                     .split_once('.')
                     .ok_or_else(|| anyhow!("The upstream table name must contain schema name prefix, e.g. 'public.table'"))?;
+
+                // insert 'schema.name' into connect properties
+                connect_properties.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
+
+                table_name
+            }
+            SQL_SERVER_CDC_CONNECTOR => {
+                let (schema_name, table_name) = external_table_name
+                    .split_once('.')
+                    .ok_or_else(|| anyhow!("The upstream table name must contain schema name prefix, e.g. 'dbo.table'"))?;
 
                 // insert 'schema.name' into connect properties
                 connect_properties.insert(SCHEMA_NAME_KEY.into(), schema_name.into());

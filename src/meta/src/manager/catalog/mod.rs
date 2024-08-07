@@ -249,6 +249,9 @@ impl CatalogManagerCore {
         {
             let _ = tx.send(Err(err.clone()));
         }
+        // Clear in progress creation streaming job. Note that background job is not tracked here, so that
+        // it won't affect background jobs.
+        self.database.in_progress_creation_streaming_job.clear();
     }
 }
 

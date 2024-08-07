@@ -51,6 +51,7 @@ pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
 pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;
 pub const CITUS_CDC_CONNECTOR: &str = Citus::CDC_CONNECTOR_NAME;
 pub const MONGODB_CDC_CONNECTOR: &str = Mongodb::CDC_CONNECTOR_NAME;
+pub const SQL_SERVER_CDC_CONNECTOR: &str = SqlServer::CDC_CONNECTOR_NAME;
 
 pub trait CdcSourceTypeTrait: Send + Sync + Clone + 'static {
     const CDC_CONNECTOR_NAME: &'static str;
@@ -66,6 +67,7 @@ impl<'a> From<&'a str> for CdcSourceType {
             POSTGRES_CDC_CONNECTOR => CdcSourceType::Postgres,
             CITUS_CDC_CONNECTOR => CdcSourceType::Citus,
             MONGODB_CDC_CONNECTOR => CdcSourceType::Mongodb,
+            SQL_SERVER_CDC_CONNECTOR => CdcSourceType::SqlServer,
             _ => CdcSourceType::Unspecified,
         }
     }
@@ -78,6 +80,7 @@ impl CdcSourceType {
             CdcSourceType::Postgres => "Postgres",
             CdcSourceType::Citus => "Citus",
             CdcSourceType::Mongodb => "MongoDB",
+            CdcSourceType::SqlServer => "SQL Server",
             CdcSourceType::Unspecified => "Unspecified",
         }
     }
