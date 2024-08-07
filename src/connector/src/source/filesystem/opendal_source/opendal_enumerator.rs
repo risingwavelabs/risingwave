@@ -14,6 +14,7 @@
 
 use std::marker::PhantomData;
 
+use anyhow::anyhow;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::stream::{self, BoxStream};
@@ -51,8 +52,14 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<OpendalFsSplit<Src>>> {
         let empty_split: OpendalFsSplit<Src> = OpendalFsSplit::empty_split();
-
-        Ok(vec![empty_split])
+        match self.op.list("/").await {
+            Ok(_) => return Ok(vec![empty_split]),
+            Err(e) => {
+                return Err(
+                    anyhow!("Fail to create source, please check your config. {}", e).into(),
+                )
+            }
+        }
     }
 }
 
