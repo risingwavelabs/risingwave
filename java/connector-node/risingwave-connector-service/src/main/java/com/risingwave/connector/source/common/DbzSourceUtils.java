@@ -19,6 +19,7 @@ import java.lang.management.ManagementFactory;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import javax.management.JMException;
@@ -112,6 +113,9 @@ public class DbzSourceUtils {
         } else if (sourceType == SourceTypeE.POSTGRES) {
             return waitForStreamingRunningInner(
                     "postgres", dbServerName, waitStreamingStartTimeout);
+        } else if (sourceType == SourceTypeE.SQL_SERVER) {
+            return waitForStreamingRunningInner(
+                    "sql_server", dbServerName, waitStreamingStartTimeout);
         } else {
             LOG.info("Unsupported backfill source, just return true for {}", dbServerName);
             return true;
@@ -162,12 +166,23 @@ public class DbzSourceUtils {
 
     private static ObjectName getStreamingMetricsObjectName(
             String connector, String server, String context) throws MalformedObjectNameException {
-        return new ObjectName(
-                "debezium."
-                        + connector
-                        + ":type=connector-metrics,context="
-                        + context
-                        + ",server="
-                        + server);
+        if (Objects.equals(connector, "sql_server")) {
+            // TODO: fulfill the task id here, by WKX
+            return new ObjectName(
+                    "debezium."
+                            + connector
+                            + ":type=connector-metrics,task=0,context="
+                            + context
+                            + ",server="
+                            + server);
+        } else {
+            return new ObjectName(
+                    "debezium."
+                            + connector
+                            + ":type=connector-metrics,context="
+                            + context
+                            + ",server="
+                            + server);
+        }
     }
 }
