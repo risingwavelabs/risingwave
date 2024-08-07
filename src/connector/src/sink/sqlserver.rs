@@ -512,24 +512,35 @@ impl SqlServerClient {
     }
 
     pub async fn new_with_config(mut config: Config) -> Result<Self> {
-        let tcp = TcpStream::connect(config.get_addr()).await.unwrap();
+        let tcp = TcpStream::connect(config.get_addr())
+            .await
+            .context("failed to connect to sql server")
+            .map_err(SinkError::SqlServer)?;
         tcp.set_nodelay(true)
             .context("failed to setting nodelay when connecting to sql server")
             .map_err(SinkError::SqlServer)?;
 
         let client = match Client::connect(config.clone(), tcp.compat_write()).await {
             // Connection successful.
-            Ok(client) => Ok(client),
+            Ok(client) => client,
             // The server wants us to redirect to a different address
             Err(tiberius::error::Error::Routing { host, port }) => {
                 config.host(&host);
                 config.port(port);
-                let tcp = TcpStream::connect(config.get_addr()).await.unwrap();
+                let tcp = TcpStream::connect(config.get_addr())
+                    .await
+                    .context("failed to connect to sql server after routing")
+                    .map_err(SinkError::SqlServer)?;
+                tcp.set_nodelay(true)
+                    .context(
+                        "failed to setting nodelay when connecting to sql server after routing",
+                    )
+                    .map_err(SinkError::SqlServer)?;
                 // we should not have more than one redirect, so we'll short-circuit here.
-                Client::connect(config, tcp.compat_write()).await
+                Client::connect(config, tcp.compat_write()).await?
             }
-            Err(e) => Err(e),
-        }?;
+            Err(e) => return Err(e.into()),
+        };
 
         Ok(Self {
             inner_client: client,
