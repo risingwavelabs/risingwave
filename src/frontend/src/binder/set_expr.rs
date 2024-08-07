@@ -252,7 +252,9 @@ impl Binder {
             // The select list of the corresponding set operation should be in the order of <corresponding column list>
             for column in column_list {
                 let col_name = column.real_value();
-                if let Some(idx_l) = name2idx_l.get(&col_name) && let Some(idx_r) = name2idx_l.get(&col_name){
+                if let Some(idx_l) = name2idx_l.get(&col_name)
+                    && let Some(idx_r) = name2idx_l.get(&col_name)
+                {
                     corresponding_col_idx_l.push(*idx_l);
                     corresponding_col_idx_r.push(*idx_r);
                 } else {
@@ -261,7 +263,7 @@ impl Binder {
                         It shall be included in both sides.",
                         col_name,
                         op,
-                    )).into())
+                    )).into());
                 }
             }
         } else {
