@@ -467,24 +467,38 @@ impl SelectReceivers {
 }
 
 struct BufferChunks {
-    stream: SelectReceivers,
+    pub inner: SelectReceivers,
     cap: usize,
 }
 
 impl BufferChunks {
-    pub(super) fn new(stream: SelectReceivers, capacity: usize) -> Self {
+    pub(super) fn new(inner: SelectReceivers, capacity: usize) -> Self {
         assert!(capacity > 0);
         Self {
-            stream,
+            inner,
             cap: capacity,
         }
+    }
+}
+
+impl std::ops::Deref for BufferChunks {
+    type Target = SelectReceivers;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl std::ops::DerefMut for BufferChunks {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
     }
 }
 
 impl Stream for BufferChunks {
     type Item = std::result::Result<Message, StreamExecutorError>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // Don't know the data types yet. Let's build it upon the first chunk.
         let mut builder: Option<StreamChunkBuilder> = None;
 
@@ -496,12 +510,12 @@ impl Stream for BufferChunks {
                 return Poll::Ready(Some(Ok(Message::Chunk(chunk))));
             }
 
-            match self.stream.poll_next(cx) {
+            match self.inner.poll_next_unpin(cx) {
                 Poll::Pending => {
                     return if let Some(b) = &mut builder
                         && b.size() > 0
                     {
-                        Poll::Ready(Some(Message::Chunk(b.take().unwrap())))
+                        Poll::Ready(Some(Ok(Message::Chunk(b.take().unwrap()))))
                     } else {
                         Poll::Pending
                     }
@@ -528,7 +542,7 @@ impl Stream for BufferChunks {
                     return if let Some(b) = &mut builder
                         && b.size() > 0
                     {
-                        Poll::Ready(Some(Message::Chunk(b.take().unwrap())))
+                        Poll::Ready(Some(Ok(Message::Chunk(b.take().unwrap()))))
                     } else {
                         Poll::Ready(None)
                     };
