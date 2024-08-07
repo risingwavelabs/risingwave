@@ -423,7 +423,9 @@ pub async fn compute_node_serve(
 
     // Clean up the spill directory.
     #[cfg(not(madsim))]
-    SpillOp::clean_spill_directory().await.unwrap();
+    if config.batch.enable_spill {
+        SpillOp::clean_spill_directory().await.unwrap();
+    }
 
     let server = tonic::transport::Server::builder()
         .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)

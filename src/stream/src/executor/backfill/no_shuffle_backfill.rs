@@ -417,7 +417,7 @@ where
                 snapshot_read_epoch = barrier.epoch.prev;
 
                 self.progress.update(
-                    barrier.epoch.curr,
+                    barrier.epoch,
                     snapshot_read_epoch,
                     total_snapshot_processed_rows,
                 );
@@ -540,7 +540,7 @@ where
                     // and backfill which just finished, we need to update mview tracker,
                     // it does not persist this information.
                     self.progress
-                        .finish(barrier.epoch.curr, total_snapshot_processed_rows);
+                        .finish(barrier.epoch, total_snapshot_processed_rows);
                     tracing::trace!(
                         epoch = ?barrier.epoch,
                         "Updated CreateMaterializedTracker"

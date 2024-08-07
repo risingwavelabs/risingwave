@@ -119,7 +119,7 @@ impl StreamNode for StreamFsFetch {
                     .map(|c| c.to_protobuf())
                     .collect_vec(),
                 with_properties,
-                rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+                rate_limit: self.base.ctx().overwrite_options().source_rate_limit,
                 secret_refs,
             }
         });

@@ -21,7 +21,7 @@ statement ok
 flush;
 
 statement ok
-SET STREAMING_RATE_LIMIT=1;
+SET BACKFILL_RATE_LIMIT=1;
 
 statement ok
 SET BACKGROUND_DDL=true;
@@ -57,7 +57,7 @@ SELECT count(*) FROM mv_always_retry where s1 is NULL;
 # t
 
 statement ok
-SET STREAMING_RATE_LIMIT TO DEFAULT;
+SET BACKFILL_RATE_LIMIT TO DEFAULT;
 
 statement ok
 SET BACKGROUND_DDL=false;

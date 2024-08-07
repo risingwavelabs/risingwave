@@ -28,6 +28,7 @@ message AddMutation {
   // We may embed a pause mutation here.
   // TODO: we may allow multiple mutations in a single barrier.
   bool pause = 4;
+  repeated SubscriptionUpstreamInfo subscriptions_to_add = 5;
 }
 
 message StopMutation {
@@ -95,14 +96,13 @@ message CombinedMutation {
   repeated BarrierMutation mutations = 1;
 }
 
-message CreateSubscriptionMutation {
-  uint32 subscription_id = 1;
+message SubscriptionUpstreamInfo {
+  uint32 subscriber_id = 1;
   uint32 upstream_mv_table_id = 2;
 }
 
-message DropSubscriptionMutation {
-  uint32 subscription_id = 1;
-  uint32 upstream_mv_table_id = 2;
+message DropSubscriptionsMutation {
+  repeated SubscriptionUpstreamInfo info = 1;
 }
 
 message BarrierMutation {
@@ -122,10 +122,8 @@ message BarrierMutation {
     ResumeMutation resume = 8;
     // Throttle specific source exec or chain exec.
     ThrottleMutation throttle = 10;
-    // Create subscription on mv
-    CreateSubscriptionMutation create_subscription = 11;
     // Drop subscription on mv
-    DropSubscriptionMutation drop_subscription = 12;
+    DropSubscriptionsMutation drop_subscriptions = 12;
     // Combined mutation.
     CombinedMutation combined = 100;
   }
@@ -480,7 +478,7 @@ message DynamicFilterNode {
   // When the condition changes, we will tell downstream to insert the LHS records which now match the condition.
   // If this is false, we need to store RHS records which match the condition in the internal table.
   // When the condition changes, we will tell downstream to delete the LHS records which now no longer match the condition.
-  bool condition_always_relax = 5;
+  bool condition_always_relax = 5 [deprecated = true];
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta

@@ -85,11 +85,17 @@ enum ClickHouseEngine {
     ReplicatedReplacingMergeTree(Option<String>),
     ReplicatedSummingMergeTree,
     ReplicatedAggregatingMergeTree,
-    #[expect(dead_code)]
     ReplicatedCollapsingMergeTree(String),
-    #[expect(dead_code)]
     ReplicatedVersionedCollapsingMergeTree(String),
     ReplicatedGraphiteMergeTree,
+    SharedMergeTree,
+    SharedReplacingMergeTree(Option<String>),
+    SharedSummingMergeTree,
+    SharedAggregatingMergeTree,
+    SharedCollapsingMergeTree(String),
+    SharedVersionedCollapsingMergeTree(String),
+    SharedGraphiteMergeTree,
+    Null,
 }
 impl ClickHouseEngine {
     pub fn is_collapsing_engine(&self) -> bool {
@@ -99,6 +105,8 @@ impl ClickHouseEngine {
                 | ClickHouseEngine::VersionedCollapsingMergeTree(_)
                 | ClickHouseEngine::ReplicatedCollapsingMergeTree(_)
                 | ClickHouseEngine::ReplicatedVersionedCollapsingMergeTree(_)
+                | ClickHouseEngine::SharedCollapsingMergeTree(_)
+                | ClickHouseEngine::SharedVersionedCollapsingMergeTree(_)
         )
     }
 
@@ -106,6 +114,7 @@ impl ClickHouseEngine {
         match self {
             ClickHouseEngine::ReplacingMergeTree(delete_col) => delete_col.is_some(),
             ClickHouseEngine::ReplicatedReplacingMergeTree(delete_col) => delete_col.is_some(),
+            ClickHouseEngine::SharedReplacingMergeTree(delete_col) => delete_col.is_some(),
             _ => false,
         }
     }
@@ -114,6 +123,9 @@ impl ClickHouseEngine {
         match self {
             ClickHouseEngine::ReplacingMergeTree(Some(delete_col)) => Some(delete_col.to_string()),
             ClickHouseEngine::ReplicatedReplacingMergeTree(Some(delete_col)) => {
+                Some(delete_col.to_string())
+            }
+            ClickHouseEngine::SharedReplacingMergeTree(Some(delete_col)) => {
                 Some(delete_col.to_string())
             }
             _ => None,
@@ -132,8 +144,25 @@ impl ClickHouseEngine {
             ClickHouseEngine::ReplicatedVersionedCollapsingMergeTree(sign_name) => {
                 Some(sign_name.to_string())
             }
+            ClickHouseEngine::SharedCollapsingMergeTree(sign_name) => Some(sign_name.to_string()),
+            ClickHouseEngine::SharedVersionedCollapsingMergeTree(sign_name) => {
+                Some(sign_name.to_string())
+            }
             _ => None,
         }
+    }
+
+    pub fn is_shared_tree(&self) -> bool {
+        matches!(
+            self,
+            ClickHouseEngine::SharedMergeTree
+                | ClickHouseEngine::SharedReplacingMergeTree(_)
+                | ClickHouseEngine::SharedSummingMergeTree
+                | ClickHouseEngine::SharedAggregatingMergeTree
+                | ClickHouseEngine::SharedCollapsingMergeTree(_)
+                | ClickHouseEngine::SharedVersionedCollapsingMergeTree(_)
+                | ClickHouseEngine::SharedGraphiteMergeTree
+        )
     }
 
     pub fn from_query_engine(
@@ -142,6 +171,7 @@ impl ClickHouseEngine {
     ) -> Result<Self> {
         match engine_name.engine.as_str() {
             "MergeTree" => Ok(ClickHouseEngine::MergeTree),
+            "Null" => Ok(ClickHouseEngine::Null),
             "ReplacingMergeTree" => {
                 let delete_column = config.common.delete_column.clone();
                 Ok(ClickHouseEngine::ReplacingMergeTree(delete_column))
@@ -201,7 +231,9 @@ impl ClickHouseEngine {
                     .ok_or_else(|| SinkError::ClickHouse("must have index 1".to_string()))?
                     .trim()
                     .to_string();
-                Ok(ClickHouseEngine::VersionedCollapsingMergeTree(sign_name))
+                Ok(ClickHouseEngine::ReplicatedVersionedCollapsingMergeTree(
+                    sign_name,
+                ))
             }
             // ReplicatedCollapsingMergeTree("a","b",sign_name)
             "ReplicatedCollapsingMergeTree" => {
@@ -218,9 +250,51 @@ impl ClickHouseEngine {
                     .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
                     .trim()
                     .to_string();
-                Ok(ClickHouseEngine::CollapsingMergeTree(sign_name))
+                Ok(ClickHouseEngine::ReplicatedCollapsingMergeTree(sign_name))
             }
             "ReplicatedGraphiteMergeTree" => Ok(ClickHouseEngine::ReplicatedGraphiteMergeTree),
+            "SharedMergeTree" => Ok(ClickHouseEngine::SharedMergeTree),
+            "SharedReplacingMergeTree" => {
+                let delete_column = config.common.delete_column.clone();
+                Ok(ClickHouseEngine::SharedReplacingMergeTree(delete_column))
+            }
+            "SharedSummingMergeTree" => Ok(ClickHouseEngine::SharedSummingMergeTree),
+            "SharedAggregatingMergeTree" => Ok(ClickHouseEngine::SharedAggregatingMergeTree),
+            // SharedVersionedCollapsingMergeTree("a","b",sign_name,"c")
+            "SharedVersionedCollapsingMergeTree" => {
+                let sign_name = engine_name
+                    .create_table_query
+                    .split("SharedVersionedCollapsingMergeTree(")
+                    .last()
+                    .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                    .split(',')
+                    .rev()
+                    .nth(1)
+                    .ok_or_else(|| SinkError::ClickHouse("must have index 1".to_string()))?
+                    .trim()
+                    .to_string();
+                Ok(ClickHouseEngine::SharedVersionedCollapsingMergeTree(
+                    sign_name,
+                ))
+            }
+            // SharedCollapsingMergeTree("a","b",sign_name)
+            "SharedCollapsingMergeTree" => {
+                let sign_name = engine_name
+                    .create_table_query
+                    .split("SharedCollapsingMergeTree(")
+                    .last()
+                    .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                    .split(')')
+                    .next()
+                    .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
+                    .split(',')
+                    .last()
+                    .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                    .trim()
+                    .to_string();
+                Ok(ClickHouseEngine::SharedCollapsingMergeTree(sign_name))
+            }
+            "SharedGraphiteMergeTree" => Ok(ClickHouseEngine::SharedGraphiteMergeTree),
             _ => Err(SinkError::ClickHouse(format!(
                 "Cannot find clickhouse engine {:?}",
                 engine_name.engine
@@ -452,13 +526,18 @@ impl Sink for ClickHouseSink {
 
         let (clickhouse_column, clickhouse_engine) =
             query_column_engine_from_ck(client, &self.config).await?;
+        if clickhouse_engine.is_shared_tree() {
+            risingwave_common::license::Feature::ClickHouseSharedEngine
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
 
         if !self.is_append_only
             && !clickhouse_engine.is_collapsing_engine()
             && !clickhouse_engine.is_delete_replacing_engine()
         {
             return match clickhouse_engine {
-                ClickHouseEngine::ReplicatedReplacingMergeTree(None) | ClickHouseEngine::ReplacingMergeTree(None) =>  {
+                ClickHouseEngine::ReplicatedReplacingMergeTree(None) | ClickHouseEngine::ReplacingMergeTree(None) | ClickHouseEngine::SharedReplacingMergeTree(None) =>  {
                     Err(SinkError::ClickHouse("To enable upsert with a `ReplacingMergeTree`, you must set a `clickhouse.delete.column` to the UInt8 column in ClickHouse used to signify deletes. See https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/replacingmergetree#is_deleted for more information".to_owned()))
                 }
                 _ => Err(SinkError::ClickHouse("If you want to use upsert, please use either `VersionedCollapsingMergeTree`, `CollapsingMergeTree` or the `ReplacingMergeTree` in ClickHouse".to_owned()))

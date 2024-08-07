@@ -30,8 +30,13 @@ Duplicate `.vscode/settings.json.example` to `.vscode/settings.json` to enable r
 
 ## Bump toolchain
 
-The version of the toolchain is specified in `rust-toolchain` file under current directory.
-It does not have to be exactly the same as the one used to build RisingWave, but it should be close enough to avoid compile errors.
+The version of the toolchain is specified in `rust-toolchain` file under current directory. It will be used to build the lints, and also be used by `dylint` to compile RisingWave, instead of the root-level `rust-toolchain`.
+
+So the chosen toolchain needs to
+1. be close enough to the root-level `rust-toolchain` to make RisingWave compile. It does not have to be exactly the same version though.
+2. be close enough to the dependency `clippy_utils`'s corresponding `rust-toolchain` in the Clippy's repo.
+
+(Note: `clippy_utils` depends on rustc's internal unstable API. When rustc has breaking changes, the `rust` repo's Clippy will be updated. And then it's [synced back to the Clippy repo bi-weekly](https://doc.rust-lang.org/clippy/development/infrastructure/sync.html#syncing-changes-between-clippy-and-rust-langrust). So ideally we can use `clippy_utils` in the rust repo corresponding to our root-level nightly version, but that repo is too large. Perhaps we can also consider copy the code out to workaround this problem.)
 
 The information below can be helpful in finding the appropriate version to bump to.
 
