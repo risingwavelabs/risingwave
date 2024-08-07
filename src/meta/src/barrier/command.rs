@@ -106,7 +106,7 @@ pub struct ReplaceTablePlan {
 }
 
 impl ReplaceTablePlan {
-    fn actor_changes(&self) -> HashMap<FragmentId, CommandFragmentChanges> {
+    fn fragment_changes(&self) -> HashMap<FragmentId, CommandFragmentChanges> {
         let mut fragment_changes = HashMap::new();
         for fragment in self.new_table_fragments.fragments.values() {
             let fragment_change = CommandFragmentChanges::NewFragment(InflightFragmentInfo {
@@ -327,7 +327,7 @@ impl Command {
                     .collect();
 
                 if let Some(plan) = replace_table {
-                    let extra_change = plan.actor_changes();
+                    let extra_change = plan.fragment_changes();
                     changes.extend(extra_change);
                 }
 
@@ -360,7 +360,7 @@ impl Command {
                     })
                     .collect(),
             ),
-            Command::ReplaceTable(plan) => Some(plan.actor_changes()),
+            Command::ReplaceTable(plan) => Some(plan.fragment_changes()),
             Command::SourceSplitAssignment(_) => None,
             Command::Throttle(_) => None,
             Command::CreateSubscription { .. } => None,
