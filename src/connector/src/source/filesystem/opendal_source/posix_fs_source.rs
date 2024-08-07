@@ -14,7 +14,7 @@
 
 use std::marker::PhantomData;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::Fs;
 use opendal::Operator;
@@ -35,13 +35,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
 
         builder.root(&posix_fs_properties.root);
 
-        let op: Operator = Operator::new(builder)
-            .map_err(|e| {
-                anyhow!(
-                    "Fail to create posix fs source, please check your fs config. {}",
-                    e.to_string()
-                )
-            })?
+        let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
             .finish();

@@ -14,7 +14,7 @@
 
 use std::marker::PhantomData;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::Gcs;
 use opendal::Operator;
@@ -45,13 +45,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         if let Some(service_account) = gcs_properties.service_account {
             builder.service_account(&service_account);
         }
-        let op: Operator = Operator::new(builder)
-            .map_err(|e| {
-                anyhow!(
-                    "Fail to create gcs source, please check gcs config. {}",
-                    e.to_string()
-                )
-            })?
+        let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
             .finish();

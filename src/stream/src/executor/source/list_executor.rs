@@ -99,6 +99,10 @@ impl<S: StateStore> FsListExecutor<S> {
                 .collect::<Vec<_>>();
 
             let res: Vec<(Op, OwnedRow)> = rows.into_iter().flatten().collect();
+            if res.is_empty(){
+                return Err(StreamExecutorError::connector_error(
+                    "The file in source cannot be listed. Please check the log to confirm whether the source configuration is correct."));
+            }
             Ok(StreamChunk::from_rows(
                 &res,
                 &[DataType::Varchar, DataType::Timestamptz, DataType::Int64],
