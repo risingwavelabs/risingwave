@@ -87,7 +87,7 @@ skipif in-memory
 query I
 select count(*) > 1 from mv;
 ----
-1000
+t
 
 ############## Cleanup
 
