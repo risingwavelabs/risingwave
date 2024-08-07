@@ -735,7 +735,7 @@
     create table t2 (a int, b numeric, y bigint);
     create table t3 (x int, b numeric, c bigint);
     select * from t1 union corresponding select * from t2 union all corresponding by (c) select * from t3;
-  binder_error: 'Invalid input syntax: Every column name in the corresponding column list shall be a column name of both left and right side query in a UNION operation. Column name `c` in the corresponding column list is not found in a query column list: ("a", "b").'
+  binder_error: 'Invalid input syntax: Column name `c` in CORRESPONDING BY is not found in a side of the UNION operation. It shall be included in both sides.'
 - name: test corresponding union error - duplicate names
   sql: |
     create table t1 (a int, b numeric, c bigint);

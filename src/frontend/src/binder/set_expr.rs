@@ -248,30 +248,20 @@ impl Binder {
         let mut corresponding_col_idx_l = vec![];
         let mut corresponding_col_idx_r = vec![];
 
-        fn corr_by_err(op: &SetOperator, col_name: &str, set_expr: &BoundSetExpr) -> Result<()> {
-            Err(ErrorCode::InvalidInputSyntax(format!(
-                "Every column name in the corresponding column list shall be a \
-                column name of both left and right side query in a {} operation. \
-                Column name `{}` in the corresponding column list is not found in a query column list: ({}).",
-                op,
-                col_name,
-                set_expr.schema().formatted_col_names(),
-            )).into())
-        }
-
         if let Some(column_list) = corresponding.column_list() {
             // The select list of the corresponding set operation should be in the order of <corresponding column list>
             for column in column_list {
                 let col_name = column.real_value();
-                if let Some(idx_l) = name2idx_l.get(&col_name) {
+                if let Some(idx_l) = name2idx_l.get(&col_name) && let Some(idx_r) = name2idx_l.get(&col_name){
                     corresponding_col_idx_l.push(*idx_l);
-                } else {
-                    corr_by_err(op, &col_name, left)?
-                }
-                if let Some(idx_r) = name2idx_r.get(&col_name) {
                     corresponding_col_idx_r.push(*idx_r);
                 } else {
-                    corr_by_err(op, &col_name, right)?
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "Column name `{}` in CORRESPONDING BY is not found in a side of the {} operation. \
+                        It shall be included in both sides.",
+                        col_name,
+                        op,
+                    )).into())
                 }
             }
         } else {

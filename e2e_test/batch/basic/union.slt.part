@@ -98,7 +98,7 @@ select * from t1 union corresponding by (vxx) select * from t2
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Invalid input syntax: Every column name in the corresponding column list shall be a column name of both left and right side query in a UNION operation. Column name `vxx` in the corresponding column list is not found in a query column list: ("v1", "v2", "v4").
+  Invalid input syntax: Column name `vxx` in CORRESPONDING BY is not found in a side of the UNION operation. It shall be included in both sides.
 
 
 statement ok
