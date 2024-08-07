@@ -33,13 +33,11 @@ use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam, SinkWriter,
 };
 
-/// The `FileSink` struct represents a file sink that uses the `OpendalSinkBackend` trait
-/// for its backend implementation.
+/// The `FileSink` struct represents a file sink that uses the `OpendalSinkBackend` trait for its backend implementation.
 ///
 /// # Type Parameters
 ///
-/// - S: The type parameter S represents the concrete implementation of the `OpendalSinkBackend`
-/// trait used by this file sink.
+/// - S: The type parameter S represents the concrete implementation of the `OpendalSinkBackend` trait used by this file sink.
 #[derive(Debug, Clone)]
 pub struct FileSink<S: OpendalSinkBackend> {
     pub(crate) op: Operator,
@@ -169,8 +167,8 @@ pub struct OpenDalSinkWriter {
 /// # Variants
 ///
 /// - `ParquetFileWriter`: Represents a Parquet file writer using the `AsyncArrowWriter<W>`
-/// for writing data to a Parquet file. It accepts an implementation of W: `AsyncWrite` + `Unpin` + `Send`
-/// as the underlying writer. In this case, the `OpendalWriter` serves as the underlying writer.
+///   for writing data to a Parquet file. It accepts an implementation of W: `AsyncWrite` + `Unpin` + `Send`
+///   as the underlying writer. In this case, the `OpendalWriter` serves as the underlying writer.
 ///
 /// The choice of writer used during the actual writing process depends on the encode type of the sink.
 enum FileWriterEnum {
