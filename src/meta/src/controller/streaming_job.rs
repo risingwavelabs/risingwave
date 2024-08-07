@@ -1214,12 +1214,22 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
+        {
+            let job = streaming_job::ActiveModel {
+                job_id: Set(source_id),
+                job_status: Set(JobStatus::Created),
+                ..Default::default()
+            };
+            job.update(&txn).await?;
+        }
+
         let source = Source::find_by_id(source_id)
             .one(&txn)
             .await?
             .ok_or_else(|| {
                 MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
             })?;
+
         let streaming_job_ids: Vec<ObjectId> =
             if let Some(table_id) = source.optional_associated_table_id {
                 vec![table_id]
