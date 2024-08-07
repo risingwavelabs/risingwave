@@ -529,7 +529,7 @@ impl CatalogController {
                 object::Column::DatabaseId,
             ])
             .join(JoinType::InnerJoin, object::Relation::Table.def())
-            .filter(table::Column::BelongsToJobId.is_in(internal_table_ids.clone()))
+            .filter(table::Column::BelongsToJobId.eq(job_id))
             .into_partial_model()
             .all(&txn)
             .await?;
@@ -565,7 +565,7 @@ impl CatalogController {
             .flatten()
         {
             let err = if is_cancelled {
-                MetaError::cancelled(format!("stremaing job {job_id} is cancelled"))
+                MetaError::cancelled(format!("streaming job {job_id} is cancelled"))
             } else {
                 MetaError::catalog_id_not_found(
                     "stream job",
