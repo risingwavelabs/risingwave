@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::fmt::Formatter;
 use std::sync::Arc;
 
 use futures::future::try_join_all;
@@ -33,9 +34,9 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, BarrierMutation, CombinedMutation, CreateSubscriptionMutation, Dispatcher,
-    Dispatchers, DropSubscriptionMutation, PauseMutation, ResumeMutation,
-    SourceChangeSplitMutation, StopMutation, StreamActor, ThrottleMutation, UpdateMutation,
+    AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers,
+    DropSubscriptionsMutation, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
+    StopMutation, StreamActor, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use thiserror_ext::AsReport;
@@ -278,7 +279,7 @@ pub enum Command {
         retention_second: u64,
     },
 
-    /// `DropSubscription` command generates a `DropSubscriptionMutation` to notify
+    /// `DropSubscription` command generates a `DropSubscriptionsMutation` to notify
     /// materialize executor to stop storing old value when there is no
     /// subscription depending on it.
     DropSubscription {
@@ -443,6 +444,17 @@ pub struct CommandContext {
     pub _span: tracing::Span,
 }
 
+impl std::fmt::Debug for CommandContext {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CommandContext")
+            .field("prev_epoch", &self.prev_epoch.value().0)
+            .field("curr_epoch", &self.curr_epoch.value().0)
+            .field("kind", &self.kind)
+            .field("command", &self.command)
+            .finish()
+    }
+}
+
 impl CommandContext {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
@@ -554,6 +566,7 @@ impl CommandContext {
                         actor_splits,
                         // If the cluster is already paused, the new actors should be paused too.
                         pause: self.current_paused_reason.is_some(),
+                        subscriptions_to_add: Default::default(),
                     }));
 
                     if let Some(ReplaceTablePlan {
@@ -748,16 +761,24 @@ impl CommandContext {
                     upstream_mv_table_id,
                     subscription_id,
                     ..
-                } => Some(Mutation::CreateSubscription(CreateSubscriptionMutation {
-                    upstream_mv_table_id: upstream_mv_table_id.table_id,
-                    subscription_id: *subscription_id,
+                } => Some(Mutation::Add(AddMutation {
+                    actor_dispatchers: Default::default(),
+                    added_actors: vec![],
+                    actor_splits: Default::default(),
+                    pause: false,
+                    subscriptions_to_add: vec![SubscriptionUpstreamInfo {
+                        upstream_mv_table_id: upstream_mv_table_id.table_id,
+                        subscriber_id: *subscription_id,
+                    }],
                 })),
                 Command::DropSubscription {
                     upstream_mv_table_id,
                     subscription_id,
-                } => Some(Mutation::DropSubscription(DropSubscriptionMutation {
-                    upstream_mv_table_id: upstream_mv_table_id.table_id,
-                    subscription_id: *subscription_id,
+                } => Some(Mutation::DropSubscriptions(DropSubscriptionsMutation {
+                    info: vec![SubscriptionUpstreamInfo {
+                        subscriber_id: *subscription_id,
+                        upstream_mv_table_id: upstream_mv_table_id.table_id,
+                    }],
                 })),
             };
 

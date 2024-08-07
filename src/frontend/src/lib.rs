@@ -25,7 +25,6 @@
 #![feature(assert_matches)]
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
-#![feature(lazy_cell)]
 #![feature(macro_metavar_expr)]
 #![feature(min_specialization)]
 #![feature(extend_one)]

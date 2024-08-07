@@ -46,7 +46,10 @@ macro_rules! for_all_features {
             { TestPaid,             Paid,       "A dummy feature that's only available on paid tier for testing purposes." },
             { TimeTravel,           Paid,       "Query historical data within the retention period."},
             { GlueSchemaRegistry,   Paid,       "Use Schema Registry from AWS Glue rather than Confluent." },
+            { ClickHouseSharedEngine,Paid,      "Delivering data to Shared tree on clickhouse cloud"},
             { SecretManagement,     Paid,       "Secret management." },
+            { CdcTableSchemaMap,    Paid,       "Automatically map upstream schema to CDC Table."},
+            { SqlServerSink,        Paid,       "Sink data from RisingWave to SQL Server." },
             { CdcAutoSchemaChange,  Paid,       "Auto replicate upstream DDL to CDC Table." },
         }
     };
@@ -84,9 +87,9 @@ for_all_features!(def_feature);
 #[derive(Debug, Error)]
 pub enum FeatureNotAvailable {
     #[error(
-        "feature {:?} is only available for tier {:?} and above, while the current tier is {:?}\n\n\
+    "feature {:?} is only available for tier {:?} and above, while the current tier is {:?}\n\n\
         Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.",
-        feature, feature.min_tier(), current_tier,
+    feature, feature.min_tier(), current_tier,
     )]
     InsufficientTier {
         feature: Feature,
