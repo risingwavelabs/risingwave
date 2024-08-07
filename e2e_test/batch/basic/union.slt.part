@@ -94,7 +94,7 @@ select * from t1 union corresponding by (v4) select * from t2
 
 statement error
 select * from t1 union corresponding by (vxx) select * from t2
----
+----
 db error: ERROR: Failed to run the query
 
 Caused by:
@@ -106,7 +106,7 @@ create table txx (vxx int);
 
 statement error
 select * from t1 union corresponding select * from txx
----
+----
 db error: ERROR: Failed to run the query
 
 Caused by:
