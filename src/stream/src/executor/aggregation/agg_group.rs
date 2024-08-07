@@ -68,6 +68,16 @@ impl Strategy for AlwaysOutput {
                 // Generate output no matter whether current row count is 0 or not.
                 Some(RecordType::Insert)
             }
+            // NOTE(kwannoel): We always output, even if the update is a no-op.
+            // e.g. the following will still be emitted downstream:
+            // ```
+            // U- 1
+            // U+ 1
+            // ```
+            // This is to support `approx_percentile` via `row_merge`, which requires
+            // both the lhs and rhs to always output updates per epoch, or not all.
+            // Otherwise we are unable to construct a full row, if only one side updates,
+            // as the `row_merge` executor is stateless.
             Some(_prev_outputs) => Some(RecordType::Update),
         }
     }
