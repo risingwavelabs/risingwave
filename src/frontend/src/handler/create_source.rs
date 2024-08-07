@@ -1160,8 +1160,8 @@ pub fn validate_compatibility(
             None => {
                 // Build a random slot name with UUID
                 // e.g. "rw_cdc_f9a3567e6dd54bf5900444c8b1c03815"
-                let uuid = uuid::Uuid::new_v4().to_string().replace('-', "");
-                props.insert("slot.name".into(), format!("rw_cdc_{}", uuid));
+                let uuid = uuid::Uuid::new_v4();
+                props.insert("slot.name".into(), format!("rw_cdc_{}", uuid.simple()));
             }
             Some(slot_name) => {
                 // please refer to
