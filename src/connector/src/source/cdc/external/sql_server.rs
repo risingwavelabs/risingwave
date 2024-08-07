@@ -24,10 +24,8 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use serde_derive::{Deserialize, Serialize};
-use tiberius::error::Error;
 use tiberius::{ColumnType, Config, Query, QueryItem};
 use tokio::net::TcpStream;
-use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::{sql_server_row_to_owned_row, ScalarImplTiberiusWrapper};
@@ -98,29 +96,7 @@ impl SqlServerExternalTable {
         let tcp = TcpStream::connect(client_config.get_addr()).await?;
         tcp.set_nodelay(true)?;
 
-        let mut client: tiberius::Client<Compat<TcpStream>> =
-            match tiberius::Client::connect(client_config, tcp.compat_write()).await {
-                // Connection successful.
-                Ok(client) => Ok(client),
-                // The server wants us to redirect to a different address
-                Err(Error::Routing { host, port }) => {
-                    let mut client_config = Config::new();
-
-                    client_config.host(&host);
-                    client_config.port(port);
-                    client_config.authentication(tiberius::AuthMethod::sql_server(
-                        &config.username,
-                        &config.password,
-                    ));
-
-                    let tcp = TcpStream::connect(client_config.get_addr()).await?;
-                    tcp.set_nodelay(true)?;
-
-                    // we should not have more than one redirect, so we'll short-circuit here.
-                    tiberius::Client::connect(client_config, tcp.compat_write()).await
-                }
-                Err(e) => Err(e),
-            }?;
+        let mut client = SqlServerClient::new_with_config(client_config).await?;
 
         let mut column_descs = vec![];
         let mut pk_names = vec![];
@@ -134,7 +110,7 @@ impl SqlServerExternalTable {
                 }),
             ));
 
-            let mut stream = sql.query(&mut client).await?;
+            let mut stream = sql.query(&mut client.inner_client).await?;
             while let Some(item) = stream.try_next().await? {
                 match item {
                     QueryItem::Metadata(meta) => {
@@ -168,7 +144,7 @@ impl SqlServerExternalTable {
                 config.schema, config.table,
             ));
 
-            let mut stream = sql.query(&mut client).await?;
+            let mut stream = sql.query(&mut client.inner_client).await?;
             while let Some(item) = stream.try_next().await? {
                 match item {
                     QueryItem::Metadata(_) => {}
