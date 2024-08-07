@@ -130,6 +130,11 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(env, r#"SQLCMDUSER="{user}""#,).unwrap();
                 writeln!(env, r#"SQLCMDPASSWORD="{password}""#,).unwrap();
                 writeln!(env, r#"SQLCMDDBNAME="{database}""#,).unwrap();
+                writeln!(
+                    env,
+                    r#"RISEDEV_SQLSERVER_WITH_OPTIONS_COMMON="connector='sqlserver-cdc',hostname='{host}',port='{port}',username='{user}',password='{password}',database.name='{database}'""#,
+                )
+                .unwrap();
             }
             _ => {}
         }
