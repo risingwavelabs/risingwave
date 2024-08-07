@@ -754,14 +754,26 @@ impl FragmentManager {
             for actor in &mut fragment.actors {
                 visit_stream_node_cont_mut(actor.nodes.as_mut().unwrap(), |node| {
                     if let Some(NodeBody::Union(_)) = node.node_body {
-                        node.input.retain_mut(|input| {
-                            if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body
-                                && !all_fragment_ids.contains(&merge_node.upstream_fragment_id)
+                        node.input.retain_mut(|input| match &mut input.node_body {
+                            // for old version sink into table
+                            Some(NodeBody::Merge(merge_node))
+                                if !all_fragment_ids.contains(&merge_node.upstream_fragment_id) =>
                             {
                                 false
-                            } else {
-                                true
                             }
+
+                            // for new version sink into table with project
+                            Some(NodeBody::Project(_)) => {
+                                if let Some(NodeBody::Merge(merge_node)) =
+                                    input.input.iter_mut().exactly_one().expect("project of the sink input for the target table should have only one merge")
+                                    && !all_fragment_ids.contains(&merge_node.upstream_fragment_id)
+                                {
+                                    false
+                                } else {
+                                    true
+                                }
+                            }
+                            _ => true,
                         });
                     }
                     true
