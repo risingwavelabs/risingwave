@@ -135,6 +135,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::Cot
             | Type::Asin
             | Type::Acos
+            | Type::Acosd
             | Type::Atan
             | Type::Atan2
             | Type::Sqrt

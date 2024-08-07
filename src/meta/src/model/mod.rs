@@ -207,7 +207,8 @@ macro_rules! for_all_metadata_models {
     ($macro:ident) => {
         $macro! {
             // These items should be included in a meta snapshot.
-            // So be sure to update meta backup/restore when adding new items.
+            // Make sure to update the meta backup&restore methods accordingly when adding new items,
+            // referring to https://github.com/risingwavelabs/risingwave/pull/15371/commits/c5a75320845a38cfb43241ddee16fd5c0e47833b
             { risingwave_pb::hummock::HummockVersionStats },
             { crate::hummock::model::CompactionGroup },
             { risingwave_pb::catalog::Database },
@@ -462,16 +463,20 @@ enum BTreeMapOp<V> {
 /// are stored in `staging`. On `commit`, it will apply the changes stored in `staging` to the in
 /// memory btree map. When serve `get` and `get_mut`, it merges the value stored in `staging` and
 /// `tree_ref`.
-pub struct BTreeMapTransaction<'a, K: Ord, V> {
+pub struct BTreeMapTransactionInner<K: Ord, V, P: DerefMut<Target = BTreeMap<K, V>>> {
     /// A reference to the original `BTreeMap`. All access to this field should be immutable,
     /// except when we commit the staging changes to the original map.
-    tree_ref: &'a mut BTreeMap<K, V>,
+    tree_ref: P,
     /// Store all the staging changes that will be applied to the original map on commit
     staging: BTreeMap<K, BTreeMapOp<V>>,
 }
 
-impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
-    pub fn new(tree_ref: &'a mut BTreeMap<K, V>) -> BTreeMapTransaction<'a, K, V> {
+pub type BTreeMapTransaction<'a, K, V> = BTreeMapTransactionInner<K, V, &'a mut BTreeMap<K, V>>;
+
+impl<K: Ord + Debug, V: Clone, P: DerefMut<Target = BTreeMap<K, V>>>
+    BTreeMapTransactionInner<K, V, P>
+{
+    pub fn new(tree_ref: P) -> BTreeMapTransactionInner<K, V, P> {
         Self {
             tree_ref,
             staging: BTreeMap::default(),
@@ -481,7 +486,7 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
     /// Start a `BTreeMapEntryTransaction` when the `key` exists
     #[allow(dead_code)]
     pub fn new_entry_txn(&mut self, key: K) -> Option<BTreeMapEntryTransaction<'_, K, V>> {
-        BTreeMapEntryTransaction::new(self.tree_ref, key, None)
+        BTreeMapEntryTransaction::new(&mut self.tree_ref, key, None)
     }
 
     /// Start a `BTreeMapEntryTransaction`. If the `key` does not exist, the the `default_val` will
@@ -492,17 +497,17 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
         key: K,
         default_val: V,
     ) -> BTreeMapEntryTransaction<'_, K, V> {
-        BTreeMapEntryTransaction::new(self.tree_ref, key, Some(default_val))
+        BTreeMapEntryTransaction::new(&mut self.tree_ref, key, Some(default_val))
             .expect("default value is provided and should return `Some`")
     }
 
     /// Start a `BTreeMapEntryTransaction` that inserts the `val` into `key`.
     pub fn new_entry_insert_txn(&mut self, key: K, val: V) -> BTreeMapEntryTransaction<'_, K, V> {
-        BTreeMapEntryTransaction::new_insert(self.tree_ref, key, val)
+        BTreeMapEntryTransaction::new_insert(&mut self.tree_ref, key, val)
     }
 
     pub fn tree_ref(&self) -> &BTreeMap<K, V> {
-        self.tree_ref
+        &self.tree_ref
     }
 
     /// Get the value of the provided key by merging the staging value and the original value
@@ -578,7 +583,7 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
         }
     }
 
-    pub fn commit_memory(self) {
+    pub fn commit_memory(mut self) {
         // Apply each op stored in the staging to original tree.
         for (k, op) in self.staging {
             match op {
@@ -593,14 +598,16 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
     }
 }
 
-impl<'a, K: Ord + Debug, V: Clone> InMemValTransaction for BTreeMapTransaction<'a, K, V> {
+impl<K: Ord + Debug, V: Clone, P: DerefMut<Target = BTreeMap<K, V>>> InMemValTransaction
+    for BTreeMapTransactionInner<K, V, P>
+{
     fn commit(self) {
         self.commit_memory();
     }
 }
 
-impl<'a, K: Ord + Debug, V: Transactional<TXN> + Clone, TXN> ValTransaction<TXN>
-    for BTreeMapTransaction<'a, K, V>
+impl<K: Ord + Debug, V: Transactional<TXN> + Clone, P: DerefMut<Target = BTreeMap<K, V>>, TXN>
+    ValTransaction<TXN> for BTreeMapTransactionInner<K, V, P>
 {
     async fn apply_to_txn(&self, txn: &mut TXN) -> MetadataModelResult<()> {
         // Add the staging operation to txn
@@ -693,6 +700,76 @@ impl<'a, K: Ord, V: PartialEq + Transactional<TXN>, TXN> ValTransaction<TXN>
             self.new_value.upsert_in_transaction(txn).await?
         }
         Ok(())
+    }
+}
+
+impl<T: InMemValTransaction> InMemValTransaction for Option<T> {
+    fn commit(self) {
+        if let Some(inner) = self {
+            inner.commit();
+        }
+    }
+}
+
+impl<T: ValTransaction<TXN>, TXN> ValTransaction<TXN> for Option<T> {
+    async fn apply_to_txn(&self, txn: &mut TXN) -> MetadataModelResult<()> {
+        if let Some(inner) = &self {
+            inner.apply_to_txn(txn).await?;
+        }
+        Ok(())
+    }
+}
+
+pub struct DerefMutForward<
+    Inner,
+    Target,
+    P: DerefMut<Target = Inner>,
+    F: Fn(&Inner) -> &Target,
+    FMut: Fn(&mut Inner) -> &mut Target,
+> {
+    ptr: P,
+    f: F,
+    f_mut: FMut,
+}
+
+impl<
+        Inner,
+        Target,
+        P: DerefMut<Target = Inner>,
+        F: Fn(&Inner) -> &Target,
+        FMut: Fn(&mut Inner) -> &mut Target,
+    > DerefMutForward<Inner, Target, P, F, FMut>
+{
+    pub fn new(ptr: P, f: F, f_mut: FMut) -> Self {
+        Self { ptr, f, f_mut }
+    }
+}
+
+impl<
+        Inner,
+        Target,
+        P: DerefMut<Target = Inner>,
+        F: Fn(&Inner) -> &Target,
+        FMut: Fn(&mut Inner) -> &mut Target,
+    > Deref for DerefMutForward<Inner, Target, P, F, FMut>
+{
+    type Target = Target;
+
+    fn deref(&self) -> &Self::Target {
+        (self.f)(&self.ptr)
+    }
+}
+
+impl<
+        Inner,
+        Target,
+        P: DerefMut<Target = Inner>,
+        F: Fn(&Inner) -> &Target,
+        FMut: Fn(&mut Inner) -> &mut Target,
+    > DerefMut for DerefMutForward<Inner, Target, P, F, FMut>
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        (self.f_mut)(&mut self.ptr)
     }
 }
 

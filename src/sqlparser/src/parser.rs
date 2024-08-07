@@ -31,7 +31,8 @@ use crate::ast::*;
 use crate::keywords::{self, Keyword};
 use crate::parser_v2;
 use crate::parser_v2::{
-    dollar_quoted_string, keyword, literal_i64, literal_uint, single_quoted_string, ParserExt as _,
+    dollar_quoted_string, keyword, literal_i64, literal_uint, single_quoted_string, token_number,
+    ParserExt as _,
 };
 use crate::tokenizer::*;
 
@@ -609,7 +610,8 @@ impl Parser<'_> {
                 Keyword::ARRAY if self.peek_token() == Token::LBracket => self.parse_array_expr(),
                 // `LEFT` and `RIGHT` are reserved as identifier but okay as function
                 Keyword::LEFT | Keyword::RIGHT => {
-                    self.parse_function(ObjectName(vec![w.to_ident()?]))
+                    *self = checkpoint;
+                    self.parse_function()
                 }
                 Keyword::OPERATOR if self.peek_token().token == Token::LParen => {
                     let op = UnaryOperator::PGQualified(Box::new(self.parse_qualified_operator()?));
@@ -643,24 +645,15 @@ impl Parser<'_> {
                 // Here `w` is a word, check if it's a part of a multi-part
                 // identifier, a function call, or a simple identifier:
                 _ => match self.peek_token().token {
-                    Token::LParen | Token::Period => {
-                        let mut id_parts: Vec<Ident> = vec![w.to_ident()?];
-                        while self.consume_token(&Token::Period) {
-                            let ckpt = *self;
-                            let token = self.next_token();
-                            match token.token {
-                                Token::Word(w) => id_parts.push(w.to_ident()?),
-                                _ => {
-                                    *self = ckpt;
-                                    return self.expected("an identifier or a '*' after '.'");
-                                }
-                            }
-                        }
-
-                        if self.peek_token().token == Token::LParen {
-                            self.parse_function(ObjectName(id_parts))
+                    Token::LParen | Token::Period | Token::Colon => {
+                        *self = checkpoint;
+                        if let Ok(object_name) = self.parse_object_name()
+                            && !matches!(self.peek_token().token, Token::LParen | Token::Colon)
+                        {
+                            Ok(Expr::CompoundIdentifier(object_name.0))
                         } else {
-                            Ok(Expr::CompoundIdentifier(id_parts))
+                            *self = checkpoint;
+                            self.parse_function()
                         }
                     }
                     _ => Ok(Expr::Identifier(w.to_ident()?)),
@@ -819,7 +812,16 @@ impl Parser<'_> {
         Ok(QualifiedOperator { schema, name })
     }
 
-    pub fn parse_function(&mut self, name: ObjectName) -> PResult<Expr> {
+    /// Parse a function call.
+    pub fn parse_function(&mut self) -> PResult<Expr> {
+        // [aggregate:]
+        let scalar_as_agg = if self.parse_keyword(Keyword::AGGREGATE) {
+            self.expect_token(&Token::Colon)?;
+            true
+        } else {
+            false
+        };
+        let name = self.parse_object_name()?;
         self.expect_token(&Token::LParen)?;
         let distinct = self.parse_all_or_distinct()?;
         let (args, order_by, variadic) = self.parse_optional_args()?;
@@ -875,6 +877,7 @@ impl Parser<'_> {
         };
 
         Ok(Expr::Function(Function {
+            scalar_as_agg,
             name,
             args,
             variadic,
@@ -1807,6 +1810,18 @@ impl Parser<'_> {
     pub fn expected_at<T>(&mut self, checkpoint: Self, expected: &str) -> PResult<T> {
         *self = checkpoint;
         self.expected(expected)
+    }
+
+    /// Check if the expected match is the next token.
+    /// The equality check is case-insensitive.
+    pub fn parse_word(&mut self, expected: &str) -> bool {
+        match self.peek_token().token {
+            Token::Word(w) if w.value.to_uppercase() == expected => {
+                self.next_token();
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Look for an expected keyword and consume it if it exists
@@ -3075,10 +3090,10 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
-            } else if let Some(rate_limit) = self.parse_alter_streaming_rate_limit()? {
-                AlterTableOperation::SetStreamingRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(true)? {
+                AlterTableOperation::SetSourceRateLimit { rate_limit }
             } else {
-                return self.expected("SCHEMA/PARALLELISM/STREAMING_RATE_LIMIT after SET");
+                return self.expected("SCHEMA/PARALLELISM/SOURCE_RATE_LIMIT after SET");
             }
         } else if self.parse_keyword(Keyword::DROP) {
             let _ = self.parse_keyword(Keyword::COLUMN);
@@ -3130,14 +3145,37 @@ impl Parser<'_> {
         })
     }
 
-    /// STREAMING_RATE_LIMIT = default | NUMBER
-    /// STREAMING_RATE_LIMIT TO default | NUMBER
-    pub fn parse_alter_streaming_rate_limit(&mut self) -> PResult<Option<i32>> {
-        if !self.parse_keyword(Keyword::STREAMING_RATE_LIMIT) {
+    /// BACKFILL_RATE_LIMIT = default | NUMBER
+    /// BACKFILL_RATE_LIMIT TO default | NUMBER
+    pub fn parse_alter_backfill_rate_limit(&mut self) -> PResult<Option<i32>> {
+        if !self.parse_word("BACKFILL_RATE_LIMIT") {
             return Ok(None);
         }
         if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
-            return self.expected("TO or = after ALTER TABLE SET STREAMING_RATE_LIMIT");
+            return self.expected("TO or = after ALTER TABLE SET BACKFILL_RATE_LIMIT");
+        }
+        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
+            -1
+        } else {
+            let s = self.parse_number_value()?;
+            if let Ok(n) = s.parse::<i32>() {
+                n
+            } else {
+                return self.expected("number or DEFAULT");
+            }
+        };
+        Ok(Some(rate_limit))
+    }
+
+    /// SOURCE_RATE_LIMIT = default | NUMBER
+    /// SOURCE_RATE_LIMIT TO default | NUMBER
+    pub fn parse_alter_source_rate_limit(&mut self, is_table: bool) -> PResult<Option<i32>> {
+        if !self.parse_word("SOURCE_RATE_LIMIT") {
+            return Ok(None);
+        }
+        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+            let ddl = if is_table { "TABLE" } else { "SOURCE" };
+            return self.expected(&format!("TO or = after ALTER {ddl} SET SOURCE_RATE_LIMIT"));
         }
         let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
             -1
@@ -3226,11 +3264,11 @@ impl Parser<'_> {
                     deferred,
                 }
             } else if materialized
-                && let Some(rate_limit) = self.parse_alter_streaming_rate_limit()?
+                && let Some(rate_limit) = self.parse_alter_backfill_rate_limit()?
             {
-                AlterViewOperation::SetStreamingRateLimit { rate_limit }
+                AlterViewOperation::SetBackfillRateLimit { rate_limit }
             } else {
-                return self.expected("SCHEMA/PARALLELISM/STREAMING_RATE_LIMIT after SET");
+                return self.expected("SCHEMA/PARALLELISM/BACKFILL_RATE_LIMIT after SET");
             }
         } else {
             return self.expected(&format!(
@@ -3351,8 +3389,8 @@ impl Parser<'_> {
                 AlterSourceOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
-            } else if let Some(rate_limit) = self.parse_alter_streaming_rate_limit()? {
-                AlterSourceOperation::SetStreamingRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(false)? {
+                AlterSourceOperation::SetSourceRateLimit { rate_limit }
             } else {
                 return self.expected("SCHEMA after SET");
             }
@@ -3366,7 +3404,7 @@ impl Parser<'_> {
             AlterSourceOperation::RefreshSchema
         } else {
             return self.expected(
-                "RENAME, ADD COLUMN, OWNER TO, SET or STREAMING_RATE_LIMIT after ALTER SOURCE",
+                "RENAME, ADD COLUMN, OWNER TO, SET or SOURCE_RATE_LIMIT after ALTER SOURCE",
             );
         };
 
@@ -3585,23 +3623,13 @@ impl Parser<'_> {
 
     /// Parse a map key string
     pub fn parse_map_key(&mut self) -> PResult<Expr> {
-        let checkpoint = *self;
-        let token = self.next_token();
-        match token.token {
-            Token::Word(Word {
-                value,
-                keyword: Keyword::NoKeyword,
-                ..
-            }) => {
-                if self.peek_token() == Token::LParen {
-                    return self.parse_function(ObjectName(vec![Ident::new_unchecked(value)]));
-                }
-                Ok(Expr::Value(Value::SingleQuotedString(value)))
-            }
-            Token::SingleQuotedString(s) => Ok(Expr::Value(Value::SingleQuotedString(s))),
-            Token::Number(s) => Ok(Expr::Value(Value::Number(s))),
-            _ => self.expected_at(checkpoint, "literal string, number or function"),
-        }
+        alt((
+            Self::parse_function,
+            single_quoted_string.map(|s| Expr::Value(Value::SingleQuotedString(s))),
+            token_number.map(|s| Expr::Value(Value::Number(s))),
+            fail.expect("literal string, number or function"),
+        ))
+        .parse_next(self)
     }
 
     /// Parse a SQL datatype (in the context of a CREATE TABLE statement for example) and convert

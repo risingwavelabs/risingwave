@@ -65,7 +65,7 @@ impl SplitEnumerator for PulsarSplitEnumerator {
             None => PulsarEnumeratorOffset::Earliest,
             _ => {
                 bail!(
-                    "properties `startup_mode` only support earliest and latest or leave it empty"
+                    "properties `startup_mode` only supports earliest and latest or leaving it empty"
                 );
             }
         };

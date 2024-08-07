@@ -21,6 +21,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     get_compaction_group_ids, get_table_compaction_group_id_mapping, BranchedSstInfo,
 };
 use risingwave_hummock_sdk::compaction_group::StateTableId;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
@@ -30,8 +31,7 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats, SstableInfo,
-    TableStats,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats, TableStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
@@ -60,6 +60,8 @@ pub struct Versioning {
     pub time_travel_snapshot_interval_counter: u64,
     /// Used to avoid the attempts to rewrite the same SST to meta store
     pub last_time_travel_snapshot_sst_ids: HashSet<HummockSstableId>,
+    /// Whether time travel is enabled during last commit epoch.
+    pub time_travel_toggle_check: bool,
 
     // Persistent states below
     pub hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
@@ -381,7 +383,7 @@ fn estimate_table_stats(sst: &SstableInfo) -> HashMap<u32, TableStats> {
     let mut changes: HashMap<u32, TableStats> = HashMap::default();
     let weighted_value =
         |value: i64| -> i64 { (value as f64 / sst.table_ids.len() as f64).ceil() as i64 };
-    let key_range = sst.key_range.as_ref().unwrap();
+    let key_range = &sst.key_range;
     let estimated_key_size: u64 = (key_range.left.len() + key_range.right.len()) as u64 / 2;
     let mut estimated_total_key_size = estimated_key_size * sst.total_key_count;
     if estimated_total_key_size > sst.uncompressed_file_size {
@@ -403,13 +405,13 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
+    use risingwave_hummock_sdk::key_range::KeyRange;
+    use risingwave_hummock_sdk::level::{Level, Levels};
+    use risingwave_hummock_sdk::sstable_info::SstableInfo;
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
-    use risingwave_pb::hummock::hummock_version::Levels;
     use risingwave_pb::hummock::write_limits::WriteLimit;
-    use risingwave_pb::hummock::{
-        HummockPinnedVersion, HummockVersionStats, KeyRange, Level, OverlappingLevel, SstableInfo,
-    };
+    use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats};
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::manager::context::ContextInfo;
@@ -441,12 +443,7 @@ mod tests {
     #[test]
     fn test_calc_new_write_limits() {
         let add_level_to_l0 = |levels: &mut Levels| {
-            levels
-                .l0
-                .as_mut()
-                .unwrap()
-                .sub_levels
-                .push(Level::default());
+            levels.l0.sub_levels.push(Level::default());
         };
         let set_sub_level_number_threshold_for_group_1 =
             |target_groups: &mut HashMap<CompactionGroupId, CompactionGroup>,
@@ -479,13 +476,7 @@ mod tests {
         .collect();
         let mut version: HummockVersion = Default::default();
         for group_id in 1..=3 {
-            version.levels.insert(
-                group_id,
-                Levels {
-                    l0: Some(OverlappingLevel::default()),
-                    ..Default::default()
-                },
-            );
+            version.levels.insert(group_id, Levels::default());
         }
         let new_write_limits =
             calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
@@ -540,11 +531,11 @@ mod tests {
     #[test]
     fn test_estimate_table_stats() {
         let sst = SstableInfo {
-            key_range: Some(KeyRange {
-                left: vec![1; 10],
-                right: vec![1; 20],
+            key_range: KeyRange {
+                left: vec![1; 10].into(),
+                right: vec![1; 20].into(),
                 ..Default::default()
-            }),
+            },
             table_ids: vec![1, 2, 3],
             total_key_count: 6000,
             uncompressed_file_size: 6_000_000,
@@ -572,7 +563,6 @@ mod tests {
                         table_infos: vec![sst.clone()],
                         ..Default::default()
                     }],
-                    l0: Some(Default::default()),
                     ..Default::default()
                 },
             );
@@ -602,11 +592,11 @@ mod tests {
     #[test]
     fn test_estimate_table_stats_large_key_range() {
         let sst = SstableInfo {
-            key_range: Some(KeyRange {
-                left: vec![1; 1000],
-                right: vec![1; 2000],
+            key_range: KeyRange {
+                left: vec![1; 1000].into(),
+                right: vec![1; 2000].into(),
                 ..Default::default()
-            }),
+            },
             table_ids: vec![1, 2, 3],
             total_key_count: 6000,
             uncompressed_file_size: 60_000,

@@ -21,7 +21,8 @@ macro_rules! for_all_classified_sources {
                 { Mysql },
                 { Postgres },
                 { Citus },
-                { Mongodb }
+                { Mongodb },
+                { SqlServer }
             },
             // other sources
             // todo: file source do not nest with mq source.

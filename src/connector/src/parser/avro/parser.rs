@@ -29,7 +29,7 @@ use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
 use crate::parser::util::bytes_from_url;
 use crate::parser::{
-    AccessBuilder, AvroProperties, EncodingProperties, EncodingType, MapHandling, SchemaLocation,
+    AccessBuilder, AvroProperties, EncodingProperties, MapHandling, SchemaLocation,
 };
 use crate::schema::schema_registry::{
     extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
@@ -55,18 +55,14 @@ impl AccessBuilder for AvroAccessBuilder {
 }
 
 impl AvroAccessBuilder {
-    pub fn new(config: AvroParserConfig, encoding_type: EncodingType) -> ConnectorResult<Self> {
+    pub fn new(config: AvroParserConfig) -> ConnectorResult<Self> {
         let AvroParserConfig {
             schema,
-            key_schema,
             writer_schema_cache,
             ..
         } = config;
         Ok(Self {
-            schema: match encoding_type {
-                EncodingType::Key => key_schema.context("Avro with empty key schema")?,
-                EncodingType::Value => schema,
-            },
+            schema,
             writer_schema_cache,
             value: None,
         })
@@ -91,7 +87,7 @@ impl AvroAccessBuilder {
     /// ## Confluent schema registry
     ///
     /// - In Kafka ([Confluent schema registry wire format](https://docs.confluent.io/platform/7.6/schema-registry/fundamentals/serdes-develop/index.html#wire-format)):
-    /// starts with 5 bytes`0x00{schema_id:08x}` followed by Avro binary encoding.
+    ///   starts with 5 bytes`0x00{schema_id:08x}` followed by Avro binary encoding.
     async fn parse_avro_value(&self, payload: &[u8]) -> ConnectorResult<Option<Value>> {
         // parse payload to avro value
         // if use confluent schema, get writer schema from confluent schema registry
@@ -148,7 +144,6 @@ impl AvroAccessBuilder {
 #[derive(Debug, Clone)]
 pub struct AvroParserConfig {
     schema: Arc<ResolvedAvroSchema>,
-    key_schema: Option<Arc<ResolvedAvroSchema>>,
     /// Writer schema is the schema used to write the data. When parsing Avro data, the exactly same schema
     /// must be used to decode the message, and then convert it with the reader schema.
     writer_schema_cache: WriterSchemaCache,
@@ -167,7 +162,6 @@ impl AvroParserConfig {
     pub async fn new(encoding_properties: EncodingProperties) -> ConnectorResult<Self> {
         let AvroProperties {
             schema_location,
-            enable_upsert,
             record_name,
             key_record_name,
             map_handling,
@@ -183,38 +177,21 @@ impl AvroParserConfig {
                 let client = Client::new(url, &client_config)?;
                 let resolver = ConfluentSchemaCache::new(client);
 
-                let subject_key = if enable_upsert {
-                    Some(get_subject_by_strategy(
-                        &name_strategy,
-                        topic.as_str(),
-                        key_record_name.as_deref(),
-                        true,
-                    )?)
-                } else {
-                    if let Some(name) = &key_record_name {
-                        bail!("unused FORMAT ENCODE option: key.message='{name}'");
-                    }
-                    None
-                };
+                if let Some(name) = &key_record_name {
+                    bail!("unused FORMAT ENCODE option: key.message='{name}'");
+                }
                 let subject_value = get_subject_by_strategy(
                     &name_strategy,
                     topic.as_str(),
                     record_name.as_deref(),
                     false,
                 )?;
-                tracing::debug!("infer key subject {subject_key:?}, value subject {subject_value}");
+                tracing::debug!("value subject {subject_value}");
 
                 Ok(Self {
                     schema: Arc::new(ResolvedAvroSchema::create(
                         resolver.get_by_subject(&subject_value).await?,
                     )?),
-                    key_schema: if let Some(subject_key) = subject_key {
-                        Some(Arc::new(ResolvedAvroSchema::create(
-                            resolver.get_by_subject(&subject_key).await?,
-                        )?))
-                    } else {
-                        None
-                    },
                     writer_schema_cache: WriterSchemaCache::Confluent(Arc::new(resolver)),
                     map_handling,
                 })
@@ -224,16 +201,12 @@ impl AvroParserConfig {
                 aws_auth_props,
             } => {
                 let url = handle_sr_list(schema_location.as_str())?;
-                if enable_upsert {
-                    bail!("avro upsert without schema registry is not supported");
-                }
                 let url = url.first().unwrap();
                 let schema_content = bytes_from_url(url, aws_auth_props.as_ref()).await?;
                 let schema = Schema::parse_reader(&mut schema_content.as_slice())
                     .context("failed to parse avro schema")?;
                 Ok(Self {
                     schema: Arc::new(ResolvedAvroSchema::create(Arc::new(schema))?),
-                    key_schema: None,
                     writer_schema_cache: WriterSchemaCache::File,
                     map_handling,
                 })
@@ -248,7 +221,6 @@ impl AvroParserConfig {
                 let schema = resolver.get_by_name(&schema_arn).await?;
                 Ok(Self {
                     schema: Arc::new(ResolvedAvroSchema::create(schema)?),
-                    key_schema: None,
                     writer_schema_cache: WriterSchemaCache::Glue(Arc::new(resolver)),
                     map_handling,
                 })

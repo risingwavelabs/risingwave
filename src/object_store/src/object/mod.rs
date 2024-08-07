@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![expect(
+    unexpected_cfgs,
+    reason = "feature(hdfs-backend) is banned https://github.com/risingwavelabs/risingwave/pull/7875"
+)]
+
 pub mod sim;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
@@ -390,12 +395,11 @@ impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
         let operation_type_str = operation_type.as_str();
         let data_len = data.len();
 
-        let res =
-            // TODO: we should avoid this special case after fully migrating to opeandal for s3.
-            self.inner
-                .write_bytes(data)
-                .verbose_instrument_await(operation_type_str)
-                .await;
+        let res = self
+            .inner
+            .write_bytes(data)
+            .verbose_instrument_await(operation_type_str)
+            .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
 

@@ -142,8 +142,8 @@ arrow-buffer-iceberg = { package = "arrow-buffer", version = "52" }
 arrow-cast-iceberg = { package = "arrow-cast", version = "52" }
 # TODO
 # After apache/iceberg-rust#411 is merged, we move to the upstream version.
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0c6e133e6f4655ff9ce4ad57b577dc7f692dd902" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0c6e133e6f4655ff9ce4ad57b577dc7f692dd902" }
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "24bd5869f2779a8b9786b5a6e1f9723844f5a82c" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "24bd5869f2779a8b9786b5a6e1f9723844f5a82c" }
 opendal = "0.47"
 arrow-array = "50"
 arrow-arith = "50"
@@ -155,7 +155,6 @@ arrow-select = "50"
 arrow-ord = "50"
 arrow-row = "50"
 arrow-udf-js = "0.3.1"
-arrow-udf-js-deno = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "fa36365" }
 arrow-udf-wasm = { version = "0.2.2", features = ["build"] }
 arrow-udf-python = "0.2"
 arrow-udf-flight = "0.1"
@@ -248,11 +247,16 @@ rw_iter_util = { path = "src/utils/iter_util" }
 [workspace.lints.rust]
 # `forbid` will also prevent the misuse of `#[allow(unused)]`
 unused_must_use = "forbid"
-future_incompatible = "warn"
-nonstandard_style = "warn"
-rust_2018_idioms = "warn"
+future_incompatible = { level = "warn", priority = -1 }
+nonstandard_style = { level = "warn", priority = -1 }
+rust_2018_idioms = { level = "warn", priority = -1 }
 # Backward compatibility is not important for an application.
 async_fn_in_trait = "allow"
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(madsim)',
+    'cfg(coverage)',
+    'cfg(dashboard_built)',
+] }
 
 [workspace.lints.clippy]
 uninlined_format_args = "allow"
@@ -282,17 +286,22 @@ private_intra_doc_links = "allow"
 # Explicit lints don't hurt, and sometimes rust-analyzer works better with explicit links.
 redundant_explicit_links = "allow"
 
+# Tweak built-in profiles and define custom profiles.
+# See `docs/dev/src/build-and-run/profiles.md` for detailed information.
 [profile.dev]
-lto = 'off'
+lto = "off"
 
 [profile.release]
 debug = "full"
+incremental = true
 split-debuginfo = "packed"
+lto = "off"
+
+[profile.production]
+inherits = "release"
+incremental = false
 lto = "thin"
 
-# The profile used for CI in main branch.
-# This profile inherits from the release profile, but turns on some checks and assertions for us to
-# better catch bugs in CI.
 [profile.ci-release]
 inherits = "release"
 incremental = false
@@ -302,9 +311,6 @@ split-debuginfo = "off"
 debug-assertions = true
 overflow-checks = true
 
-# The profile used for CI in pull requests.
-# External dependencies are built with optimization enabled, while crates in this workspace are built
-# with `dev` profile and full debug info. This is a trade-off between build time and e2e test time.
 [profile.ci-dev]
 inherits = "dev"
 incremental = false
@@ -318,14 +324,11 @@ opt-level = 3
 [profile.ci-dev.package."indextree"]
 opt-level = 3
 
-# The profile used for deterministic simulation tests in CI.
-# The simulator can only run single-threaded, so optimization is required to make the running time
-# reasonable. The optimization level is customized to speed up the build.
 [profile.ci-sim]
 inherits = "dev"
-opt-level = 2
 incremental = false
-debug = 1
+debug = "line-tables-only"
+opt-level = 2
 
 [patch.crates-io]
 # Patch third-party crates for deterministic simulation.
@@ -335,15 +338,6 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
-# patch to remove preserve_order from serde_json
-deno_core = { git = "https://github.com/bakjos/deno_core", rev = "9b241c6" }
-# patch to user reqwest 0.12.2
-deno_fetch = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_http = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_net = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_tls = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_web = { git = "https://github.com/bakjos/deno", rev = "787a232" }
-deno_websocket = { git = "https://github.com/bakjos/deno", rev = "787a232" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }
 

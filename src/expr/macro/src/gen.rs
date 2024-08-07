@@ -695,7 +695,7 @@ impl FunctionAttr {
                 use risingwave_expr::sig::{FuncSign, SigDataType, FuncBuilder};
 
                 FuncSign {
-                    name: risingwave_expr::aggregate::AggKind::#pb_type.into(),
+                    name: risingwave_pb::expr::agg_call::Type::#pb_type.into(),
                     inputs_type: vec![#(#args),*],
                     variadic: false,
                     ret_type: #ret,

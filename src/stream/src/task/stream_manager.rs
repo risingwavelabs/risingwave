@@ -277,6 +277,12 @@ impl LocalStreamManager {
             })
             .await
     }
+
+    pub async fn shutdown(&self) -> StreamResult<()> {
+        self.actor_op_tx
+            .send_and_await(|result_sender| LocalActorOperation::Shutdown { result_sender })
+            .await
+    }
 }
 
 impl LocalBarrierWorker {

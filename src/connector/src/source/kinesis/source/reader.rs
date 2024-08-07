@@ -91,7 +91,7 @@ impl SplitReader for KinesisSplitReader {
         if !matches!(start_position, KinesisOffset::Timestamp(_))
             && properties.timestamp_offset.is_some()
         {
-            bail!("scan.startup.mode need to be set to 'timestamp' if you want to start with a specific timestamp");
+            bail!("scan.startup.mode needs to be set to 'timestamp' if you want to start with a specific timestamp");
         }
 
         let stream_name = properties.common.stream_name.clone();
@@ -199,7 +199,7 @@ impl KinesisSplitReader {
                 }
                 Err(e) => {
                     let error = anyhow!(e).context(format!(
-                        "Kinesis got a unhandled error on stream {:?}, shard {:?}",
+                        "Kinesis got an unhandled error on stream {:?}, shard {:?}",
                         self.stream_name, self.shard_id
                     ));
                     tracing::error!(error = %error.as_report());

@@ -29,6 +29,7 @@ use arrow_schema_iceberg::{
 };
 use async_trait::async_trait;
 use iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
+use iceberg::spec::TableMetadata;
 use iceberg::table::Table as TableV2;
 use iceberg::{Catalog as CatalogV2, TableIdent};
 use icelake::catalog::{
@@ -578,6 +579,37 @@ impl IcebergConfig {
 
         catalog.load_table(&table_id).await.map_err(Into::into)
     }
+
+    pub async fn load_table_v2_with_metadata(
+        &self,
+        metadata: TableMetadata,
+    ) -> ConnectorResult<TableV2> {
+        match self.catalog_type() {
+            "storage" => {
+                let config = StorageCatalogConfig::builder()
+                    .warehouse(self.path.clone())
+                    .access_key(self.access_key.clone())
+                    .secret_key(self.secret_key.clone())
+                    .region(self.region.clone())
+                    .endpoint(self.endpoint.clone())
+                    .build();
+                let storage_catalog = storage_catalog::StorageCatalog::new(config)?;
+
+                let table_id = self
+                    .full_table_name_v2()
+                    .context("Unable to parse table name")?;
+
+                Ok(iceberg::table::Table::builder()
+                    .metadata(metadata)
+                    .identifier(table_id)
+                    .file_io(storage_catalog.file_io().clone())
+                    // Only support readonly table for storage catalog now.
+                    .readonly(true)
+                    .build())
+            }
+            _ => self.load_table_v2().await,
+        }
+    }
 }
 
 pub struct IcebergSink {
@@ -712,7 +744,7 @@ impl Sink for IcebergSink {
             self.param.clone(),
             writer_param.vnode_bitmap.ok_or_else(|| {
                 SinkError::Remote(anyhow!(
-                    "sink needs coordination should not have singleton input"
+                    "sink needs coordination and should not have singleton input"
                 ))
             })?,
             inner,
@@ -1028,7 +1060,7 @@ impl WriteResult {
             {
                 v
             } else {
-                bail!("iceberg sink metadata should be a object");
+                bail!("iceberg sink metadata should be an object");
             };
 
             let data_files: Vec<DataFile>;
@@ -1055,7 +1087,7 @@ impl WriteResult {
                     .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
                     .context("Failed to parse data file from json")?;
             } else {
-                bail!("icberg sink metadata should have data_files object");
+                bail!("Iceberg sink metadata should have data_files object");
             }
             Ok(Self {
                 data_files,
@@ -1155,7 +1187,7 @@ pub fn try_matches_arrow_schema(
 ) -> anyhow::Result<()> {
     if rw_schema.fields.len() != arrow_schema.fields().len() {
         bail!(
-            "Schema length not match, risingwave is {}, and iceberg is {}",
+            "Schema length mismatch, risingwave is {}, and iceberg is {}",
             rw_schema.fields.len(),
             arrow_schema.fields.len()
         );

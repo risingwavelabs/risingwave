@@ -1,0 +1,9 @@
+query T
+select aggregate:array_sum(v) from (values (3), (2), (1)) as t(v);
+----
+6
+
+query T
+select aggregate:array_sort(v) from (values (3), (2), (1)) as t(v);
+----
+{1,2,3}
