@@ -43,7 +43,7 @@ struct Inner {
 
     /// the selectivity threshold which should be in `[0,1]`. for the chunk with selectivity less
     /// than the threshold, the Project executor will construct a new chunk before expr evaluation,
-    materialize_selectivity_threshold: f64,
+    _materialize_selectivity_threshold: f64,
 
     /// Whether there are likely no-op updates in the output chunks, so that eliminating them with
     /// `StreamChunk::eliminate_adjacent_noop_update` could be beneficial.
@@ -58,7 +58,7 @@ impl ProjectExecutor {
         exprs: Vec<NonStrictExpression>,
         watermark_derivations: MultiMap<usize, usize>,
         nondecreasing_expr_indices: Vec<usize>,
-        materialize_selectivity_threshold: f64,
+        _materialize_selectivity_threshold: f64,
         noop_update_hint: bool,
     ) -> Self {
         let n_nondecreasing_exprs = nondecreasing_expr_indices.len();
@@ -70,7 +70,7 @@ impl ProjectExecutor {
                 watermark_derivations,
                 nondecreasing_expr_indices,
                 last_nondec_expr_values: vec![None; n_nondecreasing_exprs],
-                materialize_selectivity_threshold,
+                _materialize_selectivity_threshold,
                 noop_update_hint,
             },
         }
