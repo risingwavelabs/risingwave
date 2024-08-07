@@ -41,7 +41,7 @@ pub struct Model {
     pub version: i64,
     // `secret_ref` stores the mapping info mapping from property name to secret id and type.
     pub secret_ref: Option<SecretRef>,
-    pub rate_limit: Option<u32>,
+    pub rate_limit: Option<i32>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
