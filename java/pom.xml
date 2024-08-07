@@ -78,7 +78,7 @@
         <jackson.version>2.15.0</jackson.version>
         <spark_sql.version>3.3.1</spark_sql.version>
         <hadoop.version>3.4.0</hadoop.version>
-        <elasticsearch.version>7.17.19</elasticsearch.version>
+        <elasticsearch.version>7.17.23</elasticsearch.version>
         <opensearch.version>2.11.1</opensearch.version>
         <datastax.version>4.15.0</datastax.version>
         <flink.version>1.18.0</flink.version>
