@@ -25,12 +25,13 @@ use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{debug, info, warn};
 
 use crate::barrier::command::CommandContext;
+use crate::barrier::info::InflightGraphInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, SnapshotBackfillInfo, TracedEpoch,
 };
-use crate::manager::{InflightGraphInfo, WorkerId};
+use crate::manager::WorkerId;
 use crate::model::ActorId;
 use crate::MetaResult;
 
@@ -114,6 +115,22 @@ impl CreatingStreamingJobControl {
                 snapshot_backfill_actors,
             },
         }
+    }
+
+    pub(super) fn is_wait_on_worker(&self, worker_id: WorkerId) -> bool {
+        self.inflight_barrier_queue
+            .values()
+            .any(|epoch_state| epoch_state.node_to_collect.contains(&worker_id))
+            || {
+                match &self.status {
+                    CreatingStreamingJobStatus::ConsumingSnapshot { graph_info, .. }
+                    | CreatingStreamingJobStatus::ConsumingLogStore { graph_info, .. } => {
+                        graph_info.contains_worker(worker_id)
+                    }
+                    CreatingStreamingJobStatus::Finishing(_)
+                    | CreatingStreamingJobStatus::Finished(_) => false,
+                }
+            }
     }
 
     fn latest_epoch(&self) -> Option<u64> {
@@ -296,7 +313,7 @@ impl CreatingStreamingJobControl {
             CreatingStreamingJobStatus::ConsumingLogStore { graph_info } => {
                 let node_to_collect = control_stream_manager.inject_barrier(
                     Some(table_id),
-                    &command_ctx.info.node_map,
+                    &command_ctx.node_map,
                     if to_finish {
                         // erase the mutation on upstream except the last Finish command
                         command_ctx.to_mutation()

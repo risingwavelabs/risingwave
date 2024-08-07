@@ -48,7 +48,8 @@ use uuid::Uuid;
 
 use super::command::CommandContext;
 use super::{BarrierKind, GlobalBarrierManagerContext, TracedEpoch};
-use crate::manager::{InflightGraphInfo, MetaSrvEnv, WorkerId};
+use crate::barrier::info::InflightGraphInfo;
+use crate::manager::{MetaSrvEnv, WorkerId};
 use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
@@ -255,7 +256,7 @@ impl ControlStreamManager {
     ) -> MetaResult<HashSet<WorkerId>> {
         self.inject_barrier(
             None,
-            &command_ctx.info.node_map,
+            &command_ctx.node_map,
             command_ctx.to_mutation(),
             (&command_ctx.curr_epoch, &command_ctx.prev_epoch),
             &command_ctx.kind,
@@ -287,7 +288,14 @@ impl ControlStreamManager {
             })
             .unwrap_or(u32::MAX);
 
+        for worker_id in pre_applied_graph_info.worker_ids() {
+            if !node_map.contains_key(&worker_id) {
+                return Err(anyhow!("worker id {} not exist", worker_id).into());
+            }
+        }
+
         let mut node_need_collect = HashSet::new();
+
         node_map
             .iter()
             .map(|(node_id, worker_node)| {
