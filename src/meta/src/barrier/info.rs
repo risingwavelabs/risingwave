@@ -18,7 +18,7 @@ use risingwave_common::catalog::TableId;
 use tracing::warn;
 
 use crate::barrier::Command;
-use crate::manager::{ActorInfos, InflightFragmentInfo, WorkerId};
+use crate::manager::{InflightFragmentInfo, WorkerId};
 use crate::model::{ActorId, FragmentId};
 
 #[derive(Debug, Clone)]
@@ -52,10 +52,10 @@ pub(super) struct InflightGraphInfo {
 
 impl InflightGraphInfo {
     /// Resolve inflight actor info from given nodes and actors that are loaded from meta store. It will be used during recovery to rebuild all streaming actors.
-    pub fn resolve(actor_infos: ActorInfos) -> Self {
+    pub fn new(fragment_infos: HashMap<FragmentId, InflightFragmentInfo>) -> Self {
         let actor_map = {
             let mut map: HashMap<_, HashSet<_>> = HashMap::new();
-            for info in actor_infos.fragment_infos.values() {
+            for info in fragment_infos.values() {
                 for (actor_id, worker_id) in &info.actors {
                     map.entry(*worker_id).or_default().insert(*actor_id);
                 }
@@ -63,8 +63,7 @@ impl InflightGraphInfo {
             map
         };
 
-        let actor_location_map = actor_infos
-            .fragment_infos
+        let actor_location_map = fragment_infos
             .values()
             .flat_map(|fragment| {
                 fragment
@@ -77,7 +76,7 @@ impl InflightGraphInfo {
         Self {
             actor_map,
             actor_location_map,
-            fragment_infos: actor_infos.fragment_infos,
+            fragment_infos,
         }
     }
 

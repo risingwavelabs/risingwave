@@ -304,7 +304,7 @@ impl GlobalBarrierManager {
                                 warn!(error = %err.as_report(), "scale actors failed");
                             })?;
 
-                        self.context.resolve_actor_info().await.inspect_err(|err| {
+                        self.context.resolve_graph_info().await.inspect_err(|err| {
                             warn!(error = %err.as_report(), "resolve actor info failed");
                         })?
                     } else {
@@ -322,7 +322,7 @@ impl GlobalBarrierManager {
                         .pre_apply_drop_cancel(&self.scheduled_barriers)
                         .await?
                     {
-                        info = self.context.resolve_actor_info().await.inspect_err(|err| {
+                        info = self.context.resolve_graph_info().await.inspect_err(|err| {
                             warn!(error = %err.as_report(), "resolve actor info failed");
                         })?
                     }
@@ -498,7 +498,7 @@ impl GlobalBarrierManagerContext {
 
         if expired_worker_slots.is_empty() {
             debug!("no expired worker slots, skipping.");
-            return self.resolve_actor_info().await;
+            return self.resolve_graph_info().await;
         }
 
         debug!("start migrate actors.");
@@ -608,7 +608,7 @@ impl GlobalBarrierManagerContext {
 
         debug!("migrate actors succeed.");
 
-        self.resolve_actor_info().await
+        self.resolve_graph_info().await
     }
 
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
@@ -618,7 +618,7 @@ impl GlobalBarrierManagerContext {
     ) -> MetaResult<InflightGraphInfo> {
         let mgr = self.metadata_manager.as_v1_ref();
 
-        let info = self.resolve_actor_info().await?;
+        let info = self.resolve_graph_info().await?;
 
         // 1. get expired workers.
         let expired_workers: HashSet<WorkerId> = info
@@ -646,7 +646,7 @@ impl GlobalBarrierManagerContext {
         migration_plan.delete(self.env.meta_store().as_kv()).await?;
         debug!("migrate actors succeed.");
 
-        self.resolve_actor_info().await
+        self.resolve_graph_info().await
     }
 
     async fn scale_actors(&self, active_nodes: &ActiveStreamingWorkerNodes) -> MetaResult<()> {
@@ -821,7 +821,7 @@ impl GlobalBarrierManagerContext {
     }
 
     async fn scale_actors_v1(&self, active_nodes: &ActiveStreamingWorkerNodes) -> MetaResult<()> {
-        let info = self.resolve_actor_info().await?;
+        let info = self.resolve_graph_info().await?;
 
         let mgr = self.metadata_manager.as_v1_ref();
         debug!("start resetting actors distribution");

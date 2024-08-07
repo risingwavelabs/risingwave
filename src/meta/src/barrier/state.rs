@@ -26,7 +26,7 @@ pub struct BarrierManagerState {
     in_flight_prev_epoch: TracedEpoch,
 
     /// Inflight running actors info.
-    pub(crate) inflight_actor_infos: InflightGraphInfo,
+    pub(crate) inflight_graph_info: InflightGraphInfo,
 
     inflight_subscription_info: InflightSubscriptionInfo,
 
@@ -37,13 +37,13 @@ pub struct BarrierManagerState {
 impl BarrierManagerState {
     pub fn new(
         in_flight_prev_epoch: TracedEpoch,
-        inflight_actor_infos: InflightGraphInfo,
+        inflight_graph_info: InflightGraphInfo,
         inflight_subscription_info: InflightSubscriptionInfo,
         paused_reason: Option<PausedReason>,
     ) -> Self {
         Self {
             in_flight_prev_epoch,
-            inflight_actor_infos,
+            inflight_graph_info,
             inflight_subscription_info,
             paused_reason,
         }
@@ -80,18 +80,18 @@ impl BarrierManagerState {
     ) -> (InflightGraphInfo, InflightSubscriptionInfo) {
         // update the fragment_infos outside pre_apply
         let fragment_changes = if let Some(fragment_changes) = command.fragment_changes() {
-            self.inflight_actor_infos.pre_apply(&fragment_changes);
+            self.inflight_graph_info.pre_apply(&fragment_changes);
             Some(fragment_changes)
         } else {
             None
         };
         self.inflight_subscription_info.pre_apply(command);
 
-        let info = self.inflight_actor_infos.clone();
+        let info = self.inflight_graph_info.clone();
         let subscription_info = self.inflight_subscription_info.clone();
 
         if let Some(fragment_changes) = fragment_changes {
-            self.inflight_actor_infos.post_apply(&fragment_changes);
+            self.inflight_graph_info.post_apply(&fragment_changes);
         }
         self.inflight_subscription_info.post_apply(command);
 

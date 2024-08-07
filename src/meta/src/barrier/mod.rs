@@ -748,7 +748,7 @@ impl GlobalBarrierManager {
                         Err(e) => {
                             let failed_command = self.checkpoint_control.command_wait_collect_from_worker(worker_id);
                             if failed_command.is_some()
-                                || self.state.inflight_actor_infos.contains_worker(worker_id) {
+                                || self.state.inflight_graph_info.contains_worker(worker_id) {
                                 let errors = self.control_stream_manager.collect_errors(worker_id, e).await;
                                 let err = merge_node_rpc_errors("get error from control stream", errors);
                                 if let Some(failed_command) = failed_command {
@@ -799,7 +799,7 @@ impl GlobalBarrierManager {
             span,
         } = scheduled;
 
-        let (pre_applied_actor_info, pre_applied_subscription_info) =
+        let (pre_applied_graph_info, pre_applied_subscription_info) =
             self.state.apply_command(&command);
 
         let (prev_epoch, curr_epoch) = self.state.next_epoch_pair();
@@ -821,7 +821,7 @@ impl GlobalBarrierManager {
         let command_ctx = Arc::new(CommandContext::new(
             self.active_streaming_nodes.current().clone(),
             pre_applied_subscription_info,
-            pre_applied_actor_info.existing_table_ids().collect(),
+            pre_applied_graph_info.existing_table_ids().collect(),
             prev_epoch.clone(),
             curr_epoch.clone(),
             self.state.paused_reason(),
@@ -835,8 +835,8 @@ impl GlobalBarrierManager {
 
         let node_to_collect = match self.control_stream_manager.inject_barrier(
             &command_ctx,
-            &pre_applied_actor_info,
-            Some(&self.state.inflight_actor_infos),
+            &pre_applied_graph_info,
+            Some(&self.state.inflight_graph_info),
         ) {
             Ok(node_to_collect) => node_to_collect,
             Err(err) => {
@@ -1189,17 +1189,17 @@ impl GlobalBarrierManagerContext {
     /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
     /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor
     /// will create or drop before this barrier flow through them.
-    async fn resolve_actor_info(&self) -> MetaResult<InflightGraphInfo> {
+    async fn resolve_graph_info(&self) -> MetaResult<InflightGraphInfo> {
         let info = match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 let all_actor_infos = mgr.fragment_manager.load_all_actors().await;
 
-                InflightGraphInfo::resolve(all_actor_infos)
+                InflightGraphInfo::new(all_actor_infos.fragment_infos)
             }
             MetadataManager::V2(mgr) => {
                 let all_actor_infos = mgr.catalog_controller.load_all_actors().await?;
 
-                InflightGraphInfo::resolve(all_actor_infos)
+                InflightGraphInfo::new(all_actor_infos.fragment_infos)
             }
         };
 
