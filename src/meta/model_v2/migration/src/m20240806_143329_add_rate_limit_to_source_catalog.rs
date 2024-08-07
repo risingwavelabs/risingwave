@@ -10,7 +10,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Source::Table)
-                    .add_column(ColumnDef::new(Source::RateLimit).binary())
+                    .add_column(ColumnDef::new(Source::RateLimit).integer())
                     .to_owned(),
             )
             .await
