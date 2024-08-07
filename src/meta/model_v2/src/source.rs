@@ -105,7 +105,7 @@ impl From<PbSource> for ActiveModel {
             connection_id: Set(source.connection_id.map(|id| id as _)),
             version: Set(source.version as _),
             secret_ref: Set(Some(SecretRef::from(source.secret_refs))),
-            rate_limit: Set(source.rate_limit),
+            rate_limit: Set(source.rate_limit.map(|id| id as _)),
         }
     }
 }

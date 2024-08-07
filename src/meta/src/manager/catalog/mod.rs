@@ -4847,4 +4847,21 @@ impl CatalogManager {
         }
         users_need_update
     }
+
+    pub async fn update_source_rate_limit_by_source_id(
+        &self,
+        source_id: SourceId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+        let mut source = sources.get_mut(source_id);
+        let Some(source_catalog) = source.as_mut() else {
+            bail!("source {} not found", source_id)
+        };
+        source_catalog.rate_limit = rate_limit;
+        commit_meta!(self, sources)?;
+        Ok(())
+    }
 }
