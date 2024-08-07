@@ -15,8 +15,9 @@
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::PausedReason;
 
-use crate::barrier::info::InflightActorInfo;
+use crate::barrier::info::{InflightActorInfo, InflightSubscriptionInfo};
 use crate::barrier::{Command, TracedEpoch};
+use crate::manager::InflightGraphInfo;
 
 /// `BarrierManagerState` defines the necessary state of `GlobalBarrierManager`.
 pub struct BarrierManagerState {
@@ -27,7 +28,11 @@ pub struct BarrierManagerState {
     in_flight_prev_epoch: TracedEpoch,
 
     /// Inflight running actors info.
-    pub(crate) inflight_actor_infos: InflightActorInfo,
+    pub(super) inflight_actor_infos: InflightActorInfo,
+
+    pub(super) inflight_graph_info: InflightGraphInfo,
+
+    inflight_subscription_info: InflightSubscriptionInfo,
 
     /// Whether the cluster is paused and the reason.
     paused_reason: Option<PausedReason>,
@@ -37,11 +42,15 @@ impl BarrierManagerState {
     pub fn new(
         in_flight_prev_epoch: TracedEpoch,
         inflight_actor_infos: InflightActorInfo,
+        inflight_graph_info: InflightGraphInfo,
+        inflight_subscription_info: InflightSubscriptionInfo,
         paused_reason: Option<PausedReason>,
     ) -> Self {
         Self {
             in_flight_prev_epoch,
             inflight_actor_infos,
+            inflight_graph_info,
+            inflight_subscription_info,
             paused_reason,
         }
     }
@@ -75,11 +84,37 @@ impl BarrierManagerState {
 
     /// Returns the inflight actor infos that have included the newly added actors in the given command. The dropped actors
     /// will be removed from the state after the info get resolved.
-    pub fn apply_command(&mut self, command: &Command) -> InflightActorInfo {
-        self.inflight_actor_infos.pre_apply(command);
-        let info = self.inflight_actor_infos.clone();
-        self.inflight_actor_infos.post_apply(command);
+    pub fn apply_command(
+        &mut self,
+        command: &Command,
+    ) -> (
+        InflightActorInfo,
+        InflightGraphInfo,
+        InflightSubscriptionInfo,
+    ) {
+        // update the fragment_infos outside pre_apply
+        let (actors_to_add, fragment_changes) =
+            if let Some(fragment_changes) = command.fragment_changes() {
+                let actors_to_add = self.inflight_graph_info.pre_apply(&fragment_changes);
+                (Some(actors_to_add), Some(fragment_changes))
+            } else {
+                (None, None)
+            };
+        self.inflight_actor_infos.pre_apply(actors_to_add);
+        self.inflight_subscription_info.pre_apply(command);
 
-        info
+        let actor_info = self.inflight_actor_infos.clone();
+        let graph_info = self.inflight_graph_info.clone();
+        let subscription_info = self.inflight_subscription_info.clone();
+
+        let actors_to_remove = if let Some(fragment_changes) = fragment_changes {
+            Some(self.inflight_graph_info.post_apply(&fragment_changes))
+        } else {
+            None
+        };
+        self.inflight_actor_infos.post_apply(actors_to_remove);
+        self.inflight_subscription_info.post_apply(command);
+
+        (actor_info, graph_info, subscription_info)
     }
 }

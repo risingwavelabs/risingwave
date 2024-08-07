@@ -42,9 +42,9 @@ use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use thiserror_ext::AsReport;
 use tracing::warn;
 
-use super::info::{CommandActorChanges, CommandFragmentChanges, InflightActorInfo};
+use super::info::{CommandFragmentChanges, InflightActorInfo};
 use super::trace::TracedEpoch;
-use crate::barrier::GlobalBarrierManagerContext;
+use crate::barrier::{GlobalBarrierManagerContext, InflightSubscriptionInfo};
 use crate::manager::{DdlType, InflightFragmentInfo, MetadataManager, StreamingJob, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
@@ -106,7 +106,7 @@ pub struct ReplaceTablePlan {
 }
 
 impl ReplaceTablePlan {
-    fn actor_changes(&self) -> CommandActorChanges {
+    fn actor_changes(&self) -> HashMap<FragmentId, CommandFragmentChanges> {
         let mut fragment_changes = HashMap::new();
         for fragment in self.new_table_fragments.fragments.values() {
             let fragment_change = CommandFragmentChanges::NewFragment(InflightFragmentInfo {
@@ -140,7 +140,7 @@ impl ReplaceTablePlan {
                 .insert(fragment.fragment_id, CommandFragmentChanges::RemoveFragment)
                 .is_none());
         }
-        CommandActorChanges { fragment_changes }
+        fragment_changes
     }
 }
 
@@ -301,7 +301,7 @@ impl Command {
         Self::Resume(reason)
     }
 
-    pub fn actor_changes(&self) -> Option<CommandActorChanges> {
+    pub(crate) fn fragment_changes(&self) -> Option<HashMap<FragmentId, CommandFragmentChanges>> {
         match self {
             Command::Plain(_) => None,
             Command::Pause(_) => None,
@@ -309,23 +309,22 @@ impl Command {
             Command::DropStreamingJobs {
                 unregistered_fragment_ids,
                 ..
-            } => Some(CommandActorChanges {
-                fragment_changes: unregistered_fragment_ids
+            } => Some(
+                unregistered_fragment_ids
                     .iter()
                     .map(|fragment_id| (*fragment_id, CommandFragmentChanges::RemoveFragment))
                     .collect(),
-            }),
+            ),
             Command::CreateStreamingJob {
                 info,
                 replace_table,
             } => {
-                let fragment_changes = info
+                let mut changes: HashMap<_, _> = info
                     .new_fragment_info()
                     .map(|(fragment_id, info)| {
                         (fragment_id, CommandFragmentChanges::NewFragment(info))
                     })
                     .collect();
-                let mut changes = CommandActorChanges { fragment_changes };
 
                 if let Some(plan) = replace_table {
                     let extra_change = plan.actor_changes();
@@ -334,15 +333,15 @@ impl Command {
 
                 Some(changes)
             }
-            Command::CancelStreamingJob(table_fragments) => Some(CommandActorChanges {
-                fragment_changes: table_fragments
+            Command::CancelStreamingJob(table_fragments) => Some(
+                table_fragments
                     .fragments
                     .values()
                     .map(|fragment| (fragment.fragment_id, CommandFragmentChanges::RemoveFragment))
                     .collect(),
-            }),
-            Command::RescheduleFragment { reschedules, .. } => Some(CommandActorChanges {
-                fragment_changes: reschedules
+            ),
+            Command::RescheduleFragment { reschedules, .. } => Some(
+                reschedules
                     .iter()
                     .map(|(fragment_id, reschedule)| {
                         (
@@ -360,7 +359,7 @@ impl Command {
                         )
                     })
                     .collect(),
-            }),
+            ),
             Command::ReplaceTable(plan) => Some(plan.actor_changes()),
             Command::SourceSplitAssignment(_) => None,
             Command::Throttle(_) => None,
@@ -406,10 +405,6 @@ impl BarrierKind {
         matches!(self, BarrierKind::Checkpoint(_))
     }
 
-    pub fn is_initial(&self) -> bool {
-        matches!(self, BarrierKind::Initial)
-    }
-
     pub fn as_str_name(&self) -> &'static str {
         match self {
             BarrierKind::Initial => "Initial",
@@ -424,6 +419,8 @@ impl BarrierKind {
 pub struct CommandContext {
     /// Resolved info in this barrier loop.
     pub info: Arc<InflightActorInfo>,
+    pub subscription_info: InflightSubscriptionInfo,
+    pub table_ids_to_commit: HashSet<TableId>,
 
     pub prev_epoch: TracedEpoch,
     pub curr_epoch: TracedEpoch,
@@ -459,6 +456,8 @@ impl CommandContext {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         info: InflightActorInfo,
+        subscription_info: InflightSubscriptionInfo,
+        table_ids_to_commit: HashSet<TableId>,
         prev_epoch: TracedEpoch,
         curr_epoch: TracedEpoch,
         current_paused_reason: Option<PausedReason>,
@@ -469,6 +468,8 @@ impl CommandContext {
     ) -> Self {
         Self {
             info: Arc::new(info),
+            subscription_info,
+            table_ids_to_commit,
             prev_epoch,
             curr_epoch,
             current_paused_reason,

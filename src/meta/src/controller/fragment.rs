@@ -56,7 +56,7 @@ use crate::controller::utils::{
     get_actor_dispatchers, get_fragment_mappings, rebuild_fragment_mapping_from_actors,
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
 };
-use crate::manager::{ActorInfos, InflightFragmentInfo, LocalNotification};
+use crate::manager::{InflightFragmentInfo, InflightGraphInfo, LocalNotification};
 use crate::model::{TableFragments, TableParallelism};
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
@@ -838,7 +838,7 @@ impl CatalogController {
 
     /// Used in [`crate::barrier::GlobalBarrierManager`], load all running actor that need to be sent or
     /// collected
-    pub async fn load_all_actors(&self) -> MetaResult<ActorInfos> {
+    pub async fn load_graph_info(&self) -> MetaResult<InflightGraphInfo> {
         let inner = self.inner.read().await;
         let actor_info: Vec<(ActorId, WorkerId, FragmentId, i32, I32Array)> = Actor::find()
             .select_only()
@@ -887,7 +887,7 @@ impl CatalogController {
             }
         }
 
-        Ok(ActorInfos::new(fragment_infos))
+        Ok(InflightGraphInfo::new(fragment_infos))
     }
 
     pub async fn migrate_actors(
