@@ -25,7 +25,6 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use serde_derive::{Deserialize, Serialize};
 use tiberius::{ColumnType, Config, Query, QueryItem};
-use tokio::net::TcpStream;
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::{sql_server_row_to_owned_row, ScalarImplTiberiusWrapper};
@@ -91,10 +90,9 @@ impl SqlServerExternalTable {
             &config.username,
             &config.password,
         ));
+        // TODO(kexiang): add ssl support
+        // TODO(kexiang): use trust_cert_ca, trust_cert is not secure
         client_config.trust_cert();
-
-        let tcp = TcpStream::connect(client_config.get_addr()).await?;
-        tcp.set_nodelay(true)?;
 
         let mut client = SqlServerClient::new_with_config(client_config).await?;
 
@@ -288,11 +286,9 @@ impl SqlServerExternalTableReader {
             &config.username,
             &config.password,
         ));
-        client_config.trust_cert();
         // TODO(kexiang): add ssl support
         // TODO(kexiang): use trust_cert_ca, trust_cert is not secure
-        let tcp = TcpStream::connect(client_config.get_addr()).await?;
-        tcp.set_nodelay(true)?;
+        client_config.trust_cert();
 
         let client = SqlServerClient::new_with_config(client_config).await?;
 

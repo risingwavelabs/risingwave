@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
@@ -513,7 +513,9 @@ impl SqlServerClient {
 
     pub async fn new_with_config(mut config: Config) -> Result<Self> {
         let tcp = TcpStream::connect(config.get_addr()).await.unwrap();
-        tcp.set_nodelay(true).unwrap();
+        tcp.set_nodelay(true)
+            .context("failed to setting nodelay when connecting to sql server")
+            .map_err(SinkError::SqlServer)?;
 
         let client = match Client::connect(config.clone(), tcp.compat_write()).await {
             // Connection successful.
