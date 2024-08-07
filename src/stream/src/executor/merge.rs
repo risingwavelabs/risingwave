@@ -502,12 +502,11 @@ impl Stream for BufferChunks {
         // Don't know the data types yet. Let's build it upon the first chunk.
         let mut builder: Option<StreamChunkBuilder> = None;
 
-        // StreamChunks to be returned.
-        let mut pending_chunks: VecDeque<StreamChunk> = VecDeque::new();
+        let mut pending: VecDeque<Self::Item> = VecDeque::new();
 
         loop {
-            if let Some(chunk) = pending_chunks.pop_front() {
-                return Poll::Ready(Some(Ok(Message::Chunk(chunk))));
+            if let Some(item) = pending.pop_front() {
+                return Poll::Ready(Some(item));
             }
 
             match self.inner.poll_next_unpin(cx) {
@@ -529,23 +528,23 @@ impl Stream for BufferChunks {
                         }
                         for row in chunk.records() {
                             if let Some(chunk_out) = builder.as_mut().unwrap().append_record(row) {
-                                pending_chunks.push_back(chunk_out);
+                                pending.push_back(Ok(Message::Chunk(chunk_out)));
                             }
                         }
                     } else {
-                        return Poll::Ready(Some(result));
+                        return if let Some(b) = &mut builder
+                            && b.size() > 0
+                        {
+                            Poll::Ready(Some(Ok(Message::Chunk(b.take().unwrap()))))
+                        } else {
+                            Poll::Ready(Some(result))
+                        };
                     }
                 }
 
                 Poll::Ready(None) => {
-                    // NOTE: I don't think these lines are reachable...
-                    return if let Some(b) = &mut builder
-                        && b.size() > 0
-                    {
-                        Poll::Ready(Some(Ok(Message::Chunk(b.take().unwrap()))))
-                    } else {
-                        Poll::Ready(None)
-                    };
+                    // See also the comments in `SelectReceivers::poll_next`.
+                    unreachable!("SelectReceivers should never return None");
                 }
             }
         }
