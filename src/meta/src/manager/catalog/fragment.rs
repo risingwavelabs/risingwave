@@ -751,7 +751,7 @@ impl FragmentManager {
                     visit_stream_node_cont(actor.nodes.as_ref().unwrap(), |node| {
                         if let Some(NodeBody::Union(_)) = node.node_body {
                             for input in &node.input {
-                                if !union_input_is_clean(&all_fragment_ids, &input) {
+                                if !union_input_is_clean(&all_fragment_ids, input) {
                                     dirty_downstream_table_ids
                                         .insert(*table_id, fragment.fragment_id);
                                     return false;
@@ -782,7 +782,7 @@ impl FragmentManager {
                 visit_stream_node_cont_mut(actor.nodes.as_mut().unwrap(), |node| {
                     if let Some(NodeBody::Union(_)) = node.node_body {
                         node.input
-                            .retain_mut(|input| union_input_is_clean(&all_fragment_ids, &input));
+                            .retain_mut(|input| union_input_is_clean(&all_fragment_ids, input));
                     }
                     true
                 })
