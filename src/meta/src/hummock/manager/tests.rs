@@ -1369,18 +1369,18 @@ async fn test_split_compaction_group_on_demand_basic() {
     assert_eq!(original_groups, vec![2, 3]);
 
     let err = hummock_manager
-        .split_compaction_group(100, &[0])
+        .split_compaction_group(100, &[0], 0)
         .await
         .unwrap_err();
     assert_eq!("compaction group error: invalid group 100", err.to_string());
 
     hummock_manager
-        .split_compaction_group(2, &[])
+        .split_compaction_group(2, &[], 0)
         .await
         .unwrap();
 
     let err = hummock_manager
-        .split_compaction_group(2, &[100])
+        .split_compaction_group(2, &[100], 0)
         .await
         .unwrap_err();
     assert_eq!(
@@ -1438,7 +1438,7 @@ async fn test_split_compaction_group_on_demand_basic() {
         .unwrap();
 
     let err = hummock_manager
-        .split_compaction_group(2, &[100, 101])
+        .split_compaction_group(2, &[100, 101], 0)
         .await
         .unwrap_err();
     assert_eq!(
@@ -1454,7 +1454,7 @@ async fn test_split_compaction_group_on_demand_basic() {
         .unwrap();
 
     hummock_manager
-        .split_compaction_group(2, &[100, 101])
+        .split_compaction_group(2, &[100, 101], 0)
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;
@@ -1520,7 +1520,7 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
         .unwrap();
 
     hummock_manager
-        .split_compaction_group(2, &[100])
+        .split_compaction_group(2, &[100], 0)
         .await
         .unwrap();
 
@@ -1644,7 +1644,7 @@ async fn test_split_compaction_group_trivial_expired() {
         .unwrap();
 
     hummock_manager
-        .split_compaction_group(2, &[100])
+        .split_compaction_group(2, &[100], 0)
         .await
         .unwrap();
     let mut selector: Box<dyn CompactionSelector> =
@@ -1817,7 +1817,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
     );
 
     hummock_manager
-        .split_compaction_group(2, &[100])
+        .split_compaction_group(2, &[100], 0)
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;
@@ -1922,7 +1922,7 @@ async fn test_compaction_task_expiration_due_to_split_group() {
     let compaction_task = get_manual_compact_task(&hummock_manager, context_id).await;
     assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 2);
     hummock_manager
-        .split_compaction_group(2, &[100])
+        .split_compaction_group(2, &[100], 0)
         .await
         .unwrap();
 
@@ -2006,7 +2006,7 @@ async fn test_move_tables_between_compaction_group() {
     );
 
     hummock_manager
-        .split_compaction_group(2, &[100])
+        .split_compaction_group(2, &[100], 0)
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;
@@ -2165,7 +2165,7 @@ async fn test_partition_level() {
         .unwrap());
 
     hummock_manager
-        .split_compaction_group(2, &[100])
+        .split_compaction_group(2, &[100], 0)
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;
@@ -2299,7 +2299,7 @@ async fn test_unregister_moved_table() {
         .unwrap();
 
     let new_group_id = hummock_manager
-        .split_compaction_group(2, &[100])
+        .split_compaction_group(2, &[100], 0)
         .await
         .unwrap();
     assert_ne!(new_group_id, 2);

@@ -432,6 +432,7 @@ impl HummockManager {
         &self,
         parent_group_id: CompactionGroupId,
         table_ids: &[StateTableId],
+        partition_vnode_count: u32,
     ) -> Result<CompactionGroupId> {
         let result = self
             .move_state_table_to_compaction_group(
@@ -784,6 +785,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             }
             MutableConfig::MaxL0CompactLevelCount(c) => {
                 target.max_l0_compact_level_count = Some(*c);
+            }
+            MutableConfig::PartitionVnodeCount(c) => {
+                target.split_weight_by_vnode = *c;
             }
         }
     }

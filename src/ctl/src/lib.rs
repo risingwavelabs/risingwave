@@ -267,6 +267,8 @@ enum HummockCommands {
         compression_algorithm: Option<String>,
         #[clap(long)]
         max_l0_compact_level: Option<u32>,
+        #[clap(long)]
+        partition_vnode_count: Option<u32>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -274,6 +276,8 @@ enum HummockCommands {
         compaction_group_id: u64,
         #[clap(long, value_delimiter = ',')]
         table_ids: Vec<u32>,
+        #[clap(long, short)]
+        partition_vnode_count: u32,
     },
     /// Pause version checkpoint, which subsequently pauses GC of delta log and SST object.
     PauseVersionCheckpoint,
@@ -662,6 +666,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             compression_level,
             compression_algorithm,
             max_l0_compact_level,
+            partition_vnode_count,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -692,6 +697,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                         None
                     },
                     max_l0_compact_level,
+                    partition_vnode_count,
                 ),
             )
             .await?
@@ -699,9 +705,15 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::SplitCompactionGroup {
             compaction_group_id,
             table_ids,
+            partition_vnode_count,
         }) => {
-            cmd_impl::hummock::split_compaction_group(context, compaction_group_id, &table_ids)
-                .await?;
+            cmd_impl::hummock::split_compaction_group(
+                context,
+                compaction_group_id,
+                &table_ids,
+                partition_vnode_count,
+            )
+            .await?;
         }
         Commands::Hummock(HummockCommands::PauseVersionCheckpoint) => {
             cmd_impl::hummock::pause_version_checkpoint(context).await?;

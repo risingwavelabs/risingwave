@@ -66,6 +66,7 @@ pub fn build_compaction_config_vec(
     tombstone_reclaim_ratio: Option<u32>,
     compress_algorithm: Option<CompressionAlgorithm>,
     max_l0_compact_level: Option<u32>,
+    partition_vnode_count: Option<u32>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {
@@ -119,22 +120,24 @@ pub fn build_compaction_config_vec(
     if let Some(c) = max_l0_compact_level {
         configs.push(MutableConfig::MaxL0CompactLevelCount(c))
     }
-
-    configs
+    if let Some(c) = partition_vnode_count {
+        configs.push(MutableConfig::PartitionVnodeCount(c))
+    }
 }
 
 pub async fn split_compaction_group(
     context: &CtlContext,
     group_id: CompactionGroupId,
     table_ids_to_new_group: &[StateTableId],
+    partition_vnode_count: u32,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     let new_group_id = meta_client
-        .split_compaction_group(group_id, table_ids_to_new_group)
+        .split_compaction_group(group_id, table_ids_to_new_group, partition_vnode_count)
         .await?;
     println!(
-        "Succeed: split compaction group {}. tables {:#?} are moved to new group {}.",
-        group_id, table_ids_to_new_group, new_group_id
+        "Succeed: split compaction group {}. tables {:#?} are moved to new group {} partition_vnode_count {}",
+        group_id, table_ids_to_new_group, new_group_id, partition_vnode_count
     );
     Ok(())
 }
