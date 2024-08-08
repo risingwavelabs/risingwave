@@ -92,6 +92,9 @@ t
 ############## Cleanup
 
 statement ok
+drop materialized view mv;
+
+statement ok
 drop table kafka_source;
 
 statement ok
