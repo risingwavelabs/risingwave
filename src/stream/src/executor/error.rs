@@ -66,11 +66,10 @@ pub enum ErrorKind {
         BoxedError,
     ),
 
-    #[error("Sink error: {0}")]
+    #[error("Sink error: sink_id={1}, error: {0}")]
     SinkError(
-        #[from]
-        #[backtrace]
         SinkError,
+        u32,
     ),
 
     #[error(transparent)]
@@ -95,8 +94,6 @@ pub enum ErrorKind {
 
     #[error("Connector error: {0}")]
     ConnectorError(
-        #[source]
-        #[backtrace]
         BoxedError,
     ),
 
@@ -149,6 +146,12 @@ impl From<PbFieldNotFound> for StreamExecutorError {
 impl From<String> for StreamExecutorError {
     fn from(s: String) -> Self {
         ErrorKind::Uncategorized(anyhow::anyhow!(s)).into()
+    }
+}
+
+impl From<(SinkError,u32)> for StreamExecutorError {
+    fn from((err, sink_id): (SinkError, u32)) -> Self {
+        ErrorKind::SinkError(err, sink_id).into()
     }
 }
 
