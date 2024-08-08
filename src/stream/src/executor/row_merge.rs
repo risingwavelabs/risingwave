@@ -71,7 +71,7 @@ impl RowMergeExecutor {
                 self.ctx.id,
                 self.ctx.fragment_id,
                 self.ctx.streaming_metrics.clone(),
-                "Join",
+                "RowMerge",
             );
             pin_mut!(aligned_stream);
             #[for_await]
@@ -101,10 +101,10 @@ impl RowMergeExecutor {
                         yield Message::Barrier(barrier);
                     }
                     AlignedMessage::WatermarkLeft(watermark) => {
-                        yield Message::Watermark(watermark);
+                        tracing::warn!("unexpected watermark from left stream: {:?}", watermark);
                     }
                     AlignedMessage::WatermarkRight(watermark) => {
-                        yield Message::Watermark(watermark);
+                        tracing::warn!("unexpected watermark from right stream: {:?}", watermark);
                     }
                 }
             }
