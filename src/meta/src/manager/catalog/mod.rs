@@ -4869,7 +4869,7 @@ impl CatalogManager {
 
         let _version = self
             .notify_frontend(
-                Operation::Add,
+                Operation::Update,
                 Info::RelationGroup(RelationGroup {
                     relations: vec![Relation {
                         relation_info: RelationInfo::Source(source_relation).into(),
