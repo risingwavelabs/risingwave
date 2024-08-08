@@ -14,7 +14,6 @@
 
 use std::marker::PhantomData;
 
-use anyhow::anyhow;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::stream::{self, BoxStream};
@@ -57,9 +56,9 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
         match self.op.list(prefix).await {
             Ok(_) => return Ok(vec![empty_split]),
             Err(e) => {
-                return Err(
-                    anyhow!("Fail to create source, please check your config. {}", e).into(),
-                )
+                return Err(e
+                    .with_context("", "fail to create source, please check your config")
+                    .into())
             }
         }
     }
