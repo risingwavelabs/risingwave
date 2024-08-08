@@ -114,6 +114,7 @@ pub fn align_array_and_element(
 pub fn cast_ok(source: &DataType, target: &DataType, allows: CastContext) -> bool {
     cast_ok_struct(source, target, allows)
         || cast_ok_array(source, target, allows)
+        || cast_ok_map(source, target, allows)
         || cast_ok_base(source, target, allows)
 }
 
@@ -157,6 +158,17 @@ fn cast_ok_array(source: &DataType, target: &DataType, allows: CastContext) -> b
         // https://www.postgresql.org/docs/14/sql-createcast.html#id-1.9.3.58.7.4
         (DataType::Varchar, DataType::List(_)) => CastContext::Explicit <= allows,
         (DataType::List(_), DataType::Varchar) => CastContext::Assign <= allows,
+        _ => false,
+    }
+}
+
+fn cast_ok_map(source: &DataType, target: &DataType, allows: CastContext) -> bool {
+    match (source, target) {
+        (DataType::Map(source_elem), DataType::Map(target_elem)) => cast_ok(
+            &source_elem.clone().into_list(),
+            &target_elem.clone().into_list(),
+            allows,
+        ),
         _ => false,
     }
 }

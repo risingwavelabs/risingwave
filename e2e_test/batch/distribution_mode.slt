@@ -4,7 +4,7 @@ SET RW_IMPLICIT_FLUSH TO true;
 statement ok
 SET QUERY_MODE TO distributed;
 
-include ./basic/*.slt.part
+include ./basic/**/*.slt.part
 include ./duckdb/all.slt.part
 include ./order/*.slt.part
 include ./join/*.slt.part

@@ -3632,8 +3632,7 @@ impl Parser<'_> {
         .parse_next(self)
     }
 
-    /// Parse a SQL datatype (in the context of a CREATE TABLE statement for example) and convert
-    /// into an array of that datatype if needed
+    /// Parse a SQL datatype (in the context of a CREATE TABLE statement for example)
     pub fn parse_data_type(&mut self) -> PResult<DataType> {
         parser_v2::data_type(self)
     }
