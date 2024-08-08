@@ -87,6 +87,7 @@ enum ClickHouseEngine {
     SharedCollapsingMergeTree(String),
     SharedVersionedCollapsingMergeTree(String),
     SharedGraphiteMergeTree,
+    Null,
 }
 impl ClickHouseEngine {
     pub fn is_collapsing_engine(&self) -> bool {
@@ -125,6 +126,7 @@ impl ClickHouseEngine {
         match engine_name.engine.as_str() {
             "MergeTree" => Ok(ClickHouseEngine::MergeTree),
             "ReplacingMergeTree" => Ok(ClickHouseEngine::ReplacingMergeTree),
+            "Null" => Ok(ClickHouseEngine::Null),
             "SummingMergeTree" => Ok(ClickHouseEngine::SummingMergeTree),
             "AggregatingMergeTree" => Ok(ClickHouseEngine::AggregatingMergeTree),
             // VersionedCollapsingMergeTree(sign_name,"a")
