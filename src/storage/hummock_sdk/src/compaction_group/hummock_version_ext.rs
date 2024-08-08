@@ -1095,10 +1095,6 @@ impl HummockVersion {
 
         for right_sub_level in &right_l0.sub_levels {
             let sub_level = right_sub_level.clone();
-            // Reinitialise `vnode_partition_count`` to avoid misaligned hierarchies
-            // caused by the merge of different compaction groups.(picker might reject the different `vnode_partition_count` sub_level to compact)
-            // sub_level.vnode_partition_count = 0;
-
             // TODO: handle vnode_partition_count for sub level
             // 1. consider how to safely remove the vnode_partition_count of the sub level
             if let Ok(insert_hint) = left_levels
@@ -1126,6 +1122,14 @@ impl HummockVersion {
             .l0
             .sub_levels
             .sort_by_key(|sub_level| sub_level.sub_level_id);
+
+        // Reinitialise `vnode_partition_count`` to avoid misaligned hierarchies
+        // caused by the merge of different compaction groups.(picker might reject the different `vnode_partition_count` sub_level to compact)
+        left_levels
+            .l0
+            .sub_levels
+            .iter_mut()
+            .for_each(|sub_level| sub_level.vnode_partition_count = 0);
 
         for (idx, level) in right_levels.levels.iter_mut().enumerate() {
             if level.table_infos.is_empty() {

@@ -464,23 +464,14 @@ impl HummockManager {
         // group_infos.reverse();
 
         let group_count = group_infos.len();
-        for group in group_infos.iter() {
+        for group in &group_infos {
             if group.table_statistic.len() <= 1 {
                 // no need to handle the separate compaciton group
                 continue;
             }
 
-            for (table_id, table_size) in &group.table_statistic {
-                self.try_move_table_to_dedicated_cg(
-                    &table_write_throughput,
-                    table_id,
-                    table_size,
-                    checkpoint_secs,
-                    group.group_id,
-                    group.group_size,
-                )
+            self.try_split_compaction_group(&table_write_throughput, checkpoint_secs, group)
                 .await;
-            }
         }
 
         if group_count > 1 {
@@ -490,20 +481,21 @@ impl HummockManager {
             while left < group_count - 1 && right < group_count {
                 let group = &group_infos[left];
                 let next_group = &group_infos[right];
-                if let Ok(_) = self
+                if self
                     .try_merge_compaction_group(
                         &table_write_throughput,
-                        &group,
-                        &next_group,
+                        group,
+                        next_group,
                         checkpoint_secs,
                         &created_tables,
                     )
                     .await
+                    .is_ok()
                 {
                     right += 1
                 } else {
                     left = right + 1;
-                    right = right + 2;
+                    right += 2;
                 }
             }
         }

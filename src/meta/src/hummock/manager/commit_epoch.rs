@@ -110,9 +110,8 @@ impl HummockManager {
 
         let mut table_ids_from_sst = sstables
             .iter()
-            .map(|s| s.sst_info.table_ids.iter().cloned())
-            .flatten()
-            .map(|t| TableId::from(t))
+            .flat_map(|s| s.sst_info.table_ids.iter().cloned())
+            .map(TableId::from)
             .collect_vec();
         table_ids_from_sst.sort();
 
