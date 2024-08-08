@@ -63,8 +63,8 @@ impl RowMergeExecutor {
             .collect::<Vec<_>>();
 
         {
-            let mut lhs_buffer: Option<StreamChunk> = None;
-            let mut rhs_buffer: Option<StreamChunk> = None;
+            let mut lhs_buffer: Vec<StreamChunk> = Vec::with_capacity(1);
+            let mut rhs_buffer: Vec<StreamChunk> = Vec::with_capacity(1);
             let aligned_stream = barrier_align(
                 self.lhs_input.execute(),
                 self.rhs_input.execute(),
@@ -78,59 +78,25 @@ impl RowMergeExecutor {
             for message in aligned_stream {
                 match message? {
                     AlignedMessage::Left(chunk) => {
-                        lhs_buffer = Some(chunk);
+                        lhs_buffer.push(chunk);
                     }
                     AlignedMessage::Right(chunk) => {
-                        rhs_buffer = Some(chunk);
+                        rhs_buffer.push(chunk);
                     }
                     AlignedMessage::Barrier(barrier) => {
-                        if lhs_buffer.is_none() && rhs_buffer.is_none() {
+                        if lhs_buffer.is_empty() && rhs_buffer.is_empty() {
                             yield Message::Barrier(barrier);
                             continue;
                         }
-                        let Some(lhs_chunk) = lhs_buffer.take() else {
-                            bail!("lhs buffer should not be empty ");
-                        };
-                        let Some(rhs_chunk) = rhs_buffer.take() else {
-                            bail!("rhs buffer should not be empty ");
-                        };
-
-                        if !(1..=2).contains(&lhs_chunk.cardinality()) {
-                            bail!("lhs chunk cardinality should be 1 or 2");
-                        }
-                        if !(1..=2).contains(&rhs_chunk.cardinality()) {
-                            bail!("rhs chunk cardinality should be 1 or 2");
-                        }
-                        if lhs_chunk.cardinality() != rhs_chunk.cardinality() {
-                            bail!("lhs and rhs chunk cardinality should be the same");
-                        }
-                        let cardinality = lhs_chunk.cardinality();
-                        let mut ops = Vec::with_capacity(cardinality);
-                        let mut merged_rows =
-                            vec![vec![Datum::None; data_types.len()]; cardinality];
-                        for (i, (op, lhs_row)) in lhs_chunk.rows().enumerate() {
-                            ops.push(op);
-                            for (j, d) in lhs_row.iter().enumerate() {
-                                let out_index = lhs_mapping.map(j);
-                                merged_rows[i][out_index] = d.to_owned_datum();
-                            }
-                        }
-
-                        for (i, (_, rhs_row)) in rhs_chunk.rows().enumerate() {
-                            for (j, d) in rhs_row.iter().enumerate() {
-                                let out_index = rhs_mapping.map(j);
-                                merged_rows[i][out_index] = d.to_owned_datum();
-                            }
-                        }
-                        let mut builder = DataChunkBuilder::new(data_types.clone(), cardinality);
-                        for row in merged_rows {
-                            if let Some(chunk) = builder.append_one_row(&row[..]) {
-                                yield Message::Chunk(StreamChunk::from_parts(ops, chunk));
-                                break;
-                            }
-                        }
-                        if !builder.is_empty() {
-                            bail!("builder should be empty");
+                        #[for_await]
+                        for output in Self::flush_buffers(
+                            &data_types,
+                            &lhs_mapping,
+                            &rhs_mapping,
+                            &mut lhs_buffer,
+                            &mut rhs_buffer,
+                        ) {
+                            yield output?;
                         }
                         yield Message::Barrier(barrier);
                     }
@@ -143,6 +109,76 @@ impl RowMergeExecutor {
                 }
             }
         }
+    }
+
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn flush_buffers<'a>(
+        data_types: &'a [DataType],
+        lhs_mapping: &'a ColIndexMapping,
+        rhs_mapping: &'a ColIndexMapping,
+        lhs_buffer: &'a mut Vec<StreamChunk>,
+        rhs_buffer: &'a mut Vec<StreamChunk>,
+    ) {
+        if lhs_buffer.is_empty() {
+            bail!("lhs buffer should not be empty ");
+        };
+        if rhs_buffer.is_empty() {
+            bail!("rhs buffer should not be empty ");
+        };
+
+        for lhs_chunk in lhs_buffer.drain(..) {
+            for rhs_chunk in rhs_buffer.drain(..) {
+                yield Self::build_chunk(
+                    data_types,
+                    lhs_mapping,
+                    rhs_mapping,
+                    lhs_chunk.clone(),
+                    rhs_chunk,
+                )?;
+            }
+        }
+    }
+
+    fn build_chunk(
+        data_types: &[DataType],
+        lhs_mapping: &ColIndexMapping,
+        rhs_mapping: &ColIndexMapping,
+        lhs_chunk: StreamChunk,
+        rhs_chunk: StreamChunk,
+    ) -> Result<Message, StreamExecutorError> {
+        if !(1..=2).contains(&lhs_chunk.cardinality()) {
+            bail!("lhs chunk cardinality should be 1 or 2");
+        }
+        if !(1..=2).contains(&rhs_chunk.cardinality()) {
+            bail!("rhs chunk cardinality should be 1 or 2");
+        }
+        if lhs_chunk.cardinality() != rhs_chunk.cardinality() {
+            bail!("lhs and rhs chunk cardinality should be the same");
+        }
+        let cardinality = lhs_chunk.cardinality();
+        let mut ops = Vec::with_capacity(cardinality);
+        let mut merged_rows = vec![vec![Datum::None; data_types.len()]; cardinality];
+        for (i, (op, lhs_row)) in lhs_chunk.rows().enumerate() {
+            ops.push(op);
+            for (j, d) in lhs_row.iter().enumerate() {
+                let out_index = lhs_mapping.map(j);
+                merged_rows[i][out_index] = d.to_owned_datum();
+            }
+        }
+
+        for (i, (_, rhs_row)) in rhs_chunk.rows().enumerate() {
+            for (j, d) in rhs_row.iter().enumerate() {
+                let out_index = rhs_mapping.map(j);
+                merged_rows[i][out_index] = d.to_owned_datum();
+            }
+        }
+        let mut builder = DataChunkBuilder::new(data_types.to_vec(), cardinality);
+        for row in merged_rows {
+            if let Some(chunk) = builder.append_one_row(&row[..]) {
+                return Ok(Message::Chunk(StreamChunk::from_parts(ops, chunk)));
+            }
+        }
+        bail!("builder should have yielded a chunk")
     }
 }
 
