@@ -14,7 +14,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use itertools::Itertools;
 use risingwave_meta_model_migration::{
     Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
     UnionType, WithClause, WithQuery,
@@ -26,7 +25,7 @@ use risingwave_meta_model_v2::{
 };
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DbErr, EntityTrait, JoinType, QueryFilter, QuerySelect,
-    QueryTrait, RelationTrait, Statement, TransactionTrait,
+    RelationTrait, Statement, TransactionTrait,
 };
 
 use crate::controller::catalog::CatalogController;
@@ -48,16 +47,16 @@ use crate::{MetaError, MetaResult};
 /// assert_eq!(query.to_string(SqliteQueryBuilder), r#"WITH RECURSIVE "shuffle_deps" ("fragment_id", "dispatcher_type", "dispatcher_id") AS (SELECT DISTINCT "actor"."fragment_id", "actor_dispatcher"."dispatcher_type", "actor_dispatcher"."dispatcher_id" FROM "actor" INNER JOIN "actor_dispatcher" ON "actor"."actor_id" = "actor_dispatcher"."actor_id" WHERE "actor_dispatcher"."dispatcher_type" = 'NO_SHUFFLE' AND "actor_dispatcher"."dispatcher_id" IN (2, 3) UNION ALL SELECT DISTINCT "actor"."fragment_id", "actor_dispatcher"."dispatcher_type", "actor_dispatcher"."dispatcher_id" FROM "actor" INNER JOIN "actor_dispatcher" ON "actor"."actor_id" = "actor_dispatcher"."actor_id" INNER JOIN "shuffle_deps" ON "shuffle_deps"."fragment_id" = "actor_dispatcher"."dispatcher_id" WHERE "actor_dispatcher"."dispatcher_type" = 'NO_SHUFFLE') SELECT DISTINCT "fragment_id", "dispatcher_type", "dispatcher_id" FROM "shuffle_deps""#);
 /// ```
 pub fn construct_no_shuffle_upstream_traverse_query(fragment_ids: Vec<FragmentId>) -> WithQuery {
-    construct_no_shuffle_traverse_query_helper(fragment_ids, NoShuffleResolveDirection::UPSTREAM)
+    construct_no_shuffle_traverse_query_helper(fragment_ids, NoShuffleResolveDirection::Upstream)
 }
 
 pub fn construct_no_shuffle_downstream_traverse_query(fragment_ids: Vec<FragmentId>) -> WithQuery {
-    construct_no_shuffle_traverse_query_helper(fragment_ids, NoShuffleResolveDirection::DOWNSTREAM)
+    construct_no_shuffle_traverse_query_helper(fragment_ids, NoShuffleResolveDirection::Downstream)
 }
 
 enum NoShuffleResolveDirection {
-    UPSTREAM,
-    DOWNSTREAM,
+    Upstream,
+    Downstream,
 }
 
 fn construct_no_shuffle_traverse_query_helper(
@@ -71,11 +70,11 @@ fn construct_no_shuffle_traverse_query_helper(
     // and if downwards
     //     resolve by dispatcher_id -> fragment_id
     let (cte_ref_column, compared_column) = match direction {
-        NoShuffleResolveDirection::UPSTREAM => (
+        NoShuffleResolveDirection::Upstream => (
             (cte_alias.clone(), actor::Column::FragmentId).into_column_ref(),
             (ActorDispatcher, actor_dispatcher::Column::DispatcherId).into_column_ref(),
         ),
-        NoShuffleResolveDirection::DOWNSTREAM => (
+        NoShuffleResolveDirection::Downstream => (
             (cte_alias.clone(), actor_dispatcher::Column::DispatcherId).into_column_ref(),
             (Actor, actor::Column::FragmentId).into_column_ref(),
         ),
@@ -342,29 +341,5 @@ impl CatalogController {
             fragment_upstreams,
             related_jobs,
         })
-    }
-}
-
-#[cfg(test)]
-#[cfg(not(madsim))]
-mod tests {
-
-    use super::*;
-
-    #[tokio::test]
-    async fn test_scale() -> MetaResult<()> {
-        // let srv_env = MetaSrvEnv::for_test().await;
-        // let mgr = CatalogController::new(srv_env)?;
-        // let inner = mgr.inner.read().await;
-        // let txn = inner.db.begin().await?;
-        //
-        // let working_set = mgr
-        //     .resolve_working_set_for_reschedule_fragments(&txn, vec![8, 7, 6])
-        //     .await
-        //     .unwrap();
-
-        // println!("working set {:#?}", working_set);
-
-        Ok(())
     }
 }
