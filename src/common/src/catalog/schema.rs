@@ -197,6 +197,14 @@ impl Schema {
             true
         }
     }
+
+    pub fn formatted_col_names(&self) -> String {
+        self.fields
+            .iter()
+            .map(|f| format!("\"{}\"", &f.name))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
 }
 
 impl Field {

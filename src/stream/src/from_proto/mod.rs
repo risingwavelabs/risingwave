@@ -53,6 +53,8 @@ mod union;
 mod values;
 mod watermark_filter;
 
+mod approx_percentile;
+
 // import for submodules
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -60,6 +62,8 @@ use risingwave_pb::stream_plan::{StreamNode, TemporalJoinNode};
 use risingwave_storage::StateStore;
 
 use self::append_only_dedup::*;
+use self::approx_percentile::global::*;
+use self::approx_percentile::local::*;
 use self::barrier_recv::*;
 use self::batch_query::*;
 use self::cdc_filter::CdcFilterExecutorBuilder;
@@ -175,5 +179,7 @@ pub async fn create_executor(
         NodeBody::StreamFsFetch => FsFetchExecutorBuilder,
         NodeBody::SourceBackfill => SourceBackfillExecutorBuilder,
         NodeBody::Changelog => ChangeLogExecutorBuilder,
+        NodeBody::GlobalApproxPercentile => GlobalApproxPercentileExecutorBuilder,
+        NodeBody::LocalApproxPercentile => LocalApproxPercentileExecutorBuilder,
     }
 }
