@@ -261,7 +261,12 @@ impl FrontendEnv {
             .unwrap();
         info!("advertise addr is {}", frontend_address);
 
-        let frontend_rpc_addr = opts.frontend_rpc_listener_addr.parse().unwrap();
+        let addr: HostAddr = opts.frontend_rpc_listener_addr.parse().unwrap();
+        // Use the host of advertise address for the frontend rpc address.
+        let frontend_rpc_addr = HostAddr {
+            host: frontend_address.host.clone(),
+            port: addr.port,
+        };
         // Register in meta by calling `AddWorkerNode` RPC.
         // Use the rpc server address as the frontend address, since Meta needs to get frontend rpc
         // client based on this address.
