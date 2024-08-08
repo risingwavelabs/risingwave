@@ -33,7 +33,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
@@ -294,7 +294,7 @@ async fn pull_version_deltas(
     let (handle, shutdown_tx) =
         MetaClient::start_heartbeat_loop(meta_client.clone(), Duration::from_millis(1000), vec![]);
     let res = meta_client
-        .list_version_deltas(0, u32::MAX, u64::MAX)
+        .list_version_deltas(HummockVersionId::new(0), u32::MAX, u64::MAX)
         .await
         .unwrap();
 
@@ -643,7 +643,7 @@ async fn open_hummock_iters(
 }
 
 pub async fn check_compaction_results(
-    version_id: u64,
+    version_id: HummockVersionId,
     mut expect_results: BTreeMap<HummockEpoch, StateStoreIterType>,
     mut actual_results: BTreeMap<HummockEpoch, StateStoreIterType>,
 ) -> anyhow::Result<()> {
