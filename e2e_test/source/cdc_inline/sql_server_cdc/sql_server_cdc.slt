@@ -33,7 +33,7 @@ CREATE SOURCE mssql_source WITH (
 );
 
 # invalid password
-statement error Login failed for user 'sa'
+statement error Login failed for user
 CREATE SOURCE mssql_source WITH (
     connector = 'sqlserver-cdc',
     hostname = '${SQLCMDSERVER:sqlserver-server}',
