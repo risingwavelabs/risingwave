@@ -4872,7 +4872,7 @@ impl CatalogManager {
                 Operation::Add,
                 Info::RelationGroup(RelationGroup {
                     relations: vec![Relation {
-                        relation_info: RelationInfo::Source(source_relation.to_owned()).into(),
+                        relation_info: RelationInfo::Source(source_relation).into(),
                     }],
                 }),
             )
