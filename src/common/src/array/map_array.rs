@@ -225,28 +225,27 @@ mod scalar {
 
         /// # Panics
         /// Panics if [map invariants](`super::MapArray`) are violated.
-        pub fn from_kv(keys: ListValue, values: ListValue) -> Self {
-            assert_eq!(
-                keys.len(),
-                values.len(),
-                "keys: {keys:?}, values: {values:?}"
-            );
-            let unique_keys = keys.iter().unique().collect_vec();
-            assert!(
-                unique_keys.len() == keys.len(),
-                "non unique keys in map: {keys:?}"
-            );
-            assert!(!unique_keys.contains(&None), "null key in map: {keys:?}");
+        pub fn try_from_kv(key: ListValue, value: ListValue) -> Result<Self, String> {
+            if key.len() != value.len() {
+                return Err("map keys and values have different length".to_string());
+            }
+            let unique_keys = key.iter().unique().collect_vec();
+            if unique_keys.len() != key.len() {
+                return Err("map keys must be unique".to_string());
+            }
+            if unique_keys.contains(&None) {
+                return Err("map keys must not be NULL".to_string());
+            }
 
-            let len = keys.len();
-            let key_type = keys.data_type();
-            let value_type = values.data_type();
+            let len = key.len();
+            let key_type = key.data_type();
+            let value_type = value.data_type();
             let struct_array = StructArray::new(
                 MapType::struct_type_for_map(key_type, value_type),
-                vec![keys.into_array().into_ref(), values.into_array().into_ref()],
+                vec![key.into_array().into_ref(), value.into_array().into_ref()],
                 Bitmap::ones(len),
             );
-            MapValue(ListValue::new(struct_array.into()))
+            Ok(MapValue(ListValue::new(struct_array.into())))
         }
     }
 

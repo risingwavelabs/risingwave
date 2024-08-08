@@ -50,10 +50,11 @@ impl MapType {
             .iter()
             .collect_tuple()
             .expect("the underlying struct for map must have exactly two fields");
-        if cfg!(debug_assertions) {
-            // the field names are not strictly enforced
-            itertools::assert_equal(struct_type.names(), ["key", "value"]);
-        }
+        // the field names are not strictly enforced
+        // Currently this panics for SELECT * FROM t
+        // if cfg!(debug_assertions) {
+        //     itertools::assert_equal(struct_type.names(), ["key", "value"]);
+        // }
         Self::from_kv(k.1.clone(), v.1.clone())
     }
 

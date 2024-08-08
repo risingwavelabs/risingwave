@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::row::Row;
-use risingwave_common::types::{ListRef, MapType, MapValue, ToOwnedDatum};
+use risingwave_common::types::{DataType, ListRef, MapType, MapValue, ToOwnedDatum};
 use risingwave_expr::expr::Context;
 use risingwave_expr::{function, ExprError};
 
@@ -27,6 +26,11 @@ fn array(row: impl Row, ctx: &Context) -> ListValue {
 #[function("row(...) -> struct", type_infer = "panic")]
 fn row_(row: impl Row) -> StructValue {
     StructValue::new(row.iter().map(|d| d.to_owned_datum()).collect())
+}
+
+fn map_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
+    let map = MapType::try_from_kv(args[0].as_list().clone(), args[1].as_list().clone())?;
+    Ok(map.into())
 }
 
 /// # Example
@@ -44,24 +48,10 @@ fn row_(row: impl Row) -> StructValue {
 /// ```
 #[function(
     "map_from_entries(anyarray, anyarray) -> anymap",
-    type_infer = "|args| Ok(MapType::from_kv(args[0].as_list().clone(), args[1].as_list().clone()).into())"
+    type_infer = "map_type_infer"
 )]
 fn map(key: ListRef<'_>, value: ListRef<'_>) -> Result<MapValue, ExprError> {
-    // TODO: restrict key's type (where? in the macro?)
-    if key.len() != value.len() {
-        return Err(ExprError::InvalidParam {
-            name: "key",
-            reason: "Map keys and values have different length".into(),
-        });
-    }
-    if key.iter().duplicates().next().is_some() {
-        return Err(ExprError::InvalidParam {
-            name: "key",
-            reason: "Map keys must be unique".into(),
-        });
-    }
-
-    Ok(MapValue::from_kv(key.to_owned(), value.to_owned()))
+    MapValue::try_from_kv(key.to_owned(), value.to_owned()).map_err(ExprError::Custom)
 }
 
 #[cfg(test)]
