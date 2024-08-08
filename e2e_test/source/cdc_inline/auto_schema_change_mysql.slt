@@ -1,0 +1,69 @@
+control substitution on
+
+system ok
+mysql -e "DROP DATABASE IF EXISTS mytest; CREATE DATABASE mytest;"
+
+system ok
+mysql -e "
+    USE mytest;
+    DROP TABLE IF EXISTS customers;
+    CREATE TABLE customers(
+         id BIGINT PRIMARY KEY,
+         modified DATETIME,
+         custinfo JSON
+    );
+    ALTER TABLE customers ADD INDEX zipsa( (CAST(custinfo->'zipcode' AS UNSIGNED ARRAY)) );
+    "
+
+statement ok
+create source mysql_source with (
+ connector = 'mysql-cdc',
+ hostname = '${MYSQL_HOST:localhost}',
+ port = '${MYSQL_TCP_PORT:8306}',
+ username = 'root',
+ password = '${MYSQL_PWD:}',
+ database.name = 'mytest',
+ server.id = '5701',
+ auto.schema.change = 'true'
+);
+
+statement ok
+create table rw_customers (id bigint, modified timestamp, custinfo jsonb, primary key (id)) from mysql_source table 'mytest.customers';
+
+# Name, Type, Is Hidden, Description
+query TTTT
+describe rw_customers;
+----
+id bigint false NULL
+modified timestamp without time zone false NULL
+custinfo jsonb false NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description rw_customers NULL NULL
+
+
+system ok
+mysql -e "
+  USE mytest;
+  ALTER TABLE customers ADD COLUMN v1 VARCHAR(255);
+  ALTER TABLE customers ADD COLUMN v2 double(5,2);
+"
+
+sleep 3s
+
+# Name, Type, Is Hidden, Description
+query TTTT
+describe rw_customers;
+----
+id bigint false NULL
+modified timestamp without time zone false NULL
+custinfo jsonb false NULL
+v1 character varying false NULL
+v2 double precision false NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description rw_customers NULL NULL
+
+
+statement ok
+drop source mysql_source cascade;

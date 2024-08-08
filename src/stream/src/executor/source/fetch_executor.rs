@@ -177,6 +177,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                 rate_limit: self.rate_limit_rps,
             },
             source_desc.source.config.clone(),
+            None,
         )
     }
 

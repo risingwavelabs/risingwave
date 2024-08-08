@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package frontend_service;
+
+import "ddl_service.proto";
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+message GetTableReplacePlanRequest {
+  uint32 database_id = 1;
+  uint32 owner = 2;
+  string table_name = 3;
+  ddl_service.TableSchemaChange table_change = 4;
+}
+
+message GetTableReplacePlanResponse {
+  ddl_service.ReplaceTablePlan replace_plan = 1;
+}
+
+service FrontendService {
+  rpc GetTableReplacePlan(GetTableReplacePlanRequest) returns (GetTableReplacePlanResponse);
+}

@@ -145,6 +145,7 @@ pub fn type_name_to_mysql_type(ty_name: &str) -> Option<ColumnType> {
                 $(
                     $name => Some(ColumnType::$variant(Default::default())),
                 )*
+                "json" => Some(ColumnType::Json),
                 _ => None,
             }
         };

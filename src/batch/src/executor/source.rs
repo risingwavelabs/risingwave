@@ -174,6 +174,7 @@ impl SourceExecutor {
                 rate_limit: None,
             },
             ConnectorProperties::default(),
+            None,
         ));
         let stream = self
             .source

@@ -47,6 +47,14 @@ pub type SessionId = (ProcessId, SecretKey);
 pub trait SessionManager: Send + Sync + 'static {
     type Session: Session;
 
+    /// In the process of auto schema change, we need a dummy session to access
+    /// catalog information in frontend and build a replace plan for the table.
+    fn create_dummy_session(
+        &self,
+        database_id: u32,
+        user_id: u32,
+    ) -> Result<Arc<Self::Session>, BoxedError>;
+
     fn connect(
         &self,
         database: &str,
@@ -257,7 +265,7 @@ impl UserAuthenticator {
 /// Returns when the `shutdown` token is triggered.
 pub async fn pg_serve(
     addr: &str,
-    session_mgr: impl SessionManager,
+    session_mgr: Arc<impl SessionManager>,
     tls_config: Option<TlsConfig>,
     redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
     shutdown: CancellationToken,
@@ -280,7 +288,6 @@ pub async fn pg_serve(
     #[cfg(madsim)]
     let worker_runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
 
-    let session_mgr = Arc::new(session_mgr);
     let session_mgr_clone = session_mgr.clone();
     let f = async move {
         loop {
@@ -379,6 +386,14 @@ mod tests {
 
     impl SessionManager for MockSessionManager {
         type Session = MockSession;
+
+        fn create_dummy_session(
+            &self,
+            _database_id: u32,
+            _user_name: u32,
+        ) -> Result<Arc<Self::Session>, BoxedError> {
+            unimplemented!()
+        }
 
         fn connect(
             &self,
@@ -519,7 +534,7 @@ mod tests {
         tokio::spawn(async move {
             pg_serve(
                 &bind_addr,
-                session_mgr,
+                Arc::new(session_mgr),
                 None,
                 None,
                 CancellationToken::new(), // dummy

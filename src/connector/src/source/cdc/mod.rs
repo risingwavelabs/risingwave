@@ -45,6 +45,7 @@ pub const CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY: &str = "snapshot.batch_size";
 // We enable transaction for shared cdc source by default
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
 pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
+pub const CDC_AUTO_SCHEMA_CHANGE_KEY: &str = "auto.schema.change";
 
 pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
 pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;

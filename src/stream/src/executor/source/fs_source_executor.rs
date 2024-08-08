@@ -108,6 +108,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                 rate_limit: self.rate_limit_rps,
             },
             source_desc.source.config.clone(),
+            None,
         );
         let stream = source_desc
             .source

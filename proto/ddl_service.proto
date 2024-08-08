@@ -462,6 +462,12 @@ message SchemaChangeEnvelope {
   repeated TableSchemaChange table_changes = 1;
 }
 
+message AutoSchemaChangeRequest {
+  SchemaChangeEnvelope schema_change = 1;
+}
+
+message AutoSchemaChangeResponse {}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -500,4 +506,5 @@ service DdlService {
   rpc GetTables(GetTablesRequest) returns (GetTablesResponse);
   rpc Wait(WaitRequest) returns (WaitResponse);
   rpc CommentOn(CommentOnRequest) returns (CommentOnResponse);
+  rpc AutoSchemaChange(AutoSchemaChangeRequest) returns (AutoSchemaChangeResponse);
 }

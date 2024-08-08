@@ -83,6 +83,9 @@ pub mod monitor_service;
 #[cfg_attr(madsim, path = "sim/backup_service.rs")]
 pub mod backup_service;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/frontend_service.rs")]
+pub mod frontend_service;
+#[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/java_binding.rs")]
 pub mod java_binding;
 #[rustfmt::skip]

@@ -85,6 +85,14 @@ pub struct LocalFrontend {
 impl SessionManager for LocalFrontend {
     type Session = SessionImpl;
 
+    fn create_dummy_session(
+        &self,
+        _database_id: u32,
+        _user_name: u32,
+    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+        unreachable!()
+    }
+
     fn connect(
         &self,
         _database: &str,

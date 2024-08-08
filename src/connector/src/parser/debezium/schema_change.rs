@@ -71,6 +71,10 @@ pub struct TableSchemaChange {
 }
 
 impl SchemaChangeEnvelope {
+    pub fn is_empty(&self) -> bool {
+        self.table_changes.is_empty()
+    }
+
     pub fn to_protobuf(&self) -> PbSchemaChangeEnvelope {
         let table_changes = self
             .table_changes
@@ -90,5 +94,12 @@ impl SchemaChangeEnvelope {
             .collect();
 
         PbSchemaChangeEnvelope { table_changes }
+    }
+
+    pub fn table_names(&self) -> Vec<String> {
+        self.table_changes
+            .iter()
+            .map(|table_change| table_change.cdc_table_name.clone())
+            .collect()
     }
 }
