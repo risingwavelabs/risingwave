@@ -196,8 +196,7 @@ macro_rules! dispatch_state_store {
                 }
                 #[cfg(not(debug_assertions))]
                 {
-                    let _store = $store;
-                    unimplemented!("memory state store should never be used in release mode");
+                    $body
                 }
             }
 
