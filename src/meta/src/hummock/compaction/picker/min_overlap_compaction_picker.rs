@@ -406,7 +406,7 @@ impl NonOverlapSubLevelPicker {
 
             let ret = self.pick_sub_level(l0, level_handler, sst);
             if ret.sstable_infos.len() < self.min_expected_level_count
-                && ret.total_file_size < self.min_compaction_bytes
+                || ret.total_file_size < self.min_compaction_bytes
             {
                 continue;
             }
