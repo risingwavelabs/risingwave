@@ -180,6 +180,10 @@ pub struct MetaMetrics {
 
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
+
+    pub split_compaction_group_count: IntCounterVec,
+
+    pub merge_compaction_group_count: IntCounterVec,
 }
 
 pub static GLOBAL_META_METRICS: LazyLock<MetaMetrics> =
@@ -637,6 +641,22 @@ impl MetaMetrics {
         let compaction_event_loop_iteration_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
 
+        let split_compaction_group_count = register_int_counter_vec_with_registry!(
+            "storage_split_compaction_group_count",
+            "Count of trigger split compaction group",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
+        let merge_compaction_group_count = register_int_counter_vec_with_registry!(
+            "storage_merge_compaction_group_count",
+            "Count of trigger merge compaction group",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
         Self {
             grpc_latency,
             barrier_latency,
@@ -702,6 +722,8 @@ impl MetaMetrics {
             branched_sst_count,
             compaction_event_consumed_latency,
             compaction_event_loop_iteration_latency,
+            split_compaction_group_count,
+            merge_compaction_group_count,
         }
     }
 

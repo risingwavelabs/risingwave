@@ -1643,6 +1643,11 @@ impl HummockManager {
                         new_group_id
                     );
                 }
+
+                self.metrics
+                    .split_compaction_group_count
+                    .with_label_values(&[&parent_group_id.to_string()])
+                    .inc();
             }
             Err(e) => {
                 tracing::info!(
@@ -1687,6 +1692,11 @@ impl HummockManager {
                                 group.group_id,
                                 new_group_id
                             );
+
+                            self.metrics
+                                .split_compaction_group_count
+                                .with_label_values(&[&group.group_id.to_string()])
+                                .inc();
                             return;
                         }
                         Err(e) => {
@@ -1838,6 +1848,11 @@ impl HummockManager {
                     next_group.group_id,
                     group.group_id,
                 );
+
+                self.metrics
+                    .merge_compaction_group_count
+                    .with_label_values(&[&group.group_id.to_string()])
+                    .inc();
             }
             Err(e) => {
                 tracing::info!(
