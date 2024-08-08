@@ -50,7 +50,9 @@ fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion)
     metrics
         .safe_epoch
         .set(current_version.visible_table_safe_epoch() as i64);
-    metrics.current_version_id.set(current_version.id as i64);
+    metrics
+        .current_version_id
+        .set(current_version.id.to_u64() as i64);
 }
 
 pub(super) struct HummockVersionTransaction<'a> {

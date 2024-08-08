@@ -210,7 +210,7 @@ impl HummockVersionStateTableInfo {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HummockVersion {
-    pub id: u64,
+    pub id: HummockVersionId,
     pub levels: HashMap<CompactionGroupId, Levels>,
     max_committed_epoch: u64,
     safe_epoch: u64,
@@ -263,7 +263,7 @@ impl HummockVersion {
 impl From<&PbHummockVersion> for HummockVersion {
     fn from(pb_version: &PbHummockVersion) -> Self {
         Self {
-            id: pb_version.id,
+            id: HummockVersionId(pb_version.id),
             levels: pb_version
                 .levels
                 .iter()
@@ -301,7 +301,7 @@ impl From<&PbHummockVersion> for HummockVersion {
 impl From<&HummockVersion> for PbHummockVersion {
     fn from(version: &HummockVersion) -> Self {
         Self {
-            id: version.id,
+            id: version.id.0,
             levels: version
                 .levels
                 .iter()
@@ -327,7 +327,7 @@ impl From<&HummockVersion> for PbHummockVersion {
 impl From<HummockVersion> for PbHummockVersion {
     fn from(version: HummockVersion) -> Self {
         Self {
-            id: version.id,
+            id: version.id.0,
             levels: version
                 .levels
                 .into_iter()
@@ -352,7 +352,7 @@ impl From<HummockVersion> for PbHummockVersion {
 
 impl HummockVersion {
     pub fn next_version_id(&self) -> HummockVersionId {
-        self.id + 1
+        self.id.next()
     }
 
     pub fn need_fill_backward_compatible_state_table_info_delta(&self) -> bool {
@@ -449,8 +449,8 @@ impl HummockVersion {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct HummockVersionDelta {
-    pub id: u64,
-    pub prev_id: u64,
+    pub id: HummockVersionId,
+    pub prev_id: HummockVersionId,
     pub group_deltas: HashMap<CompactionGroupId, GroupDeltas>,
     max_committed_epoch: u64,
     safe_epoch: u64,
@@ -596,8 +596,8 @@ impl HummockVersionDelta {
 impl From<&PbHummockVersionDelta> for HummockVersionDelta {
     fn from(pb_version_delta: &PbHummockVersionDelta) -> Self {
         Self {
-            id: pb_version_delta.id,
-            prev_id: pb_version_delta.prev_id,
+            id: HummockVersionId(pb_version_delta.id),
+            prev_id: HummockVersionId(pb_version_delta.prev_id),
             group_deltas: pb_version_delta
                 .group_deltas
                 .iter()
@@ -646,8 +646,8 @@ impl From<&PbHummockVersionDelta> for HummockVersionDelta {
 impl From<&HummockVersionDelta> for PbHummockVersionDelta {
     fn from(version_delta: &HummockVersionDelta) -> Self {
         Self {
-            id: version_delta.id,
-            prev_id: version_delta.prev_id,
+            id: version_delta.id.0,
+            prev_id: version_delta.prev_id.0,
             group_deltas: version_delta
                 .group_deltas
                 .iter()
@@ -683,8 +683,8 @@ impl From<&HummockVersionDelta> for PbHummockVersionDelta {
 impl From<HummockVersionDelta> for PbHummockVersionDelta {
     fn from(version_delta: HummockVersionDelta) -> Self {
         Self {
-            id: version_delta.id,
-            prev_id: version_delta.prev_id,
+            id: version_delta.id.0,
+            prev_id: version_delta.prev_id.0,
             group_deltas: version_delta
                 .group_deltas
                 .into_iter()
@@ -720,8 +720,8 @@ impl From<HummockVersionDelta> for PbHummockVersionDelta {
 impl From<PbHummockVersionDelta> for HummockVersionDelta {
     fn from(pb_version_delta: PbHummockVersionDelta) -> Self {
         Self {
-            id: pb_version_delta.id,
-            prev_id: pb_version_delta.prev_id,
+            id: HummockVersionId(pb_version_delta.id),
+            prev_id: HummockVersionId(pb_version_delta.prev_id),
             group_deltas: pb_version_delta
                 .group_deltas
                 .into_iter()

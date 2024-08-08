@@ -34,7 +34,7 @@ use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId, LocalSstableInfo};
 use risingwave_pb::hummock::StateTableInfoDelta;
 use spin::Mutex;
 use tokio::spawn;
@@ -90,7 +90,7 @@ impl HummockUploader {
 
 pub(super) fn test_hummock_version(epoch: HummockEpoch) -> HummockVersion {
     let mut version = HummockVersion::default();
-    version.id = epoch;
+    version.id = HummockVersionId::new(epoch);
     version.max_committed_epoch = epoch;
     version.state_table_info.apply_delta(
         &HashMap::from_iter([(

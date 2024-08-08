@@ -176,7 +176,7 @@ pub(crate) async fn start_pinned_version_worker(
     min_execute_interval_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut need_unpin = false;
 
-    let mut version_ids_in_use: BTreeMap<u64, (usize, Instant)> = BTreeMap::new();
+    let mut version_ids_in_use: BTreeMap<HummockVersionId, (usize, Instant)> = BTreeMap::new();
     let max_version_pinning_duration_sec = Duration::from_secs(max_version_pinning_duration_sec);
     // For each run in the loop, accumulate versions to unpin and call unpin RPC once.
     loop {
