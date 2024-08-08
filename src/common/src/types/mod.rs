@@ -345,8 +345,7 @@ impl DataType {
             }
             DataType::Map(datatype) => {
                 // Same as List<Struct<K,V>>
-                pb.field_type =
-                    vec![DataType::Struct(datatype.clone().into_struct()).to_protobuf()];
+                pb.field_type = vec![datatype.clone().into_struct().to_protobuf()];
             }
             DataType::Boolean
             | DataType::Int16

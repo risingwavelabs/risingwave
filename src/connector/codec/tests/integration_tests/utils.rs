@@ -44,6 +44,14 @@ impl<'a> std::fmt::Debug for DataTypeTestDisplay<'a> {
                 .debug_tuple("List")
                 .field(&DataTypeTestDisplay(t))
                 .finish(),
+            DataType::Map(m) => {
+                write!(
+                    f,
+                    "Map({:?},{:?})",
+                    &DataTypeTestDisplay(m.key()),
+                    &DataTypeTestDisplay(m.value())
+                )
+            }
             _ => {
                 // do not use alternative display for simple types
                 write!(f, "{:?}", self.0)
@@ -75,6 +83,10 @@ impl<'a> std::fmt::Debug for ScalarRefImplTestDisplay<'a> {
             ScalarRefImpl::List(l) => f
                 .debug_list()
                 .entries(l.iter().map(DatumRefTestDisplay))
+                .finish(),
+            ScalarRefImpl::Map(m) => f
+                .debug_list()
+                .entries(m.inner().iter().map(DatumRefTestDisplay))
                 .finish(),
             _ => {
                 // do not use alternative display for simple types
