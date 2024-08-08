@@ -1120,6 +1120,14 @@ pub fn validate_compatibility(
         .get_connector()
         .ok_or_else(|| RwError::from(ProtocolError("missing field 'connector'".to_string())))?;
 
+    if connector == S3_CONNECTOR {
+        // S3 connector is deprecated, use OPENDAL_S3_CONNECTOR instead
+        // do s3 -> s3_v2 migration
+        let entry = props.get_mut(UPSTREAM_SOURCE_KEY).unwrap();
+        *entry = OPENDAL_S3_CONNECTOR.to_string();
+        connector = OPENDAL_S3_CONNECTOR.to_string();
+    }
+
     let compatible_formats = CONNECTORS_COMPATIBLE_FORMATS
         .get(&connector)
         .ok_or_else(|| {
@@ -1147,14 +1155,6 @@ pub fn validate_compatibility(
                 UPSTREAM_SOURCE_KEY
             ))));
         }
-    }
-
-    if connector == S3_CONNECTOR {
-        let entry = props
-            .get_mut(risingwave_connector::source::UPSTREAM_SOURCE_KEY)
-            .unwrap();
-        *entry = OPENDAL_S3_CONNECTOR.to_string();
-        connector = OPENDAL_S3_CONNECTOR.to_string();
     }
 
     let compatible_encodes = compatible_formats
