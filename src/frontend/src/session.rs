@@ -1125,8 +1125,8 @@ impl SessionImpl {
     }
 }
 
-pub static SESSION_MANAGER: tokio::sync::OnceCell<Arc<SessionManagerImpl>> =
-    tokio::sync::OnceCell::const_new();
+pub static SESSION_MANAGER: std::sync::OnceLock<Arc<SessionManagerImpl>> =
+    std::sync::OnceLock::new();
 
 pub struct SessionManagerImpl {
     env: FrontendEnv,

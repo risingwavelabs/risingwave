@@ -188,9 +188,8 @@ pub fn start(
     // slow compile in release mode.
     Box::pin(async move {
         let listen_addr = opts.listen_addr.clone();
-        let session_mgr = SESSION_MANAGER
-            .get_or_init(|| async { Arc::new(SessionManagerImpl::new(opts).await.unwrap()) })
-            .await;
+        let session_mgr = Arc::new(SessionManagerImpl::new(opts).await.unwrap());
+        SESSION_MANAGER.get_or_init(|| session_mgr.clone());
         let redact_sql_option_keywords = Arc::new(
             session_mgr
                 .env()
