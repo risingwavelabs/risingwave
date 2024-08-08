@@ -51,6 +51,12 @@ pub struct MergeExecutor {
 
     /// Streaming metrics.
     metrics: Arc<StreamingMetrics>,
+
+    /// Chunk size for the StreamChunkBuilder
+    chunk_size: usize,
+
+    /// Data types for the StreamChunkBuilder
+    schema: Schema,
 }
 
 impl MergeExecutor {
@@ -61,8 +67,9 @@ impl MergeExecutor {
         upstream_fragment_id: FragmentId,
         inputs: Vec<BoxedInput>,
         context: Arc<SharedContext>,
-        _receiver_id: u64,
         metrics: Arc<StreamingMetrics>,
+        chunk_size: usize,
+        schema: Schema,
     ) -> Self {
         Self {
             actor_context: ctx,
@@ -71,6 +78,8 @@ impl MergeExecutor {
             upstream_fragment_id,
             context,
             metrics,
+            chunk_size,
+            schema,
         }
     }
 
@@ -79,6 +88,7 @@ impl MergeExecutor {
         actor_id: ActorId,
         inputs: Vec<super::exchange::permit::Receiver>,
         shared_context: Arc<SharedContext>,
+        schema: Schema,
     ) -> Self {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::Input;
@@ -101,8 +111,9 @@ impl MergeExecutor {
                 })
                 .collect(),
             shared_context,
-            810,
             StreamingMetrics::unused().into(),
+            1024,
+            schema,
         )
     }
 
@@ -127,7 +138,7 @@ impl MergeExecutor {
             self.upstreams,
             merge_barrier_align_duration.clone(),
         );
-        let select_all = BufferChunks::new(select_all, 1024);
+        let select_all = BufferChunks::new(select_all, self.chunk_size, self.schema);
         let actor_id = self.actor_context.id;
 
         let mut metrics = self.metrics.new_actor_input_metrics(
@@ -466,25 +477,24 @@ impl SelectReceivers {
     }
 }
 
-/// A wrapper that buffers the `StreamChunk`s from upstreams. Any message other than `StreamChunk`
-/// will trigger the buffered `StreamChunk`s to be emitted immediately, as well as the message itself.
+/// A wrapper that buffers the `StreamChunk`s from upstream until no more ready items are available.
+/// Besides, any message other than `StreamChunk` will trigger the buffered `StreamChunk`s
+/// to be emitted immediately, as well as the message itself.
 struct BufferChunks<S: Stream> {
     inner: S,
-    cap: usize,
+    chunk_builder: StreamChunkBuilder,
 
-    /// Don't know the data types yet. Will build it upon the first chunk.
-    builder: Option<StreamChunkBuilder>,
-
+    /// The items to be emitted. Whenever there's something here, we should return a `Poll::Ready` immediately.
     pending_items: VecDeque<S::Item>,
 }
 
 impl<S: Stream> BufferChunks<S> {
-    pub(super) fn new(inner: S, capacity: usize) -> Self {
-        assert!(capacity > 0);
+    pub(super) fn new(inner: S, chunk_size: usize, schema: Schema) -> Self {
+        assert!(chunk_size > 0);
+        let chunk_builder = StreamChunkBuilder::new(chunk_size, schema.data_types());
         Self {
             inner,
-            cap: capacity,
-            builder: None,
+            chunk_builder,
             pending_items: VecDeque::new(),
         }
     }
@@ -518,10 +528,9 @@ where
 
             match self.inner.poll_next_unpin(cx) {
                 Poll::Pending => {
-                    return if let Some(b) = &mut self.builder
-                        && b.size() > 0
-                    {
-                        Poll::Ready(Some(Ok(Message::Chunk(b.take().unwrap()))))
+                    return if self.chunk_builder.size() > 0 {
+                        let chunk_out = self.chunk_builder.take().unwrap();
+                        Poll::Ready(Some(Ok(Message::Chunk(chunk_out))))
                     } else {
                         Poll::Pending
                     }
@@ -529,23 +538,14 @@ where
 
                 Poll::Ready(Some(result)) => {
                     if let Ok(Message::Chunk(chunk)) = result {
-                        if self.builder.is_none() {
-                            // initialize with the input data types
-                            self.builder =
-                                Some(StreamChunkBuilder::new(self.cap, chunk.data_types()));
-                        }
                         for row in chunk.records() {
-                            if let Some(chunk_out) =
-                                self.builder.as_mut().unwrap().append_record(row)
-                            {
+                            if let Some(chunk_out) = self.chunk_builder.append_record(row) {
                                 self.pending_items.push_back(Ok(Message::Chunk(chunk_out)));
                             }
                         }
                     } else {
-                        return if let Some(b) = &mut self.builder
-                            && b.size() > 0
-                        {
-                            let chunk_out = b.take().unwrap();
+                        return if self.chunk_builder.size() > 0 {
+                            let chunk_out = self.chunk_builder.take().unwrap();
                             self.pending_items.push_back(result);
                             Poll::Ready(Some(Ok(Message::Chunk(chunk_out))))
                         } else {
@@ -609,7 +609,7 @@ mod tests {
             test_env.shared_context.local_barrier_manager.clone(),
         )
         .boxed_input();
-        let mut buffer = BufferChunks::new(input, 1024);
+        let mut buffer = BufferChunks::new(input, 100, Schema::new(vec![]));
 
         // Send a chunk
         tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
@@ -690,7 +690,12 @@ mod tests {
             rxs.push(rx);
         }
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
-        let merger = MergeExecutor::for_test(233, rxs, barrier_test_env.shared_context.clone());
+        let merger = MergeExecutor::for_test(
+            233,
+            rxs,
+            barrier_test_env.shared_context.clone(),
+            Schema::new(vec![]),
+        );
         let actor_id = merger.actor_context.id;
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
@@ -821,8 +826,9 @@ mod tests {
             upstream_fragment_id,
             inputs,
             ctx.clone(),
-            233,
             metrics.clone(),
+            1024,
+            Schema::new(vec![]),
         )
         .boxed()
         .execute();

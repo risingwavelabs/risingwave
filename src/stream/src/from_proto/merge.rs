@@ -74,8 +74,9 @@ impl ExecutorBuilder for MergeExecutorBuilder {
                 upstream_fragment_id,
                 inputs,
                 params.shared_context.clone(),
-                params.operator_id,
                 params.executor_stats.clone(),
+                params.env.config().developer.chunk_size,
+                params.info.schema.clone(),
             )
             .boxed()
         };
