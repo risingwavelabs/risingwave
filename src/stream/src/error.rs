@@ -15,7 +15,6 @@
 use risingwave_common::array::ArrayError;
 use risingwave_common::secret::SecretError;
 use risingwave_connector::error::ConnectorError;
-use risingwave_connector::sink::SinkError;
 use risingwave_expr::ExprError;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::ToTonicStatus;
@@ -64,13 +63,6 @@ pub enum ErrorKind {
         #[from]
         #[backtrace]
         StreamExecutorError,
-    ),
-
-    #[error("Sink error: {0}")]
-    Sink(
-        #[from]
-        #[backtrace]
-        SinkError,
     ),
 
     #[error("Actor {actor_id} exited unexpectedly: {source}")]
