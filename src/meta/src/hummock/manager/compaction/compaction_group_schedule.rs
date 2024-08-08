@@ -21,8 +21,9 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compact_task::ReportTask;
+use risingwave_hummock_sdk::compaction_group::group_split::split_table_ids;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ids, split_table_ids, TableGroupInfo,
+    get_compaction_group_ids, TableGroupInfo,
 };
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
@@ -88,7 +89,7 @@ impl HummockManager {
         Ok(result)
     }
 
-    pub async fn split_compaction_group_v2(
+    async fn split_compaction_group_impl(
         &self,
         parent_group_id: CompactionGroupId,
         table_id: StateTableId,
@@ -149,7 +150,7 @@ impl HummockManager {
 
         let split_sst_count = new_version_delta
             .latest_version()
-            .count_new_ssts_in_group_split_v2(parent_group_id, split_key.clone());
+            .count_new_ssts_in_group_split(parent_group_id, split_key.clone());
 
         tracing::info!(
             "LI)K parent_group_id: {}, split_sst_count: {}",
@@ -291,7 +292,7 @@ impl HummockManager {
 
         // split 1
         let target_compaction_group_id = self
-            .split_compaction_group_v2(
+            .split_compaction_group_impl(
                 parent_group_id,
                 *table_ids.first().unwrap(),
                 VNODE_SPLIT_TO_RIGHT,
@@ -299,7 +300,7 @@ impl HummockManager {
             .await?;
 
         // split 2
-        self.split_compaction_group_v2(
+        self.split_compaction_group_impl(
             target_compaction_group_id,
             *table_ids.last().unwrap(),
             VNODE_SPLIT_TO_LEFT,
@@ -309,7 +310,7 @@ impl HummockManager {
         Ok(target_compaction_group_id)
     }
 
-    pub async fn merge_compaction_group_v2(
+    pub async fn merge_compaction_group(
         &self,
         group_1: CompactionGroupId,
         group_2: CompactionGroupId,
@@ -749,7 +750,7 @@ impl HummockManager {
         }
 
         match self
-            .merge_compaction_group_v2(group.group_id, next_group.group_id)
+            .merge_compaction_group(group.group_id, next_group.group_id)
             .await
         {
             Ok(()) => {

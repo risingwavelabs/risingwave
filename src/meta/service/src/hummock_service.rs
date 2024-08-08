@@ -709,7 +709,7 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<MergeCompactionGroupResponse>, Status> {
         let req = request.into_inner();
         self.hummock_manager
-            .merge_compaction_group_v2(req.left_group_id, req.right_group_id)
+            .merge_compaction_group(req.left_group_id, req.right_group_id)
             .await?;
         Ok(Response::new(MergeCompactionGroupResponse {}))
     }

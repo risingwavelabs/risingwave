@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::split_sst;
+use risingwave_hummock_sdk::compaction_group::group_split::split_sst;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, to_prost_table_stats_map, PbTableStatsMap,
@@ -506,7 +506,7 @@ impl HummockManager {
 
         for (mut sst, group_table_ids) in sst_to_cg_vec {
             for (group_id, _match_ids) in group_table_ids {
-                let branch_sst = split_sst(&mut sst.sst_info, &mut new_sst_id);
+                let branch_sst = split_sst(&mut sst.sst_info, &mut new_sst_id, None);
                 commit_sstables
                     .entry(group_id)
                     .or_default()

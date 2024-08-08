@@ -43,3 +43,247 @@ impl From<StaticCompactionGroupId> for CompactionGroupId {
         cg as CompactionGroupId
     }
 }
+
+pub mod group_split {
+
+    use bytes::Bytes;
+    use itertools::Itertools;
+    use risingwave_pb::hummock::PbLevelType;
+
+    use super::hummock_version_ext::{add_ssts_to_sub_level, insert_new_sub_level};
+    use crate::can_concat;
+    use crate::key::FullKey;
+    use crate::key_range::KeyRange;
+    use crate::level::{Level, Levels};
+    use crate::sstable_info::SstableInfo;
+
+    #[derive(Debug, PartialEq, Clone)]
+    pub enum SstSplitType {
+        Left,
+        Right,
+        Both,
+    }
+
+    pub fn need_to_split(sst: &SstableInfo, split_key: Bytes) -> SstSplitType {
+        let key_range = &sst.key_range;
+        // 1. compare left
+        if split_key.cmp(&key_range.left).is_le() {
+            return SstSplitType::Right;
+        }
+
+        // 2. compare right
+        if key_range.right_exclusive {
+            if split_key.cmp(&key_range.right).is_ge() {
+                return SstSplitType::Left;
+            }
+        } else if split_key.cmp(&key_range.right).is_gt() {
+            return SstSplitType::Left;
+        }
+
+        SstSplitType::Both
+    }
+
+    pub fn split_sst(
+        origin_sst_info: &mut SstableInfo,
+        new_sst_id: &mut u64,
+        split_key: Option<Bytes>,
+    ) -> SstableInfo {
+        let mut branch_table_info = origin_sst_info.clone();
+        branch_table_info.sst_id = *new_sst_id;
+        origin_sst_info.sst_id = *new_sst_id + 1;
+        *new_sst_id += 1;
+
+        if split_key.is_none() {
+            return branch_table_info;
+        }
+
+        let split_key = split_key.unwrap();
+
+        let (key_range_l, key_range_r) = {
+            let key_range = &origin_sst_info.key_range;
+            let l = KeyRange {
+                left: key_range.left.clone(),
+                right: split_key.clone(),
+                right_exclusive: true,
+            };
+
+            let r = KeyRange {
+                left: split_key.clone(),
+                right: key_range.right.clone(),
+                right_exclusive: key_range.right_exclusive,
+            };
+
+            (l, r)
+        };
+        let (table_ids_l, table_ids_r) =
+            split_table_ids(&origin_sst_info.table_ids, split_key.clone());
+
+        // rebuild the key_range and size and sstable file size
+        {
+            // origin_sst_info
+            origin_sst_info.key_range = key_range_l.clone();
+            origin_sst_info.estimated_sst_size /= 2;
+            origin_sst_info.table_ids = table_ids_l;
+        }
+
+        {
+            // new sst
+            branch_table_info.key_range = key_range_r.clone();
+            branch_table_info.estimated_sst_size /= 2;
+            branch_table_info.table_ids = table_ids_r;
+        }
+
+        branch_table_info
+    }
+
+    pub fn split_table_ids(table_ids: &Vec<u32>, split_key: Bytes) -> (Vec<u32>, Vec<u32>) {
+        assert!(table_ids.is_sorted());
+        let split_full_key = FullKey::decode(&split_key);
+        let split_user_key = split_full_key.user_key;
+        let vnode = split_user_key.get_vnode_id();
+        let table_id = split_user_key.table_id.table_id();
+
+        // let pos = table_ids.binary_search(&table_id).unwrap();
+        let pos = table_ids.partition_point(|&id| id < table_id);
+        if vnode == 0 {
+            // The split logic binds the vnode and assumes that the incoming split key epoch == 0, so we place the table_id to the right
+            // NOTE: This branch can avoid split same table_id into two groups when vnode == 0, it related to the implementation of `state_table_info` with compaction group
+            (table_ids[..pos].to_vec(), table_ids[pos..].to_vec())
+        } else {
+            (table_ids[..=pos].to_vec(), table_ids[pos..].to_vec())
+        }
+
+        // split table_id that related to split_key both left and right
+        // let pos = table_ids.binary_search(&table_id).unwrap();
+        // (table_ids[..=pos].to_vec(), table_ids[pos..].to_vec())
+    }
+
+    pub fn split_sst_info_for_level(
+        level: &mut Level,
+        new_sst_id: &mut u64,
+        split_key: Bytes,
+    ) -> Vec<SstableInfo> {
+        if level.table_infos.is_empty() {
+            return vec![];
+        }
+        if level.level_type == PbLevelType::Overlapping {
+            // TODO: filter the Overlapping sst with table_id / vnode / key_range
+            level
+                .table_infos
+                .iter_mut()
+                .map(|sst| split_sst(sst, new_sst_id, None))
+                .collect_vec()
+        } else {
+            let pos = get_split_pos(&level.table_infos, split_key.clone());
+            if pos >= level.table_infos.len() {
+                return vec![];
+            }
+
+            let mut insert_table_infos = vec![];
+            let sst = &mut level.table_infos[pos];
+            let sst_split_type = need_to_split(sst, split_key.clone());
+
+            match sst_split_type {
+                SstSplitType::Left => {
+                    insert_table_infos.extend_from_slice(&level.table_infos[pos + 1..]);
+                    level.table_infos = level.table_infos[0..=pos].to_vec();
+                }
+                SstSplitType::Right => {
+                    insert_table_infos.extend_from_slice(&level.table_infos[pos..]); // the sst at pos has been split to the right
+                    level.table_infos = level.table_infos[0..pos].to_vec();
+                }
+                SstSplitType::Both => {
+                    // split the sst
+                    let branch_sst = split_sst(sst, new_sst_id, Some(split_key));
+                    insert_table_infos.push(branch_sst.clone());
+                    // the sst at pos has been split to both left and right
+                    // the branched sst has been inserted to the `insert_table_infos`
+                    insert_table_infos.extend_from_slice(&level.table_infos[pos + 1..]);
+                    level.table_infos = level.table_infos[0..=pos].to_vec();
+                }
+            };
+
+            insert_table_infos
+        }
+    }
+
+    pub fn get_split_pos(sstables: &Vec<SstableInfo>, split_key: Bytes) -> usize {
+        sstables
+            .partition_point(|sst| sst.key_range.left.cmp(&split_key).is_lt())
+            .saturating_sub(1)
+    }
+
+    pub fn merge_levels(left_levels: &mut Levels, right_levels: &mut Levels) {
+        let right_l0 = &right_levels.l0;
+
+        for right_sub_level in &right_l0.sub_levels {
+            let sub_level = right_sub_level.clone();
+            // TODO: handle vnode_partition_count for sub level
+            // 1. consider how to safely remove the vnode_partition_count of the sub level
+            if let Ok(insert_hint) = left_levels
+                .l0
+                .sub_levels
+                .binary_search_by_key(&sub_level.sub_level_id, |level| level.sub_level_id)
+            {
+                add_ssts_to_sub_level(
+                    &mut left_levels.l0,
+                    insert_hint,
+                    sub_level.table_infos.clone(),
+                )
+            } else {
+                insert_new_sub_level(
+                    &mut left_levels.l0,
+                    sub_level.sub_level_id,
+                    sub_level.level_type,
+                    sub_level.table_infos.clone(),
+                    None,
+                );
+            }
+        }
+
+        left_levels
+            .l0
+            .sub_levels
+            .sort_by_key(|sub_level| sub_level.sub_level_id);
+
+        // Reinitialise `vnode_partition_count`` to avoid misaligned hierarchies
+        // caused by the merge of different compaction groups.(picker might reject the different `vnode_partition_count` sub_level to compact)
+        left_levels
+            .l0
+            .sub_levels
+            .iter_mut()
+            .for_each(|sub_level| sub_level.vnode_partition_count = 0);
+
+        for (idx, level) in right_levels.levels.iter_mut().enumerate() {
+            if level.table_infos.is_empty() {
+                continue;
+            }
+
+            let insert_table_infos = level.table_infos.clone();
+            left_levels.levels[idx].total_file_size += insert_table_infos
+                .iter()
+                .map(|sst| sst.estimated_sst_size)
+                .sum::<u64>();
+            left_levels.levels[idx].uncompressed_file_size += insert_table_infos
+                .iter()
+                .map(|sst| sst.uncompressed_file_size)
+                .sum::<u64>();
+
+            left_levels.levels[idx]
+                .table_infos
+                .extend(insert_table_infos);
+            left_levels.levels[idx]
+                .table_infos
+                .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
+            assert!(
+                can_concat(&left_levels.levels[idx].table_infos),
+                "{}",
+                format!(
+                    "left_levels.levels[{}].table_infos: {:?} level_idx {:?}",
+                    idx, left_levels.levels[idx].table_infos, left_levels.levels[idx].level_idx
+                )
+            );
+            level.table_infos.clear();
+        }
+    }
+}
