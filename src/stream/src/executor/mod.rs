@@ -103,6 +103,8 @@ mod watermark;
 mod watermark_filter;
 mod wrapper;
 
+mod approx_percentile;
+
 #[cfg(test)]
 mod integration_tests;
 pub mod test_utils;
@@ -110,6 +112,8 @@ mod utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
+pub use approx_percentile::global::GlobalApproxPercentileExecutor;
+pub use approx_percentile::local::LocalApproxPercentileExecutor;
 pub use backfill::arrangement_backfill::*;
 pub use backfill::cdc::{CdcBackfillExecutor, CdcScanOptions, ExternalStorageTable};
 pub use backfill::no_shuffle_backfill::*;
