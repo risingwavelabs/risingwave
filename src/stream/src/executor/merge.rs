@@ -52,10 +52,10 @@ pub struct MergeExecutor {
     /// Streaming metrics.
     metrics: Arc<StreamingMetrics>,
 
-    /// Chunk size for the StreamChunkBuilder
+    /// Chunk size for the `StreamChunkBuilder`
     chunk_size: usize,
 
-    /// Data types for the StreamChunkBuilder
+    /// Data types for the `StreamChunkBuilder`
     schema: Schema,
 }
 
@@ -528,8 +528,7 @@ where
 
             match self.inner.poll_next_unpin(cx) {
                 Poll::Pending => {
-                    return if self.chunk_builder.size() > 0 {
-                        let chunk_out = self.chunk_builder.take().unwrap();
+                    return if let Some(chunk_out) = self.chunk_builder.take() {
                         Poll::Ready(Some(Ok(Message::Chunk(chunk_out))))
                     } else {
                         Poll::Pending
@@ -544,8 +543,7 @@ where
                             }
                         }
                     } else {
-                        return if self.chunk_builder.size() > 0 {
-                            let chunk_out = self.chunk_builder.take().unwrap();
+                        return if let Some(chunk_out) = self.chunk_builder.take() {
                             self.pending_items.push_back(result);
                             Poll::Ready(Some(Ok(Message::Chunk(chunk_out))))
                         } else {
