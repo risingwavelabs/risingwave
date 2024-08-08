@@ -52,7 +52,9 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<OpendalFsSplit<Src>>> {
         let empty_split: OpendalFsSplit<Src> = OpendalFsSplit::empty_split();
-        match self.op.list("/").await {
+        let prefix = self.prefix.as_deref().unwrap_or("/");
+
+        match self.op.list(prefix).await {
             Ok(_) => return Ok(vec![empty_split]),
             Err(e) => {
                 return Err(
