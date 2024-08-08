@@ -59,7 +59,7 @@ pub struct MetaSnapshotMetadata {
     #[serde(default)]
     pub format_version: u32,
     pub remarks: Option<String>,
-    #[serde(with = "table_id_key_map")]
+    #[serde(default, with = "table_id_key_map")]
     pub state_table_info: HashMap<TableId, PbStateTableInfo>,
     pub rw_version: Option<String>,
 }

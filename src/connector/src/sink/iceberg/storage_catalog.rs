@@ -162,6 +162,10 @@ impl StorageCatalog {
 
         Ok(paths)
     }
+
+    pub fn file_io(&self) -> &FileIO {
+        &self.file_io
+    }
 }
 
 #[async_trait]
