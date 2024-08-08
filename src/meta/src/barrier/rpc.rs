@@ -256,7 +256,6 @@ impl ControlStreamManager {
     ) -> MetaResult<HashSet<WorkerId>> {
         self.inject_barrier(
             None,
-            &command_ctx.node_map,
             command_ctx.to_mutation(),
             (&command_ctx.curr_epoch, &command_ctx.prev_epoch),
             &command_ctx.kind,
@@ -269,7 +268,6 @@ impl ControlStreamManager {
     pub(super) fn inject_barrier(
         &mut self,
         creating_table_id: Option<TableId>,
-        node_map: &HashMap<WorkerId, WorkerNode>,
         mutation: Option<Mutation>,
         (curr_epoch, prev_epoch): (&TracedEpoch, &TracedEpoch),
         kind: &BarrierKind,
@@ -288,17 +286,21 @@ impl ControlStreamManager {
             })
             .unwrap_or(u32::MAX);
 
-        for worker_id in pre_applied_graph_info.worker_ids() {
-            if !node_map.contains_key(&worker_id) {
-                return Err(anyhow!("worker id {} not exist", worker_id).into());
+        for worker_id in pre_applied_graph_info.worker_ids().chain(
+            applied_graph_info
+                .into_iter()
+                .flat_map(|info| info.worker_ids()),
+        ) {
+            if !self.nodes.contains_key(&worker_id) {
+                return Err(anyhow!("unconnected worker node {}", worker_id).into());
             }
         }
 
         let mut node_need_collect = HashSet::new();
 
-        node_map
-            .iter()
-            .map(|(node_id, worker_node)| {
+        self.nodes
+            .iter_mut()
+            .map(|(node_id, node)| {
                 let actor_ids_to_send: Vec<_> =
                     pre_applied_graph_info.actor_ids_to_send(*node_id).collect();
                 let actor_ids_to_collect: Vec<_> = pre_applied_graph_info
@@ -318,15 +320,6 @@ impl ControlStreamManager {
                 };
 
                 {
-                    let Some(node) = self.nodes.get_mut(node_id) else {
-                        if actor_ids_to_collect.is_empty() {
-                            // Worker node get disconnected but has no actor to collect. Simply skip it.
-                            return Ok(());
-                        }
-                        return Err(
-                            anyhow!("unconnected worker node: {:?}", worker_node.host).into()
-                        );
-                    };
                     let mutation = mutation.clone();
                     let barrier = Barrier {
                         epoch: Some(risingwave_pb::data::Epoch {

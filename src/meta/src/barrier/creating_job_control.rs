@@ -18,7 +18,6 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -211,7 +210,6 @@ impl CreatingStreamingJobControl {
     pub(super) fn may_inject_fake_barrier(
         &mut self,
         control_stream_manager: &mut ControlStreamManager,
-        node_map: &HashMap<WorkerId, WorkerNode>,
         is_checkpoint: bool,
     ) -> MetaResult<()> {
         if let CreatingStreamingJobStatus::ConsumingSnapshot {
@@ -230,7 +228,6 @@ impl CreatingStreamingJobControl {
                 let prev_epoch = Epoch::from_physical_time(*prev_epoch_fake_physical_time);
                 let node_to_collect = control_stream_manager.inject_barrier(
                     table_id,
-                    node_map,
                     None,
                     (
                         &TracedEpoch::new(self.backfill_epoch),
@@ -248,7 +245,6 @@ impl CreatingStreamingJobControl {
                 for command in pending_commands {
                     let node_to_collect = control_stream_manager.inject_barrier(
                         table_id,
-                        node_map,
                         command.to_mutation(),
                         (&command.curr_epoch, &command.prev_epoch),
                         &command.kind,
@@ -273,7 +269,6 @@ impl CreatingStreamingJobControl {
                 };
                 let node_to_collect = control_stream_manager.inject_barrier(
                     table_id,
-                    node_map,
                     None,
                     (&curr_epoch, &prev_epoch),
                     &kind,
@@ -313,7 +308,6 @@ impl CreatingStreamingJobControl {
             CreatingStreamingJobStatus::ConsumingLogStore { graph_info } => {
                 let node_to_collect = control_stream_manager.inject_barrier(
                     Some(table_id),
-                    &command_ctx.node_map,
                     if to_finish {
                         // erase the mutation on upstream except the last Finish command
                         command_ctx.to_mutation()

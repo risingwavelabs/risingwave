@@ -968,11 +968,7 @@ impl GlobalBarrierManager {
             .creating_streaming_job_controls
             .values_mut()
         {
-            creating_job.may_inject_fake_barrier(
-                &mut self.control_stream_manager,
-                self.active_streaming_nodes.current(),
-                checkpoint,
-            )?
+            creating_job.may_inject_fake_barrier(&mut self.control_stream_manager, checkpoint)?
         }
 
         self.pending_non_checkpoint_barriers
