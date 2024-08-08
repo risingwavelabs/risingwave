@@ -93,7 +93,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         chunk_size: usize,
         input_data_types: Vec<DataType>,
     ) -> StreamExecutorResult<Self> {
-        let sink = build_sink(sink_param.clone()).map_err(|e| StreamExecutorError::from((e,sink_param.sink_id.sink_id)))?;
+        let sink = build_sink(sink_param.clone())
+            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
         let sink_input_schema: Schema = columns
             .iter()
             .map(|column| Field::from(&column.column_desc))
@@ -495,7 +496,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     );
                     Err(e)
                 }
-            }.map_err(|e| StreamExecutorError::from((e,sink_param.sink_id.sink_id)))?;
+            }
+            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
         }
         Err(anyhow!("end of stream").into())
     }

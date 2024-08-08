@@ -67,10 +67,7 @@ pub enum ErrorKind {
     ),
 
     #[error("Sink error: sink_id={1}, error: {0}")]
-    SinkError(
-        SinkError,
-        u32,
-    ),
+    SinkError(SinkError, u32),
 
     #[error(transparent)]
     RpcError(
@@ -93,9 +90,7 @@ pub enum ErrorKind {
     AlignBarrier(Box<Barrier>, Box<Barrier>),
 
     #[error("Connector error: {0}")]
-    ConnectorError(
-        BoxedError,
-    ),
+    ConnectorError(BoxedError),
 
     #[error(transparent)]
     DmlError(
@@ -149,7 +144,7 @@ impl From<String> for StreamExecutorError {
     }
 }
 
-impl From<(SinkError,u32)> for StreamExecutorError {
+impl From<(SinkError, u32)> for StreamExecutorError {
     fn from((err, sink_id): (SinkError, u32)) -> Self {
         ErrorKind::SinkError(err, sink_id).into()
     }
