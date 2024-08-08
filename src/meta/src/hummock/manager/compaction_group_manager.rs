@@ -221,7 +221,9 @@ impl HummockManager {
             &self.metrics,
         );
         let mut new_version_delta = version.new_delta();
-        let epoch = new_version_delta.latest_version().max_committed_epoch;
+        let epoch = new_version_delta
+            .latest_version()
+            .visible_table_committed_epoch();
 
         for (table_id, raw_group_id) in pairs {
             let mut group_id = *raw_group_id;

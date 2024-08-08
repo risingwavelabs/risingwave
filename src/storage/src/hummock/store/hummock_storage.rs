@@ -202,8 +202,12 @@ impl HummockStorage {
             await_tree_reg.clone(),
         );
 
-        let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
-        let min_current_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
+        let seal_epoch = Arc::new(AtomicU64::new(
+            pinned_version.visible_table_committed_epoch(),
+        ));
+        let min_current_epoch = Arc::new(AtomicU64::new(
+            pinned_version.visible_table_committed_epoch(),
+        ));
         let hummock_event_handler = HummockEventHandler::new(
             version_update_rx,
             pinned_version,
@@ -654,7 +658,7 @@ impl StateStore for HummockStorage {
             .expect("should send success");
         rx.await.expect("should wait success");
 
-        let epoch = self.pinned_version.load().max_committed_epoch();
+        let epoch = self.pinned_version.load().visible_table_committed_epoch();
         self.min_current_epoch
             .store(HummockEpoch::MAX, MemOrdering::SeqCst);
         self.seal_epoch.store(epoch, MemOrdering::SeqCst);

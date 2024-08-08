@@ -1138,8 +1138,9 @@ impl HummockUploader {
         &self.context.buffer_tracker
     }
 
+    #[cfg(test)]
     pub(super) fn max_committed_epoch(&self) -> HummockEpoch {
-        self.context.pinned_version.max_committed_epoch()
+        self.context.pinned_version.visible_table_committed_epoch()
     }
 
     pub(super) fn hummock_version(&self) -> &PinnedVersion {

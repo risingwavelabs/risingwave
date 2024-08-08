@@ -665,7 +665,7 @@ impl HummockManager {
         let _timer = start_measure_real_process_timer!(self, "get_compact_tasks_impl");
 
         let start_time = Instant::now();
-        let max_committed_epoch = versioning.current_version.max_committed_epoch;
+        let max_committed_epoch = versioning.current_version.visible_table_committed_epoch();
         let watermark = self
             .context_info
             .read()
@@ -1379,7 +1379,7 @@ impl HummockManager {
         tracing::info!(
             "Trigger compaction for version {}, epoch {}, groups {:?}",
             old_version.id,
-            old_version.max_committed_epoch,
+            old_version.visible_table_committed_epoch(),
             compaction_groups
         );
 

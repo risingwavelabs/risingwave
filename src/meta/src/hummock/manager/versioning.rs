@@ -153,14 +153,6 @@ impl HummockManager {
         self.versioning.read().await.current_version.clone()
     }
 
-    pub async fn get_current_max_committed_epoch(&self) -> HummockEpoch {
-        self.versioning
-            .read()
-            .await
-            .current_version
-            .max_committed_epoch
-    }
-
     /// Gets the mapping from table id to compaction group id
     pub async fn get_table_compaction_group_id_mapping(
         &self,
@@ -181,7 +173,7 @@ impl HummockManager {
             .hummock_version_deltas
             .range(start_id..)
             .map(|(_id, delta)| delta)
-            .filter(|delta| delta.max_committed_epoch <= committed_epoch_limit)
+            .filter(|delta| delta.visible_table_committed_epoch() <= committed_epoch_limit)
             .take(num_limit as _)
             .cloned()
             .collect();

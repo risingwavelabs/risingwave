@@ -433,8 +433,8 @@ impl HummockManager {
 
         self.latest_snapshot.store(
             HummockSnapshot {
-                committed_epoch: redo_state.max_committed_epoch,
-                current_epoch: redo_state.max_committed_epoch,
+                committed_epoch: redo_state.visible_table_committed_epoch(),
+                current_epoch: redo_state.visible_table_committed_epoch(),
             }
             .into(),
         );

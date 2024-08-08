@@ -379,7 +379,7 @@ impl HummockManager {
             Ok(count)
         }
 
-        let epoch = delta.max_committed_epoch;
+        let epoch = delta.visible_table_committed_epoch();
         let version_id = delta.id;
         let m = hummock_epoch_to_version::ActiveModel {
             epoch: Set(epoch.try_into().unwrap()),
@@ -472,14 +472,14 @@ fn replay_archive(
     deltas: impl Iterator<Item = PbHummockVersionDelta>,
 ) -> HummockVersion {
     let mut last_version = HummockVersion::from_persisted_protobuf(&version);
-    let mut mce = last_version.max_committed_epoch;
+    let mut mce = last_version.visible_table_committed_epoch();
     for d in deltas {
         let d = HummockVersionDelta::from_persisted_protobuf(&d);
         assert!(
-            d.max_committed_epoch > mce,
+            d.visible_table_committed_epoch() > mce,
             "time travel expects delta from commit_epoch only"
         );
-        mce = d.max_committed_epoch;
+        mce = d.visible_table_committed_epoch();
         // Need to work around the assertion in `apply_version_delta`.
         // Because compaction deltas are not included in time travel archive.
         while last_version.id < d.prev_id {
