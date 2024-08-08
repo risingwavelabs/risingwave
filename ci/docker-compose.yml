@@ -74,6 +74,7 @@ services:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240731
     depends_on:
       - mysql
+      - sqlserver-server
       - db
       - message_queue
       - schemaregistry
@@ -215,6 +216,7 @@ services:
     environment:
       ACCEPT_EULA: 'Y'
       SA_PASSWORD: 'SomeTestOnly@SA'
+      MSSQL_AGENT_ENABLED: "true"
 
   starrocks-fe-server:
     container_name: starrocks-fe-server

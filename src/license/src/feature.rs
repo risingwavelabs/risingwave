@@ -50,6 +50,7 @@ macro_rules! for_all_features {
             { SecretManagement,     Paid,       "Secret management." },
             { CdcTableSchemaMap,    Paid,       "Automatically map upstream schema to CDC Table."},
             { SqlServerSink,        Paid,       "Sink data from RisingWave to SQL Server." },
+            { SqlServerCdcSource,   Paid,       "CDC source connector for Sql Server." },
         }
     };
 }

@@ -27,6 +27,7 @@ use risingwave_common::catalog::{
     debug_assert_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
     INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
+use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::additional_columns::{
@@ -45,7 +46,7 @@ use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
     CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR,
-    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
@@ -1094,9 +1095,23 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 ),
                 ICEBERG_CONNECTOR => hashmap!(
                     Format::None => vec![Encode::None],
-                )
+                ),
+                SQL_SERVER_CDC_CONNECTOR => hashmap!(
+                    Format::Debezium => vec![Encode::Json],
+                    // support source stream job
+                    Format::Plain => vec![Encode::Json],
+                ),
         ))
     });
+
+pub fn validate_license(connector: &str) -> Result<()> {
+    if connector == SQL_SERVER_CDC_CONNECTOR {
+        Feature::SqlServerCdcSource
+            .check_available()
+            .map_err(|e| anyhow::anyhow!(e))?;
+    }
+    Ok(())
+}
 
 pub fn validate_compatibility(
     source_schema: &ConnectorSchema,
@@ -1115,6 +1130,8 @@ pub fn validate_compatibility(
                 CONNECTORS_COMPATIBLE_FORMATS.keys()
             )))
         })?;
+
+    validate_license(&connector)?;
     if connector != KAFKA_CONNECTOR {
         let res = match (&source_schema.format, &source_schema.row_encode) {
             (Format::Plain, Encode::Protobuf) | (Format::Plain, Encode::Avro) => {
@@ -1156,12 +1173,30 @@ pub fn validate_compatibility(
     }
 
     if connector == POSTGRES_CDC_CONNECTOR || connector == CITUS_CDC_CONNECTOR {
-        if !props.contains_key("slot.name") {
-            // Build a random slot name with UUID
-            // e.g. "rw_cdc_f9a3567e6dd54bf5900444c8b1c03815"
-            let uuid = uuid::Uuid::new_v4().to_string().replace('-', "");
-            props.insert("slot.name".into(), format!("rw_cdc_{}", uuid));
+        match props.get("slot.name") {
+            None => {
+                // Build a random slot name with UUID
+                // e.g. "rw_cdc_f9a3567e6dd54bf5900444c8b1c03815"
+                let uuid = uuid::Uuid::new_v4();
+                props.insert("slot.name".into(), format!("rw_cdc_{}", uuid.simple()));
+            }
+            Some(slot_name) => {
+                // please refer to
+                // - https://github.com/debezium/debezium/blob/97956ce25b7612e3413d363658661896b7d2e0a2/debezium-connector-postgres/src/main/java/io/debezium/connector/postgresql/PostgresConnectorConfig.java#L1179
+                // - https://doxygen.postgresql.org/slot_8c.html#afac399f07320b9adfd2c599cf822aaa3
+                if !slot_name
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                    || slot_name.len() > 63
+                {
+                    return Err(RwError::from(ProtocolError(format!(
+                        "Invalid replication slot name: {:?}. Valid replication slot name must contain only digits, lowercase characters and underscores with length <= 63",
+                        slot_name
+                    ))));
+                }
+            }
         }
+
         if !props.contains_key("schema.name") {
             // Default schema name is "public"
             props.insert("schema.name".into(), "public".into());
@@ -1175,6 +1210,12 @@ pub fn validate_compatibility(
             props.insert("publication.create.enable".into(), "true".into());
         }
     }
+
+    if connector == SQL_SERVER_CDC_CONNECTOR && !props.contains_key("schema.name") {
+        // Default schema name is "dbo"
+        props.insert("schema.name".into(), "dbo".into());
+    }
+
     Ok(())
 }
 
@@ -1356,13 +1397,22 @@ pub fn bind_connector_props(
     let mut with_properties = handler_args.with_options.clone().into_connector_props();
     validate_compatibility(source_schema, &mut with_properties)?;
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
+
+    if !is_create_source && with_properties.is_shareable_only_cdc_connector() {
+        return Err(RwError::from(ProtocolError(format!(
+            "connector {} does not support `CREATE TABLE`, please use `CREATE SOURCE` instead",
+            with_properties.get_connector().unwrap(),
+        ))));
+    }
     if is_create_source && create_cdc_source_job {
         // set connector to backfill mode
         with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
         // enable cdc sharing mode, which will capture all tables in the given `database.name`
         with_properties.insert(CDC_SHARING_MODE_KEY.into(), "true".into());
         // enable transactional cdc
-        with_properties.insert(CDC_TRANSACTIONAL_KEY.into(), "true".into());
+        if with_properties.enable_transaction_metadata() {
+            with_properties.insert(CDC_TRANSACTIONAL_KEY.into(), "true".into());
+        }
         with_properties.insert(
             CDC_WAIT_FOR_STREAMING_START_TIMEOUT.into(),
             handler_args
