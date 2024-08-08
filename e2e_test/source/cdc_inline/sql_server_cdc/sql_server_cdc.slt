@@ -11,7 +11,7 @@ sqlcmd -C -i e2e_test/source/cdc_inline/sql_server_cdc/sql_server_cdc_prepare.sq
 # ------------ validate stage ------------
 
 # invalid address, comment this test out because it takes long to wait for TCP connection timeout.
-# statement error The TCP/IP connection to the host wrong-sqlserver-server, port 1433 has failed. 
+# statement error The TCP/IP connection to the host wrong-sqlserver-server, port 1433 has failed.
 # CREATE SOURCE mssql_source WITH (
 #     connector = 'sqlserver-cdc',
 #     hostname = 'wrong-sqlserver-server',
