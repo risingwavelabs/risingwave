@@ -4853,15 +4853,30 @@ impl CatalogManager {
         source_id: SourceId,
         rate_limit: Option<u32>,
     ) -> MetaResult<()> {
-        let core = &mut *self.core.lock().await;
-        let database_core = &mut core.database;
-        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
-        let mut source = sources.get_mut(source_id);
-        let Some(source_catalog) = source.as_mut() else {
-            bail!("source {} not found", source_id)
-        };
-        source_catalog.rate_limit = rate_limit;
-        commit_meta!(self, sources)?;
+        let source_relation: PbSource;
+        {
+            let core = &mut *self.core.lock().await;
+            let database_core = &mut core.database;
+            let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+            let mut source = sources.get_mut(source_id);
+            let Some(source_catalog) = source.as_mut() else {
+                bail!("source {} not found", source_id)
+            };
+            source_relation = source_catalog.clone();
+            source_catalog.rate_limit = rate_limit;
+            commit_meta!(self, sources)?;
+        }
+
+        let _version = self
+            .notify_frontend(
+                Operation::Add,
+                Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: RelationInfo::Source(source_relation.to_owned()).into(),
+                    }],
+                }),
+            )
+            .await;
         Ok(())
     }
 }
