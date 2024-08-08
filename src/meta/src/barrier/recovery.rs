@@ -232,7 +232,7 @@ impl GlobalBarrierManager {
         let (prev_epoch, version_id) = {
             let version = self.context.hummock_manager.get_current_version().await;
             (
-                TracedEpoch::new(Epoch::from(version.max_committed_epoch)),
+                TracedEpoch::new(Epoch::from(version.visible_table_committed_epoch())),
                 version.id,
             )
         };

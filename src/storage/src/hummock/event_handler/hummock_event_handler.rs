@@ -503,8 +503,8 @@ impl HummockEventHandler {
 
                 info!(
                     ?version_id,
-                    current_mce = current_version.max_committed_epoch(),
-                    refiller_mce = new_pinned_version.max_committed_epoch(),
+                    current_mce = current_version.visible_table_committed_epoch(),
+                    refiller_mce = new_pinned_version.visible_table_committed_epoch(),
                     "refiller is clear in recovery"
                 );
 
@@ -647,10 +647,9 @@ impl HummockEventHandler {
         }
 
         // TODO: should we change the logic when supporting partial ckpt?
-        let temp = 0;
         if let Some(sstable_object_id_manager) = &self.sstable_object_id_manager {
             sstable_object_id_manager.remove_watermark_object_id(TrackerId::Epoch(
-                self.pinned_version.load().max_committed_epoch(),
+                self.pinned_version.load().visible_table_committed_epoch(),
             ));
         }
 

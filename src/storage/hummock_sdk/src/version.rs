@@ -405,6 +405,11 @@ impl HummockVersion {
         self.max_committed_epoch = max_committed_epoch;
     }
 
+    #[cfg(any(test, feature = "test"))]
+    pub fn max_committed_epoch(&self) -> u64 {
+        self.max_committed_epoch
+    }
+
     pub fn visible_table_committed_epoch(&self) -> u64 {
         self.max_committed_epoch
     }
