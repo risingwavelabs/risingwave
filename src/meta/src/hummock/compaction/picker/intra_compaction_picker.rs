@@ -267,8 +267,7 @@ impl IntraCompactionPicker {
                 continue;
             }
 
-            let trivial_move_picker =
-                TrivialMovePicker::new(0, 0, overlap_strategy.clone(), u64::MAX);
+            let trivial_move_picker = TrivialMovePicker::new(0, 0, overlap_strategy.clone(), 0);
 
             let select_sst = trivial_move_picker.pick_trivial_move_sst(
                 &l0.sub_levels[idx + 1].table_infos,
