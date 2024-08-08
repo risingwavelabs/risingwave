@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #![feature(error_generic_member_access)]
-#![feature(lazy_cell)]
 #![feature(once_cell_try)]
 #![feature(type_alias_impl_trait)]
 #![feature(try_blocks)]
@@ -243,23 +242,26 @@ struct JavaClassMethodCache {
     utc: OnceLock<GlobalRef>,
 }
 
-// TODO: may only return a RowRef
-pub type StreamChunkRowIterator<'a> = impl Iterator<Item = (Op, OwnedRow)> + 'a;
-pub type HummockJavaBindingIterator = BoxStream<'static, anyhow::Result<(Bytes, OwnedRow)>>;
+mod opaque_type {
+    use super::*;
+    // TODO: may only return a RowRef
+    pub type StreamChunkRowIterator<'a> = impl Iterator<Item = (Op, OwnedRow)> + 'a;
 
+    impl<'a> JavaBindingIteratorInner<'a> {
+        pub(super) fn from_chunk(chunk: &'a StreamChunk) -> JavaBindingIteratorInner<'a> {
+            JavaBindingIteratorInner::StreamChunk(
+                chunk
+                    .rows()
+                    .map(|(op, row)| (op.to_protobuf(), row.to_owned_row())),
+            )
+        }
+    }
+}
+pub use opaque_type::StreamChunkRowIterator;
+pub type HummockJavaBindingIterator = BoxStream<'static, anyhow::Result<(Bytes, OwnedRow)>>;
 pub enum JavaBindingIteratorInner<'a> {
     Hummock(HummockJavaBindingIterator),
     StreamChunk(StreamChunkRowIterator<'a>),
-}
-
-impl<'a> JavaBindingIteratorInner<'a> {
-    fn from_chunk(chunk: &'a StreamChunk) -> JavaBindingIteratorInner<'a> {
-        JavaBindingIteratorInner::StreamChunk(
-            chunk
-                .rows()
-                .map(|(op, row)| (op.to_protobuf(), row.to_owned_row())),
-        )
-    }
 }
 
 enum RowExtra {

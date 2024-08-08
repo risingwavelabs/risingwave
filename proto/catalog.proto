@@ -77,7 +77,7 @@ message StreamSourceInfo {
   //
   // Currently, the following sources can be shared:
   //
-  // - Direct CDC sources (mysql & postgresql)
+  // - Direct CDC sources (mysql & postgresql & sqlserver)
   // - MQ sources (Kafka)
   bool cdc_source_job = 13;
   // Only used when `cdc_source_job` is `true`.

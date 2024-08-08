@@ -42,9 +42,27 @@ use crate::monitor::{
 use crate::opts::StorageOpts;
 use crate::StateStore;
 
-pub type HummockStorageType = impl StateStore + AsHummock;
-pub type MemoryStateStoreType = impl StateStore + AsHummock;
-pub type SledStateStoreType = impl StateStore + AsHummock;
+mod opaque_type {
+    use super::*;
+
+    pub type HummockStorageType = impl StateStore + AsHummock;
+    pub type MemoryStateStoreType = impl StateStore + AsHummock;
+    pub type SledStateStoreType = impl StateStore + AsHummock;
+
+    pub fn in_memory(state_store: MemoryStateStore) -> MemoryStateStoreType {
+        may_dynamic_dispatch(state_store)
+    }
+
+    pub fn hummock(state_store: HummockStorage) -> HummockStorageType {
+        may_dynamic_dispatch(may_verify(state_store))
+    }
+
+    pub fn sled(state_store: SledStateStore) -> SledStateStoreType {
+        may_dynamic_dispatch(state_store)
+    }
+}
+use opaque_type::{hummock, in_memory, sled};
+pub use opaque_type::{HummockStorageType, MemoryStateStoreType, SledStateStoreType};
 
 /// The type erased [`StateStore`].
 #[derive(Clone, EnumAsInner)]
@@ -114,7 +132,7 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
         // The specific type of MemoryStateStoreType in deducted here.
-        Self::MemoryStateStore(may_dynamic_dispatch(state_store).monitored(storage_metrics))
+        Self::MemoryStateStore(in_memory(state_store).monitored(storage_metrics))
     }
 
     pub fn hummock(
@@ -122,16 +140,14 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
         // The specific type of HummockStateStoreType in deducted here.
-        Self::HummockStateStore(
-            may_dynamic_dispatch(may_verify(state_store)).monitored(storage_metrics),
-        )
+        Self::HummockStateStore(hummock(state_store).monitored(storage_metrics))
     }
 
     pub fn sled(
         state_store: SledStateStore,
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
-        Self::SledStateStore(may_dynamic_dispatch(state_store).monitored(storage_metrics))
+        Self::SledStateStore(sled(state_store).monitored(storage_metrics))
     }
 
     pub fn shared_in_memory_store(storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
