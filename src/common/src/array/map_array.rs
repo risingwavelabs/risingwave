@@ -406,10 +406,7 @@ impl MapValue {
         datatype: &MapType,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
-        let list = ListValue::memcmp_deserialize(
-            &DataType::Struct(datatype.clone().into_struct()),
-            deserializer,
-        )?;
+        let list = ListValue::memcmp_deserialize(&datatype.clone().into_struct(), deserializer)?;
         Ok(Self::from_list_entries(list))
     }
 }
