@@ -1340,11 +1340,12 @@ mod tests {
     use crate::version::{
         GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, IntraLevelDelta,
     };
+    use crate::HummockVersionId;
 
     #[test]
     fn test_get_sst_object_ids() {
         let mut version = HummockVersion::default();
-        version.id = 0;
+        version.id = HummockVersionId::new(0);
         version.levels = HashMap::from_iter([(
             0,
             Levels {
@@ -1391,7 +1392,7 @@ mod tests {
     #[test]
     fn test_apply_version_delta() {
         let mut version = HummockVersion::default();
-        version.id = 0;
+        version.id = HummockVersionId::new(0);
         version.levels = HashMap::from_iter([
             (
                 0,
@@ -1415,7 +1416,7 @@ mod tests {
             ),
         ]);
         let mut version_delta = HummockVersionDelta::default();
-        version_delta.id = 1;
+        version_delta.id = HummockVersionId::new(1);
         version_delta.group_deltas = HashMap::from_iter([
             (
                 2,
@@ -1474,7 +1475,7 @@ mod tests {
         };
         assert_eq!(version, {
             let mut version = HummockVersion::default();
-            version.id = 1;
+            version.id = HummockVersionId::new(1);
             version.levels = HashMap::from_iter([
                 (
                     2,
