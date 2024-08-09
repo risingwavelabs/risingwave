@@ -718,6 +718,8 @@ impl GlobalBarrierManager {
 
                     info!(?changed_worker, "worker changed");
 
+                    self.state.inflight_graph_info
+                        .on_new_worker_node_map(self.active_streaming_nodes.current());
                     if let ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) = changed_worker {
                         self.control_stream_manager.add_worker(node).await;
                     }

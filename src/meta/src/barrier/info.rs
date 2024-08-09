@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::TableId;
+use risingwave_pb::common::WorkerNode;
 use tracing::warn;
 
 use crate::barrier::Command;
@@ -77,6 +78,15 @@ impl InflightGraphInfo {
             actor_map,
             actor_location_map,
             fragment_infos,
+        }
+    }
+
+    /// Update worker nodes snapshot. We need to support incremental updates for it in the future.
+    pub fn on_new_worker_node_map(&mut self, node_map: &HashMap<WorkerId, WorkerNode>) {
+        for (node_id, actors) in &self.actor_map {
+            if !node_map.contains_key(node_id) {
+                warn!(node_id, ?actors, "node with running actors is deleted");
+            }
         }
     }
 
