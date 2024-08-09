@@ -132,8 +132,12 @@ impl LevelCompactionPicker {
         }
 
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
-        let trivial_move_picker =
-            TrivialMovePicker::new(0, self.target_level, overlap_strategy.clone());
+        let trivial_move_picker = TrivialMovePicker::new(
+            0,
+            self.target_level,
+            overlap_strategy.clone(),
+            self.config.target_file_size_base / 4,
+        );
 
         trivial_move_picker.pick_trivial_move_task(
             &l0.sub_levels[0].table_infos,
