@@ -2496,7 +2496,7 @@ async fn test_commit_multi_epoch() {
         .manager
         .get_current_version()
         .await
-        .max_committed_epoch;
+        .max_committed_epoch();
 
     let epoch1 = initial_epoch.next_epoch();
     let sst1_epoch1 = SstableInfo {

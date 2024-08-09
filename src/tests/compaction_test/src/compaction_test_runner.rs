@@ -375,7 +375,7 @@ async fn start_replay(
     for delta in version_delta_logs {
         let (current_version, compaction_groups) = meta_client.replay_version_delta(delta).await?;
         let (version_id, max_committed_epoch) =
-            (current_version.id, current_version.max_committed_epoch);
+            (current_version.id, current_version.max_committed_epoch());
         tracing::info!(
             "Replayed version delta version_id: {}, max_committed_epoch: {}, compaction_groups: {:?}",
             version_id,
@@ -464,7 +464,7 @@ async fn start_replay(
             );
 
             let (new_version_id, new_committed_epoch) =
-                (new_version.id, new_version.max_committed_epoch);
+                (new_version.id, new_version.max_committed_epoch());
             assert!(
                 new_version_id >= version_id,
                 "new_version_id: {}, epoch: {}",

@@ -234,7 +234,7 @@ impl GlobalBarrierManager {
             .hummock_manager
             .on_current_version(|version| {
                 (
-                    TracedEpoch::new(Epoch::from(version.max_committed_epoch)),
+                    TracedEpoch::new(Epoch::from(version.visible_table_committed_epoch())),
                     version.id,
                 )
             })

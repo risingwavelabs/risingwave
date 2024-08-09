@@ -1155,7 +1155,7 @@ mod tests {
         );
 
         let mut version = HummockVersion::default();
-        version.max_committed_epoch = EPOCH1;
+        version.set_max_committed_epoch(EPOCH1);
         let test_table_id = TableId::from(233);
         version.table_watermarks.insert(
             test_table_id,

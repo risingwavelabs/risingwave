@@ -128,7 +128,8 @@ impl Display for MetadataV2 {
         writeln!(
             f,
             "Hummock version: id {}, max_committed_epoch: {}",
-            self.hummock_version.id, self.hummock_version.max_committed_epoch
+            self.hummock_version.id,
+            self.hummock_version.visible_table_committed_epoch()
         )?;
         // optionally dump other metadata
         Ok(())
