@@ -66,7 +66,7 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
 
 impl<Src: OpendalSource> OpendalEnumerator<Src> {
     pub async fn list(&self) -> ConnectorResult<ObjectMetadataIter> {
-        let prefix = self.prefix.as_deref().unwrap_or("");
+        let prefix = self.prefix.as_deref().unwrap_or("/");
 
         let object_lister = self
             .op
