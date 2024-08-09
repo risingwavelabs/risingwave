@@ -14,7 +14,6 @@
 
 #![feature(let_chains)]
 #![feature(if_let_guard)]
-#![feature(lazy_cell)]
 #![feature(box_patterns)]
 #![feature(register_tool)]
 #![register_tool(rw)]

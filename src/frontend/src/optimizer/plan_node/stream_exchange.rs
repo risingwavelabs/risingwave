@@ -20,7 +20,9 @@ use super::stream::prelude::*;
 use super::utils::{childless_record, plan_node_name, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{Distribution, DistributionDisplay};
+use crate::optimizer::property::{
+    Distribution, DistributionDisplay, MonotonicityMap, RequiredDist,
+};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamExchange` imposes a particular distribution on its input
@@ -34,16 +36,24 @@ pub struct StreamExchange {
 
 impl StreamExchange {
     pub fn new(input: PlanRef, dist: Distribution) -> Self {
-        // Dispatch executor won't change the append-only behavior of the stream.
+        let columns_monotonicity = if input.distribution().satisfies(&RequiredDist::single()) {
+            // If the input is a singleton, the monotonicity will be preserved during shuffle
+            // since we use ordered channel/buffer when exchanging data.
+            input.columns_monotonicity().clone()
+        } else {
+            MonotonicityMap::new()
+        };
+        assert!(!input.schema().is_empty());
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
             input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             dist,
-            input.append_only(),
+            input.append_only(), // append-only property won't change
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
+            columns_monotonicity,
         );
         StreamExchange {
             base,
@@ -54,16 +64,16 @@ impl StreamExchange {
 
     pub fn new_no_shuffle(input: PlanRef) -> Self {
         let ctx = input.ctx();
-        // Dispatch executor won't change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
             ctx,
             input.schema().clone(),
             input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
-            input.append_only(),
+            input.append_only(), // append-only property won't change
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
+            input.columns_monotonicity().clone(),
         );
         StreamExchange {
             base,

@@ -14,32 +14,32 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::catalog;
+use risingwave_common::catalog::TableId;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::TableParallelism;
-use risingwave_meta::stream::{ScaleControllerRef, TableRevision};
+use risingwave_meta::stream::{
+    RescheduleOptions, ScaleControllerRef, TableRevision, WorkerReschedule,
+};
 use risingwave_meta_model_v2::FragmentId;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
-    GetClusterInfoRequest, GetClusterInfoResponse, GetReschedulePlanRequest,
-    GetReschedulePlanResponse, Reschedule, RescheduleRequest, RescheduleResponse,
+    GetClusterInfoRequest, GetClusterInfoResponse, GetServerlessStreamingJobsStatusRequest,
+    GetServerlessStreamingJobsStatusResponse, PbWorkerReschedule, RescheduleRequest,
+    RescheduleResponse, UpdateStreamingJobNodeLabelsRequest, UpdateStreamingJobNodeLabelsResponse,
 };
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
 use crate::model::MetadataModel;
-use crate::stream::{
-    GlobalStreamManagerRef, ParallelUnitReschedule, RescheduleOptions, SourceManagerRef,
-};
+use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
 
 pub struct ScaleServiceImpl {
     metadata_manager: MetadataManager,
     source_manager: SourceManagerRef,
     stream_manager: GlobalStreamManagerRef,
     barrier_manager: BarrierManagerRef,
-    scale_controller: ScaleControllerRef,
 }
 
 impl ScaleServiceImpl {
@@ -48,14 +48,13 @@ impl ScaleServiceImpl {
         source_manager: SourceManagerRef,
         stream_manager: GlobalStreamManagerRef,
         barrier_manager: BarrierManagerRef,
-        scale_controller: ScaleControllerRef,
+        _scale_controller: ScaleControllerRef,
     ) -> Self {
         Self {
             metadata_manager,
             source_manager,
             stream_manager,
             barrier_manager,
-            scale_controller,
         }
     }
 
@@ -137,7 +136,7 @@ impl ScaleService for ScaleServiceImpl {
         self.barrier_manager.check_status_running()?;
 
         let RescheduleRequest {
-            reschedules,
+            worker_reschedules,
             revision,
             resolve_no_shuffle_upstream,
         } = request.into_inner();
@@ -162,7 +161,7 @@ impl ScaleService for ScaleServiceImpl {
                     for (table_id, table) in guard.table_fragments() {
                         if table
                             .fragment_ids()
-                            .any(|fragment_id| reschedules.contains_key(&fragment_id))
+                            .any(|fragment_id| worker_reschedules.contains_key(&fragment_id))
                         {
                             table_parallelisms.insert(*table_id, TableParallelism::Custom);
                         }
@@ -174,13 +173,16 @@ impl ScaleService for ScaleServiceImpl {
                     let streaming_job_ids = mgr
                         .catalog_controller
                         .get_fragment_job_id(
-                            reschedules.keys().map(|id| *id as FragmentId).collect(),
+                            worker_reschedules
+                                .keys()
+                                .map(|id| *id as FragmentId)
+                                .collect(),
                         )
                         .await?;
 
                     streaming_job_ids
                         .into_iter()
-                        .map(|id| (catalog::TableId::new(id as _), TableParallelism::Custom))
+                        .map(|id| (TableId::new(id as _), TableParallelism::Custom))
                         .collect()
                 }
             }
@@ -188,22 +190,17 @@ impl ScaleService for ScaleServiceImpl {
 
         self.stream_manager
             .reschedule_actors(
-                reschedules
+                worker_reschedules
                     .into_iter()
                     .map(|(fragment_id, reschedule)| {
-                        let Reschedule {
-                            added_parallel_units,
-                            removed_parallel_units,
-                        } = reschedule;
-
-                        let added_parallel_units = added_parallel_units.into_iter().collect();
-                        let removed_parallel_units = removed_parallel_units.into_iter().collect();
-
+                        let PbWorkerReschedule { worker_actor_diff } = reschedule;
                         (
                             fragment_id,
-                            ParallelUnitReschedule {
-                                added_parallel_units,
-                                removed_parallel_units,
+                            WorkerReschedule {
+                                worker_actor_diff: worker_actor_diff
+                                    .into_iter()
+                                    .map(|(worker_id, diff)| (worker_id as _, diff as _))
+                                    .collect(),
                             },
                         )
                     })
@@ -224,61 +221,17 @@ impl ScaleService for ScaleServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
-    async fn get_reschedule_plan(
+    async fn update_streaming_job_node_labels(
         &self,
-        request: Request<GetReschedulePlanRequest>,
-    ) -> Result<Response<GetReschedulePlanResponse>, Status> {
-        self.barrier_manager.check_status_running()?;
+        _request: Request<UpdateStreamingJobNodeLabelsRequest>,
+    ) -> Result<Response<UpdateStreamingJobNodeLabelsResponse>, Status> {
+        todo!()
+    }
 
-        let req = request.into_inner();
-
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
-
-        let current_revision = self.get_revision().await;
-
-        if req.revision != current_revision.inner() {
-            return Ok(Response::new(GetReschedulePlanResponse {
-                success: false,
-                revision: current_revision.inner(),
-                reschedules: Default::default(),
-            }));
-        }
-
-        let policy = req
-            .policy
-            .ok_or_else(|| Status::invalid_argument("policy is required"))?;
-
-        let scale_controller = &self.scale_controller;
-
-        let plan = scale_controller.get_reschedule_plan(policy).await?;
-
-        let next_revision = self.get_revision().await;
-
-        // generate reschedule plan will not change the revision
-        assert_eq!(current_revision, next_revision);
-
-        Ok(Response::new(GetReschedulePlanResponse {
-            success: true,
-            revision: next_revision.into(),
-            reschedules: plan
-                .into_iter()
-                .map(|(fragment_id, reschedule)| {
-                    (
-                        fragment_id,
-                        Reschedule {
-                            added_parallel_units: reschedule
-                                .added_parallel_units
-                                .into_iter()
-                                .collect(),
-                            removed_parallel_units: reschedule
-                                .removed_parallel_units
-                                .into_iter()
-                                .collect(),
-                        },
-                    )
-                })
-                .collect(),
-        }))
+    async fn get_serverless_streaming_jobs_status(
+        &self,
+        _request: Request<GetServerlessStreamingJobsStatusRequest>,
+    ) -> Result<Response<GetServerlessStreamingJobsStatusResponse>, Status> {
+        todo!()
     }
 }

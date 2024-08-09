@@ -15,7 +15,7 @@
 use std::ops::{Deref, DerefMut};
 
 use risingwave_common::array::Op;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::HashKey;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
@@ -239,8 +239,7 @@ where
 
     async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark> {
         if watermark.col_idx == self.group_by[0] {
-            self.managed_state
-                .update_watermark(watermark.val.clone(), false);
+            self.managed_state.update_watermark(watermark.val.clone());
             Some(watermark)
         } else {
             None

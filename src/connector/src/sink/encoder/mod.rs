@@ -150,6 +150,31 @@ pub enum CustomJsonType {
     None,
 }
 
+/// How the jsonb type is encoded.
+///
+/// - `String`: encode jsonb as string. `[1, true, "foo"] -> "[1, true, \"foo\"]"`
+/// - `Dynamic`: encode jsonb as json type dynamically. `[1, true, "foo"] -> [1, true, "foo"]`
+pub enum JsonbHandlingMode {
+    String,
+    Dynamic,
+}
+
+impl JsonbHandlingMode {
+    pub const OPTION_KEY: &'static str = "jsonb.handling.mode";
+
+    pub fn from_options(options: &BTreeMap<String, String>) -> Result<Self> {
+        match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
+            Some("string") | None => Ok(Self::String),
+            Some("dynamic") => Ok(Self::Dynamic),
+            Some(v) => Err(super::SinkError::Config(anyhow::anyhow!(
+                "unrecognized {} value {}",
+                Self::OPTION_KEY,
+                v
+            ))),
+        }
+    }
+}
+
 #[derive(Debug)]
 struct FieldEncodeError {
     message: String,

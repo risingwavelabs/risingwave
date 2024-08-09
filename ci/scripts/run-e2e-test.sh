@@ -27,6 +27,7 @@ if [[ $mode == "standalone" ]]; then
 fi
 
 if [[ $mode == "single-node" ]]; then
+  export RUST_MIN_STACK=4194304
   source ci/scripts/single-node-utils.sh
 fi
 
@@ -88,7 +89,7 @@ cluster_stop
 echo "--- e2e, $mode, batch"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cluster_start
-sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}"
+sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}" --label "can-use-recover"
 if [[ "$mode" != "single-node" ]]; then
   sqllogictest -p 4566 -d dev './e2e_test/background_ddl/basic.slt' --junit "batch-ddl-${profile}"
 fi
@@ -133,7 +134,6 @@ sqllogictest -p 4566 -d dev './e2e_test/udf/wasm_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/rust_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/js_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/python_udf.slt'
-sqllogictest -p 4566 -d dev './e2e_test/udf/deno_udf.slt'
 
 echo "--- Kill cluster"
 cluster_stop

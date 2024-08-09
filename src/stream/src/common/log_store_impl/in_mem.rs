@@ -17,7 +17,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context};
 use await_tree::InstrumentAwait;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::util::epoch::{EpochExt, EpochPair, INVALID_EPOCH};
 use risingwave_connector::sink::log_store::{
     LogReader, LogStoreFactory, LogStoreReadItem, LogStoreResult, LogWriter, TruncateOffset,

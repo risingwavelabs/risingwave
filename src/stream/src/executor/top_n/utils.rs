@@ -16,14 +16,14 @@ use std::future::Future;
 
 use itertools::Itertools;
 use risingwave_common::array::Op;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::ColumnOrder;
 
-use super::CacheKey;
+use super::top_n_cache::CacheKey;
 use crate::executor::prelude::*;
 
 pub trait TopNExecutorBase: Send + 'static {

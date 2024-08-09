@@ -24,9 +24,9 @@ use bytes::Bytes;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common_estimate_size::{EstimateSize, KvSize};
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::WatermarkDirection;
@@ -66,7 +66,7 @@ pub struct MemTable {
 
 #[derive(Error, Debug)]
 pub enum MemTableError {
-    #[error("Inconsistent operation")]
+    #[error("Inconsistent operation {key:?}, prev: {prev:?}, new: {new:?}")]
     InconsistentOperation {
         key: TableKey<Bytes>,
         prev: KeyOp,
@@ -546,15 +546,6 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
 
-    #[allow(clippy::unused_async)]
-    async fn may_exist(
-        &self,
-        _key_range: TableKeyRange,
-        _read_options: ReadOptions,
-    ) -> StorageResult<bool> {
-        Ok(true)
-    }
-
     async fn get(
         &self,
         key: TableKey<Bytes>,
@@ -769,6 +760,11 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
 
     fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
         std::mem::replace(&mut self.vnodes, vnodes)
+    }
+
+    fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
+        // TODO: may store the written table watermark and have a correct implementation
+        None
     }
 }
 

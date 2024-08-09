@@ -19,7 +19,7 @@ use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverError};
+use risingwave_common_service::{Channel, NotificationClient, ObserverError};
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
 use risingwave_hummock_trace::{

@@ -42,6 +42,7 @@ impl StreamFilter {
             input.append_only(),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
+            input.columns_monotonicity().clone(),
         );
         StreamFilter { base, core }
     }

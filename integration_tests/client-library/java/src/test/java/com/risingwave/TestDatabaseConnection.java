@@ -23,16 +23,15 @@ public class TestDatabaseConnection {
 
     @Test
     public void testEstablishConnection() throws SQLException {
-        Connection conn = establishConnection();
-        assertNotNull(conn, "Connection should not be null");
+        try (Connection conn = TestUtils.establishConnection()) {
+            assertNotNull(conn, "Connection should not be null");
 
-        String query = "SELECT 1";
-        Statement statement = conn.createStatement();
-        ResultSet resultSet = statement.executeQuery(query);
-        assertTrue(resultSet.next(), "Expected a result");
-        int resultValue = resultSet.getInt(1);
-        assertEquals(1, resultValue, "Expected result value to be 1");
-
-        conn.close(); // Close the connection to release resources
+            String query = "SELECT 1";
+            Statement statement = conn.createStatement();
+            ResultSet resultSet = statement.executeQuery(query);
+            assertTrue(resultSet.next(), "Expected a result");
+            int resultValue = resultSet.getInt(1);
+            assertEquals(1, resultValue, "Expected result value to be 1");
+        }
     }
 }

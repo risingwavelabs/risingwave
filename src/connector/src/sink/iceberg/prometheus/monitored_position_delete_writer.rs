@@ -21,14 +21,14 @@ use risingwave_common::metrics::LabelGuardedIntGauge;
 
 #[derive(Clone)]
 pub struct MonitoredPositionDeleteWriterBuilder<B: FileWriterBuilder> {
-    current_cache_number: LabelGuardedIntGauge<2>,
+    current_cache_number: LabelGuardedIntGauge<3>,
     inner: PositionDeleteWriterBuilder<B>,
 }
 
 impl<B: FileWriterBuilder> MonitoredPositionDeleteWriterBuilder<B> {
     pub fn new(
         inner: PositionDeleteWriterBuilder<B>,
-        current_cache_number: LabelGuardedIntGauge<2>,
+        current_cache_number: LabelGuardedIntGauge<3>,
     ) -> Self {
         Self {
             current_cache_number,
@@ -59,7 +59,7 @@ pub struct MonitoredPositionDeleteWriter<B: FileWriterBuilder> {
     writer: PositionDeleteWriter<B>,
 
     // metrics
-    cache_number: LabelGuardedIntGauge<2>,
+    cache_number: LabelGuardedIntGauge<3>,
     current_metrics: PositionDeleteMetrics,
 }
 

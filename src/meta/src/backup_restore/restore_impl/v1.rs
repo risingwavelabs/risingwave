@@ -43,7 +43,7 @@ impl Loader<ClusterMetadata> for LoaderV1 {
         let backup_store = &self.backup_store;
         let snapshot_list = &backup_store.manifest().snapshot_metadata;
         let mut target_snapshot: MetaSnapshotV1 = backup_store.get(target_id).await?;
-        tracing::info!(
+        tracing::debug!(
             "snapshot {} before rewrite:\n{}",
             target_id,
             target_snapshot
@@ -78,11 +78,11 @@ impl Loader<ClusterMetadata> for LoaderV1 {
             }
             target_snapshot.metadata.default_cf = newest_snapshot.metadata.default_cf;
             tracing::info!(
-                "snapshot {} after rewrite by snapshot {}:\n{}",
+                "snapshot {} is rewritten by snapshot {}:\n",
                 target_id,
                 newest_id,
-                target_snapshot,
             );
+            tracing::debug!("{target_snapshot}",);
         }
         Ok(target_snapshot)
     }
@@ -199,5 +199,6 @@ async fn restore_metadata<S: MetaStore>(
     restore_system_param_model(&meta_store, &[snapshot.metadata.system_param]).await?;
     restore_cluster_id(&meta_store, snapshot.metadata.cluster_id.into()).await?;
     restore_metadata_model(&meta_store, &snapshot.metadata.subscription).await?;
+    restore_metadata_model(&meta_store, &snapshot.metadata.secret).await?;
     Ok(())
 }

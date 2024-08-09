@@ -305,6 +305,13 @@ impl HummockManager {
                                             compact_task::TaskType::SpaceReclaim,
                                         )
                                         .await;
+
+                                    // share the same trigger with SpaceReclaim
+                                    hummock_manager
+                                        .on_handle_trigger_multi_group(
+                                            compact_task::TaskType::VnodeWatermark,
+                                        )
+                                        .await;
                                 }
 
                                 HummockTimerEvent::TtlCompactionTrigger => {
@@ -333,7 +340,7 @@ impl HummockManager {
 
                                 HummockTimerEvent::FullGc => {
                                     if hummock_manager
-                                        .start_full_gc(Duration::from_secs(3600))
+                                        .start_full_gc(Duration::from_secs(3600), None)
                                         .is_ok()
                                     {
                                         tracing::info!("Start full GC from meta node.");
@@ -369,8 +376,6 @@ impl HummockManager {
                         *id,
                         group
                             .l0
-                            .as_ref()
-                            .unwrap()
                             .sub_levels
                             .iter()
                             .map(|level| level.total_file_size)

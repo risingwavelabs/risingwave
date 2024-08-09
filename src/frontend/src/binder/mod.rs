@@ -29,6 +29,7 @@ use crate::error::Result;
 mod bind_context;
 mod bind_param;
 mod create;
+mod create_view;
 mod delete;
 mod expr;
 mod for_system;
@@ -43,6 +44,7 @@ mod update;
 mod values;
 
 pub use bind_context::{BindContext, Clause, LateralBindContext};
+pub use create_view::BoundCreateView;
 pub use delete::BoundDelete;
 pub use expr::{bind_data_type, bind_struct_field};
 pub use insert::BoundInsert;
@@ -747,6 +749,269 @@ mod tests {
                             schema: Schema {
                                 fields: [
                                     a:Int32,
+                                ],
+                            },
+                        },
+                    ),
+                    order: [],
+                    limit: None,
+                    offset: None,
+                    with_ties: false,
+                    extra_order_exprs: [],
+                },
+            )"#]];
+
+        expected.assert_eq(&format!("{:#?}", bound));
+    }
+
+    #[tokio::test]
+    async fn test_bind_approx_percentile() {
+        let stmt = risingwave_sqlparser::parser::Parser::parse_sql(
+            "SELECT approx_percentile(0.5, 0.01) WITHIN GROUP (ORDER BY generate_series) FROM generate_series(1, 100)",
+        ).unwrap().into_iter().next().unwrap();
+        let parse_expected = expect![[r#"
+            Query(
+                Query {
+                    with: None,
+                    body: Select(
+                        Select {
+                            distinct: All,
+                            projection: [
+                                UnnamedExpr(
+                                    Function(
+                                        Function {
+                                            scalar_as_agg: false,
+                                            name: ObjectName(
+                                                [
+                                                    Ident {
+                                                        value: "approx_percentile",
+                                                        quote_style: None,
+                                                    },
+                                                ],
+                                            ),
+                                            args: [
+                                                Unnamed(
+                                                    Expr(
+                                                        Value(
+                                                            Number(
+                                                                "0.5",
+                                                            ),
+                                                        ),
+                                                    ),
+                                                ),
+                                                Unnamed(
+                                                    Expr(
+                                                        Value(
+                                                            Number(
+                                                                "0.01",
+                                                            ),
+                                                        ),
+                                                    ),
+                                                ),
+                                            ],
+                                            variadic: false,
+                                            over: None,
+                                            distinct: false,
+                                            order_by: [],
+                                            filter: None,
+                                            within_group: Some(
+                                                OrderByExpr {
+                                                    expr: Identifier(
+                                                        Ident {
+                                                            value: "generate_series",
+                                                            quote_style: None,
+                                                        },
+                                                    ),
+                                                    asc: None,
+                                                    nulls_first: None,
+                                                },
+                                            ),
+                                        },
+                                    ),
+                                ),
+                            ],
+                            from: [
+                                TableWithJoins {
+                                    relation: TableFunction {
+                                        name: ObjectName(
+                                            [
+                                                Ident {
+                                                    value: "generate_series",
+                                                    quote_style: None,
+                                                },
+                                            ],
+                                        ),
+                                        alias: None,
+                                        args: [
+                                            Unnamed(
+                                                Expr(
+                                                    Value(
+                                                        Number(
+                                                            "1",
+                                                        ),
+                                                    ),
+                                                ),
+                                            ),
+                                            Unnamed(
+                                                Expr(
+                                                    Value(
+                                                        Number(
+                                                            "100",
+                                                        ),
+                                                    ),
+                                                ),
+                                            ),
+                                        ],
+                                        with_ordinality: false,
+                                    },
+                                    joins: [],
+                                },
+                            ],
+                            lateral_views: [],
+                            selection: None,
+                            group_by: [],
+                            having: None,
+                        },
+                    ),
+                    order_by: [],
+                    limit: None,
+                    offset: None,
+                    fetch: None,
+                },
+            )"#]];
+        parse_expected.assert_eq(&format!("{:#?}", stmt));
+
+        let mut binder = mock_binder();
+        let bound = binder.bind(stmt).unwrap();
+
+        let expected = expect![[r#"
+            Query(
+                BoundQuery {
+                    body: Select(
+                        BoundSelect {
+                            distinct: All,
+                            select_items: [
+                                AggCall(
+                                    AggCall {
+                                        agg_kind: Builtin(
+                                            ApproxPercentile,
+                                        ),
+                                        return_type: Float64,
+                                        args: [
+                                            FunctionCall(
+                                                FunctionCall {
+                                                    func_type: Cast,
+                                                    return_type: Float64,
+                                                    inputs: [
+                                                        InputRef(
+                                                            InputRef {
+                                                                index: 0,
+                                                                data_type: Int32,
+                                                            },
+                                                        ),
+                                                    ],
+                                                },
+                                            ),
+                                        ],
+                                        filter: Condition {
+                                            conjunctions: [],
+                                        },
+                                        distinct: false,
+                                        order_by: OrderBy {
+                                            sort_exprs: [
+                                                OrderByExpr {
+                                                    expr: InputRef(
+                                                        InputRef {
+                                                            index: 0,
+                                                            data_type: Int32,
+                                                        },
+                                                    ),
+                                                    order_type: OrderType {
+                                                        direction: Ascending,
+                                                        nulls_are: Largest,
+                                                    },
+                                                },
+                                            ],
+                                        },
+                                        direct_args: [
+                                            Literal {
+                                                data: Some(
+                                                    Float64(
+                                                        OrderedFloat(
+                                                            0.5,
+                                                        ),
+                                                    ),
+                                                ),
+                                                data_type: Some(
+                                                    Float64,
+                                                ),
+                                            },
+                                            Literal {
+                                                data: Some(
+                                                    Float64(
+                                                        OrderedFloat(
+                                                            0.01,
+                                                        ),
+                                                    ),
+                                                ),
+                                                data_type: Some(
+                                                    Float64,
+                                                ),
+                                            },
+                                        ],
+                                    },
+                                ),
+                            ],
+                            aliases: [
+                                Some(
+                                    "approx_percentile",
+                                ),
+                            ],
+                            from: Some(
+                                TableFunction {
+                                    expr: TableFunction(
+                                        FunctionCall {
+                                            function_type: GenerateSeries,
+                                            return_type: Int32,
+                                            args: [
+                                                Literal(
+                                                    Literal {
+                                                        data: Some(
+                                                            Int32(
+                                                                1,
+                                                            ),
+                                                        ),
+                                                        data_type: Some(
+                                                            Int32,
+                                                        ),
+                                                    },
+                                                ),
+                                                Literal(
+                                                    Literal {
+                                                        data: Some(
+                                                            Int32(
+                                                                100,
+                                                            ),
+                                                        ),
+                                                        data_type: Some(
+                                                            Int32,
+                                                        ),
+                                                    },
+                                                ),
+                                            ],
+                                        },
+                                    ),
+                                    with_ordinality: false,
+                                },
+                            ),
+                            where_clause: None,
+                            group_by: GroupKey(
+                                [],
+                            ),
+                            having: None,
+                            schema: Schema {
+                                fields: [
+                                    approx_percentile:Float64,
                                 ],
                             },
                         },

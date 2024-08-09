@@ -75,9 +75,6 @@ async fn build_accessor_builder(
                     .unwrap_or(TimestamptzHandling::GuessNumberUnit),
             )?,
         )),
-        EncodingProperties::Protobuf(_) => {
-            Ok(AccessBuilderImpl::new_default(config, encoding_type).await?)
-        }
         _ => bail!("unsupported encoding for Debezium"),
     }
 }

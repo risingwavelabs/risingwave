@@ -83,13 +83,31 @@ async fn test_snapshot_mv() -> Result<()> {
 
     let id = fragment.id();
 
-    cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
+    let workers = fragment.all_worker_count().into_keys().collect_vec();
+
+    // prev cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
+    cluster
+        .reschedule(format!(
+            "{}:[{}]",
+            id,
+            format_args!("{}:-1,{}:-2,{}:-2", workers[0], workers[1], workers[2]),
+        ))
+        .await?;
+
     sleep(Duration::from_secs(3)).await;
 
     // Before complete recovery should be NO_BACKFILL state
     test_no_backfill_state(&mut session).await?;
 
-    cluster.reschedule(format!("{id}+[1,2,3,4,5]")).await?;
+    // prev cluster.reschedule(format!("{id}+[1,2,3,4,5]")).await?;
+    cluster
+        .reschedule(format!(
+            "{}:[{}]",
+            id,
+            format_args!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
+        ))
+        .await?;
+
     sleep(Duration::from_secs(3)).await;
 
     // After recovery should be NO_BACKFILL state
@@ -130,7 +148,17 @@ async fn test_backfill_mv() -> Result<()> {
 
     let id = fragment.id();
 
-    cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
+    let workers = fragment.all_worker_count().into_keys().collect_vec();
+
+    // prev cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
+    cluster
+        .reschedule(format!(
+            "{}:[{}]",
+            id,
+            format_args!("{}:-1,{}:-2,{}:-2", workers[0], workers[1], workers[2]),
+        ))
+        .await?;
+
     sleep(Duration::from_secs(3)).await;
 
     let internal_table = session.run(SHOW_INTERNAL_TABLES).await?;
@@ -139,7 +167,15 @@ async fn test_backfill_mv() -> Result<()> {
         .await?;
     assert_eq!(results.lines().collect_vec().len(), 256);
 
-    cluster.reschedule(format!("{id}+[1,2,3,4,5]")).await?;
+    // prev cluster.reschedule(format!("{id}+[1,2,3,4,5]")).await?;
+    cluster
+        .reschedule(format!(
+            "{}:[{}]",
+            id,
+            format_args!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
+        ))
+        .await?;
+
     sleep(Duration::from_secs(3)).await;
 
     let internal_table = session.run(SHOW_INTERNAL_TABLES).await?;
@@ -183,7 +219,16 @@ async fn test_index_backfill() -> Result<()> {
 
     let id = fragment.id();
 
-    cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
+    let workers = fragment.all_worker_count().into_keys().collect_vec();
+
+    // prev cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
+    cluster
+        .reschedule(format!(
+            "{}:[{}]",
+            id,
+            format_args!("{}:-1,{}:-2,{}:-2", workers[0], workers[1], workers[2]),
+        ))
+        .await?;
     sleep(Duration::from_secs(3)).await;
 
     let internal_table = session.run(SHOW_INTERNAL_TABLES).await?;
@@ -192,7 +237,14 @@ async fn test_index_backfill() -> Result<()> {
         .await?;
     assert_eq!(results.lines().collect_vec().len(), 256);
 
-    cluster.reschedule(format!("{id}+[1,2,3,4,5]")).await?;
+    // prev cluster.reschedule(format!("{id}+[1,2,3,4,5]")).await?;
+    cluster
+        .reschedule(format!(
+            "{}:[{}]",
+            id,
+            format_args!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
+        ))
+        .await?;
     sleep(Duration::from_secs(3)).await;
 
     let internal_table = session.run(SHOW_INTERNAL_TABLES).await?;

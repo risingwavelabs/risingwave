@@ -33,6 +33,7 @@ aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
 aws-msk-iam-sasl-signer = "1.0.0"
 aws-sdk-dynamodb = "1"
+aws-sdk-glue = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
@@ -84,7 +85,7 @@ mysql_common = { version = "0.32", default-features = false, features = [
 ] }
 nexmark = { version = "0.2", features = ["serde"] }
 num-bigint = "0.4"
-opendal = { version = "0.47", features = [
+opendal = { workspace = true, features = [
     "executors-tokio",
     "services-fs",
     "services-gcs",
@@ -146,8 +147,19 @@ strum = "0.26"
 strum_macros = "0.26"
 tempfile = "3"
 thiserror = "1"
+
 thiserror-ext = { workspace = true }
-tiberius = { version = "0.12", default-features = false, features = ["chrono", "time", "tds73", "rust_decimal", "bigdecimal", "rustls"] }
+# To easiy get the type_name and impl IntoSql for rust_decimal, we fork the crate.
+# Another reason is that we are planning to refactor their IntoSql trait to allow specifying the type to convert.
+tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "f834f2deeb9e2fb08afaf73865f330cf31a3876a", default-features = false, features = [
+    "chrono",
+    "sql-browser-tokio",
+    "vendored-openssl",
+    "rust_decimal",
+    "bigdecimal",
+    "tds73",
+    "time",
+] }
 time = "0.3.30"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

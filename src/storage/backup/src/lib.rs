@@ -21,7 +21,6 @@
 #![feature(map_try_insert)]
 #![feature(hash_extract_if)]
 #![feature(btree_extract_if)]
-#![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
 #![cfg_attr(coverage, feature(coverage_attribute))]
@@ -60,7 +59,7 @@ pub struct MetaSnapshotMetadata {
     #[serde(default)]
     pub format_version: u32,
     pub remarks: Option<String>,
-    #[serde(with = "table_id_key_map")]
+    #[serde(default, with = "table_id_key_map")]
     pub state_table_info: HashMap<TableId, PbStateTableInfo>,
     pub rw_version: Option<String>,
 }

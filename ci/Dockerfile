@@ -68,16 +68,16 @@ ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
 # install build tools
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
-RUN cargo binstall -y --no-symlinks cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-cache cargo-audit \
+RUN cargo binstall -y --locked --no-symlinks cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-cache cargo-audit \
     cargo-make@0.37.9 \
     sqllogictest-bin@0.21.0 \
     sccache@0.7.4 \
     && cargo cache -a \
     && rm -rf "/root/.cargo/registry/index" \
     && rm -rf "/root/.cargo/registry/cache" \
-    && rm -rf "/root/.cargo/git/db"
+    && rm -rf "/root/.cargo/git/db" \
+    && cargo uninstall cargo-cache
 RUN cargo install cargo-dylint@3.1.0 dylint-link@3.1.0
-RUN cargo uninstall cargo-cache
 
 # install risedev
 COPY <<EOF /root/.cargo/bin/risedev

@@ -19,12 +19,13 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{is_empty_key_range, vnode_range, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
-use risingwave_pb::hummock::SstableInfo;
 use tracing::{warn, Instrument};
 
 use super::version::{StagingData, VersionUpdate};
@@ -240,27 +241,6 @@ impl LocalHummockStorage {
             )
             .await
     }
-
-    pub async fn may_exist_inner(
-        &self,
-        key_range: TableKeyRange,
-        read_options: ReadOptions,
-    ) -> StorageResult<bool> {
-        if self.mem_table.iter(key_range.clone()).next().is_some() {
-            return Ok(true);
-        }
-
-        let (key_range, read_snapshot) = read_filter_for_version(
-            HummockEpoch::MAX, // Use MAX epoch to make sure we read from latest
-            read_options.table_id,
-            key_range,
-            &self.read_version,
-        )?;
-
-        self.hummock_version_reader
-            .may_exist(key_range, read_options, read_snapshot)
-            .await
-    }
 }
 
 impl StateStoreRead for LocalHummockStorage {
@@ -319,14 +299,6 @@ impl LocalStateStore for LocalHummockStorage {
     type Iter<'a> = LocalHummockStorageIterator<'a>;
     type RevIter<'a> = LocalHummockStorageRevIterator<'a>;
 
-    fn may_exist(
-        &self,
-        key_range: TableKeyRange,
-        read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
-        self.may_exist_inner(key_range, read_options)
-    }
-
     async fn get(
         &self,
         key: TableKey<Bytes>,
@@ -373,6 +345,10 @@ impl LocalStateStore for LocalHummockStorage {
         );
         self.rev_iter_all(key_range.clone(), self.epoch(), read_options)
             .await
+    }
+
+    fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+        self.read_version.read().latest_watermark(vnode)
     }
 
     fn insert(

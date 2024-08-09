@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::TableId;
+use risingwave_connector::WithOptionsSecResolved;
 use risingwave_pb::stream_plan::SourceBackfillNode;
 
 use super::*;
@@ -35,12 +36,16 @@ impl ExecutorBuilder for SourceBackfillExecutorBuilder {
         let source_name = node.source_name.clone();
         let source_info = node.get_info()?;
 
+        let options_with_secret =
+            WithOptionsSecResolved::new(node.with_properties.clone(), node.secret_refs.clone());
         let source_desc_builder = super::source::create_source_desc_builder(
+            "source backfill",
+            &source_id,
             node.columns.clone(),
             &params,
             source_info.clone(),
             node.row_id_index,
-            node.with_properties.clone(),
+            options_with_secret,
         );
 
         let source_column_ids: Vec<_> = source_desc_builder

@@ -26,7 +26,7 @@ use futures::stream::BoxStream;
 use futures::FutureExt;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::config::MetricLevel;
 use risingwave_pb::common::ActorInfo;
@@ -275,6 +275,12 @@ impl LocalStreamManager {
                     "finish inspecting barrier state"
                 );
             })
+            .await
+    }
+
+    pub async fn shutdown(&self) -> StreamResult<()> {
+        self.actor_op_tx
+            .send_and_await(|result_sender| LocalActorOperation::Shutdown { result_sender })
             .await
     }
 }

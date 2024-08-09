@@ -33,7 +33,7 @@ use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistributi
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::{EventLog, PbThrottleTarget};
+use risingwave_pb::meta::{EventLog, PbThrottleTarget, RecoveryStatus};
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
@@ -126,6 +126,15 @@ pub trait FrontendMetaClient: Send + Sync {
         id: u32,
         rate_limit: Option<u32>,
     ) -> Result<()>;
+
+    async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Result<Vec<u64>>;
+
+    async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -317,5 +326,20 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
             .apply_throttle(kind, id, rate_limit)
             .await
             .map(|_| ())
+    }
+
+    async fn list_change_log_epochs(
+        &self,
+        table_id: u32,
+        min_epoch: u64,
+        max_count: u32,
+    ) -> Result<Vec<u64>> {
+        self.0
+            .list_change_log_epochs(table_id, min_epoch, max_count)
+            .await
+    }
+
+    async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {
+        self.0.get_cluster_recovery_status().await
     }
 }

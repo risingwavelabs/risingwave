@@ -5,6 +5,8 @@ set -euo pipefail
 export RW_PREFIX=$PWD/.risingwave
 export PREFIX_BIN=./target/debug
 export PREFIX_LOG=$RW_PREFIX/log
+export PREFIX_CONFIG=$RW_PREFIX/config
+export RISEDEV=1 # as if we are running in RiseDev
 
 # You can fill up this section by consulting
 # .risingwave/log/risedev.log, after calling `risedev d full`.
@@ -12,6 +14,7 @@ export PREFIX_LOG=$RW_PREFIX/log
 start_single_node() {
   mkdir -p "$HOME/.risingwave/state_store"
   mkdir -p "$HOME/.risingwave/meta_store"
+  mkdir -p .risingwave/config
   RUST_BACKTRACE=1 "$PREFIX_BIN"/risingwave >"$1" 2>&1
 }
 

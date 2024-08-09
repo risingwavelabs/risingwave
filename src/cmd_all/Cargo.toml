@@ -11,11 +11,10 @@ repository = { workspace = true }
 default = ["rw-static-link"]
 rw-static-link = ["workspace-config/rw-static-link"]
 rw-dynamic-link = ["workspace-config/rw-dynamic-link"]
-all-udf = ["external-udf", "wasm-udf", "js-udf", "deno-udf", "python-udf"]
+all-udf = ["external-udf", "wasm-udf", "js-udf", "python-udf"]
 external-udf = ["risingwave_expr_impl/external-udf"]
 wasm-udf = ["risingwave_expr_impl/wasm-udf"]
 js-udf = ["risingwave_expr_impl/js-udf"]
-deno-udf = ["risingwave_expr_impl/deno-udf"]
 python-udf = ["risingwave_expr_impl/python-udf"]
 
 [package.metadata.cargo-machete]

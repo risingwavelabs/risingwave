@@ -29,7 +29,7 @@ use risingwave_pb::data::PbDataChunk;
 use super::{Array, ArrayImpl, ArrayRef, ArrayResult, StructArray};
 use crate::array::data_chunk_iter::RowRef;
 use crate::array::ArrayBuilderImpl;
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use crate::hash::HashCode;
 use crate::row::Row;

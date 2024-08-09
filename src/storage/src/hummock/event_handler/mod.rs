@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use parking_lot::{RwLock, RwLockReadGuard};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
 use thiserror_ext::AsReport;
@@ -74,6 +74,11 @@ pub enum HummockEvent {
         imm: ImmutableMemtable,
     },
 
+    StartEpoch {
+        epoch: HummockEpoch,
+        table_ids: HashSet<TableId>,
+    },
+
     InitEpoch {
         instance_id: LocalInstanceId,
         init_epoch: HummockEpoch,
@@ -116,6 +121,10 @@ impl HummockEvent {
             HummockEvent::Clear(_, prev_epoch) => format!("Clear {:?}", prev_epoch),
 
             HummockEvent::Shutdown => "Shutdown".to_string(),
+
+            HummockEvent::StartEpoch { epoch, table_ids } => {
+                format!("StartEpoch {} {:?}", epoch, table_ids)
+            }
 
             HummockEvent::InitEpoch {
                 instance_id,
@@ -208,7 +217,7 @@ impl Drop for LocalInstanceGuard {
                     instance_id: self.instance_id,
                 })
                 .unwrap_or_else(|err| {
-                    tracing::error!(
+                    tracing::debug!(
                         error = %err.as_report(),
                         table_id = %self.table_id,
                         instance_id = self.instance_id,
