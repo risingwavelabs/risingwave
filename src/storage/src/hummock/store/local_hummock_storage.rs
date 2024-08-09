@@ -48,8 +48,8 @@ use crate::hummock::utils::{
 };
 use crate::hummock::write_limiter::WriteLimiterRef;
 use crate::hummock::{
-    BackwardSstableIterator, MemoryLimiter, SstableIterator, SstableIteratorReadOptions,
-    SstableStoreRef,
+    BackwardSstableIterator, HummockError, MemoryLimiter, SstableIterator,
+    SstableIteratorReadOptions, SstableStoreRef,
 };
 use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator, MemTableHummockRevIterator};
 use crate::monitor::{HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic};
@@ -495,7 +495,9 @@ impl LocalStateStore for LocalHummockStorage {
                     instance_id: self.instance_id(),
                     init_epoch: options.epoch.curr,
                 })
-                .expect("should succeed");
+                .map_err(|_| {
+                    HummockError::other("failed to send InitEpoch. maybe shutting down")
+                })?;
         }
         Ok(())
     }
@@ -528,14 +530,17 @@ impl LocalStateStore for LocalHummockStorage {
                 });
             }
         }
-        if !self.is_replicated {
-            self.event_sender
+        if !self.is_replicated
+            && self
+                .event_sender
                 .send(HummockEvent::LocalSealEpoch {
                     instance_id: self.instance_id(),
                     next_epoch,
                     opts,
                 })
-                .expect("should be able to send");
+                .is_err()
+        {
+            warn!("failed to send LocalSealEpoch. maybe shutting down");
         }
     }
 
@@ -624,7 +629,9 @@ impl LocalHummockStorage {
             if !self.is_replicated {
                 self.event_sender
                     .send(HummockEvent::ImmToUploader { instance_id, imm })
-                    .unwrap();
+                    .map_err(|_| {
+                        HummockError::other("failed to send imm to uploader. maybe shutting down")
+                    })?;
             }
             imm_size
         } else {

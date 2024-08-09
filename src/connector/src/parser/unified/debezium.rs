@@ -106,6 +106,7 @@ pub fn parse_transaction_meta(
         // The id field has different meanings for different databases:
         // PG: txID:LSN
         // MySQL: source_id:transaction_id (e.g. 3E11FA47-71CA-11E1-9E33-C80AA9429562:23)
+        // SQL Server: commit_lsn (e.g. 00000027:00000ac0:0002)
         match status {
             DEBEZIUM_TRANSACTION_STATUS_BEGIN => match *connector_props {
                 ConnectorProperties::PostgresCdc(_) => {
@@ -113,6 +114,9 @@ pub fn parse_transaction_meta(
                     return Ok(TransactionControl::Begin { id: tx_id.into() });
                 }
                 ConnectorProperties::MysqlCdc(_) => {
+                    return Ok(TransactionControl::Begin { id: id.into() })
+                }
+                ConnectorProperties::SqlServerCdc(_) => {
                     return Ok(TransactionControl::Begin { id: id.into() })
                 }
                 _ => {}
@@ -123,6 +127,9 @@ pub fn parse_transaction_meta(
                     return Ok(TransactionControl::Commit { id: tx_id.into() });
                 }
                 ConnectorProperties::MysqlCdc(_) => {
+                    return Ok(TransactionControl::Commit { id: id.into() })
+                }
+                ConnectorProperties::SqlServerCdc(_) => {
                     return Ok(TransactionControl::Commit { id: id.into() })
                 }
                 _ => {}

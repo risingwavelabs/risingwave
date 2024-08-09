@@ -29,6 +29,7 @@ use arrow_schema_iceberg::{
 };
 use async_trait::async_trait;
 use iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
+use iceberg::spec::TableMetadata;
 use iceberg::table::Table as TableV2;
 use iceberg::{Catalog as CatalogV2, TableIdent};
 use icelake::catalog::{
@@ -578,6 +579,37 @@ impl IcebergConfig {
 
         catalog.load_table(&table_id).await.map_err(Into::into)
     }
+
+    pub async fn load_table_v2_with_metadata(
+        &self,
+        metadata: TableMetadata,
+    ) -> ConnectorResult<TableV2> {
+        match self.catalog_type() {
+            "storage" => {
+                let config = StorageCatalogConfig::builder()
+                    .warehouse(self.path.clone())
+                    .access_key(self.access_key.clone())
+                    .secret_key(self.secret_key.clone())
+                    .region(self.region.clone())
+                    .endpoint(self.endpoint.clone())
+                    .build();
+                let storage_catalog = storage_catalog::StorageCatalog::new(config)?;
+
+                let table_id = self
+                    .full_table_name_v2()
+                    .context("Unable to parse table name")?;
+
+                Ok(iceberg::table::Table::builder()
+                    .metadata(metadata)
+                    .identifier(table_id)
+                    .file_io(storage_catalog.file_io().clone())
+                    // Only support readonly table for storage catalog now.
+                    .readonly(true)
+                    .build())
+            }
+            _ => self.load_table_v2().await,
+        }
+    }
 }
 
 pub struct IcebergSink {
@@ -732,10 +764,12 @@ impl Sink for IcebergSink {
     }
 
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+        let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
         let partition_type = table.current_partition_type()?;
 
         Ok(IcebergSinkCommitter {
+            catalog,
             table,
             partition_type,
         })
@@ -1107,6 +1141,7 @@ impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
 }
 
 pub struct IcebergSinkCommitter {
+    catalog: CatalogRef,
     table: Table,
     partition_type: Any,
 }
@@ -1133,6 +1168,12 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             tracing::debug!(?epoch, "no data to commit");
             return Ok(());
         }
+        // Load the latest table to avoid concurrent modification with the best effort.
+        self.table = self
+            .catalog
+            .clone()
+            .load_table(self.table.table_name())
+            .await?;
         let mut txn = Transaction::new(&mut self.table);
         write_results.into_iter().for_each(|s| {
             txn.append_data_file(s.data_files);

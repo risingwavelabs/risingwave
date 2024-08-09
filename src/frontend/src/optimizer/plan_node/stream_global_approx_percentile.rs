@@ -16,13 +16,15 @@ use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::GlobalApproxPercentileNode;
 
 use crate::expr::{ExprRewriter, ExprVisitor, Literal};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
-use crate::optimizer::plan_node::utils::{childless_record, Distill};
+use crate::optimizer::plan_node::utils::{childless_record, Distill, TableCatalogBuilder};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanAggCall, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
 };
@@ -95,8 +97,42 @@ impl PlanTreeNodeUnary for StreamGlobalApproxPercentile {
 impl_plan_tree_node_for_unary! {StreamGlobalApproxPercentile}
 
 impl StreamNode for StreamGlobalApproxPercentile {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        todo!()
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
+        let relative_error = self.relative_error.get_data().as_ref().unwrap();
+        let relative_error = relative_error.as_float64().into_inner();
+        let base = (1.0 + relative_error) / (1.0 - relative_error);
+        let quantile = self.quantile.get_data().as_ref().unwrap();
+        let quantile = quantile.as_float64().into_inner();
+
+        // setup table: bucket_id->count
+        let mut bucket_table_builder = TableCatalogBuilder::default();
+        bucket_table_builder.add_column(&Field::with_name(DataType::Int16, "sign"));
+        bucket_table_builder.add_column(&Field::with_name(DataType::Int32, "bucket_id"));
+        bucket_table_builder.add_column(&Field::with_name(DataType::Int64, "count"));
+        bucket_table_builder.add_order_column(0, OrderType::ascending()); // sign
+        bucket_table_builder.add_order_column(1, OrderType::ascending()); // bucket_id
+
+        // setup table: total_count
+        let mut count_table_builder = TableCatalogBuilder::default();
+        count_table_builder.add_column(&Field::with_name(DataType::Int64, "total_count"));
+
+        let body = GlobalApproxPercentileNode {
+            base,
+            quantile,
+            bucket_state_table: Some(
+                bucket_table_builder
+                    .build(vec![], 0)
+                    .with_id(state.gen_table_id_wrapped())
+                    .to_internal_table_prost(),
+            ),
+            count_state_table: Some(
+                count_table_builder
+                    .build(vec![], 0)
+                    .with_id(state.gen_table_id_wrapped())
+                    .to_internal_table_prost(),
+            ),
+        };
+        PbNodeBody::GlobalApproxPercentile(body)
     }
 }
 

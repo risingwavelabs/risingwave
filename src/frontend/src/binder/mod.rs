@@ -32,6 +32,7 @@ mod create;
 mod create_view;
 mod delete;
 mod expr;
+pub mod fetch_cursor;
 mod for_system;
 mod insert;
 mod query;
