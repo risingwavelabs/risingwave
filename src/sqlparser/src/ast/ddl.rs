@@ -20,7 +20,7 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::ConnectorSchema;
+use super::{ConnectorSchema, WithProperties};
 use crate::ast::{
     display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName, SetVariableValue,
 };
@@ -105,6 +105,9 @@ pub enum AlterTableOperation {
     /// `SET SOURCE_RATE_LIMIT TO <rate_limit>`
     SetSourceRateLimit {
         rate_limit: i32,
+    },
+    AlterConnectorConfig {
+        config: WithProperties,
     },
 }
 
@@ -292,6 +295,9 @@ impl fmt::Display for AlterTableOperation {
             }
             AlterTableOperation::SetSourceRateLimit { rate_limit } => {
                 write!(f, "SET SOURCE_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterTableOperation::AlterConnectorConfig { config } => {
+                write!(f, " CONNECTOR CONFIG {}", config)
             }
         }
     }

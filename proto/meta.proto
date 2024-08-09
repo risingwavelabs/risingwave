@@ -285,6 +285,16 @@ message ApplyThrottleResponse {
   common.Status status = 1;
 }
 
+message AlterConnectorConfigRequest {
+  uint32 source_id = 1;
+  bool require_clean_state = 2;
+  map<string, string> config = 3;
+}
+
+message AlterConnectorConfigResponse {
+  common.Status status = 1;
+}
+
 message RecoverRequest {}
 
 message RecoverResponse {}
@@ -301,6 +311,7 @@ service StreamManagerService {
   rpc ListObjectDependencies(ListObjectDependenciesRequest) returns (ListObjectDependenciesResponse);
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
   rpc Recover(RecoverRequest) returns (RecoverResponse);
+  rpc AlterConnectorConfig(AlterConnectorConfigRequest) returns (AlterConnectorConfigResponse);
 }
 
 // Below for cluster service.

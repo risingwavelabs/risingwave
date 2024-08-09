@@ -3106,34 +3106,43 @@ impl Parser<'_> {
                 cascade,
             }
         } else if self.parse_keyword(Keyword::ALTER) {
-            let _ = self.parse_keyword(Keyword::COLUMN);
-            let column_name = self.parse_identifier_non_reserved()?;
-
-            let op = if self.parse_keywords(&[Keyword::SET, Keyword::NOT, Keyword::NULL]) {
-                AlterColumnOperation::SetNotNull {}
-            } else if self.parse_keywords(&[Keyword::DROP, Keyword::NOT, Keyword::NULL]) {
-                AlterColumnOperation::DropNotNull {}
-            } else if self.parse_keywords(&[Keyword::SET, Keyword::DEFAULT]) {
-                AlterColumnOperation::SetDefault {
-                    value: self.parse_expr()?,
+            if self.parse_keyword(Keyword::CONNECTOR) {
+                // ALTER CONNECTOR WITH (...)
+                let config = self.parse_with_properties()?;
+                AlterTableOperation::AlterConnectorConfig {
+                    config: WithProperties(config),
                 }
-            } else if self.parse_keywords(&[Keyword::DROP, Keyword::DEFAULT]) {
-                AlterColumnOperation::DropDefault {}
-            } else if self.parse_keywords(&[Keyword::SET, Keyword::DATA, Keyword::TYPE])
-                || (self.parse_keyword(Keyword::TYPE))
-            {
-                let data_type = self.parse_data_type()?;
-                let using = if self.parse_keyword(Keyword::USING) {
-                    Some(self.parse_expr()?)
-                } else {
-                    None
-                };
-                AlterColumnOperation::SetDataType { data_type, using }
             } else {
-                return self
-                    .expected("SET/DROP NOT NULL, SET DEFAULT, SET DATA TYPE after ALTER COLUMN");
-            };
-            AlterTableOperation::AlterColumn { column_name, op }
+                // ALTER [ COLUMN ] column_name SET/DROP NOT NULL
+                let _ = self.parse_keyword(Keyword::COLUMN);
+                let column_name = self.parse_identifier_non_reserved()?;
+                let op = if self.parse_keywords(&[Keyword::SET, Keyword::NOT, Keyword::NULL]) {
+                    AlterColumnOperation::SetNotNull {}
+                } else if self.parse_keywords(&[Keyword::DROP, Keyword::NOT, Keyword::NULL]) {
+                    AlterColumnOperation::DropNotNull {}
+                } else if self.parse_keywords(&[Keyword::SET, Keyword::DEFAULT]) {
+                    AlterColumnOperation::SetDefault {
+                        value: self.parse_expr()?,
+                    }
+                } else if self.parse_keywords(&[Keyword::DROP, Keyword::DEFAULT]) {
+                    AlterColumnOperation::DropDefault {}
+                } else if self.parse_keywords(&[Keyword::SET, Keyword::DATA, Keyword::TYPE])
+                    || (self.parse_keyword(Keyword::TYPE))
+                {
+                    let data_type = self.parse_data_type()?;
+                    let using = if self.parse_keyword(Keyword::USING) {
+                        Some(self.parse_expr()?)
+                    } else {
+                        None
+                    };
+                    AlterColumnOperation::SetDataType { data_type, using }
+                } else {
+                    return self.expected(
+                        "SET/DROP NOT NULL, SET DEFAULT, SET DATA TYPE after ALTER COLUMN",
+                    );
+                };
+                AlterTableOperation::AlterColumn { column_name, op }
+            }
         } else if self.parse_keywords(&[Keyword::REFRESH, Keyword::SCHEMA]) {
             AlterTableOperation::RefreshSchema
         } else {
