@@ -57,7 +57,7 @@ public class CassandraConfig extends CommonSinkConfig {
             @JsonProperty(value = "type") String type) {
         this.url = url;
         this.keyspace = keyspace;
-        this.table = table;
+        this.table = CassandraUtil.convertCQLIdentifiers(table);
         this.datacenter = datacenter;
         this.type = type;
     }
