@@ -161,10 +161,6 @@ DynamoDbConfig:
     required: true
     alias:
     - dynamodb.table
-  - name: dynamodb.max_batch_rows
-    field_type: usize
-    required: false
-    default: '1024'
   - name: aws.region
     field_type: String
     required: false
@@ -208,6 +204,14 @@ DynamoDbConfig:
     required: false
     alias:
     - profile
+  - name: dynamodb.max_batch_item_nums
+    field_type: usize
+    required: false
+    default: '25'
+  - name: dynamodb.max_future_send_nums
+    field_type: usize
+    required: false
+    default: '256'
 GooglePubSubConfig:
   fields:
   - name: pubsub.project_id
@@ -552,11 +556,6 @@ MongodbConfig:
     comments: Controls whether the field value of `collection.name.field` should be dropped when sinking.  Set this option to true to avoid the duplicate values of `collection.name.field` being written to the  result collection.
     required: false
     default: Default::default
-  - name: mongodb.bulk_write.max_entries
-    field_type: usize
-    comments: The maximum entries will accumulate before performing the bulk write, defaults to 1024.
-    required: false
-    default: '1024'
 MqttConfig:
   fields:
   - name: url

@@ -21,11 +21,13 @@ use redis::cluster::{ClusterClient, ClusterConnection, ClusterPipeline};
 use redis::{Client as RedisClient, Pipeline};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use serde_derive::Deserialize;
 use serde_json::Value;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
+use super::catalog::desc::SinkDesc;
 use super::catalog::SinkFormatDesc;
 use super::encoder::template::TemplateEncoder;
 use super::formatter::SinkFormatterImpl;
@@ -197,6 +199,13 @@ impl Sink for RedisSink {
     type LogSinker = AsyncTruncateLogSinkerOf<RedisSinkWriter>;
 
     const SINK_NAME: &'static str = "redis";
+
+    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Disable => Ok(false),
+        }
+    }
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(RedisSinkWriter::new(

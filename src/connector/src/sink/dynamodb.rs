@@ -12,26 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::result;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::{anyhow, Context};
 use aws_sdk_dynamodb as dynamodb;
 use aws_sdk_dynamodb::client::Client;
+use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
 use aws_smithy_types::Blob;
+use dynamodb::error::SdkError;
+use dynamodb::operation::batch_write_item::{BatchWriteItemError, BatchWriteItemOutput};
 use dynamodb::types::{
     AttributeValue, DeleteRequest, PutRequest, ReturnConsumedCapacity, ReturnItemCollectionMetrics,
     TableStatus, WriteRequest,
 };
+use futures::prelude::future::{try_join_all, FutureExt, TryFutureExt};
+use futures::prelude::{Future, TryFuture};
+use itertools::Itertools;
 use maplit::hashmap;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row as _;
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::{DataType, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
 
+use super::catalog::desc::SinkDesc;
 use super::log_store::DeliveryFutureManagerAddFuture;
 use super::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
@@ -48,16 +57,30 @@ pub struct DynamoDbConfig {
     #[serde(rename = "table", alias = "dynamodb.table")]
     pub table: String,
 
-    #[serde(rename = "dynamodb.max_batch_rows", default = "default_max_batch_rows")]
-    #[serde_as(as = "DisplayFromStr")]
-    pub max_batch_rows: usize,
-
     #[serde(flatten)]
     pub aws_auth_props: AwsAuthProps,
+
+    #[serde(
+        rename = "dynamodb.max_batch_item_nums",
+        default = "default_max_batch_item_nums"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub max_batch_item_nums: usize,
+
+    #[serde(
+        rename = "dynamodb.max_future_send_nums",
+        default = "default_max_future_send_nums"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub max_future_send_nums: usize,
 }
 
-fn default_max_batch_rows() -> usize {
-    1024
+fn default_max_batch_item_nums() -> usize {
+    25
+}
+
+fn default_max_future_send_nums() -> usize {
+    256
 }
 
 impl DynamoDbConfig {
@@ -86,6 +109,13 @@ impl Sink for DynamoDbSink {
     type LogSinker = AsyncTruncateLogSinkerOf<DynamoDbSinkWriter>;
 
     const SINK_NAME: &'static str = DYNAMO_DB_SINK;
+
+    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Disable => Ok(false),
+        }
+    }
 
     async fn validate(&self) -> Result<()> {
         let client = (self.config.build_client().await)
@@ -138,7 +168,7 @@ impl Sink for DynamoDbSink {
         Ok(
             DynamoDbSinkWriter::new(self.config.clone(), self.schema.clone())
                 .await?
-                .into_log_sinker(usize::MAX),
+                .into_log_sinker(self.config.max_future_send_nums),
         )
     }
 }
@@ -185,6 +215,7 @@ struct DynamoDbPayloadWriter {
     client: Client,
     table: String,
     dynamodb_keys: Vec<String>,
+    max_batch_item_nums: usize,
 }
 
 impl DynamoDbPayloadWriter {
@@ -221,36 +252,46 @@ impl DynamoDbPayloadWriter {
         self.request_items.push(r_req);
     }
 
-    async fn write_chunk(&mut self) -> Result<()> {
-        if !self.request_items.is_empty() {
-            let table = self.table.clone();
-            let req_items = std::mem::take(&mut self.request_items)
-                .into_iter()
-                .map(|r| r.inner)
-                .collect();
-            let reqs = hashmap! {
-                table => req_items,
-            };
-            self.client
-                .batch_write_item()
-                .set_request_items(Some(reqs))
-                .return_consumed_capacity(ReturnConsumedCapacity::None)
-                .return_item_collection_metrics(ReturnItemCollectionMetrics::None)
-                .send()
-                .await
-                .map_err(|e| {
-                    SinkError::DynamoDb(
-                        anyhow!(e).context("failed to delete item from DynamoDB sink"),
-                    )
-                })?;
-        }
+    fn write_chunk(
+        &mut self,
+    ) -> Result<
+        Vec<
+            impl Future<
+                Output = result::Result<
+                    BatchWriteItemOutput,
+                    SdkError<BatchWriteItemError, HttpResponse>,
+                >,
+            >,
+        >,
+    > {
+        let table = self.table.clone();
+        let req_items: Vec<Vec<_>> = std::mem::take(&mut self.request_items)
+            .into_iter()
+            .map(|r| r.inner)
+            .chunks(self.max_batch_item_nums)
+            .into_iter()
+            .map(|chunk| chunk.collect())
+            .collect();
+        let futures: Vec<_> = req_items
+            .into_iter()
+            .map(|req_items| {
+                let reqs = hashmap! {
+                    table.clone() => req_items,
+                };
+                self.client
+                    .batch_write_item()
+                    .set_request_items(Some(reqs))
+                    .return_consumed_capacity(ReturnConsumedCapacity::None)
+                    .return_item_collection_metrics(ReturnItemCollectionMetrics::None)
+                    .send()
+            })
+            .collect();
 
-        Ok(())
+        Ok(futures)
     }
 }
 
 pub struct DynamoDbSinkWriter {
-    max_batch_rows: usize,
     payload_writer: DynamoDbPayloadWriter,
     formatter: DynamoDbFormatter,
 }
@@ -281,18 +322,30 @@ impl DynamoDbSinkWriter {
         let payload_writer = DynamoDbPayloadWriter {
             request_items: Vec::new(),
             client,
-            table: config.table,
+            table: config.table.clone(),
             dynamodb_keys,
+            max_batch_item_nums: config.max_batch_item_nums,
         };
 
         Ok(Self {
-            max_batch_rows: config.max_batch_rows,
             payload_writer,
             formatter: DynamoDbFormatter { schema },
         })
     }
 
-    async fn write_chunk_inner(&mut self, chunk: StreamChunk) -> Result<()> {
+    fn write_chunk_inner(
+        &mut self,
+        chunk: StreamChunk,
+    ) -> Result<
+        Vec<
+            impl Future<
+                Output = result::Result<
+                    BatchWriteItemOutput,
+                    SdkError<BatchWriteItemError, HttpResponse>,
+                >,
+            >,
+        >,
+    > {
         for (op, row) in chunk.rows() {
             let items = self.formatter.format_row(row)?;
             match op {
@@ -305,30 +358,38 @@ impl DynamoDbSinkWriter {
                 Op::UpdateDelete => {}
             }
         }
-        if self.payload_writer.request_items.len() >= self.max_batch_rows {
-            self.payload_writer.write_chunk().await?;
-        }
-        Ok(())
-    }
-
-    async fn flush(&mut self) -> Result<()> {
-        self.payload_writer.write_chunk().await
+        self.payload_writer.write_chunk()
     }
 }
 
+pub type DynamoDbSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
+
 impl AsyncTruncateSinkWriter for DynamoDbSinkWriter {
+    type DeliveryFuture = DynamoDbSinkDeliveryFuture;
+
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,
-        _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
+        mut add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        self.write_chunk_inner(chunk).await
-    }
-
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
-        if is_checkpoint {
-            self.flush().await?;
-        }
+        let futures = self.write_chunk_inner(chunk)?;
+        add_future
+            .add_future_may_await(
+                try_join_all(futures.into_iter().map(|future| {
+                    future.map(|result| {
+                        result
+                            .map_err(|e| {
+                                SinkError::DynamoDb(
+                                    anyhow!(e).context("failed to delete item from DynamoDB sink"),
+                                )
+                            })
+                            .map(|_| ())
+                    })
+                }))
+                .map_ok(|_: Vec<()>| ())
+                .boxed(),
+            )
+            .await?;
         Ok(())
     }
 }
