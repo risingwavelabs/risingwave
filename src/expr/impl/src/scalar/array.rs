@@ -22,12 +22,12 @@ use risingwave_expr::{function, ExprError};
 
 use super::array_positions::array_position;
 
-#[function("array(...) -> anyarray", type_infer = "panic")]
+#[function("array(...) -> anyarray", type_infer = "unreachable")]
 fn array(row: impl Row, ctx: &Context) -> ListValue {
     ListValue::from_datum_iter(ctx.return_type.as_list(), row.iter())
 }
 
-#[function("row(...) -> struct", type_infer = "panic")]
+#[function("row(...) -> struct", type_infer = "unreachable")]
 fn row_(row: impl Row) -> StructValue {
     StructValue::new(row.iter().map(|d| d.to_owned_datum()).collect())
 }
@@ -79,7 +79,7 @@ fn map(key: ListRef<'_>, value: ListRef<'_>) -> Result<MapValue, ExprError> {
 ///
 /// Caused by these errors (recent errors listed first):
 ///   1: Failed to bind expression: map_access(map_from_entries(ARRAY[1, 2, 3], ARRAY[100, 200, 300]), 1.0)
-///   2: Bind error: Cannot access numeric in map(integer,integer): cannot cast type "numeric" to "integer" in Implicit context
+///   2: Bind error: Cannot access numeric in map(integer,integer)
 ///
 ///
 /// query T
@@ -97,10 +97,7 @@ fn map(key: ListRef<'_>, value: ListRef<'_>) -> Result<MapValue, ExprError> {
 /// ----
 /// NULL
 /// ```
-#[function(
-    "map_access(anymap, any) -> any",
-    type_infer = "|args| Ok(args[0].as_map().value().clone())"
-)]
+#[function("map_access(anymap, any) -> any")]
 fn map_access<'a, 'b>(
     map: MapRef<'a>,
     key: ScalarRefImpl<'b>,
