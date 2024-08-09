@@ -30,6 +30,7 @@ use tracing::warn;
 use super::group_split::{self, SstSplitType};
 use super::StateTableId;
 use crate::change_log::TableChangeLog;
+use crate::compaction_group::group_split::get_sub_level_insert_hint;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::level::{Level, Levels, OverlappingLevel};
@@ -372,23 +373,6 @@ impl HummockVersion {
         {
             for sub_level in &mut l0.sub_levels {
                 let target_l0 = &mut cur_levels.l0;
-                // When `insert_hint` is `Ok(idx)`, it means that the sub level `idx` in `target_l0`
-                // will extend these SSTs. When `insert_hint` is `Err(idx)`, it
-                // means that we will add a new sub level `idx` into `target_l0`.
-                let mut insert_hint = Err(target_l0.sub_levels.len());
-                for (idx, other) in target_l0.sub_levels.iter_mut().enumerate() {
-                    match other.sub_level_id.cmp(&sub_level.sub_level_id) {
-                        Ordering::Less => {}
-                        Ordering::Equal => {
-                            insert_hint = Ok(idx);
-                            break;
-                        }
-                        Ordering::Greater => {
-                            insert_hint = Err(idx);
-                            break;
-                        }
-                    }
-                }
                 // Remove SST from sub level may result in empty sub level. It will be purged
                 // whenever another compaction task is finished.
                 let insert_table_infos = if let Some(split_key) = &split_key {
@@ -440,7 +424,8 @@ impl HummockVersion {
                         l0.total_file_size -= sstable_file_size;
                         l0.uncompressed_file_size -= sst_info.uncompressed_file_size;
                     });
-                match insert_hint {
+
+                match get_sub_level_insert_hint(&target_l0.sub_levels, sub_level) {
                     Ok(idx) => {
                         add_ssts_to_sub_level(target_l0, idx, insert_table_infos);
                     }
@@ -2243,7 +2228,7 @@ mod tests {
                 .encode()
                 .into(),
             )],
-            sub_level_id: 102,
+            sub_level_id: 103,
             level_type: LevelType::Overlapping,
             total_file_size: 100,
             ..Default::default()
@@ -2269,7 +2254,7 @@ mod tests {
                 .encode()
                 .into(),
             )],
-            sub_level_id: 103,
+            sub_level_id: 105,
             level_type: LevelType::Nonoverlapping,
             total_file_size: 100,
             ..Default::default()
@@ -2410,7 +2395,7 @@ mod tests {
                 .encode()
                 .into(),
             )],
-            sub_level_id: 104,
+            sub_level_id: 103,
             level_type: LevelType::Nonoverlapping,
             total_file_size: 100,
             ..Default::default()
@@ -2442,7 +2427,7 @@ mod tests {
             assert_eq!(100, left_levels.l0.sub_levels[0].total_file_size);
             assert!(left_levels.l0.sub_levels[1].sub_level_id == 102);
             assert_eq!(100, left_levels.l0.sub_levels[1].total_file_size);
-            assert!(left_levels.l0.sub_levels[2].sub_level_id == 104);
+            assert!(left_levels.l0.sub_levels[2].sub_level_id == 103);
             assert_eq!(100, left_levels.l0.sub_levels[2].total_file_size);
 
             assert!(left_levels.levels[0].level_idx == 1);
@@ -2465,9 +2450,9 @@ mod tests {
             assert!(left_levels.l0.sub_levels.len() == 3);
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
             assert_eq!(100, left_levels.l0.sub_levels[0].total_file_size);
-            assert!(left_levels.l0.sub_levels[1].sub_level_id == 102);
+            assert!(left_levels.l0.sub_levels[1].sub_level_id == 103);
             assert_eq!(100, left_levels.l0.sub_levels[1].total_file_size);
-            assert!(left_levels.l0.sub_levels[2].sub_level_id == 103);
+            assert!(left_levels.l0.sub_levels[2].sub_level_id == 105);
             assert_eq!(100, left_levels.l0.sub_levels[2].total_file_size);
 
             assert!(left_levels.levels[0].level_idx == 1);
@@ -2484,10 +2469,10 @@ mod tests {
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
             assert_eq!(200, left_levels.l0.sub_levels[0].total_file_size);
             assert!(left_levels.l0.sub_levels[1].sub_level_id == 102);
-            assert_eq!(200, left_levels.l0.sub_levels[1].total_file_size);
+            assert_eq!(100, left_levels.l0.sub_levels[1].total_file_size);
             assert!(left_levels.l0.sub_levels[2].sub_level_id == 103);
-            assert_eq!(100, left_levels.l0.sub_levels[2].total_file_size);
-            assert!(left_levels.l0.sub_levels[3].sub_level_id == 104);
+            assert_eq!(200, left_levels.l0.sub_levels[2].total_file_size);
+            assert!(left_levels.l0.sub_levels[3].sub_level_id == 105);
             assert_eq!(100, left_levels.l0.sub_levels[3].total_file_size);
 
             assert!(left_levels.levels[0].level_idx == 1);
