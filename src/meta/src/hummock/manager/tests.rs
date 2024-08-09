@@ -318,7 +318,10 @@ async fn test_hummock_transaction() {
         .await;
         // Get tables before committing epoch1. No tables should be returned.
         let current_version = hummock_manager.get_current_version().await;
-        assert_eq!(current_version.max_committed_epoch, INVALID_EPOCH);
+        assert_eq!(
+            current_version.visible_table_committed_epoch(),
+            INVALID_EPOCH
+        );
         assert!(get_sorted_committed_object_ids(&current_version).is_empty());
 
         // Commit epoch1
@@ -333,7 +336,7 @@ async fn test_hummock_transaction() {
 
         // Get tables after committing epoch1. All tables committed in epoch1 should be returned
         let current_version = hummock_manager.get_current_version().await;
-        assert_eq!(current_version.max_committed_epoch, epoch1);
+        assert_eq!(current_version.visible_table_committed_epoch(), epoch1);
         assert_eq!(
             get_sorted_object_ids(&committed_tables),
             get_sorted_committed_object_ids(&current_version)
@@ -356,7 +359,7 @@ async fn test_hummock_transaction() {
         // Get tables before committing epoch2. tables_in_epoch1 should be returned and
         // tables_in_epoch2 should be invisible.
         let current_version = hummock_manager.get_current_version().await;
-        assert_eq!(current_version.max_committed_epoch, epoch1);
+        assert_eq!(current_version.visible_table_committed_epoch(), epoch1);
         assert_eq!(
             get_sorted_object_ids(&committed_tables),
             get_sorted_committed_object_ids(&current_version)
@@ -375,7 +378,7 @@ async fn test_hummock_transaction() {
         // Get tables after committing epoch2. tables_in_epoch1 and tables_in_epoch2 should be
         // returned
         let current_version = hummock_manager.get_current_version().await;
-        assert_eq!(current_version.max_committed_epoch, epoch2);
+        assert_eq!(current_version.visible_table_committed_epoch(), epoch2);
         assert_eq!(
             get_sorted_object_ids(&committed_tables),
             get_sorted_committed_object_ids(&current_version)
@@ -538,7 +541,7 @@ async fn test_hummock_manager_basic() {
     );
     for _ in 0..2 {
         hummock_manager
-            .unpin_version_before(context_id_1, u64::MAX)
+            .unpin_version_before(context_id_1, HummockVersionId::MAX)
             .await
             .unwrap();
         assert_eq!(
@@ -571,8 +574,8 @@ async fn test_hummock_manager_basic() {
         );
         // pinned by context_id_1
         assert_eq!(
-            hummock_manager.get_min_pinned_version_id().await,
-            init_version_id + commit_log_count + register_log_count - 2,
+            hummock_manager.get_min_pinned_version_id().await + 2,
+            init_version_id + commit_log_count + register_log_count,
         );
     }
     // objects_to_delete is always empty because no compaction is ever invoked.
@@ -597,7 +600,7 @@ async fn test_hummock_manager_basic() {
         ((commit_log_count + register_log_count) as usize, 0)
     );
     hummock_manager
-        .unpin_version_before(context_id_1, u64::MAX)
+        .unpin_version_before(context_id_1, HummockVersionId::MAX)
         .await
         .unwrap();
     assert_eq!(
@@ -605,7 +608,7 @@ async fn test_hummock_manager_basic() {
         init_version_id + commit_log_count + register_log_count
     );
     hummock_manager
-        .unpin_version_before(context_id_2, u64::MAX)
+        .unpin_version_before(context_id_2, HummockVersionId::MAX)
         .await
         .unwrap();
     assert_eq!(
@@ -1148,7 +1151,7 @@ async fn test_extend_objects_to_delete() {
     );
     let objects_to_delete = hummock_manager.get_objects_to_delete();
     assert_eq!(objects_to_delete.len(), orphan_sst_num as usize);
-    let new_epoch = pinned_version2.max_committed_epoch.next_epoch();
+    let new_epoch = pinned_version2.visible_table_committed_epoch().next_epoch();
     hummock_manager
         .commit_epoch_for_test(
             new_epoch,
@@ -1158,7 +1161,7 @@ async fn test_extend_objects_to_delete() {
         .await
         .unwrap();
     let pinned_version3: HummockVersion = hummock_manager.pin_version(context_id).await.unwrap();
-    assert_eq!(new_epoch, pinned_version3.max_committed_epoch);
+    assert_eq!(new_epoch, pinned_version3.visible_table_committed_epoch());
     hummock_manager
         .unpin_version_before(context_id, pinned_version3.id)
         .await

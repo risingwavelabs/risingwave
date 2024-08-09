@@ -76,7 +76,7 @@ impl ContextInfo {
         for id in self
             .pinned_versions
             .values()
-            .map(|v| v.min_pinned_id)
+            .map(|v| HummockVersionId::new(v.min_pinned_id))
             .chain(self.version_safe_points.iter().cloned())
         {
             min_pinned_version_id = cmp::min(id, min_pinned_version_id);
@@ -153,14 +153,6 @@ impl HummockManager {
         self.versioning.read().await.current_version.clone()
     }
 
-    pub async fn get_current_max_committed_epoch(&self) -> HummockEpoch {
-        self.versioning
-            .read()
-            .await
-            .current_version
-            .max_committed_epoch
-    }
-
     /// Gets the mapping from table id to compaction group id
     pub async fn get_table_compaction_group_id_mapping(
         &self,
@@ -172,7 +164,7 @@ impl HummockManager {
     #[cfg_attr(coverage, coverage(off))]
     pub async fn list_version_deltas(
         &self,
-        start_id: u64,
+        start_id: HummockVersionId,
         num_limit: u32,
         committed_epoch_limit: HummockEpoch,
     ) -> Result<Vec<HummockVersionDelta>> {
@@ -181,7 +173,7 @@ impl HummockManager {
             .hummock_version_deltas
             .range(start_id..)
             .map(|(_id, delta)| delta)
-            .filter(|delta| delta.max_committed_epoch <= committed_epoch_limit)
+            .filter(|delta| delta.visible_table_committed_epoch() <= committed_epoch_limit)
             .take(num_limit as _)
             .cloned()
             .collect();
@@ -363,7 +355,7 @@ pub(super) fn calc_new_write_limits(
 /// Note that the result is approximate value. See `estimate_table_stats`.
 fn rebuild_table_stats(version: &HummockVersion) -> HummockVersionStats {
     let mut stats = HummockVersionStats {
-        hummock_version_id: version.id,
+        hummock_version_id: version.id.to_u64(),
         table_stats: Default::default(),
     };
     for level in version.get_combined_levels() {
@@ -431,11 +423,13 @@ mod tests {
                 min_pinned_id: 10,
             },
         );
-        assert_eq!(context_info.min_pinned_version_id(), 10);
-        context_info.version_safe_points.push(5);
-        assert_eq!(context_info.min_pinned_version_id(), 5);
+        assert_eq!(context_info.min_pinned_version_id().to_u64(), 10);
+        context_info
+            .version_safe_points
+            .push(HummockVersionId::new(5));
+        assert_eq!(context_info.min_pinned_version_id().to_u64(), 5);
         context_info.version_safe_points.clear();
-        assert_eq!(context_info.min_pinned_version_id(), 10);
+        assert_eq!(context_info.min_pinned_version_id().to_u64(), 10);
         context_info.pinned_versions.clear();
         assert_eq!(context_info.min_pinned_version_id(), HummockVersionId::MAX);
     }
@@ -553,7 +547,7 @@ mod tests {
         }
 
         let mut version = HummockVersion::default();
-        version.id = 123;
+        version.id = HummockVersionId::new(123);
 
         for cg in 1..3 {
             version.levels.insert(
@@ -571,7 +565,7 @@ mod tests {
             hummock_version_id,
             table_stats,
         } = rebuild_table_stats(&version);
-        assert_eq!(hummock_version_id, version.id);
+        assert_eq!(hummock_version_id, version.id.to_u64());
         assert_eq!(table_stats.len(), 3);
         for (tid, stats) in table_stats {
             assert_eq!(

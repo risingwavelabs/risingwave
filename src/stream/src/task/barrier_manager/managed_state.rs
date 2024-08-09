@@ -633,7 +633,7 @@ impl PartialGraphManagedBarrierState {
                         "ignore sealing data for the first barrier"
                     );
                     if let Some(hummock) = self.state_store.as_hummock() {
-                        let mce = hummock.get_pinned_version().max_committed_epoch();
+                        let mce = hummock.get_pinned_version().visible_table_committed_epoch();
                         assert_eq!(
                             mce, prev_epoch,
                             "first epoch should match with the current version",

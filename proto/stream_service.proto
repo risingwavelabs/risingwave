@@ -102,7 +102,7 @@ message WaitEpochCommitResponse {
 
 message StreamingControlStreamRequest {
   message InitRequest {
-    uint64 prev_epoch = 2;
+    uint64 version_id = 1;
   }
 
   message RemovePartialGraphRequest {

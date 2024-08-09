@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -228,13 +229,13 @@ impl GlobalBarrierManager {
     ///
     /// Returns the new state of the barrier manager after recovery.
     pub async fn recovery(&mut self, paused_reason: Option<PausedReason>, err: Option<MetaError>) {
-        let prev_epoch = TracedEpoch::new(
-            self.context
-                .hummock_manager
-                .latest_snapshot()
-                .committed_epoch
-                .into(),
-        );
+        let (prev_epoch, version_id) = {
+            let version = self.context.hummock_manager.get_current_version().await;
+            (
+                TracedEpoch::new(Epoch::from(version.visible_table_committed_epoch())),
+                version.id,
+            )
+        };
 
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
@@ -338,7 +339,7 @@ impl GlobalBarrierManager {
                         ControlStreamManager::new(self.context.clone());
 
                     control_stream_manager
-                        .reset(prev_epoch.value().0, active_streaming_nodes.current())
+                        .reset(version_id, active_streaming_nodes.current())
                         .await
                         .inspect_err(|err| {
                             warn!(error = %err.as_report(), "reset compute nodes failed");
