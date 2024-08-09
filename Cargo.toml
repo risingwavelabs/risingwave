@@ -193,7 +193,7 @@ sea-orm = { version = "0.12.14", features = [
     "sqlx-sqlite",
     "runtime-tokio-native-tls",
 ] }
-sqlx = "0.7"
+sqlx = { version = "0.7", default-features = false, features = ["bigdecimal", "chrono", "json", "mysql", "postgres", "runtime-tokio-native-tls", "rust_decimal", "sqlite", "time", "uuid"] }
 tokio-util = "0.7"
 tracing-opentelemetry = "0.24"
 rand = { version = "0.8", features = ["small_rng"] }
@@ -337,6 +337,7 @@ getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
+sqlx = { git = "https://github.com/KveinAxel/sqlx.git", rev = "f7bc5da" }
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }
