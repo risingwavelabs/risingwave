@@ -1079,7 +1079,7 @@ impl ScoredStreamError {
                 | ErrorKind::ArrayError(_)
                 | ErrorKind::ExprError(_)
                 | ErrorKind::SerdeError(_)
-                | ErrorKind::SinkError(_)
+                | ErrorKind::SinkError(_, _)
                 | ErrorKind::RpcError(_)
                 | ErrorKind::AlignBarrier(_, _)
                 | ErrorKind::ConnectorError(_)
@@ -1105,7 +1105,6 @@ impl ScoredStreamError {
                 | ErrorKind::Storage(_)
                 | ErrorKind::Expression(_)
                 | ErrorKind::Array(_)
-                | ErrorKind::Sink(_)
                 | ErrorKind::Secret(_) => 1000,
             }
         }

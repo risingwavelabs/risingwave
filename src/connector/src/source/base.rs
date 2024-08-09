@@ -45,7 +45,7 @@ use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
-use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc};
+use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc, SqlServerCdc};
 use crate::with_options::WithOptions;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
@@ -472,7 +472,7 @@ impl SplitImpl {
     pub fn is_cdc_split(&self) -> bool {
         matches!(
             self,
-            MysqlCdc(_) | PostgresCdc(_) | MongodbCdc(_) | CitusCdc(_)
+            MysqlCdc(_) | PostgresCdc(_) | MongodbCdc(_) | CitusCdc(_) | SqlServerCdc(_)
         )
     }
 
@@ -483,6 +483,7 @@ impl SplitImpl {
             PostgresCdc(split) => split.start_offset().clone().unwrap_or_default(),
             MongodbCdc(split) => split.start_offset().clone().unwrap_or_default(),
             CitusCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            SqlServerCdc(split) => split.start_offset().clone().unwrap_or_default(),
             _ => unreachable!("get_cdc_split_offset() is only for cdc split"),
         }
     }
