@@ -3092,6 +3092,8 @@ impl Parser<'_> {
                 }
             } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(true)? {
                 AlterTableOperation::SetSourceRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? {
+                AlterTableOperation::SetBackfillRateLimit { rate_limit }
             } else {
                 return self.expected("SCHEMA/PARALLELISM/SOURCE_RATE_LIMIT after SET");
             }
