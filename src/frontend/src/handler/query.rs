@@ -516,7 +516,7 @@ async fn execute(
         .into())
 }
 
-async fn distribute_execute(
+pub async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
     can_timeout_cancel: bool,
@@ -538,8 +538,7 @@ async fn distribute_execute(
         .map_err(|err| err.into())
 }
 
-#[expect(clippy::unused_async)]
-async fn local_execute(
+pub async fn local_execute(
     session: Arc<SessionImpl>,
     query: Query,
     can_timeout_cancel: bool,
