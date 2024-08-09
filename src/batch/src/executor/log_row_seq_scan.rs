@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
 use std::sync::Arc;
 
 use futures::prelude::stream::StreamExt;
@@ -182,7 +181,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             old_epoch,
             new_epoch,
             chunk_size,
-            histogram.clone(),
+            histogram.as_ref().map(|h| &***h),
             Arc::new(schema.clone()),
         );
         #[for_await]
@@ -198,7 +197,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         old_epoch: u64,
         new_epoch: u64,
         chunk_size: usize,
-        histogram: Option<impl Deref<Target = Histogram>>,
+        histogram: Option<&Histogram>,
         schema: Arc<Schema>,
     ) {
         // Range Scan.

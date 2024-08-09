@@ -340,9 +340,13 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         // Point Get
         for point_get in point_gets {
             let table = table.clone();
-            if let Some(row) =
-                Self::execute_point_get(table, point_get, query_epoch.clone(), histogram.clone())
-                    .await?
+            if let Some(row) = Self::execute_point_get(
+                table,
+                point_get,
+                query_epoch.clone(),
+                histogram.as_ref().map(|h| &***h),
+            )
+            .await?
             {
                 if let Some(chunk) = data_chunk_builder.append_one_row(row) {
                     returned += chunk.cardinality() as u64;
@@ -376,7 +380,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 query_epoch.clone(),
                 chunk_size,
                 limit,
-                histogram.clone(),
+                histogram.as_ref().map(|h| &***h),
             );
             #[for_await]
             for chunk in stream {
@@ -396,7 +400,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         table: Arc<StorageTable<S>>,
         scan_range: ScanRange,
         epoch: BatchQueryEpoch,
-        histogram: Option<impl Deref<Target = Histogram>>,
+        histogram: Option<&Histogram>,
     ) -> Result<Option<OwnedRow>> {
         let pk_prefix = scan_range.pk_prefix;
         assert!(pk_prefix.len() == table.pk_indices().len());

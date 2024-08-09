@@ -26,7 +26,7 @@ use prometheus::core::{
 };
 use prometheus::local::{LocalHistogram, LocalIntCounter};
 use prometheus::proto::MetricFamily;
-use prometheus::{Gauge, Histogram, IntCounter, IntGauge};
+use prometheus::Histogram;
 use thiserror_ext::AsReport;
 use tracing::warn;
 
@@ -126,6 +126,8 @@ mod tait {
 }
 pub use tait::*;
 
+use crate::guarded_metrics::lazy_guarded_metric::{lazy_guarded_metrics, LazyGuardedMetrics};
+
 pub type LabelGuardedHistogramVec<const N: usize> = LabelGuardedMetricVec<VecBuilderOfHistogram, N>;
 pub type LabelGuardedIntCounterVec<const N: usize> =
     LabelGuardedMetricVec<VecBuilderOfCounter<AtomicU64>, N>;
@@ -134,10 +136,14 @@ pub type LabelGuardedIntGaugeVec<const N: usize> =
 pub type LabelGuardedGaugeVec<const N: usize> =
     LabelGuardedMetricVec<VecBuilderOfGauge<AtomicF64>, N>;
 
-pub type LabelGuardedHistogram<const N: usize> = LabelGuardedMetric<Histogram, N>;
-pub type LabelGuardedIntCounter<const N: usize> = LabelGuardedMetric<IntCounter, N>;
-pub type LabelGuardedIntGauge<const N: usize> = LabelGuardedMetric<IntGauge, N>;
-pub type LabelGuardedGauge<const N: usize> = LabelGuardedMetric<Gauge, N>;
+pub type LabelGuardedHistogram<const N: usize> =
+    LabelGuardedMetric<LazyGuardedMetrics<VecBuilderOfHistogram, N>, N>;
+pub type LabelGuardedIntCounter<const N: usize> =
+    LabelGuardedMetric<LazyGuardedMetrics<VecBuilderOfCounter<AtomicU64>, N>, N>;
+pub type LabelGuardedIntGauge<const N: usize> =
+    LabelGuardedMetric<LazyGuardedMetrics<VecBuilderOfGauge<AtomicI64>, N>, N>;
+pub type LabelGuardedGauge<const N: usize> =
+    LabelGuardedMetric<LazyGuardedMetrics<VecBuilderOfGauge<AtomicF64>, N>, N>;
 
 pub type LabelGuardedLocalHistogram<const N: usize> = LabelGuardedMetric<LocalHistogram, N>;
 pub type LabelGuardedLocalIntCounter<const N: usize> = LabelGuardedMetric<LocalIntCounter, N>;
@@ -227,6 +233,45 @@ impl<T: MetricVecBuilder, const N: usize> Collector for LabelGuardedMetricVec<T,
     }
 }
 
+pub(crate) mod lazy_guarded_metric {
+    use std::marker::PhantomData;
+    use std::ops::Deref;
+    use std::sync::{Arc, LazyLock};
+
+    use prometheus::core::{MetricVec, MetricVecBuilder};
+
+    use crate::guarded_metrics::LabelGuard;
+
+    type GuardedMetricsLazyLock<T: MetricVecBuilder, const N: usize> =
+        Arc<LazyLock<T::M, impl FnOnce() -> T::M>>;
+
+    #[derive(Clone)]
+    pub struct LazyGuardedMetrics<T: MetricVecBuilder, const N: usize> {
+        inner: GuardedMetricsLazyLock<T, N>,
+        _phantom: PhantomData<T>,
+    }
+
+    pub(super) fn lazy_guarded_metrics<T: MetricVecBuilder, const N: usize>(
+        metric_vec: MetricVec<T>,
+        guard: Arc<LabelGuard<N>>,
+    ) -> LazyGuardedMetrics<T, N> {
+        LazyGuardedMetrics {
+            inner: Arc::new(LazyLock::new(move || {
+                metric_vec.with_label_values(&guard.labels.each_ref().map(|s| s.as_str()))
+            })),
+            _phantom: PhantomData,
+        }
+    }
+
+    impl<T: MetricVecBuilder, const N: usize> Deref for LazyGuardedMetrics<T, N> {
+        type Target = T::M;
+
+        fn deref(&self) -> &Self::Target {
+            &self.inner
+        }
+    }
+}
+
 impl<T: MetricVecBuilder, const N: usize> LabelGuardedMetricVec<T, N> {
     pub fn new(inner: MetricVec<T>, labels: &[&'static str; N]) -> Self {
         Self {
@@ -246,16 +291,20 @@ impl<T: MetricVecBuilder, const N: usize> LabelGuardedMetricVec<T, N> {
     /// Instead, we should store the returned `LabelGuardedMetric` in a scope with longer
     /// lifetime so that the labels can be regarded as being used in its whole life scope.
     /// This is also the recommended way to use the raw metrics vec.
-    pub fn with_guarded_label_values(&self, labels: &[&str; N]) -> LabelGuardedMetric<T::M, N> {
-        let guard = LabelGuardedMetricsInfo::register_new_label(&self.info, labels);
-        let inner = self.inner.with_label_values(labels);
+    pub fn with_guarded_label_values(
+        &self,
+        labels: &[&str; N],
+    ) -> LabelGuardedMetric<LazyGuardedMetrics<T, N>, N> {
+        let guard = Arc::new(LabelGuardedMetricsInfo::register_new_label(
+            &self.info, labels,
+        ));
         LabelGuardedMetric {
-            inner,
-            _guard: Arc::new(guard),
+            inner: lazy_guarded_metrics(self.inner.clone(), guard.clone()),
+            _guard: guard,
         }
     }
 
-    pub fn with_test_label(&self) -> LabelGuardedMetric<T::M, N> {
+    pub fn with_test_label(&self) -> LabelGuardedMetric<LazyGuardedMetrics<T, N>, N> {
         let labels: [&'static str; N] = gen_test_label::<N>();
         self.with_guarded_label_values(&labels)
     }
@@ -308,7 +357,6 @@ impl<const N: usize> LabelGuardedHistogramVec<N> {
     }
 }
 
-#[derive(Clone)]
 struct LabelGuard<const N: usize> {
     labels: [String; N],
     info: Arc<Mutex<LabelGuardedMetricsInfo<N>>>,
@@ -396,8 +444,12 @@ impl<P: Atomic> MetricWithLocal for GenericCounter<P> {
     }
 }
 
-impl<T: MetricWithLocal, const N: usize> LabelGuardedMetric<T, N> {
-    pub fn local(&self) -> LabelGuardedMetric<T::Local, N> {
+impl<T, const N: usize> LabelGuardedMetric<LazyGuardedMetrics<T, N>, N>
+where
+    T: MetricVecBuilder,
+    T::M: MetricWithLocal,
+{
+    pub fn local(&self) -> LabelGuardedMetric<<T::M as MetricWithLocal>::Local, N> {
         LabelGuardedMetric {
             inner: self.inner.local(),
             _guard: self._guard.clone(),
