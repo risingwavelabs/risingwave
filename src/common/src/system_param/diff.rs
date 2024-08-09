@@ -40,7 +40,7 @@ impl SystemParamsDiff {
             ($({ $field:ident, $($rest:tt)* },)*) => {
                 $(
                     if curr.$field() != prev.$field() {
-                        diff.$field = Some(curr.$field().to_owned());
+                        diff.$field = Some(curr.$field().into());
                     }
                 )*
             };
@@ -57,7 +57,7 @@ impl SystemParamsDiff {
             ($({ $field:ident, $($rest:tt)* },)*) => {
                 Self {
                     $(
-                        $field: Some(initial.$field().to_owned()),
+                        $field: Some(initial.$field().into()),
                     )*
                 }
             };

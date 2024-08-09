@@ -38,7 +38,7 @@ impl CommonHandler {
         }
         // Refresh the license key.
         if let Some(key) = diff.license_key.as_ref() {
-            LicenseManager::get().refresh(key);
+            LicenseManager::get().refresh(key.as_ref());
         }
     }
 }
