@@ -604,12 +604,12 @@ impl<'a> ListRef<'a> {
         let (k, v) = self.array.as_struct().fields().collect_tuple().unwrap();
         (
             ListRef {
-                array: &k,
+                array: k,
                 start: self.start,
                 end: self.end,
             },
             ListRef {
-                array: &v,
+                array: v,
                 start: self.start,
                 end: self.end,
             },

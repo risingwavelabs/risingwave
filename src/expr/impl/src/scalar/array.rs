@@ -61,7 +61,6 @@ fn map(key: ListRef<'_>, value: ListRef<'_>) -> Result<MapValue, ExprError> {
 /// # Example
 ///
 /// ```slt
-/// 
 /// query T
 /// select map_access(map_from_entries(array[1,2,3], array[100,200,300]), 3);
 /// ----
@@ -98,9 +97,9 @@ fn map(key: ListRef<'_>, value: ListRef<'_>) -> Result<MapValue, ExprError> {
 /// NULL
 /// ```
 #[function("map_access(anymap, any) -> any")]
-fn map_access<'a, 'b>(
+fn map_access<'a>(
     map: MapRef<'a>,
-    key: ScalarRefImpl<'b>,
+    key: ScalarRefImpl<'_>,
 ) -> Result<Option<ScalarRefImpl<'a>>, ExprError> {
     // FIXME: DatumRef in return value is not support by the macro yet.
 
