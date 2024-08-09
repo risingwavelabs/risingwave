@@ -50,6 +50,9 @@ pub struct MergeExecutor {
 
     /// Streaming metrics.
     metrics: Arc<StreamingMetrics>,
+
+    /// Schema of inputs
+    schema: Schema,
 }
 
 impl MergeExecutor {
@@ -62,6 +65,7 @@ impl MergeExecutor {
         context: Arc<SharedContext>,
         _receiver_id: u64,
         metrics: Arc<StreamingMetrics>,
+        schema: Schema,
     ) -> Self {
         Self {
             actor_context: ctx,
@@ -70,6 +74,7 @@ impl MergeExecutor {
             upstream_fragment_id,
             context,
             metrics,
+            schema,
         }
     }
 
@@ -120,6 +125,11 @@ impl MergeExecutor {
             None
         };
 
+        let mut chunk_builder = StreamChunkBuilder::new(
+            self.context.config.developer.chunk_size,
+            self.schema.data_types(),
+        );
+
         // Futures of all active upstreams.
         let select_all = SelectReceivers::new(
             self.actor_context.id,
@@ -141,16 +151,32 @@ impl MergeExecutor {
             metrics
                 .actor_input_buffer_blocking_duration_ns
                 .inc_by(start_time.elapsed().as_nanos() as u64);
-            let mut msg: Message = msg?;
+            let msg: Message = msg?;
 
-            match &mut msg {
-                Message::Watermark(_) => {
-                    // Do nothing.
+            match msg {
+                Message::Watermark(watermark) => {
+                    if let Some(c) = chunk_builder.take() {
+                        metrics.actor_in_record_cnt.inc_by(c.cardinality() as _);
+                        metrics.actor_in_chunk_rows.observe(c.cardinality() as _);
+                        yield Message::Chunk(c);
+                    }
+                    yield Message::Watermark(watermark);
                 }
                 Message::Chunk(chunk) => {
-                    metrics.actor_in_record_cnt.inc_by(chunk.cardinality() as _);
+                    for (op, row) in chunk.rows() {
+                        if let Some(c) = chunk_builder.append_row(op, row) {
+                            metrics.actor_in_record_cnt.inc_by(c.cardinality() as _);
+                            metrics.actor_in_chunk_rows.observe(c.cardinality() as _);
+                            yield Message::Chunk(c);
+                        }
+                    }
                 }
-                Message::Barrier(barrier) => {
+                Message::Barrier(mut barrier) => {
+                    if let Some(c) = chunk_builder.take() {
+                        metrics.actor_in_record_cnt.inc_by(c.cardinality() as _);
+                        metrics.actor_in_chunk_rows.observe(c.cardinality() as _);
+                        yield Message::Chunk(c);
+                    }
                     tracing::debug!(
                         target: "events::stream::barrier::path",
                         actor_id = actor_id,
@@ -220,7 +246,7 @@ impl MergeExecutor {
                                 merge_barrier_align_duration.clone(),
                             );
                             let new_barrier = expect_first_barrier(&mut select_new).await?;
-                            assert_eq!(barrier, &new_barrier);
+                            assert_eq!(barrier, new_barrier);
 
                             // Add the new upstreams to select.
                             select_all.add_upstreams_from(select_new);
@@ -254,10 +280,9 @@ impl MergeExecutor {
 
                         select_all.update_actor_ids();
                     }
+                    yield Message::Barrier(barrier);
                 }
             }
-
-            yield msg;
             start_time = Instant::now();
         }
     }
