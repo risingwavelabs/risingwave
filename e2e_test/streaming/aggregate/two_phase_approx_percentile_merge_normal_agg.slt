@@ -78,7 +78,7 @@ select * from m1;
 query I
 select
   percentile_cont(0.01) within group (order by p_col) as p01,
-  round(sum(p_col), 2),
+  round_digit(sum(p_col), 2),
   percentile_cont(0.5) within group (order by p_col) as p50,
   count(*),
   percentile_cont(0.99) within group (order by p_col) as p99
