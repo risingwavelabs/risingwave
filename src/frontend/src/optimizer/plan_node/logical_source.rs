@@ -16,6 +16,7 @@ use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_batch::error::anyhow;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field};
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
@@ -318,6 +319,9 @@ impl PredicatePushdown for LogicalSource {
 
 impl ToBatch for LogicalSource {
     fn to_batch(&self) -> Result<PlanRef> {
+        if self.core.is_new_fs_connector() {
+            return Err(anyhow!("Select from file source is not currently supported.").into());
+        }
         assert!(
             !self.core.is_kafka_connector(),
             "LogicalSource with a kafka property should be converted to LogicalKafkaScan"
@@ -326,6 +330,7 @@ impl ToBatch for LogicalSource {
             !self.core.is_iceberg_connector(),
             "LogicalSource with a iceberg property should be converted to LogicalIcebergScan"
         );
+
         let mut plan: PlanRef = BatchSource::new(self.core.clone()).into();
 
         if let Some(exprs) = &self.output_exprs {
