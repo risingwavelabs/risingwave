@@ -176,6 +176,7 @@ pub struct SubLevelSstables {
     pub total_file_size: u64,
     pub total_file_count: usize,
     pub sstable_infos: Vec<Vec<SstableInfo>>,
+    pub expected: bool,
 }
 
 pub struct NonOverlapSubLevelPicker {
@@ -404,13 +405,7 @@ impl NonOverlapSubLevelPicker {
                 continue;
             }
 
-            let ret = self.pick_sub_level(l0, level_handler, sst);
-            if ret.sstable_infos.len() < self.min_expected_level_count
-                || ret.total_file_size < self.min_compaction_bytes
-            {
-                continue;
-            }
-            scores.push(ret);
+            scores.push(self.pick_sub_level(l0, level_handler, sst));
         }
 
         if scores.is_empty() {
@@ -420,10 +415,15 @@ impl NonOverlapSubLevelPicker {
         let mut expected = Vec::with_capacity(scores.len());
         let mut unexpected = vec![];
 
-        for selected_task in scores {
-            if selected_task.sstable_infos.len() > self.max_expected_level_count {
+        for mut selected_task in scores {
+            if selected_task.sstable_infos.len() > self.max_expected_level_count
+                || selected_task.sstable_infos.len() < self.min_expected_level_count
+                || selected_task.total_file_size < self.min_compaction_bytes
+            {
+                selected_task.expected = false;
                 unexpected.push(selected_task);
             } else {
+                selected_task.expected = true;
                 expected.push(selected_task);
             }
         }
@@ -1089,6 +1089,30 @@ pub mod tests {
                 assert_eq!(0, plan.sstable_infos[0][0].sst_id);
                 assert_eq!(1, plan.sstable_infos[1][0].sst_id);
                 assert_eq!(2, plan.sstable_infos[2][0].sst_id);
+            }
+        }
+
+        {
+            // limit min_compacaion_bytes
+            let max_expected_level_count = 100;
+            let picker = NonOverlapSubLevelPicker::for_test(
+                1000,
+                10000,
+                1,
+                100,
+                Arc::new(RangeOverlapStrategy::default()),
+                true,
+                max_expected_level_count,
+            );
+            let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
+            {
+                let plan = &ret[0];
+
+                assert_eq!(0, plan.sstable_infos[0][0].sst_id);
+                assert_eq!(1, plan.sstable_infos[1][0].sst_id);
+                assert_eq!(2, plan.sstable_infos[2][0].sst_id);
+                assert_eq!(3, plan.sstable_infos[3][0].sst_id);
+                assert!(!plan.expected);
             }
         }
     }
