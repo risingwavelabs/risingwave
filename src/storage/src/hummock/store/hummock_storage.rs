@@ -479,7 +479,7 @@ impl HummockStorage {
                             v.vnodes().iter_ones().collect_vec()
                         })
                         .collect_vec();
-                    panic!("There are {} read version associated with vnode {}. read_version_vnodes={:?}", read_version_vnodes.len(), vnode.to_index(), read_version_vnodes);
+                    return Err(HummockError::other(format!("There are {} read version associated with vnode {}. read_version_vnodes={:?}", read_version_vnodes.len(), vnode.to_index(), read_version_vnodes)).into());
                 }
                 read_filter_for_version(
                     epoch,

@@ -229,13 +229,16 @@ impl GlobalBarrierManager {
     ///
     /// Returns the new state of the barrier manager after recovery.
     pub async fn recovery(&mut self, paused_reason: Option<PausedReason>, err: Option<MetaError>) {
-        let (prev_epoch, version_id) = {
-            let version = self.context.hummock_manager.get_current_version().await;
-            (
-                TracedEpoch::new(Epoch::from(version.visible_table_committed_epoch())),
-                version.id,
-            )
-        };
+        let (prev_epoch, version_id) = self
+            .context
+            .hummock_manager
+            .on_current_version(|version| {
+                (
+                    TracedEpoch::new(Epoch::from(version.visible_table_committed_epoch())),
+                    version.id,
+                )
+            })
+            .await;
 
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers

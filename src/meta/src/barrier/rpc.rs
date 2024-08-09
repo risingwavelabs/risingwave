@@ -105,7 +105,11 @@ impl ControlStreamManager {
             warn!(id = node.id, host = ?node.host, "node already exists");
             return;
         }
-        let version_id = self.context.hummock_manager.get_current_version().await.id;
+        let version_id = self
+            .context
+            .hummock_manager
+            .on_current_version(|version| version.id)
+            .await;
         let node_id = node.id;
         let node_host = node.host.clone().unwrap();
         let mut backoff = ExponentialBackoff::from_millis(100)
