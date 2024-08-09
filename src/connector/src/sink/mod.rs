@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 pub mod big_query;
 pub mod boxed;
 pub mod catalog;
@@ -24,6 +23,7 @@ pub mod doris_starrocks_connector;
 pub mod dynamodb;
 pub mod elasticsearch;
 pub mod encoder;
+pub mod file_sink;
 pub mod formatter;
 pub mod google_pubsub;
 pub mod iceberg;
@@ -53,6 +53,8 @@ use ::deltalake::DeltaTableError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
+use opendal::Error as OpendalError;
+use risingwave_common::array::ArrayError;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::metrics::{
@@ -73,9 +75,11 @@ use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEn
 use crate::error::ConnectorError;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
+use crate::sink::file_sink::fs::FsSink;
+use crate::sink::file_sink::gcs::GcsSink;
+use crate::sink::file_sink::s3::S3Sink;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
-
 const BOUNDED_CHANNEL_SIZE: usize = 16;
 #[macro_export]
 macro_rules! for_all_sinks {
@@ -99,6 +103,9 @@ macro_rules! for_all_sinks {
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
+                { S3, $crate::sink::file_sink::opendal_sink::FileSink<S3Sink> },
+                { Gcs, $crate::sink::file_sink::opendal_sink::FileSink<GcsSink>  },
+                { Fs, $crate::sink::file_sink::opendal_sink::FileSink<FsSink>  },
                 { Snowflake, $crate::sink::snowflake::SnowflakeSink },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
@@ -572,6 +579,8 @@ pub enum SinkError {
     ),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
+    #[error("File error: {0}")]
+    File(String),
     #[error("Snowflake error: {0}")]
     Snowflake(
         #[source]
@@ -631,6 +640,24 @@ pub enum SinkError {
 impl From<icelake::Error> for SinkError {
     fn from(value: icelake::Error) -> Self {
         SinkError::Iceberg(anyhow!(value))
+    }
+}
+
+impl From<OpendalError> for SinkError {
+    fn from(error: OpendalError) -> Self {
+        SinkError::File(error.to_report_string())
+    }
+}
+
+impl From<parquet::errors::ParquetError> for SinkError {
+    fn from(error: parquet::errors::ParquetError) -> Self {
+        SinkError::File(error.to_report_string())
+    }
+}
+
+impl From<ArrayError> for SinkError {
+    fn from(error: ArrayError) -> Self {
+        SinkError::File(error.to_report_string())
     }
 }
 
