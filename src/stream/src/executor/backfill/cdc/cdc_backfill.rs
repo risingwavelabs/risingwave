@@ -343,8 +343,17 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                     && *new_rate_limit != self.rate_limit_rps
                                                 {
                                                     self.rate_limit_rps = *new_rate_limit;
-                                                    // rebuild the new reader stream with new rate limit
-                                                    continue 'backfill_loop;
+                                                    // staging the barrier for post processing
+                                                    pending_barrier = Some(barrier);
+                                                    tracing::info!(
+                                                        table_id,
+                                                        ?current_pk_pos,
+                                                        ?snapshot_read_row_cnt,
+                                                        "Break snapshot loop to apply rate limit"
+                                                    );
+                                                    // break the snapshopt read loop,
+                                                    // so that we can rebuild the new snapshot stream with the new rate limit
+                                                    break;
                                                 }
                                             }
                                             Mutation::Update(UpdateMutation {
