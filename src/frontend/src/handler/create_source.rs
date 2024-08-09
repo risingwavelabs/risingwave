@@ -39,7 +39,8 @@ use risingwave_connector::parser::{
     DEBEZIUM_IGNORE_KEY,
 };
 use risingwave_connector::schema::schema_registry::{
-    name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
+    name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_CA_PEM_PATH, SCHEMA_REGISTRY_PASSWORD,
+    SCHEMA_REGISTRY_USERNAME,
 };
 use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
 use risingwave_connector::sink::iceberg::IcebergConfig;
@@ -105,6 +106,7 @@ async fn extract_json_table_schema(
                 let auth = SchemaRegistryAuth::from(&*format_encode_options);
                 try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_USERNAME);
                 try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_PASSWORD);
+                try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_CA_PEM_PATH);
                 auth
             });
             Ok(Some(
@@ -156,6 +158,7 @@ async fn extract_avro_table_schema(
     let parser_config = SpecificParserConfig::new(info, with_properties)?;
     try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_USERNAME);
     try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_PASSWORD);
+    try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_CA_PEM_PATH);
     consume_aws_config_from_options(format_encode_options);
 
     let vec_column_desc = if is_debezium {
@@ -210,6 +213,7 @@ async fn extract_protobuf_table_schema(
     let parser_config = SpecificParserConfig::new(&info, with_properties)?;
     try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_USERNAME);
     try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_PASSWORD);
+    try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_CA_PEM_PATH);
     consume_aws_config_from_options(format_encode_options);
 
     let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
