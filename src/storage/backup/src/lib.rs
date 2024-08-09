@@ -122,7 +122,7 @@ impl From<&MetaSnapshotMetadata> for PbMetaSnapshotMetadata {
             state_table_info: m
                 .state_table_info
                 .iter()
-                .map(|(t, i)| (t.table_id, i.clone()))
+                .map(|(t, i)| (t.table_id, *i))
                 .collect(),
             rw_version: m.rw_version.clone(),
         }

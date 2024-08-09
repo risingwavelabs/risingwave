@@ -231,7 +231,7 @@ mod tests {
         let worker_1 = WorkerNode {
             id: 1,
             parallelism: 1,
-            property: Some(serving_property.clone()),
+            property: Some(serving_property),
             ..Default::default()
         };
 
@@ -246,7 +246,7 @@ mod tests {
         let worker_2 = WorkerNode {
             id: 2,
             parallelism: 50,
-            property: Some(serving_property.clone()),
+            property: Some(serving_property),
             ..Default::default()
         };
 

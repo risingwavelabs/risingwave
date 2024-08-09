@@ -196,7 +196,7 @@ impl StageExecution {
         match cur_state {
             Pending { msg_sender } => {
                 let runner = StageRunner {
-                    epoch: self.epoch.clone(),
+                    epoch: self.epoch,
                     stage: self.stage.clone(),
                     worker_node_manager: self.worker_node_manager.clone(),
                     tasks: self.tasks.clone(),
@@ -622,7 +622,7 @@ impl StageRunner {
             &plan_node,
             &task_id,
             self.ctx.to_batch_task_context(),
-            self.epoch.clone(),
+            self.epoch,
             shutdown_rx.clone(),
         );
 
@@ -908,7 +908,7 @@ impl StageRunner {
         let t_id = task_id.task_id;
 
         let stream_status: Fuse<Streaming<TaskInfoResponse>> = compute_client
-            .create_task(task_id, plan_fragment, self.epoch.clone(), expr_context)
+            .create_task(task_id, plan_fragment, self.epoch, expr_context)
             .await
             .inspect_err(|_| self.mask_failed_serving_worker(&worker))
             .map_err(|e| anyhow!(e))?

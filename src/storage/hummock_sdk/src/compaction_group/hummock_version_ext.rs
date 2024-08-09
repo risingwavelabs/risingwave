@@ -85,7 +85,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
             }
             GroupDelta::GroupDestroy(destroy_delta) => {
                 assert!(group_destroy.is_none());
-                group_destroy = Some(destroy_delta.clone());
+                group_destroy = Some(*destroy_delta);
             }
             GroupDelta::GroupMetaChange(meta_delta) => {
                 group_meta_changes.push(meta_delta.clone());

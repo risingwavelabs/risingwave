@@ -240,7 +240,7 @@ fn get_acl_items(
 ) -> String {
     let mut res = String::from("{");
     let mut empty_flag = true;
-    let super_privilege = available_prost_privilege(object.clone(), for_dml_table);
+    let super_privilege = available_prost_privilege(*object, for_dml_table);
     for user in users {
         let privileges = if user.is_super {
             vec![&super_privilege]

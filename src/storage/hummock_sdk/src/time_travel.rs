@@ -338,7 +338,7 @@ impl IncompleteHummockVersionDelta {
             state_table_info_delta: self
                 .state_table_info_delta
                 .iter()
-                .map(|(table_id, delta)| (table_id.table_id, delta.clone()))
+                .map(|(table_id, delta)| (table_id.table_id, *delta))
                 .collect(),
         }
     }

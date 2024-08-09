@@ -24,7 +24,7 @@ serde = { version = "1", features = ["derive"] }
 serde_with = "3"
 tokio = { version = "0.2", package = "madsim-tokio" }
 tokio-postgres = "0.7"
-tokio-stream = { version = "0.1", features = ["fs"] }
+tokio-stream = { workspace = true }
 toml = "0.8"
 tracing = "0.1"
 
