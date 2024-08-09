@@ -2,7 +2,11 @@ import subprocess
 import sys
 
 
-relations = ['default.demo_test', 'default.ck_types']
+relations = [
+    'default.demo_test',
+    'default.demo_test_target_null',
+    'default.ck_types',
+]
 
 failed_cases = []
 for rel in relations:

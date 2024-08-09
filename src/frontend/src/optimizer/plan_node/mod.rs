@@ -898,7 +898,6 @@ mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
 mod stream_hop_window;
-mod stream_keyed_merge;
 mod stream_local_approx_percentile;
 mod stream_materialize;
 mod stream_now;
@@ -906,6 +905,7 @@ mod stream_over_window;
 mod stream_project;
 mod stream_project_set;
 mod stream_row_id_gen;
+mod stream_row_merge;
 mod stream_simple_agg;
 mod stream_sink;
 mod stream_sort;
@@ -1010,7 +1010,6 @@ pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
-pub use stream_keyed_merge::StreamKeyedMerge;
 pub use stream_local_approx_percentile::StreamLocalApproxPercentile;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_now::StreamNow;
@@ -1018,6 +1017,7 @@ pub use stream_over_window::StreamOverWindow;
 pub use stream_project::StreamProject;
 pub use stream_project_set::StreamProjectSet;
 pub use stream_row_id_gen::StreamRowIdGen;
+pub use stream_row_merge::StreamRowMerge;
 pub use stream_share::StreamShare;
 pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_sink::{IcebergPartitionInfo, PartitionComputeInfo, StreamSink};
@@ -1158,7 +1158,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, ChangeLog }
             , { Stream, GlobalApproxPercentile }
             , { Stream, LocalApproxPercentile }
-            , { Stream, KeyedMerge }
+            , { Stream, RowMerge }
         }
     };
 }
@@ -1287,7 +1287,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, ChangeLog }
             , { Stream, GlobalApproxPercentile }
             , { Stream, LocalApproxPercentile }
-            , { Stream, KeyedMerge }
+            , { Stream, RowMerge }
         }
     };
 }

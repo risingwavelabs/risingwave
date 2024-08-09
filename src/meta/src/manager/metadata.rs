@@ -802,6 +802,9 @@ impl MetadataManager {
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         match self {
             MetadataManager::V1(mgr) => {
+                mgr.catalog_manager
+                    .update_source_rate_limit_by_source_id(source_id as u32, rate_limit)
+                    .await?;
                 mgr.fragment_manager
                     .update_source_rate_limit_by_source_id(source_id, rate_limit)
                     .await
