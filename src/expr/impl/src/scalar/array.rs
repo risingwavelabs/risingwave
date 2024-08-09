@@ -67,19 +67,21 @@ fn map(key: ListRef<'_>, value: ListRef<'_>) -> Result<MapValue, ExprError> {
 /// ----
 /// 300
 ///
-/// #TODO: support this  (Cannot implicitly cast ''3':Varchar' to polymorphic type Any)
 /// query T
 /// select map_access(map_from_entries(array[1,2,3], array[100,200,300]), '3');
 /// ----
 /// 300
 ///
-/// #XXX: return error or NULL here?
-/// query T
+/// query error
 /// select map_access(map_from_entries(array[1,2,3], array[100,200,300]), 1.0);
-/// ---
-/// NULL
+/// ----
+/// db error: ERROR: Failed to run the query
 ///
-/// #TODO: support this  (Bind error: Cannot implicitly cast ''a':Varchar' to polymorphic type Any)
+/// Caused by these errors (recent errors listed first):
+///   1: Failed to bind expression: map_access(map_from_entries(ARRAY[1, 2, 3], ARRAY[100, 200, 300]), 1.0)
+///   2: Bind error: Cannot access numeric in map(integer,integer): cannot cast type "numeric" to "integer" in Implicit context
+///
+///
 /// query T
 /// select map_access(map_from_entries(array['a','b','c'], array[1,2,3]), 'a');
 /// ----
