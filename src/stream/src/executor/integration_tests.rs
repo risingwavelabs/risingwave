@@ -159,13 +159,14 @@ async fn test_merger_sum_aggr() {
     let actor_ctx = ActorContext::for_test(gen_next_actor_id());
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
+    let schema = Schema::new(vec![
+        Field::unnamed(DataType::Int64),
+        Field::unnamed(DataType::Int64),
+    ]);
     let merger = Executor::new(
         ExecutorInfo {
             // output schema of local simple agg
-            schema: Schema::new(vec![
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-            ]),
+            schema: schema.clone(),
             pk_indices: PkIndices::new(),
             identity: "MergeExecutor".to_string(),
         },
@@ -173,6 +174,7 @@ async fn test_merger_sum_aggr() {
             actor_ctx.id,
             outputs,
             barrier_test_env.shared_context.clone(),
+            schema,
         )
         .boxed(),
     );
