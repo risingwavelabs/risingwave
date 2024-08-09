@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -130,6 +131,16 @@ impl CreatingStreamingJobControl {
                     | CreatingStreamingJobStatus::Finished(_) => false,
                 }
             }
+    }
+
+    pub(super) fn on_new_worker_node_map(&self, node_map: &HashMap<WorkerId, WorkerNode>) {
+        match &self.status {
+            CreatingStreamingJobStatus::ConsumingSnapshot { graph_info, .. }
+            | CreatingStreamingJobStatus::ConsumingLogStore { graph_info, .. } => {
+                graph_info.on_new_worker_node_map(node_map)
+            }
+            CreatingStreamingJobStatus::Finishing(_) | CreatingStreamingJobStatus::Finished(_) => {}
+        }
     }
 
     fn latest_epoch(&self) -> Option<u64> {
