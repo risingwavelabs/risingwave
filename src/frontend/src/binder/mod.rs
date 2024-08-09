@@ -260,8 +260,8 @@ impl UdfContext {
     }
 }
 
-/// `ParameterTypes` is used to record the types of the parameters during binding. It works
-/// following the rules:
+/// `ParameterTypes` is used to record the types of the parameters during binding prepared stataments.
+/// It works by following the rules:
 /// 1. At the beginning, it contains the user specified parameters type.
 /// 2. When the binder encounters a parameter, it will record it as unknown(call `record_new_param`)
 ///    if it didn't exist in `ParameterTypes`.
