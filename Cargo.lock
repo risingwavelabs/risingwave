@@ -11186,6 +11186,7 @@ dependencies = [
  "pbjson",
  "pbjson-build",
  "prost 0.12.1",
+ "prost-build 0.12.1",
  "prost-helpers",
  "risingwave_error",
  "serde",

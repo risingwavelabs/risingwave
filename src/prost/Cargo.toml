@@ -24,6 +24,7 @@ workspace-hack = { path = "../workspace-hack" }
 [build-dependencies]
 fs-err = "2.11"
 pbjson-build = "0.5"
+prost-build = { workspace = true }
 tonic-build = { workspace = true }
 walkdir = "2"
 
