@@ -60,6 +60,12 @@ public class EsSink extends SinkWriterBase {
         // Count of write tasks in progress
         private int taskCount = 0;
 
+        private Integer maxTaskNum;
+
+        public RequestTracker(Integer maxTaskNum) {
+            this.maxTaskNum = maxTaskNum;
+        }
+
         void addErrResult(String errorMsg) {
             blockingQueue.add(new EsWriteResultResp(errorMsg));
         }
@@ -68,12 +74,17 @@ public class EsSink extends SinkWriterBase {
             blockingQueue.add(new EsWriteResultResp(numberOfActions));
         }
 
-        void addWriteTask() {
+        void addWriteTask() throws InterruptedException {
             taskCount++;
             EsWriteResultResp esWriteResultResp;
             while (true) {
-                if ((esWriteResultResp = this.blockingQueue.poll()) != null) {
+                if ((esWriteResultResp = this.blockingQueue.poll(10, TimeUnit.MILLISECONDS))
+                        != null) {
                     checkEsWriteResultResp(esWriteResultResp);
+                }
+
+                if (taskCount >= maxTaskNum) {
+                    continue;
                 } else {
                     return;
                 }
@@ -146,23 +157,31 @@ public class EsSink extends SinkWriterBase {
         }
 
         this.config = config;
-        this.requestTracker = new RequestTracker();
-
+        if (config.getMaxTaskNum() == null) {
+            this.requestTracker = new RequestTracker(Integer.MAX_VALUE);
+        } else {
+            this.requestTracker = new RequestTracker(config.getMaxTaskNum());
+        }
+        int retryOnConflict = config.getRetryOnConflict() == null ? 3 : config.getRetryOnConflict();
         // ApiCompatibilityMode is enabled to ensure the client can talk to newer version es sever.
         if (config.getConnector().equals("elasticsearch")) {
             ElasticRestHighLevelClientAdapter client =
                     new ElasticRestHighLevelClientAdapter(host, config);
-            this.bulkProcessor = new ElasticBulkProcessorAdapter(this.requestTracker, client);
+            this.bulkProcessor =
+                    new ElasticBulkProcessorAdapter(this.requestTracker, client, retryOnConflict);
         } else if (config.getConnector().equals("opensearch")) {
             OpensearchRestHighLevelClientAdapter client =
                     new OpensearchRestHighLevelClientAdapter(host, config);
-            this.bulkProcessor = new OpensearchBulkProcessorAdapter(this.requestTracker, client);
+            this.bulkProcessor =
+                    new OpensearchBulkProcessorAdapter(
+                            this.requestTracker, client, retryOnConflict);
         } else {
             throw new RuntimeException("Sink type must be elasticsearch or opensearch");
         }
     }
 
-    private void writeRow(SinkRow row) throws JsonMappingException, JsonProcessingException {
+    private void writeRow(SinkRow row)
+            throws JsonMappingException, JsonProcessingException, InterruptedException {
         final String key = (String) row.get(1);
         String doc = (String) row.get(2);
         final String index;
