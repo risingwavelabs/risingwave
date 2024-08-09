@@ -99,6 +99,10 @@ impl<S: StateStore> FsListExecutor<S> {
                 .collect::<Vec<_>>();
 
             let res: Vec<(Op, OwnedRow)> = rows.into_iter().flatten().collect();
+            if res.is_empty() {
+                tracing::warn!("No items were listed from source.");
+                return Ok(StreamChunk::default());
+            }
             Ok(StreamChunk::from_rows(
                 &res,
                 &[DataType::Varchar, DataType::Timestamptz, DataType::Int64],
