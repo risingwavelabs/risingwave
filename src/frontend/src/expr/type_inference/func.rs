@@ -16,7 +16,7 @@ use itertools::Itertools as _;
 use num_integer::Integer as _;
 use risingwave_common::bail_no_function;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::types::{DataType, MapType, StructType};
+use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
 pub use risingwave_expr::sig::*;
 use risingwave_pb::expr::agg_call::PbType as PbAggKind;
@@ -26,9 +26,7 @@ use thiserror_ext::AsReport;
 use super::{align_types, cast_ok_base, CastContext};
 use crate::error::{ErrorCode, Result};
 use crate::expr::type_inference::cast::align_array_and_element;
-use crate::expr::{
-    cast_ok, is_row_function, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef,
-};
+use crate::expr::{cast_ok, is_row_function, Expr as _, ExprImpl, ExprType, FunctionCall};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
 /// is not supported on backend.
@@ -617,23 +615,14 @@ fn infer_type_for_special(
         ExprType::MapAccess => {
             ensure_arity!("map_access", | inputs | == 2);
             let map_type = inputs[0].return_type().into_map();
-            let key_type = map_type.key().clone();
-            let mut key_dummy_expr = InputRef::new(0, key_type).into();
-            let common_key_type = align_types([&mut key_dummy_expr, &mut inputs[1]].into_iter());
-            match common_key_type {
-                Ok(common_key_type) => {
-                    let new_map = DataType::Map(MapType::from_kv(
-                        common_key_type.clone(),
-                        map_type.value().clone(),
-                    ));
-                    inputs[0].cast_implicit_mut(new_map)?;
-                    Ok(Some(map_type.value().clone()))
-                }
-                Err(e) => Err(ErrorCode::BindError(format!(
-                    "Cannot access {} in {}: {}",
+            // We do not align the map's key type with the input type here, but cast the latter to the former instead.
+            // e.g., for {1:'a'}[1.0], if we align them, we will get "numeric" as the key type, which violates the map type's restriction.
+            match inputs[1].cast_implicit_mut(map_type.key().clone()) {
+                Ok(()) => Ok(Some(map_type.value().clone())),
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot access {} in {}",
                     inputs[1].return_type(),
                     inputs[0].return_type(),
-                    e.to_report_string()
                 ))
                 .into()),
             }
