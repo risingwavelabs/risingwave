@@ -70,7 +70,7 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt, need_drop_table=Tr
         sex int,
         mark int,
     ) WITH (
-        connector = 's3_v2',
+        connector = 's3',
         match_pattern = '{prefix}*.{fmt}',
         s3.region_name = '{config['S3_REGION']}',
         s3.bucket_name = '{config['S3_BUCKET']}',

@@ -16,7 +16,7 @@ CREATE SOURCE ad_click (
     bid_id BIGINT,
     click_timestamp TIMESTAMPTZ
 ) WITH (
-    connector = 's3_v2',
+    connector = 's3',
     s3.region_name = 'us-east-1',
     s3.bucket_name = 'ad-click',
     s3.credentials.access = 'test',
