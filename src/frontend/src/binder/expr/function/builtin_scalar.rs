@@ -392,6 +392,7 @@ impl Binder {
                 ("jsonb_set", raw_call(ExprType::JsonbSet)),
                 // map
                 ("map_from_entries", raw_call(ExprType::MapFromEntries)),
+                ("map_access",raw_call(ExprType::MapAccess)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least

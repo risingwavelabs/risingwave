@@ -70,7 +70,12 @@ impl std::fmt::Debug for Literal {
 
 impl Literal {
     pub fn new(data: Datum, data_type: DataType) -> Self {
-        assert!(literal_type_match(&data_type, data.as_ref()));
+        assert!(
+            literal_type_match(&data_type, data.as_ref()),
+            "data_type: {:?}, data: {:?}",
+            data_type,
+            data
+        );
         Literal {
             data,
             data_type: Some(data_type),

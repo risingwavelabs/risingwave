@@ -597,6 +597,24 @@ impl<'a> ListRef<'a> {
             _ => None,
         }
     }
+
+    /// # Panics
+    /// Panics if the list is not a map's internal representation (See [`super::MapArray`]).
+    pub(super) fn as_map_kv(self) -> (ListRef<'a>, ListRef<'a>) {
+        let (k, v) = self.array.as_struct().fields().collect_tuple().unwrap();
+        (
+            ListRef {
+                array: &k,
+                start: self.start,
+                end: self.end,
+            },
+            ListRef {
+                array: &v,
+                start: self.start,
+                end: self.end,
+            },
+        )
+    }
 }
 
 impl PartialEq for ListRef<'_> {

@@ -285,6 +285,7 @@ message ExprNode {
 
     // Map functions
     MAP_FROM_ENTRIES = 700;
+    MAP_ACCESS = 701;
 
     // Non-pure functions below (> 1000)
     // ------------------------
