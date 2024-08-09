@@ -35,6 +35,8 @@ mysql -uroot -P 9030 -h starrocks-fe-server -e "CREATE database demo;use demo;
 CREATE table demo_bhv_table(v1 int,v2 smallint,v3 bigint,v4 float,v5 double,v6 string,v7 date,v8 datetime,v9 boolean,v10 json,v11 decimal(10,5)) ENGINE=OLAP
 PRIMARY KEY(\`v1\`)
 DISTRIBUTED BY HASH(\`v1\`) properties(\"replication_num\" = \"1\");
+CREATE TABLE demo_reserved_words(id int, \`order\` string, \`from\` string) ENGINE=OLAP
+PRIMARY KEY(id) DISTRIBUTED BY HASH (id) properties(\"replication_num\" = \"1\");
 CREATE USER 'users'@'%' IDENTIFIED BY '123456';
 GRANT ALL ON *.* TO 'users'@'%';"
 sleep 2
