@@ -707,6 +707,18 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetBackfillRateLimit { rate_limit },
+        } => {
+            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                handler_args,
+                PbThrottleTarget::CdcTable,
+                name,
+                rate_limit,
+            )
+            .await
+        }
         Statement::AlterIndex {
             name,
             operation: AlterIndexOperation::RenameIndex { index_name },
