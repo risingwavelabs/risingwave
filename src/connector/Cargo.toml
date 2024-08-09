@@ -99,9 +99,9 @@ paste = "1"
 pg_bigdecimal = { git = "https://github.com/risingwavelabs/rust-pg_bigdecimal", rev = "0b7893d88894ca082b4525f94f812da034486f7c" }
 postgres-openssl = "0.5.0"
 prometheus = { version = "0.13", features = ["process"] }
-prost = { version = "0.12", features = ["no-recursion-limit"] }
-prost-reflect = "0.13"
-prost-types = "0.12"
+prost = { version = "0.13", features = ["no-recursion-limit"] }
+prost-reflect = "0.14"
+prost-types = "0.13"
 protobuf-native = "0.2.2"
 pulsar = { version = "6.3", default-features = false, features = [
     "tokio-runtime",
@@ -204,7 +204,7 @@ tracing-test = "0.2"
 walkdir = "2"
 
 [build-dependencies]
-prost-build = "0.12"
+prost-build = "0.13"
 protobuf-src = "1"
 
 [[bench]]
