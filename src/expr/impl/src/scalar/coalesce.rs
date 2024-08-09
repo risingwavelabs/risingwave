@@ -74,7 +74,7 @@ impl Expression for CoalesceExpression {
     }
 }
 
-#[build_function("coalesce(...) -> any", type_infer = "panic")]
+#[build_function("coalesce(...) -> any", type_infer = "unreachable")]
 fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
     Ok(Box::new(CoalesceExpression {
         return_type,

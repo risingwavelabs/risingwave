@@ -86,9 +86,10 @@ impl FunctionAttr {
     /// Generate the type infer function: `fn(&[DataType]) -> Result<DataType>`
     fn generate_type_infer_fn(&self) -> Result<TokenStream2> {
         if let Some(func) = &self.type_infer {
-            // XXX: should this be called "placeholder" or "unreachable"?
-            if func == "panic" {
-                return Ok(quote! { |_| panic!("type inference function is not implemented") });
+            if func == "unreachable" {
+                return Ok(
+                    quote! { |_| unreachable!("type inference for this function should be specially handled in frontend, and should not call sig.type_infer") },
+                );
             }
             // use the user defined type inference function
             return Ok(func.parse().unwrap());

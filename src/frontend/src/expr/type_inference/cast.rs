@@ -29,7 +29,10 @@ use crate::expr::{Expr as _, ExprImpl, InputRef, Literal};
 ///
 /// If you also need to cast them to this type, and there are more than 2 exprs, check out
 /// [`align_types`].
-pub fn least_restrictive(lhs: DataType, rhs: DataType) -> std::result::Result<DataType, ErrorCode> {
+///
+/// Note: be careful that literal strings are considered untyped.
+/// e.g., `align_types(1, '1')` will be `Int32`, but `least_restrictive(Int32, Varchar)` will return error.
+fn least_restrictive(lhs: DataType, rhs: DataType) -> std::result::Result<DataType, ErrorCode> {
     if lhs == rhs {
         Ok(lhs)
     } else if cast_ok(&lhs, &rhs, CastContext::Implicit) {
@@ -81,6 +84,7 @@ pub fn align_array_and_element(
     element_indices: &[usize],
     inputs: &mut [ExprImpl],
 ) -> std::result::Result<DataType, ErrorCode> {
+    tracing::trace!(?inputs, "align_array_and_element begin");
     let mut dummy_element = match inputs[array_idx].is_untyped() {
         // when array is unknown type, make an unknown typed value (e.g. null)
         true => ExprImpl::from(Literal::new_untyped(None)),
@@ -106,7 +110,7 @@ pub fn align_array_and_element(
 
     // elements are already casted by `align_types`, we cast the array argument here
     inputs[array_idx].cast_implicit_mut(array_type.clone())?;
-
+    tracing::trace!(?inputs, "align_array_and_element done");
     Ok(array_type)
 }
 
