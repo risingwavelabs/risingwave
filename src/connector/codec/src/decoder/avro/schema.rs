@@ -20,7 +20,7 @@ use apache_avro::AvroResult;
 use itertools::Itertools;
 use risingwave_common::error::NotImplemented;
 use risingwave_common::log::LogSuppresser;
-use risingwave_common::types::{DataType, Decimal};
+use risingwave_common::types::{DataType, Decimal, MapType};
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
 
@@ -57,8 +57,7 @@ impl ResolvedAvroSchema {
 #[derive(Debug, Copy, Clone)]
 pub enum MapHandling {
     Jsonb,
-    // TODO: <https://github.com/risingwavelabs/risingwave/issues/13387>
-    // Map
+    Map,
 }
 
 impl MapHandling {
@@ -69,6 +68,7 @@ impl MapHandling {
     ) -> anyhow::Result<Option<Self>> {
         let mode = match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
             Some("jsonb") => Self::Jsonb,
+            Some("map") => Self::Map,
             Some(v) => bail!("unrecognized {} value {}", Self::OPTION_KEY, v),
             None => return Ok(None),
         };
@@ -266,12 +266,10 @@ fn avro_type_mapping(
                         );
                     }
                 }
-                None => {
-                    // We require it to be specified, because we don't want to have a bad default behavior.
-                    // But perhaps changing the default behavior won't be a breaking change,
-                    // because it affects only on creation time, what the result ColumnDesc will be, and the ColumnDesc will be persisted.
-                    // This is unlike timestamp.handing.mode, which affects parser's behavior on the runtime.
-                    bail!("`map.handling.mode` not specified in ENCODE AVRO (...). Currently supported modes: `jsonb`")
+                Some(MapHandling::Map) | None => {
+                    let value = avro_type_mapping(value_schema.as_ref(), map_handling)
+                        .context("failed to convert Avro map type")?;
+                    DataType::Map(MapType::from_kv(DataType::Varchar, value))
                 }
             }
         }

@@ -73,13 +73,13 @@ impl MapType {
         &self.0 .1
     }
 
-    pub fn into_struct(self) -> StructType {
+    pub fn into_struct(self) -> DataType {
         let (key, value) = *self.0;
-        Self::struct_type_for_map(key, value)
+        DataType::Struct(Self::struct_type_for_map(key, value))
     }
 
     pub fn into_list(self) -> DataType {
-        DataType::List(Box::new(DataType::Struct(self.into_struct())))
+        DataType::List(Box::new(self.into_struct()))
     }
 
     /// String and integral types are allowed.
