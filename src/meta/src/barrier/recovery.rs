@@ -397,8 +397,12 @@ impl GlobalBarrierManager {
                         tracing::Span::current(), // recovery span
                     ));
 
-                    let mut node_to_collect =
-                        control_stream_manager.inject_barrier(&command_ctx, &info, Some(&info))?;
+                    let mut node_to_collect = control_stream_manager.inject_command_ctx_barrier(
+                        &command_ctx,
+                        &info,
+                        Some(&info),
+                        HashMap::new(),
+                    )?;
                     while !node_to_collect.is_empty() {
                         let (worker_id, result) = control_stream_manager
                             .next_complete_barrier_response()

@@ -119,6 +119,7 @@ pub use approx_percentile::local::LocalApproxPercentileExecutor;
 pub use backfill::arrangement_backfill::*;
 pub use backfill::cdc::{CdcBackfillExecutor, CdcScanOptions, ExternalStorageTable};
 pub use backfill::no_shuffle_backfill::*;
+pub use backfill::snapshot_backfill::*;
 pub use barrier_recv::BarrierRecvExecutor;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;

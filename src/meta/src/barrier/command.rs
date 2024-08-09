@@ -42,7 +42,7 @@ use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use thiserror_ext::AsReport;
 use tracing::warn;
 
-use super::info::CommandFragmentChanges;
+use super::info::{CommandFragmentChanges, InflightGraphInfo};
 use super::trace::TracedEpoch;
 use crate::barrier::{GlobalBarrierManagerContext, InflightSubscriptionInfo};
 use crate::manager::{DdlType, InflightFragmentInfo, MetadataManager, StreamingJob, WorkerId};
@@ -159,7 +159,9 @@ pub struct CreateStreamingJobCommandInfo {
 }
 
 impl CreateStreamingJobCommandInfo {
-    fn new_fragment_info(&self) -> impl Iterator<Item = (FragmentId, InflightFragmentInfo)> + '_ {
+    pub(super) fn new_fragment_info(
+        &self,
+    ) -> impl Iterator<Item = (FragmentId, InflightFragmentInfo)> + '_ {
         self.table_fragments.fragments.values().map(|fragment| {
             (
                 fragment.fragment_id,
@@ -188,6 +190,18 @@ impl CreateStreamingJobCommandInfo {
             )
         })
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct SnapshotBackfillInfo {
+    pub upstream_mv_table_ids: HashSet<TableId>,
+}
+
+#[derive(Debug, Clone)]
+pub enum CreateStreamingJobType {
+    Normal,
+    SinkIntoTable(ReplaceTablePlan),
+    SnapshotBackfill(SnapshotBackfillInfo),
 }
 
 /// [`Command`] is the input of [`crate::barrier::GlobalBarrierManager`]. For different commands,
@@ -234,9 +248,11 @@ pub enum Command {
     /// will be set to `Created`.
     CreateStreamingJob {
         info: CreateStreamingJobCommandInfo,
-        /// This is for create SINK into table.
-        replace_table: Option<ReplaceTablePlan>,
+        job_type: CreateStreamingJobType,
     },
+    FinishCreateSnapshotBackfillStreamingJobs(
+        HashMap<TableId, (SnapshotBackfillInfo, InflightGraphInfo)>,
+    ),
     /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
     /// table fragment.
     ///
@@ -315,10 +331,11 @@ impl Command {
                     .map(|fragment_id| (*fragment_id, CommandFragmentChanges::RemoveFragment))
                     .collect(),
             ),
-            Command::CreateStreamingJob {
-                info,
-                replace_table,
-            } => {
+            Command::CreateStreamingJob { info, job_type } => {
+                assert!(
+                    !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_)),
+                    "should handle fragment changes separately for snapshot backfill"
+                );
                 let mut changes: HashMap<_, _> = info
                     .new_fragment_info()
                     .map(|(fragment_id, info)| {
@@ -326,7 +343,7 @@ impl Command {
                     })
                     .collect();
 
-                if let Some(plan) = replace_table {
+                if let CreateStreamingJobType::SinkIntoTable(plan) = job_type {
                     let extra_change = plan.fragment_changes();
                     changes.extend(extra_change);
                 }
@@ -361,6 +378,7 @@ impl Command {
                     .collect(),
             ),
             Command::ReplaceTable(plan) => Some(plan.fragment_changes()),
+            Command::FinishCreateSnapshotBackfillStreamingJobs(_) => None,
             Command::SourceSplitAssignment(_) => None,
             Command::Throttle(_) => None,
             Command::CreateSubscription { .. } => None,
@@ -543,7 +561,7 @@ impl CommandContext {
                             init_split_assignment: split_assignment,
                             ..
                         },
-                    replace_table,
+                    job_type,
                 } => {
                     let actor_dispatchers = dispatchers
                         .iter()
@@ -561,23 +579,38 @@ impl CommandContext {
                         .values()
                         .flat_map(build_actor_connector_splits)
                         .collect();
+                    let subscriptions_to_add =
+                        if let CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info) =
+                            job_type
+                        {
+                            snapshot_backfill_info
+                                .upstream_mv_table_ids
+                                .iter()
+                                .map(|table_id| SubscriptionUpstreamInfo {
+                                    subscriber_id: table_fragments.table_id().table_id,
+                                    upstream_mv_table_id: table_id.table_id,
+                                })
+                                .collect()
+                        } else {
+                            Default::default()
+                        };
                     let add = Some(Mutation::Add(AddMutation {
                         actor_dispatchers,
                         added_actors,
                         actor_splits,
                         // If the cluster is already paused, the new actors should be paused too.
                         pause: self.current_paused_reason.is_some(),
-                        subscriptions_to_add: Default::default(),
+                        subscriptions_to_add,
                     }));
 
-                    if let Some(ReplaceTablePlan {
+                    if let CreateStreamingJobType::SinkIntoTable(ReplaceTablePlan {
                         old_table_fragments,
                         new_table_fragments: _,
                         merge_updates,
                         dispatchers,
                         init_split_assignment,
                         ..
-                    }) = replace_table
+                    }) = job_type
                     {
                         // TODO: support in v2.
                         let update = Self::generate_update_mutation_for_replace_table(
@@ -596,6 +629,21 @@ impl CommandContext {
                     } else {
                         add
                     }
+                }
+                Command::FinishCreateSnapshotBackfillStreamingJobs(jobs_to_finish) => {
+                    Some(Mutation::DropSubscriptions(DropSubscriptionsMutation {
+                        info: jobs_to_finish
+                            .iter()
+                            .flat_map(|(table_id, (backfill_info, _))| {
+                                backfill_info.upstream_mv_table_ids.iter().map(
+                                    move |upstream_table_id| SubscriptionUpstreamInfo {
+                                        subscriber_id: table_id.table_id,
+                                        upstream_mv_table_id: upstream_table_id.table_id,
+                                    },
+                                )
+                            })
+                            .collect(),
+                    }))
                 }
 
                 Command::CancelStreamingJob(table_fragments) => {
@@ -997,10 +1045,7 @@ impl CommandContext {
                 }
             }
 
-            Command::CreateStreamingJob {
-                info,
-                replace_table,
-            } => {
+            Command::CreateStreamingJob { info, job_type } => {
                 let CreateStreamingJobCommandInfo {
                     table_fragments,
                     dispatchers,
@@ -1028,14 +1073,14 @@ impl CommandContext {
                             )
                             .await?;
 
-                        if let Some(ReplaceTablePlan {
+                        if let CreateStreamingJobType::SinkIntoTable(ReplaceTablePlan {
                             old_table_fragments,
                             new_table_fragments,
                             merge_updates,
                             dispatchers,
                             init_split_assignment,
                             ..
-                        }) = replace_table
+                        }) = job_type
                         {
                             self.clean_up(old_table_fragments.actor_ids()).await?;
 
@@ -1061,13 +1106,13 @@ impl CommandContext {
                             )
                             .await?;
 
-                        if let Some(ReplaceTablePlan {
+                        if let CreateStreamingJobType::SinkIntoTable(ReplaceTablePlan {
                             new_table_fragments,
                             dispatchers,
                             init_split_assignment,
                             old_table_fragments,
                             ..
-                        }) = replace_table
+                        }) = job_type
                         {
                             // Tell compute nodes to drop actors.
                             self.clean_up(old_table_fragments.actor_ids()).await?;
@@ -1097,7 +1142,6 @@ impl CommandContext {
                     )
                     .await;
             }
-
             Command::RescheduleFragment {
                 reschedules,
                 table_parallelism,
@@ -1184,6 +1228,7 @@ impl CommandContext {
                 }
             },
             Command::DropSubscription { .. } => {}
+            Command::FinishCreateSnapshotBackfillStreamingJobs(_) => {}
         }
 
         Ok(())

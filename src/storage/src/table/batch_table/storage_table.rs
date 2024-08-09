@@ -751,7 +751,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         &self,
         start_epoch: u64,
         end_epoch: u64,
-    ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send> {
+    ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send + 'static> {
         let pk_prefix = OwnedRow::default();
         let start_key = self.serialize_pk_bound(&pk_prefix, Unbounded, true);
         let end_key = self.serialize_pk_bound(&pk_prefix, Unbounded, false);

@@ -15,6 +15,7 @@
 pub mod arrangement_backfill;
 pub mod cdc;
 pub mod no_shuffle_backfill;
+pub mod snapshot_backfill;
 pub mod utils;
 
 pub use cdc::CdcScanOptions;

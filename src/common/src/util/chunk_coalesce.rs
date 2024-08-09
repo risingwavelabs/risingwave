@@ -49,6 +49,10 @@ impl DataChunkBuilder {
         }
     }
 
+    pub fn batch_size(&self) -> usize {
+        self.batch_size
+    }
+
     /// Lazily create the array builders if absent
     fn ensure_builders(&mut self) {
         if self.array_builders.len() != self.data_types.len() {
