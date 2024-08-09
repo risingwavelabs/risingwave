@@ -54,7 +54,8 @@ impl std::fmt::Debug for Literal {
                     | DataType::Interval
                     | DataType::Jsonb
                     | DataType::Int256
-                    | DataType::Struct(_) => write!(
+                    | DataType::Struct(_)
+                    | DataType::Map(_) => write!(
                         f,
                         "'{}'",
                         v.as_scalar_ref_impl().to_text_with_type(&data_type)

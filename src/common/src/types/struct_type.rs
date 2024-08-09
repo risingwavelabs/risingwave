@@ -37,11 +37,11 @@ impl Debug for StructType {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct StructTypeInner {
-    // Details about a struct type. There are 2 cases for a struct:
-    // 1. `field_names.len() == field_types.len()`: it represents a struct with named fields,
-    //     e.g. `STRUCT<i INT, j VARCHAR>`.
-    // 2. `field_names.len() == 0`: it represents a struct with unnamed fields,
-    //     e.g. `ROW(1, 2)`.
+    /// Details about a struct type. There are 2 cases for a struct:
+    /// 1. `field_names.len() == field_types.len()`: it represents a struct with named fields,
+    ///     e.g. `STRUCT<i INT, j VARCHAR>`.
+    /// 2. `field_names.len() == 0`: it represents a struct with unnamed fields,
+    ///     e.g. `ROW(1, 2)`.
     field_names: Box<[String]>,
     field_types: Box<[DataType]>,
 }
@@ -71,6 +71,8 @@ impl StructType {
     }
 
     pub(super) fn from_parts(field_names: Vec<String>, field_types: Vec<DataType>) -> Self {
+        // TODO: enable this assertion
+        // debug_assert!(field_names.len() == field_types.len());
         Self(Arc::new(StructTypeInner {
             field_types: field_types.into(),
             field_names: field_names.into(),

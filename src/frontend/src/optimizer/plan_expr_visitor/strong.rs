@@ -291,6 +291,7 @@ impl Strong {
             | ExprType::JsonbPopulateRecord
             | ExprType::JsonbToRecord
             | ExprType::JsonbSet
+            | ExprType::MapFromEntries
             | ExprType::Vnode
             | ExprType::TestPaidTier
             | ExprType::Proctime

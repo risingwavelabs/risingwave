@@ -102,6 +102,7 @@ impl ToBinary for ScalarRefImpl<'_> {
                 issue = 7949,
                 "the pgwire extended-mode encoding for {ty} is unsupported"
             ),
+            ScalarRefImpl::Map(_) => todo!(),
         }
     }
 }

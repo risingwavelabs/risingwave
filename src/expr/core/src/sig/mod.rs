@@ -395,6 +395,8 @@ pub enum SigDataType {
     AnyArray,
     /// Accepts any struct data type
     AnyStruct,
+    /// TODO: not all type can be used as a map key.
+    AnyMap,
 }
 
 impl From<DataType> for SigDataType {
@@ -410,6 +412,7 @@ impl std::fmt::Display for SigDataType {
             Self::Any => write!(f, "any"),
             Self::AnyArray => write!(f, "anyarray"),
             Self::AnyStruct => write!(f, "anystruct"),
+            Self::AnyMap => write!(f, "anymap"),
         }
     }
 }
@@ -422,6 +425,7 @@ impl SigDataType {
             Self::Any => true,
             Self::AnyArray => dt.is_array(),
             Self::AnyStruct => dt.is_struct(),
+            Self::AnyMap => dt.is_map(),
         }
     }
 

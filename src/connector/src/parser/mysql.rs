@@ -127,8 +127,10 @@ pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> Owne
                 | DataType::Struct(_)
                 | DataType::List(_)
                 | DataType::Int256
-                | DataType::Serial => {
+                | DataType::Serial
+                | DataType::Map(_) => {
                     // Interval, Struct, List, Int256 are not supported
+                    // XXX: is this branch reachable?
                     if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                         tracing::warn!(column = rw_field.name, ?rw_field.data_type, suppressed_count, "unsupported data type, set to null");
                     }

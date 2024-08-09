@@ -16,8 +16,8 @@ use std::fmt::Debug;
 
 use jsonbb::Builder;
 use risingwave_common::types::{
-    DataType, Date, Decimal, Int256Ref, Interval, JsonbRef, JsonbVal, ListRef, ScalarRefImpl,
-    Serial, StructRef, Time, Timestamp, Timestamptz, ToText, F32, F64,
+    DataType, Date, Decimal, Int256Ref, Interval, JsonbRef, JsonbVal, ListRef, MapRef,
+    ScalarRefImpl, Serial, StructRef, Time, Timestamp, Timestamptz, ToText, F32, F64,
 };
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::Context;
@@ -72,6 +72,7 @@ impl ToJsonb for ScalarRefImpl<'_> {
             Timestamptz(v) => v.add_to(ty, builder),
             Struct(v) => v.add_to(ty, builder),
             List(v) => v.add_to(ty, builder),
+            Map(v) => v.add_to(ty, builder),
         }
     }
 }
@@ -223,6 +224,20 @@ impl ToJsonb for ListRef<'_> {
             value.add_to(elem_type, builder)?;
         }
         builder.end_array();
+        Ok(())
+    }
+}
+
+impl ToJsonb for MapRef<'_> {
+    fn add_to(self, data_type: &DataType, builder: &mut Builder) -> Result<()> {
+        let value_type = data_type.as_map().value();
+        builder.begin_object();
+        for (k, v) in self.iter() {
+            // XXX: is to_text here reasonable?
+            builder.add_string(&k.to_text());
+            v.add_to(value_type, builder)?;
+        }
+        builder.end_object();
         Ok(())
     }
 }

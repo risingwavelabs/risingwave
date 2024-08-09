@@ -35,6 +35,7 @@ const TYPE_MATRIX: &str = "
     jsonb       Jsonb       JsonbArray          JsonbVal        JsonbRef<'_>        _
     anyarray    List        ListArray           ListValue       ListRef<'_>         _
     struct      Struct      StructArray         StructValue     StructRef<'_>       _
+    anymap      Map         MapArray            MapValue        MapRef<'_>          _
     any         ???         ArrayImpl           ScalarImpl      ScalarRefImpl<'_>   _
 ";
 
@@ -81,7 +82,7 @@ fn lookup_matrix(mut ty: &str, idx: usize) -> &str {
             None
         }
     });
-    s.unwrap_or_else(|| panic!("unknown type: {}", ty))
+    s.unwrap_or_else(|| panic!("failed to lookup type matrix: unknown type: {}", ty))
 }
 
 /// Expands a type wildcard string into a list of concrete types.

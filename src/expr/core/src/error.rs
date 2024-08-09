@@ -88,6 +88,7 @@ pub enum ExprError {
     #[error("More than one row returned by {0} used as an expression")]
     MaxOneRow(&'static str),
 
+    /// TODO: deprecate in favor of `Function`
     #[error(transparent)]
     Internal(
         #[from]
@@ -111,6 +112,7 @@ pub enum ExprError {
     InvalidState(String),
 
     /// Function error message returned by UDF.
+    /// TODO: replace with `Function`
     #[error("{0}")]
     Custom(String),
 

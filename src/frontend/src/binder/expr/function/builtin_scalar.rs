@@ -129,6 +129,9 @@ impl Binder {
             )
         }
 
+        // XXX: can we unify this with FUNC_SIG_MAP?
+        // For raw_call here, it seems unnecessary to declare it again here.
+        // For some functions, we have validation logic here. Is it still useful now?
         static HANDLES: LazyLock<HashMap<&'static str, Handle>> = LazyLock::new(|| {
             [
                 (
@@ -387,6 +390,8 @@ impl Binder {
                 ("jsonb_path_query_array", raw_call(ExprType::JsonbPathQueryArray)),
                 ("jsonb_path_query_first", raw_call(ExprType::JsonbPathQueryFirst)),
                 ("jsonb_set", raw_call(ExprType::JsonbSet)),
+                // map
+                ("map_from_entries", raw_call(ExprType::MapFromEntries)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least
@@ -692,6 +697,7 @@ impl Binder {
             return Ok(FunctionCall::new(func, inputs)?.into());
         }
 
+        // Note: for raw_call, we only check name here. The type check is done later.
         match HANDLES.get(function_name) {
             Some(handle) => handle(self, inputs),
             None => {
