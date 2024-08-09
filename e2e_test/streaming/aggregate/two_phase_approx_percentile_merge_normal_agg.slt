@@ -78,13 +78,13 @@ select * from m1;
 query I
 select
   percentile_cont(0.01) within group (order by p_col) as p01,
-  round_digit(sum(p_col), 2),
+  round(sum(p_col) * 100),
   percentile_cont(0.5) within group (order by p_col) as p50,
   count(*),
   percentile_cont(0.99) within group (order by p_col) as p99
 from t;
 ----
--969.99 0.55 0.0001 3002 969.9899999999998
+-969.99 55 0.0001 3002 969.9899999999998
 
 statement ok
 drop materialized view m1;
