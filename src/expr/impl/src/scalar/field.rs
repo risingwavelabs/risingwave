@@ -54,7 +54,7 @@ impl Expression for FieldExpression {
     }
 }
 
-#[build_function("field(struct, int4) -> any", type_infer = "panic")]
+#[build_function("field(struct, int4) -> any", type_infer = "unreachable")]
 fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
     // Field `func_call_node` have 2 child nodes, the first is Field `FuncCall` or
     // `InputRef`, the second is i32 `Literal`.

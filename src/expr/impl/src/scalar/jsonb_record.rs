@@ -115,7 +115,7 @@ fn jsonb_populate_recordset<'a>(
 /// ----
 /// 1 [1,2,3] {1,2,3} NULL (123,"a b c")
 /// ```
-#[function("jsonb_to_record(jsonb) -> struct", type_infer = "panic")]
+#[function("jsonb_to_record(jsonb) -> struct", type_infer = "unreachable")]
 fn jsonb_to_record(jsonb: JsonbRef<'_>, ctx: &Context) -> Result<StructValue> {
     let output_type = ctx.return_type.as_struct();
     jsonb.to_struct(output_type).map_err(parse_err)
@@ -135,7 +135,10 @@ fn jsonb_to_record(jsonb: JsonbRef<'_>, ctx: &Context) -> Result<StructValue> {
 /// 1 foo
 /// 2 NULL
 /// ```
-#[function("jsonb_to_recordset(jsonb) -> setof struct", type_infer = "panic")]
+#[function(
+    "jsonb_to_recordset(jsonb) -> setof struct",
+    type_infer = "unreachable"
+)]
 fn jsonb_to_recordset<'a>(
     jsonb: JsonbRef<'a>,
     ctx: &'a Context,

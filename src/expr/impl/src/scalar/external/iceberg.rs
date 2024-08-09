@@ -75,7 +75,7 @@ impl risingwave_expr::expr::Expression for IcebergTransform {
     }
 }
 
-#[build_function("iceberg_transform(varchar, any) -> any", type_infer = "panic")]
+#[build_function("iceberg_transform(varchar, any) -> any", type_infer = "unreachable")]
 fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
     let transform_type = {
         let datum = children[0].eval_const()?.unwrap();

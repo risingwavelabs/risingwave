@@ -21,7 +21,6 @@ use risingwave_common::util::iter_util::ZipEqFast;
 pub use risingwave_expr::sig::*;
 use risingwave_pb::expr::agg_call::PbType as PbAggKind;
 use risingwave_pb::expr::table_function::PbType as PbTableFuncType;
-use thiserror_ext::AsReport;
 
 use super::{align_types, cast_ok_base, CastContext};
 use crate::error::{ErrorCode, Result};
