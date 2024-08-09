@@ -169,9 +169,6 @@ pub enum Operation {
     /// Try wait epoch
     TryWaitEpoch(TracedHummockReadEpoch),
 
-    /// clear shared buffer
-    ClearSharedBuffer(u64),
-
     /// Seal current epoch
     SealCurrentEpoch {
         epoch: u64,

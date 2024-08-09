@@ -498,6 +498,19 @@ impl HummockStorage {
         )
     }
 
+    pub async fn clear_shared_buffer(&self, version_id: HummockVersionId) {
+        let (tx, rx) = oneshot::channel();
+        self.hummock_event_sender
+            .send(HummockEvent::Clear(tx, version_id))
+            .expect("should send success");
+        rx.await.expect("should wait success");
+
+        let epoch = self.pinned_version.load().max_committed_epoch();
+        self.min_current_epoch
+            .store(HummockEpoch::MAX, MemOrdering::SeqCst);
+        self.seal_epoch.store(epoch, MemOrdering::SeqCst);
+    }
+
     /// Declare the start of an epoch. This information is provided for spill so that the spill task won't
     /// include data of two or more syncs.
     // TODO: remove this method when we support spill task that can include data of more two or more syncs
@@ -645,19 +658,6 @@ impl StateStore for HummockStorage {
             );
         }
         StoreLocalStatistic::flush_all();
-    }
-
-    async fn clear_shared_buffer(&self, prev_epoch: u64) {
-        let (tx, rx) = oneshot::channel();
-        self.hummock_event_sender
-            .send(HummockEvent::Clear(tx, prev_epoch))
-            .expect("should send success");
-        rx.await.expect("should wait success");
-
-        let epoch = self.pinned_version.load().max_committed_epoch();
-        self.min_current_epoch
-            .store(HummockEpoch::MAX, MemOrdering::SeqCst);
-        self.seal_epoch.store(epoch, MemOrdering::SeqCst);
     }
 
     fn new_local(&self, option: NewLocalOptions) -> impl Future<Output = Self::Local> + Send + '_ {

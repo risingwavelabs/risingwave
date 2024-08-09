@@ -25,6 +25,7 @@ use futures::{pin_mut, FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::tracing::TracingContext;
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::stream_plan::{Barrier, BarrierMutation};
 use risingwave_pb::stream_service::{
@@ -104,11 +105,11 @@ impl ControlStreamManager {
             warn!(id = node.id, host = ?node.host, "node already exists");
             return;
         }
-        let prev_epoch = self
+        let version_id = self
             .context
             .hummock_manager
-            .latest_snapshot()
-            .committed_epoch;
+            .on_current_version(|version| version.id)
+            .await;
         let node_id = node.id;
         let node_host = node.host.clone().unwrap();
         let mut backoff = ExponentialBackoff::from_millis(100)
@@ -118,7 +119,7 @@ impl ControlStreamManager {
         for i in 1..=MAX_RETRY {
             match self
                 .context
-                .new_control_stream_node(node.clone(), prev_epoch)
+                .new_control_stream_node(node.clone(), version_id)
                 .await
             {
                 Ok((stream_node, response_stream)) => {
@@ -142,13 +143,13 @@ impl ControlStreamManager {
 
     pub(super) async fn reset(
         &mut self,
-        prev_epoch: u64,
+        version_id: HummockVersionId,
         nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
         let nodes = try_join_all(nodes.iter().map(|(worker_id, node)| async {
             let node = self
                 .context
-                .new_control_stream_node(node.clone(), prev_epoch)
+                .new_control_stream_node(node.clone(), version_id)
                 .await?;
             Result::<_, MetaError>::Ok((*worker_id, node))
         }))
@@ -353,7 +354,7 @@ impl GlobalBarrierManagerContext {
     async fn new_control_stream_node(
         &self,
         node: WorkerNode,
-        prev_epoch: u64,
+        initial_version_id: HummockVersionId,
     ) -> MetaResult<(
         ControlStreamNode,
         BoxStream<'static, risingwave_rpc_client::error::Result<StreamingControlStreamResponse>>,
@@ -363,7 +364,7 @@ impl GlobalBarrierManagerContext {
             .stream_client_pool()
             .get(&node)
             .await?
-            .start_streaming_control(prev_epoch)
+            .start_streaming_control(initial_version_id)
             .await?;
         Ok((
             ControlStreamNode {
