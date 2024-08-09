@@ -118,11 +118,11 @@ impl<'a> HummockVersionTransaction<'a> {
         &mut self,
         max_committed_epoch: HummockEpoch,
         commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>>,
-        new_table_ids: HashMap<TableId, CompactionGroupId>,
+        new_tables: Option<(Vec<TableId>, CompactionGroupId, CompactionConfig)>,
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         change_log_delta: HashMap<TableId, ChangeLogDelta>,
         batch_commit_for_new_cg: Option<(
-            HashMap<CompactionGroupId, BTreeMap<u64, Vec<LocalSstableInfo>>>,
+            HashMap<CompactionGroupId, (BTreeMap<u64, Vec<LocalSstableInfo>>, Vec<TableId>)>,
             CompactionConfig,
         )>,
     ) -> HummockVersionDelta {
@@ -131,13 +131,19 @@ impl<'a> HummockVersionTransaction<'a> {
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
 
+        let mut new_table_ids = HashMap::new();
+
         if let Some((batch_commit_for_new_cg, compaction_group_config)) = batch_commit_for_new_cg {
-            for (compaction_group_id, batch_commit_sst) in batch_commit_for_new_cg {
+            for (compaction_group_id, (batch_commit_sst, table_ids)) in batch_commit_for_new_cg {
                 let group_deltas = &mut new_version_delta
                     .group_deltas
                     .entry(compaction_group_id)
                     .or_default()
                     .group_deltas;
+
+                for table_id in &table_ids {
+                    new_table_ids.insert(*table_id, compaction_group_id);
+                }
 
                 #[expect(deprecated)]
                 group_deltas.push(GroupDelta::GroupConstruct(GroupConstruct {
@@ -148,6 +154,7 @@ impl<'a> HummockVersionTransaction<'a> {
                     new_sst_start_id: 0, // No need to set it when `NewCompactionGroup`
                     table_ids: vec![],
                     version: CompatibilityVersion::NoMemberTableIds as i32,
+                    split_key: None,
                 }));
 
                 for (epoch, insert_ssts) in batch_commit_sst {
@@ -163,6 +170,29 @@ impl<'a> HummockVersionTransaction<'a> {
                     group_deltas.push(group_delta);
                 }
             }
+        }
+
+        if let Some((table_ids, compaction_group_id, compaction_group_config)) = new_tables {
+            let group_deltas = &mut new_version_delta
+                .group_deltas
+                .entry(compaction_group_id)
+                .or_default()
+                .group_deltas;
+
+            for table_id in &table_ids {
+                new_table_ids.insert(*table_id, compaction_group_id);
+            }
+
+            #[expect(deprecated)]
+            group_deltas.push(GroupDelta::GroupConstruct(GroupConstruct {
+                group_config: Some(compaction_group_config),
+                group_id: compaction_group_id,
+                parent_group_id: StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
+                new_sst_start_id: 0, // No need to set it when `NewCompactionGroup`
+                table_ids: vec![],
+                version: CompatibilityVersion::NoMemberTableIds as i32,
+                split_key: None,
+            }));
         }
 
         // Append SSTs to a new version.

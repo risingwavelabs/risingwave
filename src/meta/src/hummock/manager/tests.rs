@@ -310,12 +310,6 @@ async fn test_hummock_transaction() {
     {
         // Add tables in epoch1
         let tables_in_epoch1 = generate_test_tables(epoch1, get_sst_ids(&hummock_manager, 2).await);
-        register_sstable_infos_to_compaction_group(
-            &hummock_manager,
-            &tables_in_epoch1,
-            StaticCompactionGroupId::StateDefault.into(),
-        )
-        .await;
         // Get tables before committing epoch1. No tables should be returned.
         let current_version = hummock_manager.get_current_version().await;
         assert_eq!(current_version.max_committed_epoch, INVALID_EPOCH);
@@ -333,6 +327,8 @@ async fn test_hummock_transaction() {
 
         // Get tables after committing epoch1. All tables committed in epoch1 should be returned
         let current_version = hummock_manager.get_current_version().await;
+        println!("current_version {:?}", current_version);
+
         assert_eq!(current_version.max_committed_epoch, epoch1);
         assert_eq!(
             get_sorted_object_ids(&committed_tables),
@@ -2185,6 +2181,7 @@ async fn test_partition_level() {
     for epoch in 31..100 {
         let mut sst = gen_local_sstable_info(global_sst_id, 10, vec![100]);
         sst.sst_info.file_size = 10 * MB;
+        sst.sst_info.estimated_sst_size = sst.sst_info.file_size;
         sst.sst_info.uncompressed_file_size = 10 * MB;
         hummock_manager
             .commit_epoch_for_test(
@@ -2208,7 +2205,7 @@ async fn test_partition_level() {
                     level
                         .table_infos
                         .iter()
-                        .map(|sst| sst.file_size)
+                        .map(|sst| sst.estimated_sst_size)
                         .sum::<u64>()
                 })
                 .sum::<u64>();

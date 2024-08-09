@@ -103,11 +103,14 @@ impl TombstoneReclaimCompactionPicker {
                     }
                 };
                 return Some(CompactionInput {
-                    select_input_size: select_input_ssts.iter().map(|sst| sst.file_size).sum(),
+                    select_input_size: select_input_ssts
+                        .iter()
+                        .map(|sst| sst.estimated_sst_size)
+                        .sum(),
                     target_input_size: target_level
                         .table_infos
                         .iter()
-                        .map(|sst| sst.file_size)
+                        .map(|sst| sst.estimated_sst_size)
                         .sum(),
                     total_file_count: (select_input_ssts.len() + target_level.table_infos.len())
                         as u64,

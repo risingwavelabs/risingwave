@@ -28,6 +28,7 @@ message SstableInfo {
   uint64 uncompressed_file_size = 11;
   uint64 range_tombstone_count = 12;
   BloomFilterType bloom_filter_kind = 13;
+  uint64 estimated_sst_size = 14; // for compaction
 }
 
 enum LevelType {
@@ -80,6 +81,7 @@ message GroupConstruct {
   uint64 group_id = 4;
   uint64 new_sst_start_id = 5;
   CompatibilityVersion version = 6;
+  optional bytes split_key = 7;
 }
 
 message GroupMetaChange {
@@ -99,6 +101,12 @@ message GroupTableChange {
 
 message GroupDestroy {}
 
+message GroupMerge {
+  uint64 left_group_id = 1;
+  uint64 right_group_id = 2;
+  CompactionConfig group_config = 3;
+}
+
 message GroupDelta {
   oneof delta_type {
     IntraLevelDelta intra_level = 1;
@@ -106,6 +114,7 @@ message GroupDelta {
     GroupDestroy group_destroy = 3;
     GroupMetaChange group_meta_change = 4 [deprecated = true];
     GroupTableChange group_table_change = 5 [deprecated = true];
+    GroupMerge group_merge = 6;
   }
 }
 
@@ -716,6 +725,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 tombstone_reclaim_ratio = 16;
       CompressionAlgorithm compression_algorithm = 17;
       uint32 max_l0_compact_level_count = 18;
+      uint32 split_weight_by_vnode = 19;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -832,6 +842,13 @@ message GetVersionByEpochResponse {
   HummockVersion version = 1;
 }
 
+message MergeCompactionGroupRequest {
+  uint64 left_group_id = 1;
+  uint64 right_group_id = 2;
+}
+
+message MergeCompactionGroupResponse {}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -873,6 +890,7 @@ service HummockManagerService {
   rpc CancelCompactTask(CancelCompactTaskRequest) returns (CancelCompactTaskResponse);
   rpc ListChangeLogEpochs(ListChangeLogEpochsRequest) returns (ListChangeLogEpochsResponse);
   rpc GetVersionByEpoch(GetVersionByEpochRequest) returns (GetVersionByEpochResponse);
+  rpc MergeCompactionGroup(MergeCompactionGroupRequest) returns (MergeCompactionGroupResponse);
 }
 
 message CompactionConfig {

@@ -24,15 +24,13 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_pb::hummock::group_delta::PbDeltaType;
 use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
 use risingwave_pb::hummock::{
-    CompactionConfig, PbGroupConstruct, PbGroupDelta, PbGroupDestroy, PbGroupMetaChange,
+    PbGroupConstruct, PbGroupDelta, PbGroupDestroy, PbGroupMerge, PbGroupMetaChange,
     PbGroupTableChange, PbHummockVersion, PbHummockVersionDelta, PbIntraLevelDelta,
     PbStateTableInfo, StateTableInfo, StateTableInfoDelta,
 };
 use tracing::warn;
 
 use crate::change_log::{ChangeLogDelta, TableChangeLog};
-use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
-use crate::compaction_group::StaticCompactionGroupId;
 use crate::level::Levels;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::TableWatermarks;
@@ -54,7 +52,7 @@ impl HummockVersionStateTableInfo {
         }
     }
 
-    fn build_compaction_group_member_tables(
+    pub fn build_compaction_group_member_tables(
         state_table_info: &HashMap<TableId, PbStateTableInfo>,
     ) -> HashMap<CompactionGroupId, BTreeSet<TableId>> {
         let mut ret: HashMap<_, BTreeSet<_>> = HashMap::new();
@@ -396,8 +394,8 @@ impl HummockVersion {
         self.safe_epoch
     }
 
-    pub fn create_init_version(default_compaction_config: Arc<CompactionConfig>) -> HummockVersion {
-        let mut init_version = HummockVersion {
+    pub fn create_init_version() -> HummockVersion {
+        HummockVersion {
             id: FIRST_VERSION_ID,
             levels: Default::default(),
             max_committed_epoch: INVALID_EPOCH,
@@ -405,17 +403,7 @@ impl HummockVersion {
             table_watermarks: HashMap::new(),
             table_change_log: HashMap::new(),
             state_table_info: HummockVersionStateTableInfo::empty(),
-        };
-        for group_id in [
-            StaticCompactionGroupId::StateDefault as CompactionGroupId,
-            StaticCompactionGroupId::MaterializedView as CompactionGroupId,
-        ] {
-            init_version.levels.insert(
-                group_id,
-                build_initial_compaction_group_levels(group_id, default_compaction_config.as_ref()),
-            );
         }
-        init_version
     }
 
     pub fn version_delta_after(&self) -> HummockVersionDelta {
@@ -483,12 +471,18 @@ impl HummockVersionDelta {
             .flat_map(|group_deltas| {
                 group_deltas.group_deltas.iter().flat_map(|group_delta| {
                     static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
-                    let sst_slice = match group_delta {
-                        GroupDelta::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
-                        GroupDelta::GroupConstruct(_)
-                        | GroupDelta::GroupDestroy(_)
-                        | GroupDelta::GroupMetaChange(_)
-                        | GroupDelta::GroupTableChange(_) => &EMPTY_VEC,
+                    // let sst_slice = match group_delta {
+                    //     GroupDelta::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
+                    //     GroupDelta::GroupConstruct(_)
+                    //     | GroupDelta::GroupDestroy(_)
+                    //     | GroupDelta::GroupMetaChange(_)
+                    //     | GroupDelta::GroupTableChange(_) => &EMPTY_VEC,
+                    // };
+
+                    let sst_slice = if let GroupDelta::IntraLevel(level_delta) = &group_delta {
+                        &level_delta.inserted_table_infos
+                    } else {
+                        &EMPTY_VEC
                     };
                     sst_slice.iter().map(|sst| sst.object_id)
                 })
@@ -508,13 +502,12 @@ impl HummockVersionDelta {
         let ssts_from_group_deltas = self.group_deltas.values().flat_map(|group_deltas| {
             group_deltas.group_deltas.iter().flat_map(|group_delta| {
                 static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
-                let sst_slice = match group_delta {
-                    GroupDelta::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
-                    GroupDelta::GroupConstruct(_)
-                    | GroupDelta::GroupDestroy(_)
-                    | GroupDelta::GroupMetaChange(_)
-                    | GroupDelta::GroupTableChange(_) => &EMPTY_VEC,
+                let sst_slice = if let GroupDelta::IntraLevel(level_delta) = &group_delta {
+                    &level_delta.inserted_table_infos
+                } else {
+                    &EMPTY_VEC
                 };
+
                 sst_slice.iter()
             })
         });
@@ -546,12 +539,10 @@ impl HummockVersionDelta {
             .flat_map(|group_deltas| {
                 group_deltas.group_deltas.iter().flat_map(|group_delta| {
                     static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
-                    let sst_slice = match group_delta {
-                        GroupDelta::IntraLevel(level_delta) => &level_delta.inserted_table_infos,
-                        GroupDelta::GroupConstruct(_)
-                        | GroupDelta::GroupDestroy(_)
-                        | GroupDelta::GroupMetaChange(_)
-                        | GroupDelta::GroupTableChange(_) => &EMPTY_VEC,
+                    let sst_slice = if let GroupDelta::IntraLevel(level_delta) = &group_delta {
+                        &level_delta.inserted_table_infos
+                    } else {
+                        &EMPTY_VEC
                     };
                     sst_slice.iter()
                 })
@@ -855,6 +846,8 @@ pub enum GroupDelta {
 
     #[allow(dead_code)]
     GroupTableChange(PbGroupTableChange),
+
+    GroupMerge(PbGroupMerge),
 }
 
 impl From<PbGroupDelta> for GroupDelta {
@@ -875,6 +868,7 @@ impl From<PbGroupDelta> for GroupDelta {
             Some(PbDeltaType::GroupTableChange(pb_group_table_change)) => {
                 GroupDelta::GroupTableChange(pb_group_table_change)
             }
+            Some(PbDeltaType::GroupMerge(pb_group_merge)) => GroupDelta::GroupMerge(pb_group_merge),
             None => panic!("delta_type is not set"),
         }
     }
@@ -898,6 +892,9 @@ impl From<GroupDelta> for PbGroupDelta {
             GroupDelta::GroupTableChange(pb_group_table_change) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupTableChange(pb_group_table_change)),
             },
+            GroupDelta::GroupMerge(pb_group_merge) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::GroupMerge(pb_group_merge)),
+            },
         }
     }
 }
@@ -920,6 +917,9 @@ impl From<&GroupDelta> for PbGroupDelta {
             GroupDelta::GroupTableChange(pb_group_table_change) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupTableChange(pb_group_table_change.clone())),
             },
+            GroupDelta::GroupMerge(pb_group_merge) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::GroupMerge(pb_group_merge.clone())),
+            },
         }
     }
 }
@@ -941,6 +941,9 @@ impl From<&PbGroupDelta> for GroupDelta {
             }
             Some(PbDeltaType::GroupTableChange(pb_group_table_change)) => {
                 GroupDelta::GroupTableChange(pb_group_table_change.clone())
+            }
+            Some(PbDeltaType::GroupMerge(pb_group_merge)) => {
+                GroupDelta::GroupMerge(pb_group_merge.clone())
             }
             None => panic!("delta_type is not set"),
         }

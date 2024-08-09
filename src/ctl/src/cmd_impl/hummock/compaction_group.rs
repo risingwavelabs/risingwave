@@ -280,3 +280,15 @@ pub async fn cancel_compact_task(context: &CtlContext, task_id: u64) -> anyhow::
 
     Ok(())
 }
+
+pub async fn merge_compaction_group(
+    context: &CtlContext,
+    left_group_id: CompactionGroupId,
+    right_group_id: CompactionGroupId,
+) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    meta_client
+        .merge_compaction_group(left_group_id, right_group_id)
+        .await?;
+    Ok(())
+}

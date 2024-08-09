@@ -52,6 +52,7 @@ pub mod version;
 pub use compact::*;
 use risingwave_common::catalog::TableId;
 
+use crate::key::FullKey;
 use crate::table_watermark::TableWatermarks;
 
 pub type HummockSstableObjectId = u64;
@@ -128,6 +129,7 @@ impl LocalSstableInfo {
     }
 
     pub fn file_size(&self) -> u64 {
+        assert_eq!(self.sst_info.file_size, self.sst_info.estimated_sst_size);
         self.sst_info.file_size
     }
 }
@@ -215,6 +217,15 @@ pub fn can_concat(ssts: &[SstableInfo]) -> bool {
             .compare_right_with(&ssts[i].key_range.left)
             != Ordering::Less
         {
+            tracing::error!(
+                "Can't concat sstables, key range not continuous, left: {:?}, right: {:?} idx {:?} left_key_range: {:?}, right_key_range: {:?}",
+                FullKey::decode(&ssts[i - 1].key_range.right),
+                FullKey::decode(&ssts[i].key_range.left),
+                i,
+                ssts[i - 1].key_range,
+                ssts[i].key_range
+            );
+
             return false;
         }
     }
