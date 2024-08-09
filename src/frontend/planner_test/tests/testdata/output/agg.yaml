@@ -1906,7 +1906,7 @@
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [approx_percentile, sum], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamKeyedMerge { output: [approx_percentile:Float64, sum(sum(t.v1)):Int64] }
+    └─StreamRowMerge { output: [approx_percentile:Float64, sum(sum(t.v1)):Int64] }
       ├─StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }
       │ └─StreamExchange { dist: Single }
       │   └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
@@ -1931,7 +1931,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [s1, approx_percentile, s2, count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(sum(t.v1)), approx_percentile, sum(sum(t.v1)), sum0(count(t.v1))] }
-      └─StreamKeyedMerge { output: [sum(sum(t.v1)):Int64, approx_percentile:Float64, sum0(count(t.v1)):Int64] }
+      └─StreamRowMerge { output: [sum(sum(t.v1)):Int64, approx_percentile:Float64, sum0(count(t.v1)):Int64] }
         ├─StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }
         │ └─StreamExchange { dist: Single }
         │   └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
@@ -1972,23 +1972,16 @@
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [x, y], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamKeyedMerge { output: [approx_percentile:Float64, approx_percentile:Float64] }
-      ├─StreamKeyedMerge { output: [approx_percentile:Float64, approx_percentile:Float64] }
-      │ ├─StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }
-      │ │ └─StreamExchange { dist: Single }
-      │ │   └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
-      │ │     └─StreamShare { id: 2 }
-      │ │       └─StreamProject { exprs: [t.v1::Float64 as $expr1, t.v2::Float64 as $expr2, t._row_id] }
-      │ │         └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-      │ └─StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }
-      │   └─StreamExchange { dist: Single }
-      │     └─StreamLocalApproxPercentile { percentile_col: $expr2, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
-      │       └─StreamShare { id: 2 }
-      │         └─StreamProject { exprs: [t.v1::Float64 as $expr1, t.v2::Float64 as $expr2, t._row_id] }
-      │           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-      └─StreamSimpleAgg { aggs: [count] }
+    └─StreamRowMerge { output: [approx_percentile:Float64, approx_percentile:Float64] }
+      ├─StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }
+      │ └─StreamExchange { dist: Single }
+      │   └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
+      │     └─StreamShare { id: 2 }
+      │       └─StreamProject { exprs: [t.v1::Float64 as $expr1, t.v2::Float64 as $expr2, t._row_id] }
+      │         └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessSimpleAgg { aggs: [] }
+          └─StreamLocalApproxPercentile { percentile_col: $expr2, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
             └─StreamShare { id: 2 }
               └─StreamProject { exprs: [t.v1::Float64 as $expr1, t.v2::Float64 as $expr2, t._row_id] }
                 └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -2003,8 +1996,8 @@
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [s1, x, count, s2, y], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamKeyedMerge { output: [sum(sum(t.v1)):Int64, approx_percentile:Float64, sum0(count):Int64, sum(sum(t.v2)):Int64, approx_percentile:Float64] }
-      ├─StreamKeyedMerge { output: [approx_percentile:Float64, approx_percentile:Float64] }
+    └─StreamRowMerge { output: [sum(sum(t.v1)):Int64, approx_percentile:Float64, sum0(count):Int64, sum(sum(t.v2)):Int64, approx_percentile:Float64] }
+      ├─StreamRowMerge { output: [approx_percentile:Float64, approx_percentile:Float64] }
       │ ├─StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }
       │ │ └─StreamExchange { dist: Single }
       │ │   └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
@@ -2034,7 +2027,7 @@
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [s1, approx_percentile], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamKeyedMerge { output: [sum(sum(t.v1)):Int64, approx_percentile:Float64] }
+    └─StreamRowMerge { output: [sum(sum(t.v1)):Int64, approx_percentile:Float64] }
       ├─StreamGlobalApproxPercentile { quantile: 0.8:Float64, relative_error: 0.01:Float64 }
       │ └─StreamExchange { dist: Single }
       │   └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.8:Float64, relative_error: 0.01:Float64 }

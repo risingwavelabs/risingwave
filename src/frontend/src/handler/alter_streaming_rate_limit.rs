@@ -42,7 +42,7 @@ pub async fn handle_alter_streaming_rate_limit(
         PbThrottleTarget::Mv => {
             let reader = session.env().catalog_reader().read_guard();
             let (table, schema_name) =
-                reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
+                reader.get_any_table_by_name(db_name, schema_path, &real_table_name)?;
             if table.table_type != TableType::MaterializedView {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "\"{table_name}\" is not a materialized view",

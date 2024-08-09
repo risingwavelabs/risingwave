@@ -46,9 +46,8 @@ use uuid::Uuid;
 
 use super::command::CommandContext;
 use super::GlobalBarrierManagerContext;
-use crate::barrier::info::InflightActorInfo;
-use crate::manager::{InflightFragmentInfo, MetaSrvEnv, WorkerId};
-use crate::model::FragmentId;
+use crate::barrier::info::InflightGraphInfo;
+use crate::manager::{MetaSrvEnv, WorkerId};
 use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
@@ -246,31 +245,40 @@ impl ControlStreamManager {
     pub(super) fn inject_barrier(
         &mut self,
         command_context: &CommandContext,
-        pre_applied_fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
-        applied_fragment_infos: Option<&HashMap<FragmentId, InflightFragmentInfo>>,
+        pre_applied_graph_info: &InflightGraphInfo,
+        applied_graph_info: Option<&InflightGraphInfo>,
     ) -> MetaResult<HashSet<WorkerId>> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
             "inject_barrier_err"
         ));
         let mutation = command_context.to_mutation();
-        let info = command_context.info.clone();
         let mut node_need_collect = HashSet::new();
 
-        info.node_map
-            .iter()
-            .map(|(node_id, worker_node)| {
+        for worker_id in pre_applied_graph_info.worker_ids().chain(
+            applied_graph_info
+                .into_iter()
+                .flat_map(|info| info.worker_ids()),
+        ) {
+            if !self.nodes.contains_key(&worker_id) {
+                return Err(anyhow!("unconnected worker node {}", worker_id).into());
+            }
+        }
+
+        self.nodes
+            .iter_mut()
+            .map(|(node_id, node)| {
                 let actor_ids_to_send: Vec<_> =
-                    InflightActorInfo::actor_ids_to_send(pre_applied_fragment_infos, *node_id)
-                        .collect();
-                let actor_ids_to_collect: Vec<_> =
-                    InflightActorInfo::actor_ids_to_collect(pre_applied_fragment_infos, *node_id)
-                        .collect();
+                    pre_applied_graph_info.actor_ids_to_send(*node_id).collect();
+                let actor_ids_to_collect: Vec<_> = pre_applied_graph_info
+                    .actor_ids_to_collect(*node_id)
+                    .collect();
                 if actor_ids_to_collect.is_empty() {
                     // No need to send or collect barrier for this node.
                     assert!(actor_ids_to_send.is_empty());
                 }
-                let table_ids_to_sync = if let Some(fragment_infos) = applied_fragment_infos {
-                    InflightActorInfo::existing_table_ids(fragment_infos)
+                let table_ids_to_sync = if let Some(graph_info) = applied_graph_info {
+                    graph_info
+                        .existing_table_ids()
                         .map(|table_id| table_id.table_id)
                         .collect()
                 } else {
@@ -278,15 +286,6 @@ impl ControlStreamManager {
                 };
 
                 {
-                    let Some(node) = self.nodes.get_mut(node_id) else {
-                        if actor_ids_to_collect.is_empty() {
-                            // Worker node get disconnected but has no actor to collect. Simply skip it.
-                            return Ok(());
-                        }
-                        return Err(
-                            anyhow!("unconnected worker node: {:?}", worker_node.host).into()
-                        );
-                    };
                     let mutation = mutation.clone();
                     let barrier = Barrier {
                         epoch: Some(risingwave_pb::data::Epoch {

@@ -249,6 +249,9 @@ impl CatalogManagerCore {
         {
             let _ = tx.send(Err(err.clone()));
         }
+        // Clear in progress creation streaming job. Note that background job is not tracked here, so that
+        // it won't affect background jobs.
+        self.database.in_progress_creation_streaming_job.clear();
     }
 }
 
@@ -4843,5 +4846,37 @@ impl CatalogManager {
             }
         }
         users_need_update
+    }
+
+    pub async fn update_source_rate_limit_by_source_id(
+        &self,
+        source_id: SourceId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<()> {
+        let source_relation: PbSource;
+        {
+            let core = &mut *self.core.lock().await;
+            let database_core = &mut core.database;
+            let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+            let mut source = sources.get_mut(source_id);
+            let Some(source_catalog) = source.as_mut() else {
+                bail!("source {} not found", source_id)
+            };
+            source_relation = source_catalog.clone();
+            source_catalog.rate_limit = rate_limit;
+            commit_meta!(self, sources)?;
+        }
+
+        let _version = self
+            .notify_frontend(
+                Operation::Update,
+                Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: RelationInfo::Source(source_relation).into(),
+                    }],
+                }),
+            )
+            .await;
+        Ok(())
     }
 }
