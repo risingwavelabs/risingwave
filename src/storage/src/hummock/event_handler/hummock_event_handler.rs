@@ -427,10 +427,18 @@ impl HummockEventHandler {
             }
         }
         if !pending.is_empty() {
-            warn!(
-                pending_count = pending.len(),
-                total_count, "cannot acquire lock for all read version"
-            );
+            if pending.len() * 10 > total_count {
+                // Only print warn log when failed to acquire more than 10%
+                warn!(
+                    pending_count = pending.len(),
+                    total_count, "cannot acquire lock for all read version"
+                );
+            } else {
+                debug!(
+                    pending_count = pending.len(),
+                    total_count, "cannot acquire lock for all read version"
+                );
+            }
         }
 
         const TRY_LOCK_TIMEOUT: Duration = Duration::from_millis(1);

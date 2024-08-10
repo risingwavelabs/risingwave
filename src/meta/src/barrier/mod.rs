@@ -61,9 +61,7 @@ use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, Trac
 use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
 use crate::barrier::state::BarrierManagerState;
 use crate::error::MetaErrorInner;
-use crate::hummock::{
-    BatchCommitForNewCg, CommitEpochInfo, HummockManagerRef, NewTableFragmentInfo,
-};
+use crate::hummock::{CommitEpochInfo, HummockManagerRef, NewTableFragmentInfo};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
@@ -1531,40 +1529,41 @@ fn collect_commit_epoch_info(
     let mut table_watermarks = Vec::with_capacity(resps.len());
     let mut old_value_ssts = Vec::with_capacity(resps.len());
 
-    let batch_commit_creating_job_ssts = state
-        .finished_table_ids
-        .into_values()
-        .map(|job| BatchCommitForNewCg {
-            epoch_to_ssts: job
-                .collected_barrier
-                .into_iter()
-                .map(|(epoch, resps)| {
-                    (
-                        epoch,
-                        resps
-                            .into_iter()
-                            .flat_map(|resp| {
-                                resp.synced_sstables
-                                    .into_iter()
-                                    .map(|sst| LocalSstableInfo {
-                                        sst_info: sst.sst.unwrap().into(),
-                                        table_stats: from_prost_table_stats_map(
-                                            sst.table_stats_map,
-                                        ),
-                                    })
-                            })
-                            .collect(),
-                    )
-                })
-                .collect(),
-            table_ids: job
-                .info
-                .table_fragments
-                .all_table_ids()
-                .map(TableId::new)
-                .collect(),
-        })
-        .collect();
+    let temp = 0;
+    // let batch_commit_creating_job_ssts = state
+    //     .finished_table_ids
+    //     .into_values()
+    //     .map(|job| BatchCommitForNewCg {
+    //         epoch_to_ssts: job
+    //             .collected_barrier
+    //             .into_iter()
+    //             .map(|(epoch, resps)| {
+    //                 (
+    //                     epoch,
+    //                     resps
+    //                         .into_iter()
+    //                         .flat_map(|resp| {
+    //                             resp.synced_sstables
+    //                                 .into_iter()
+    //                                 .map(|sst| LocalSstableInfo {
+    //                                     sst_info: sst.sst.unwrap().into(),
+    //                                     table_stats: from_prost_table_stats_map(
+    //                                         sst.table_stats_map,
+    //                                     ),
+    //                                 })
+    //                         })
+    //                         .collect(),
+    //                 )
+    //             })
+    //             .collect(),
+    //         table_ids: job
+    //             .info
+    //             .table_fragments
+    //             .all_table_ids()
+    //             .map(TableId::new)
+    //             .collect(),
+    //     })
+    //     .collect();
 
     for resp in resps {
         let ssts_iter = resp.synced_sstables.into_iter().map(|grouped| {
@@ -1585,17 +1584,16 @@ fn collect_commit_epoch_info(
         && !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_))
     {
         let table_fragments = &info.table_fragments;
-        Some(NewTableFragmentInfo {
-            table_id: table_fragments.table_id(),
+        NewTableFragmentInfo::Normal {
             mv_table_id: table_fragments.mv_table_id().map(TableId::new),
             internal_table_ids: table_fragments
                 .internal_table_ids()
                 .into_iter()
                 .map(TableId::new)
                 .collect(),
-        })
+        }
     } else {
-        None
+        NewTableFragmentInfo::None
     };
 
     let mut mv_log_store_truncate_epoch = HashMap::new();
@@ -1637,9 +1635,9 @@ fn collect_commit_epoch_info(
 
     let epoch = command_ctx.prev_epoch.value().0;
 
-    CommitEpochInfo::new(
-        synced_ssts,
-        merge_multiple_new_table_watermarks(
+    CommitEpochInfo {
+        sstables: synced_ssts,
+        new_table_watermarks: merge_multiple_new_table_watermarks(
             table_watermarks
                 .into_iter()
                 .map(|watermarks| {
@@ -1652,11 +1650,11 @@ fn collect_commit_epoch_info(
                 })
                 .collect_vec(),
         ),
-        sst_to_worker,
+        sst_to_context: sst_to_worker,
         new_table_fragment_info,
-        table_new_change_log,
-        BTreeMap::from_iter([(epoch, command_ctx.table_ids_to_commit.clone())]),
-        epoch,
-        batch_commit_creating_job_ssts,
-    )
+        change_log_delta: table_new_change_log,
+        committed_epoch: epoch,
+        tables_to_commit: command_ctx.table_ids_to_commit.clone(),
+        is_visible_table_committed_epoch: true,
+    }
 }

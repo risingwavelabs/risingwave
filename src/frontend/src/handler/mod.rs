@@ -401,7 +401,7 @@ pub async fn handle(
             declare_cursor::handle_declare_cursor(handler_args, stmt).await
         }
         Statement::FetchCursor { stmt } => {
-            fetch_cursor::handle_fetch_cursor(handler_args, stmt).await
+            fetch_cursor::handle_fetch_cursor(handler_args, stmt, &formats).await
         }
         Statement::CloseCursor { stmt } => {
             close_cursor::handle_close_cursor(handler_args, stmt).await

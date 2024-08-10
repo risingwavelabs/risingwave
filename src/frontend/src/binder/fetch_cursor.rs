@@ -12,20 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::binder::BoundStatement;
-use crate::error::Result;
-use crate::optimizer::PlanRoot;
-use crate::planner::Planner;
+use risingwave_common::catalog::Schema;
 
-impl Planner {
-    pub(super) fn plan_statement(&mut self, stmt: BoundStatement) -> Result<PlanRoot> {
-        match stmt {
-            BoundStatement::Insert(i) => self.plan_insert(*i),
-            BoundStatement::Delete(d) => self.plan_delete(*d),
-            BoundStatement::Update(u) => self.plan_update(*u),
-            BoundStatement::Query(q) => self.plan_query(*q),
-            BoundStatement::FetchCursor(_) => unimplemented!(),
-            BoundStatement::CreateView(c) => self.plan_query(*c.query),
-        }
+use crate::error::Result;
+use crate::Binder;
+
+#[derive(Debug, Clone)]
+pub struct BoundFetchCursor {
+    pub cursor_name: String,
+
+    pub count: u32,
+
+    pub returning_schema: Option<Schema>,
+}
+
+impl Binder {
+    pub fn bind_fetch_cursor(
+        &mut self,
+        cursor_name: String,
+        count: u32,
+        returning_schema: Option<Schema>,
+    ) -> Result<BoundFetchCursor> {
+        Ok(BoundFetchCursor {
+            cursor_name,
+            count,
+            returning_schema,
+        })
     }
 }

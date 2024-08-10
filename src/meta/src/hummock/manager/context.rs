@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use fail::fail_point;
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
@@ -196,7 +197,9 @@ impl HummockManager {
 
     pub async fn commit_epoch_sanity_check(
         &self,
-        max_committed_epoch: HummockEpoch,
+        committed_epoch: HummockEpoch,
+        tables_to_commit: &HashSet<TableId>,
+        is_visible_table_committed_epoch: bool,
         sstables: &[LocalSstableInfo],
         sst_to_context: &HashMap<HummockSstableObjectId, HummockContextId>,
         current_version: &HummockVersion,
@@ -221,14 +224,36 @@ impl HummockManager {
             }
         }
 
-        // TODO: allow equal when supporting partial checkpoint
-        if max_committed_epoch <= current_version.visible_table_committed_epoch() {
+        if is_visible_table_committed_epoch {
+            if committed_epoch <= current_version.visible_table_committed_epoch() {
+                return Err(anyhow::anyhow!(
+                    "Epoch {} <= max_committed_epoch {}",
+                    committed_epoch,
+                    current_version.visible_table_committed_epoch()
+                )
+                .into());
+            }
+        } else if committed_epoch > current_version.visible_table_committed_epoch() {
             return Err(anyhow::anyhow!(
-                "Epoch {} <= max_committed_epoch {}",
-                max_committed_epoch,
+                "Epoch {} > max_committed_epoch {}",
+                committed_epoch,
                 current_version.visible_table_committed_epoch()
             )
             .into());
+        }
+
+        for table_id in tables_to_commit {
+            if let Some(info) = current_version.state_table_info.info().get(table_id) {
+                if committed_epoch <= info.committed_epoch {
+                    return Err(anyhow::anyhow!(
+                        "table {} Epoch {} <= committed_epoch {}",
+                        committed_epoch,
+                        info.committed_epoch,
+                        table_id
+                    )
+                    .into());
+                }
+            }
         }
 
         async {
@@ -253,7 +278,7 @@ impl HummockManager {
                 .send_event(ResponseEvent::ValidationTask(ValidationTask {
                     sst_infos: sst_infos.into_iter().map(|sst| sst.into()).collect_vec(),
                     sst_id_to_worker_id: sst_to_context.clone(),
-                    epoch: max_committed_epoch,
+                    epoch: committed_epoch,
                 }))
                 .is_err()
             {

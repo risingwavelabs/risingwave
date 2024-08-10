@@ -67,9 +67,7 @@ mod transaction;
 mod utils;
 mod worker;
 
-pub(crate) use commit_epoch::*;
-#[cfg(any(test, feature = "test"))]
-pub use commit_epoch::{BatchCommitForNewCg, CommitEpochInfo};
+pub use commit_epoch::{CommitEpochInfo, NewTableFragmentInfo};
 use compaction::*;
 pub use compaction::{check_cg_write_limit, WriteLimitType};
 pub(crate) use utils::*;
