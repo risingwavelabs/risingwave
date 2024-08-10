@@ -32,6 +32,7 @@ use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_common::{bail, must_match};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::from_prost_table_stats_map;
 use risingwave_hummock_sdk::table_watermark::{
     merge_multiple_new_table_watermarks, TableWatermarks,
@@ -1224,8 +1225,50 @@ impl GlobalBarrierManagerContext {
                 match &command_ctx.kind {
                     BarrierKind::Initial => {}
                     BarrierKind::Checkpoint(epochs) => {
+                        for job in state.finished_table_ids.into_values() {
+                            let tables_to_commit: HashSet<_> = job
+                                .info
+                                .table_fragments
+                                .all_table_ids()
+                                .map(TableId::new)
+                                .collect();
+                            assert!(job.all_collected());
+                            assert!(!job.collected_barrier.is_empty());
+                            let barrier_count = job.collected_barrier.len();
+                            for (i, (epoch, kind, resps)) in
+                                job.collected_barrier.into_iter().enumerate()
+                            {
+                                if i == 0 || i == barrier_count - 1 {
+                                    assert!(kind.is_checkpoint());
+                                }
+                                if !kind.is_checkpoint() {
+                                    continue;
+                                }
+                                let (sst_to_context, sstables, new_table_watermarks, old_value_sst) =
+                                    collect_resp_info(resps);
+                                assert!(old_value_sst.is_empty());
+                                let new_table_fragment_info = if i == 0 {
+                                    NewTableFragmentInfo::NewCompactionGroup {
+                                        table_ids: tables_to_commit.clone(),
+                                    }
+                                } else {
+                                    NewTableFragmentInfo::None
+                                };
+                                let info = CommitEpochInfo {
+                                    sstables,
+                                    new_table_watermarks,
+                                    sst_to_context,
+                                    new_table_fragment_info,
+                                    change_log_delta: Default::default(),
+                                    committed_epoch: epoch,
+                                    tables_to_commit: tables_to_commit.clone(),
+                                    is_visible_table_committed_epoch: false,
+                                };
+                                self.hummock_manager.commit_epoch(info).await?;
+                            }
+                        }
                         let commit_info = collect_commit_epoch_info(
-                            state,
+                            state.resps,
                             command_ctx,
                             epochs,
                             backfill_progress,
@@ -1517,53 +1560,18 @@ impl GlobalBarrierManagerContext {
 
 pub type BarrierManagerRef = GlobalBarrierManagerContext;
 
-fn collect_commit_epoch_info(
-    state: BarrierEpochState,
-    command_ctx: &CommandContext,
-    epochs: &Vec<u64>,
-    backfill_progress: HashMap<TableId, (u64, HashSet<TableId>)>,
-) -> CommitEpochInfo {
-    let resps = state.resps;
+fn collect_resp_info(
+    resps: Vec<BarrierCompleteResponse>,
+) -> (
+    HashMap<HummockSstableObjectId, WorkerId>,
+    Vec<LocalSstableInfo>,
+    HashMap<TableId, TableWatermarks>,
+    Vec<SstableInfo>,
+) {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, WorkerId> = HashMap::new();
     let mut synced_ssts: Vec<LocalSstableInfo> = vec![];
     let mut table_watermarks = Vec::with_capacity(resps.len());
     let mut old_value_ssts = Vec::with_capacity(resps.len());
-
-    let temp = 0;
-    // let batch_commit_creating_job_ssts = state
-    //     .finished_table_ids
-    //     .into_values()
-    //     .map(|job| BatchCommitForNewCg {
-    //         epoch_to_ssts: job
-    //             .collected_barrier
-    //             .into_iter()
-    //             .map(|(epoch, resps)| {
-    //                 (
-    //                     epoch,
-    //                     resps
-    //                         .into_iter()
-    //                         .flat_map(|resp| {
-    //                             resp.synced_sstables
-    //                                 .into_iter()
-    //                                 .map(|sst| LocalSstableInfo {
-    //                                     sst_info: sst.sst.unwrap().into(),
-    //                                     table_stats: from_prost_table_stats_map(
-    //                                         sst.table_stats_map,
-    //                                     ),
-    //                                 })
-    //                         })
-    //                         .collect(),
-    //                 )
-    //             })
-    //             .collect(),
-    //         table_ids: job
-    //             .info
-    //             .table_fragments
-    //             .all_table_ids()
-    //             .map(TableId::new)
-    //             .collect(),
-    //     })
-    //     .collect();
 
     for resp in resps {
         let ssts_iter = resp.synced_sstables.into_iter().map(|grouped| {
@@ -1578,6 +1586,35 @@ fn collect_commit_epoch_info(
         table_watermarks.push(resp.table_watermarks);
         old_value_ssts.extend(resp.old_value_sstables.into_iter().map(|s| s.into()));
     }
+
+    (
+        sst_to_worker,
+        synced_ssts,
+        merge_multiple_new_table_watermarks(
+            table_watermarks
+                .into_iter()
+                .map(|watermarks| {
+                    watermarks
+                        .into_iter()
+                        .map(|(table_id, watermarks)| {
+                            (TableId::new(table_id), TableWatermarks::from(&watermarks))
+                        })
+                        .collect()
+                })
+                .collect_vec(),
+        ),
+        old_value_ssts,
+    )
+}
+
+fn collect_commit_epoch_info(
+    resps: Vec<BarrierCompleteResponse>,
+    command_ctx: &CommandContext,
+    epochs: &Vec<u64>,
+    backfill_progress: HashMap<TableId, (u64, HashSet<TableId>)>,
+) -> CommitEpochInfo {
+    let (sst_to_context, synced_ssts, new_table_watermarks, old_value_ssts) =
+        collect_resp_info(resps);
 
     let new_table_fragment_info = if let Command::CreateStreamingJob { info, job_type } =
         &command_ctx.command
@@ -1637,20 +1674,8 @@ fn collect_commit_epoch_info(
 
     CommitEpochInfo {
         sstables: synced_ssts,
-        new_table_watermarks: merge_multiple_new_table_watermarks(
-            table_watermarks
-                .into_iter()
-                .map(|watermarks| {
-                    watermarks
-                        .into_iter()
-                        .map(|(table_id, watermarks)| {
-                            (TableId::new(table_id), TableWatermarks::from(&watermarks))
-                        })
-                        .collect()
-                })
-                .collect_vec(),
-        ),
-        sst_to_context: sst_to_worker,
+        new_table_watermarks,
+        sst_to_context,
         new_table_fragment_info,
         change_log_delta: table_new_change_log,
         committed_epoch: epoch,

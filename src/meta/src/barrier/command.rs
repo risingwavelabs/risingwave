@@ -402,7 +402,7 @@ impl Command {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BarrierKind {
     Initial,
     Barrier,

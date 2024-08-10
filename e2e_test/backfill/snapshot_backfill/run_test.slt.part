@@ -1,7 +1,7 @@
 control substitution on
 
 statement ok
-set backfill_rate_limit = 500;
+set backfill_rate_limit = 1000;
 
 statement ok
 set streaming_use_snapshot_backfill = true;
