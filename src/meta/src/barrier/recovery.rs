@@ -229,17 +229,6 @@ impl GlobalBarrierManager {
     ///
     /// Returns the new state of the barrier manager after recovery.
     pub async fn recovery(&mut self, paused_reason: Option<PausedReason>, err: Option<MetaError>) {
-        let (prev_epoch, version_id) = self
-            .context
-            .hummock_manager
-            .on_current_version(|version| {
-                (
-                    TracedEpoch::new(Epoch::from(version.visible_table_committed_epoch())),
-                    version.id,
-                )
-            })
-            .await;
-
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked("cluster is under recovering");
@@ -337,6 +326,25 @@ impl GlobalBarrierManager {
                         .purge_state_table_from_hummock(&info.existing_table_ids().collect())
                         .await
                         .context("purge state table from hummock")?;
+
+                    let (prev_epoch, version_id) = self
+                        .context
+                        .hummock_manager
+                        .on_current_version(|version| {
+                            let max_committed_epoch = version.visible_table_committed_epoch();
+                            for (table_id, info) in version.state_table_info.info() {
+                                assert_eq!(
+                                    info.committed_epoch, max_committed_epoch,
+                                    "table {} with invisible epoch is not purged",
+                                    table_id
+                                );
+                            }
+                            (
+                                TracedEpoch::new(Epoch::from(max_committed_epoch)),
+                                version.id,
+                            )
+                        })
+                        .await;
 
                     let mut control_stream_manager =
                         ControlStreamManager::new(self.context.clone());
