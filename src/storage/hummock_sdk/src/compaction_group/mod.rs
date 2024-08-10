@@ -297,8 +297,6 @@ pub mod group_split {
             match other.sub_level_id.cmp(&sub_level.sub_level_id) {
                 Ordering::Less => {}
                 Ordering::Equal => {
-                    // insert_hint = Ok(idx);
-                    // break;
                     return Ok(idx);
                 }
                 Ordering::Greater => {
