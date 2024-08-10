@@ -1284,17 +1284,16 @@ fn collect_commit_epoch_info(
     let new_table_fragment_info =
         if let Command::CreateStreamingJob { info, .. } = &command_ctx.command {
             let table_fragments = &info.table_fragments;
-            Some(NewTableFragmentInfo {
-                table_id: table_fragments.table_id(),
+            NewTableFragmentInfo::Normal {
                 mv_table_id: table_fragments.mv_table_id().map(TableId::new),
                 internal_table_ids: table_fragments
                     .internal_table_ids()
                     .into_iter()
                     .map(TableId::new)
                     .collect(),
-            })
+            }
         } else {
-            None
+            NewTableFragmentInfo::None
         };
 
     let table_new_change_log = build_table_change_log_delta(
@@ -1317,9 +1316,9 @@ fn collect_commit_epoch_info(
 
     let epoch = command_ctx.prev_epoch.value().0;
 
-    CommitEpochInfo::new(
-        synced_ssts,
-        merge_multiple_new_table_watermarks(
+    CommitEpochInfo {
+        sstables: synced_ssts,
+        new_table_watermarks: merge_multiple_new_table_watermarks(
             table_watermarks
                 .into_iter()
                 .map(|watermarks| {
@@ -1332,11 +1331,11 @@ fn collect_commit_epoch_info(
                 })
                 .collect_vec(),
         ),
-        sst_to_worker,
+        sst_to_context: sst_to_worker,
         new_table_fragment_info,
-        table_new_change_log,
-        BTreeMap::from_iter([(epoch, command_ctx.table_ids_to_commit.clone())]),
-        epoch,
-        vec![],
-    )
+        change_log_delta: table_new_change_log,
+        committed_epoch: epoch,
+        tables_to_commit: command_ctx.table_ids_to_commit.clone(),
+        is_visible_table_committed_epoch: true,
+    }
 }
