@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::mem::take;
 use std::sync::Arc;
+use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
@@ -22,7 +23,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::InflightGraphInfo;
@@ -56,6 +57,7 @@ pub(super) enum CreatingStreamingJobStatus {
     },
     ConsumingLogStore {
         graph_info: InflightGraphInfo,
+        start_consume_log_store_epoch: u64,
     },
     Finishing(u64), // The prev epoch that marks it as Finishing
     Finished(u64),  // The prev epoch that marks it as Finished
@@ -67,7 +69,11 @@ pub(super) struct CreatingStreamingJobControl {
     pub(super) snapshot_backfill_info: SnapshotBackfillInfo,
     // key is prev_epoch of barrier
     inflight_barrier_queue: BTreeMap<u64, CreatingStreamingJobEpochState>,
-    pub(super) collected_barrier: Vec<(u64, BarrierKind, Vec<BarrierCompleteResponse>)>,
+    max_collected_epoch: Option<u64>,
+    // newer epoch at the front
+    collected_barrier: VecDeque<(u64, BarrierKind, Vec<BarrierCompleteResponse>)>,
+    is_first_completing: bool,
+    completing_barrier: Option<u64>,
     backfill_epoch: Epoch,
     pub(super) status: CreatingStreamingJobStatus,
 }
@@ -104,7 +110,10 @@ impl CreatingStreamingJobControl {
             info,
             snapshot_backfill_info,
             inflight_barrier_queue: Default::default(),
-            collected_barrier: vec![],
+            max_collected_epoch: None,
+            collected_barrier: VecDeque::new(),
+            is_first_completing: false,
+            completing_barrier: None,
             backfill_epoch,
             status: CreatingStreamingJobStatus::ConsumingSnapshot {
                 prev_epoch_fake_physical_time: 0,
@@ -148,7 +157,7 @@ impl CreatingStreamingJobControl {
         self.inflight_barrier_queue
             .last_key_value()
             .map(|(epoch, _)| *epoch)
-            .or_else(|| self.collected_barrier.last().map(|(epoch, _, _)| *epoch))
+            .or(self.max_collected_epoch)
     }
 
     pub(super) fn gen_ddl_progress(&self) -> DdlProgress {
@@ -167,21 +176,33 @@ impl CreatingStreamingJobControl {
                     format!("ConsumingSnapshot [{}]", progress.progress)
                 }
             }
-            CreatingStreamingJobStatus::ConsumingLogStore { .. } => {
+            CreatingStreamingJobStatus::ConsumingLogStore {
+                start_consume_log_store_epoch,
+                ..
+            } => {
+                let max_collected_epoch = self
+                    .max_collected_epoch
+                    .expect("should have collected some epoch when entering ConsumingLogStore");
+                let lag = Duration::from_millis(
+                    Epoch(*start_consume_log_store_epoch)
+                        .physical_time()
+                        .saturating_sub(Epoch(max_collected_epoch).physical_time()),
+                );
                 format!(
-                    "ConsumingLogStore [remaining epoch count: {}]",
+                    "ConsumingLogStore [wait finish lag: {:?},inflight epoch count: {}]",
+                    lag,
                     self.inflight_barrier_queue.len()
                 )
             }
             CreatingStreamingJobStatus::Finishing(_) => {
                 format!(
-                    "Finishing [remaining epoch count: {}]",
+                    "Finishing [inflight epoch count: {}]",
                     self.inflight_barrier_queue.len()
                 )
             }
             CreatingStreamingJobStatus::Finished(_) => {
                 format!(
-                    "Finished [remaining epoch count: {}]",
+                    "Finished [inflight epoch count: {}]",
                     self.inflight_barrier_queue.len()
                 )
             }
@@ -197,10 +218,10 @@ impl CreatingStreamingJobControl {
         match &self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot { .. } => Some(self.backfill_epoch.0),
             CreatingStreamingJobStatus::ConsumingLogStore { .. } => {
-                if let Some((latest_collected_epoch, _, _)) = self.collected_barrier.last()
-                    && *latest_collected_epoch > self.backfill_epoch.0
+                if let Some(max_collected_epoch) = self.max_collected_epoch
+                    && max_collected_epoch > self.backfill_epoch.0
                 {
-                    Some(*latest_collected_epoch)
+                    Some(max_collected_epoch)
                 } else {
                     Some(self.backfill_epoch.0)
                 }
@@ -208,10 +229,10 @@ impl CreatingStreamingJobControl {
             CreatingStreamingJobStatus::Finishing(_) | CreatingStreamingJobStatus::Finished(_) => {
                 if self.inflight_barrier_queue.is_empty() {
                     None
-                } else if let Some((latest_collected_epoch, _, _)) = self.collected_barrier.last()
-                    && *latest_collected_epoch > self.backfill_epoch.0
+                } else if let Some(max_collected_epoch) = self.max_collected_epoch
+                    && max_collected_epoch > self.backfill_epoch.0
                 {
-                    Some(*latest_collected_epoch)
+                    Some(max_collected_epoch)
                 } else {
                     Some(self.backfill_epoch.0)
                 }
@@ -223,6 +244,7 @@ impl CreatingStreamingJobControl {
         &mut self,
         control_stream_manager: &mut ControlStreamManager,
         is_checkpoint: bool,
+        global_prev_epoch: u64,
     ) -> MetaResult<()> {
         if let CreatingStreamingJobStatus::ConsumingSnapshot {
             prev_epoch_fake_physical_time,
@@ -271,7 +293,10 @@ impl CreatingStreamingJobControl {
                         node_to_collect,
                     );
                 }
-                self.status = CreatingStreamingJobStatus::ConsumingLogStore { graph_info };
+                self.status = CreatingStreamingJobStatus::ConsumingLogStore {
+                    graph_info,
+                    start_consume_log_store_epoch: global_prev_epoch,
+                };
             } else {
                 let prev_epoch =
                     TracedEpoch::new(Epoch::from_physical_time(*prev_epoch_fake_physical_time));
@@ -322,7 +347,7 @@ impl CreatingStreamingJobControl {
                 );
                 pending_commands.push(command_ctx.clone());
             }
-            CreatingStreamingJobStatus::ConsumingLogStore { graph_info } => {
+            CreatingStreamingJobStatus::ConsumingLogStore { graph_info, .. } => {
                 let node_to_collect = control_stream_manager.inject_barrier(
                     Some(table_id),
                     if to_finish {
@@ -370,7 +395,12 @@ impl CreatingStreamingJobControl {
             assert!(epoch > latest_epoch, "{} {}", epoch, latest_epoch);
         }
         if node_to_collect.is_empty() {
-            self.collected_barrier.push((epoch, barrier_kind, vec![]));
+            self.collected_barrier
+                .push_front((epoch, barrier_kind, vec![]));
+            if let Some(max_collected_epoch) = self.max_collected_epoch {
+                assert!(epoch > max_collected_epoch);
+            }
+            self.max_collected_epoch = Some(epoch);
         } else {
             self.inflight_barrier_queue.insert(
                 epoch,
@@ -383,8 +413,10 @@ impl CreatingStreamingJobControl {
         }
     }
 
-    pub(super) fn all_collected(&self) -> bool {
+    pub(super) fn all_completed(&self) -> bool {
         self.inflight_barrier_queue.is_empty()
+            && self.collected_barrier.is_empty()
+            && self.completing_barrier.is_none()
     }
 
     pub(super) fn collect(
@@ -392,7 +424,7 @@ impl CreatingStreamingJobControl {
         epoch: u64,
         worker_id: WorkerId,
         resp: BarrierCompleteResponse,
-    ) -> Option<u64> {
+    ) {
         debug!(
             epoch,
             worker_id,
@@ -423,7 +455,11 @@ impl CreatingStreamingJobControl {
             if state.node_to_collect.is_empty() {
                 let (epoch, state) = self.inflight_barrier_queue.pop_first().expect("non-empty");
                 self.collected_barrier
-                    .push((epoch, state.kind, state.resps));
+                    .push_front((epoch, state.kind, state.resps));
+                if let Some(max_collected_epoch) = self.max_collected_epoch {
+                    assert!(epoch > max_collected_epoch);
+                }
+                self.max_collected_epoch = Some(epoch);
             } else {
                 break;
             }
@@ -435,29 +471,56 @@ impl CreatingStreamingJobControl {
             inflight = ?self.inflight_barrier_queue.keys().collect_vec(),
             "collect"
         );
-        if self.all_collected() {
-            if let CreatingStreamingJobStatus::Finished(finished_epoch) = self.status {
-                Some(finished_epoch)
-            } else {
-                None
+    }
+
+    pub(super) fn start_completing(&mut self) -> Option<(u64, Vec<BarrierCompleteResponse>, bool)> {
+        assert!(self.completing_barrier.is_none());
+        while let Some((epoch, kind, resps)) = self.collected_barrier.pop_back() {
+            if !self.is_first_completing {
+                assert!(kind.is_checkpoint());
+                self.completing_barrier = Some(epoch);
+                self.is_first_completing = true;
+                return Some((epoch, resps, true));
+            } else if kind.is_checkpoint() {
+                self.completing_barrier = Some(epoch);
+                return Some((epoch, resps, false));
             }
+        }
+        None
+    }
+
+    pub(super) fn ack_completed(&mut self, completed_epoch: u64) -> Option<u64> {
+        assert_eq!(self.completing_barrier.take(), Some(completed_epoch));
+        if let CreatingStreamingJobStatus::Finished(finished_epoch) = self.status
+            && self.inflight_barrier_queue.is_empty()
+            && self.collected_barrier.is_empty()
+        {
+            Some(finished_epoch)
         } else {
             None
         }
     }
 
     pub(super) fn should_finish(&self) -> Option<InflightGraphInfo> {
-        if let CreatingStreamingJobStatus::ConsumingLogStore { graph_info } = &self.status {
-            // TODO: should have a new policy before merged
-            let len = self
-                .collected_barrier
-                .iter()
-                .filter(|(epoch, _, _)| *epoch > self.backfill_epoch.0)
-                .count();
-            warn!(len, "jobs finished, waiting to collect more");
-            if len > 10 {
+        if let CreatingStreamingJobStatus::ConsumingLogStore {
+            graph_info,
+            start_consume_log_store_epoch,
+        } = &self.status
+        {
+            let max_collected_epoch = self
+                .max_collected_epoch
+                .expect("should have collected some epoch when entering `ConsumingLogStore`");
+            if max_collected_epoch >= *start_consume_log_store_epoch {
                 Some(graph_info.clone())
             } else {
+                let lag = Duration::from_millis(
+                    Epoch(*start_consume_log_store_epoch).physical_time()
+                        - Epoch(max_collected_epoch).physical_time(),
+                );
+                debug!(
+                    ?lag,
+                    max_collected_epoch, start_consume_log_store_epoch, "wait consuming log store"
+                );
                 None
             }
         } else {

@@ -253,7 +253,7 @@ impl CheckpointControl {
     fn total_command_num(&self) -> usize {
         self.command_ctx_queue.len()
             + match &self.completing_command {
-                CompletingCommand::Completing { .. } => 1,
+                CompletingCommand::GlobalStreamingGraph { .. } => 1,
                 _ => 0,
             }
     }
@@ -332,12 +332,13 @@ impl CheckpointControl {
                 .get_mut(&table_id)
                 .expect("should exist");
             assert_matches!(&streaming_job.status, CreatingStreamingJobStatus::Finished(finished_epoch) if *finished_epoch == command_ctx.prev_epoch.value().0);
-            if streaming_job.all_collected() {
+            if streaming_job.all_completed() {
                 finished_table_ids.insert(
                     table_id,
                     self.creating_streaming_job_controls
                         .remove(&table_id)
-                        .expect("should exist"),
+                        .expect("should exist")
+                        .info,
                 );
             } else {
                 finishing_table_ids.insert(table_id);
@@ -395,27 +396,10 @@ impl CheckpointControl {
             }
         } else {
             let creating_table_id = TableId::new(resp.partial_graph_id);
-            if let Some(finished_epoch) = self
-                .creating_streaming_job_controls
+            self.creating_streaming_job_controls
                 .get_mut(&creating_table_id)
                 .expect("should exist")
                 .collect(prev_epoch, worker_id, resp)
-            {
-                debug!(finished_epoch, ?creating_table_id, "finish creating job");
-                let creating_streaming_job = self
-                    .creating_streaming_job_controls
-                    .remove(&creating_table_id)
-                    .expect("should exist");
-                let state = &mut self
-                    .command_ctx_queue
-                    .get_mut(&finished_epoch)
-                    .expect("should exist")
-                    .state;
-                assert!(state.finishing_table_ids.remove(&creating_table_id));
-                state
-                    .finished_table_ids
-                    .insert(creating_table_id, creating_streaming_job);
-            }
         }
     }
 
@@ -434,8 +418,10 @@ impl CheckpointControl {
             .last_key_value()
             .map(|(_, x)| &x.command_ctx)
             .or(match &self.completing_command {
-                CompletingCommand::None | CompletingCommand::Err(_) => None,
-                CompletingCommand::Completing { command_ctx, .. } => Some(command_ctx),
+                CompletingCommand::None
+                | CompletingCommand::Err(_)
+                | CompletingCommand::CreatingStreamingJob { .. } => None,
+                CompletingCommand::GlobalStreamingGraph { command_ctx, .. } => Some(command_ctx),
             })
             .map(|command_ctx| command_ctx.command.should_pause_inject_barrier())
             .unwrap_or(false);
@@ -445,8 +431,11 @@ impl CheckpointControl {
                 .map(|node| &node.command_ctx)
                 .chain(
                     match &self.completing_command {
-                        CompletingCommand::None | CompletingCommand::Err(_) => None,
-                        CompletingCommand::Completing { command_ctx, .. } => Some(command_ctx),
+                        CompletingCommand::None
+                        | CompletingCommand::Err(_)
+                        | CompletingCommand::CreatingStreamingJob { .. } => None,
+                        CompletingCommand::GlobalStreamingGraph { command_ctx, .. } =>
+                            Some(command_ctx),
                     }
                     .into_iter()
                 )
@@ -462,7 +451,7 @@ impl CheckpointControl {
         // join spawned completing command to finish no matter it succeeds or not.
         let is_err = match replace(&mut self.completing_command, CompletingCommand::None) {
             CompletingCommand::None => false,
-            CompletingCommand::Completing {
+            CompletingCommand::GlobalStreamingGraph {
                 command_ctx,
                 join_handle,
                 ..
@@ -485,6 +474,19 @@ impl CheckpointControl {
                 }
             }
             CompletingCommand::Err(_) => true,
+            CompletingCommand::CreatingStreamingJob { join_handle, .. } => {
+                match join_handle.await {
+                    Err(e) => {
+                        warn!(err = ?e.as_report(), "failed to join completing task");
+                        true
+                    }
+                    Ok(Err(e)) => {
+                        warn!(err = ?e.as_report(), "failed to complete barrier during clear");
+                        true
+                    }
+                    Ok(Ok(_)) => false,
+                }
+            }
         };
         if !is_err {
             // continue to finish the pending collected barrier.
@@ -562,7 +564,7 @@ struct BarrierEpochState {
 
     finishing_table_ids: HashSet<TableId>,
 
-    finished_table_ids: HashMap<TableId, CreatingStreamingJobControl>,
+    finished_table_ids: HashMap<TableId, CreateStreamingJobCommandInfo>,
 }
 
 impl BarrierEpochState {
@@ -573,7 +575,7 @@ impl BarrierEpochState {
 
 enum CompletingCommand {
     None,
-    Completing {
+    GlobalStreamingGraph {
         command_ctx: Arc<CommandContext>,
         table_ids_to_finish: HashSet<TableId>,
         require_next_checkpoint: bool,
@@ -582,6 +584,11 @@ enum CompletingCommand {
         // The return value indicate whether there is some create streaming job command
         // that has finished but not checkpointed. If there is any, we will force checkpoint on the next barrier
         join_handle: JoinHandle<MetaResult<Option<HummockVersionStats>>>,
+    },
+    CreatingStreamingJob {
+        table_id: TableId,
+        epoch: u64,
+        join_handle: JoinHandle<MetaResult<()>>,
     },
     #[expect(dead_code)]
     Err(MetaError),
@@ -887,7 +894,7 @@ impl GlobalBarrierManager {
                 }
                 complete_result = self.checkpoint_control.next_completed_barrier() => {
                     match complete_result {
-                        Ok(output) => {
+                        Ok(Some(output)) => {
                             // If there are remaining commands (that requires checkpoint to finish), we force
                             // the next barrier to be a checkpoint.
                             if output.require_next_checkpoint {
@@ -898,6 +905,7 @@ impl GlobalBarrierManager {
                                 output.table_ids_to_finish.iter().map(|table_id| table_id.table_id).collect()
                             );
                         }
+                        Ok(None) => {}
                         Err(e) => {
                             self.failure_recovery(e).await;
                         }
@@ -970,7 +978,11 @@ impl GlobalBarrierManager {
             .creating_streaming_job_controls
             .values_mut()
         {
-            creating_job.may_inject_fake_barrier(&mut self.control_stream_manager, checkpoint)?
+            creating_job.may_inject_fake_barrier(
+                &mut self.control_stream_manager,
+                checkpoint,
+                prev_epoch.value().0,
+            )?
         }
 
         self.pending_non_checkpoint_barriers
@@ -1140,6 +1152,37 @@ impl GlobalBarrierManager {
 }
 
 impl GlobalBarrierManagerContext {
+    async fn complete_creating_job_barrier(
+        self,
+        epoch: u64,
+        resps: Vec<BarrierCompleteResponse>,
+        tables_to_commit: HashSet<TableId>,
+        is_first_time: bool,
+    ) -> MetaResult<()> {
+        let (sst_to_context, sstables, new_table_watermarks, old_value_sst) =
+            collect_resp_info(resps);
+        assert!(old_value_sst.is_empty());
+        let new_table_fragment_info = if is_first_time {
+            NewTableFragmentInfo::NewCompactionGroup {
+                table_ids: tables_to_commit.clone(),
+            }
+        } else {
+            NewTableFragmentInfo::None
+        };
+        let info = CommitEpochInfo {
+            sstables,
+            new_table_watermarks,
+            sst_to_context,
+            new_table_fragment_info,
+            change_log_delta: Default::default(),
+            committed_epoch: epoch,
+            tables_to_commit: tables_to_commit.clone(),
+            is_visible_table_committed_epoch: false,
+        };
+        self.hummock_manager.commit_epoch(info).await?;
+        Ok(())
+    }
+
     /// Try to commit this node. If err, returns
     async fn complete_barrier(
         self,
@@ -1160,24 +1203,19 @@ impl GlobalBarrierManagerContext {
         } = node;
         assert!(state.node_to_collect.is_empty());
         assert!(state.finishing_table_ids.is_empty());
-        assert!(state.finished_table_ids.values().all(|job| {
-            let prev_epoch = command_ctx.prev_epoch.value().0;
-            matches!(&job.status, CreatingStreamingJobStatus::Finished(epoch) if *epoch == prev_epoch)
-                && job.all_collected()
-        }));
         let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
         if !state.finished_table_ids.is_empty() {
             assert!(command_ctx.kind.is_checkpoint());
         }
-        finished_jobs.extend(state.finished_table_ids.values().map(|job| {
+        finished_jobs.extend(state.finished_table_ids.into_values().map(|info| {
             TrackingJob::New(TrackingCommand {
-                info: job.info.clone(),
+                info,
                 replace_table_info: None,
             })
         }));
 
         let result = self
-            .update_snapshot(&command_ctx, state, backfill_progress)
+            .update_snapshot(&command_ctx, state.resps, backfill_progress)
             .await;
 
         let version_stats = match result {
@@ -1209,7 +1247,7 @@ impl GlobalBarrierManagerContext {
     async fn update_snapshot(
         &self,
         command_ctx: &CommandContext,
-        state: BarrierEpochState,
+        resps: Vec<BarrierCompleteResponse>,
         backfill_progress: HashMap<TableId, (u64, HashSet<TableId>)>,
     ) -> MetaResult<Option<HummockVersionStats>> {
         {
@@ -1225,50 +1263,8 @@ impl GlobalBarrierManagerContext {
                 match &command_ctx.kind {
                     BarrierKind::Initial => {}
                     BarrierKind::Checkpoint(epochs) => {
-                        for job in state.finished_table_ids.into_values() {
-                            let tables_to_commit: HashSet<_> = job
-                                .info
-                                .table_fragments
-                                .all_table_ids()
-                                .map(TableId::new)
-                                .collect();
-                            assert!(job.all_collected());
-                            assert!(!job.collected_barrier.is_empty());
-                            let barrier_count = job.collected_barrier.len();
-                            for (i, (epoch, kind, resps)) in
-                                job.collected_barrier.into_iter().enumerate()
-                            {
-                                if i == 0 || i == barrier_count - 1 {
-                                    assert!(kind.is_checkpoint());
-                                }
-                                if !kind.is_checkpoint() {
-                                    continue;
-                                }
-                                let (sst_to_context, sstables, new_table_watermarks, old_value_sst) =
-                                    collect_resp_info(resps);
-                                assert!(old_value_sst.is_empty());
-                                let new_table_fragment_info = if i == 0 {
-                                    NewTableFragmentInfo::NewCompactionGroup {
-                                        table_ids: tables_to_commit.clone(),
-                                    }
-                                } else {
-                                    NewTableFragmentInfo::None
-                                };
-                                let info = CommitEpochInfo {
-                                    sstables,
-                                    new_table_watermarks,
-                                    sst_to_context,
-                                    new_table_fragment_info,
-                                    change_log_delta: Default::default(),
-                                    committed_epoch: epoch,
-                                    tables_to_commit: tables_to_commit.clone(),
-                                    is_visible_table_committed_epoch: false,
-                                };
-                                self.hummock_manager.commit_epoch(info).await?;
-                            }
-                        }
                         let commit_info = collect_commit_epoch_info(
-                            state.resps,
+                            resps,
                             command_ctx,
                             epochs,
                             backfill_progress,
@@ -1391,7 +1387,9 @@ impl CheckpointControl {
             .collect()
     }
 
-    pub(super) async fn next_completed_barrier(&mut self) -> MetaResult<BarrierCompleteOutput> {
+    pub(super) async fn next_completed_barrier(
+        &mut self,
+    ) -> MetaResult<Option<BarrierCompleteOutput>> {
         if matches!(&self.completing_command, CompletingCommand::None) {
             // If there is no completing barrier, try to start completing the earliest barrier if
             // it has been collected.
@@ -1418,47 +1416,115 @@ impl CheckpointControl {
                     } else {
                         false
                     };
-                self.completing_command = CompletingCommand::Completing {
+                self.completing_command = CompletingCommand::GlobalStreamingGraph {
                     command_ctx,
                     require_next_checkpoint,
                     join_handle,
                     table_ids_to_finish,
                 };
+            } else {
+                for (table_id, job) in &mut self.creating_streaming_job_controls {
+                    if let Some((epoch, resps, is_first_time)) = job.start_completing() {
+                        let tables_to_commit = job
+                            .info
+                            .table_fragments
+                            .all_table_ids()
+                            .map(TableId::new)
+                            .collect();
+                        let join_handle =
+                            tokio::spawn(self.context.clone().complete_creating_job_barrier(
+                                epoch,
+                                resps,
+                                tables_to_commit,
+                                is_first_time,
+                            ));
+                        self.completing_command = CompletingCommand::CreatingStreamingJob {
+                            table_id: *table_id,
+                            epoch,
+                            join_handle,
+                        };
+                        break;
+                    }
+                }
             }
         }
 
-        if let CompletingCommand::Completing { join_handle, .. } = &mut self.completing_command {
-            let join_result: MetaResult<_> = try {
-                join_handle
-                    .await
-                    .context("failed to join completing command")??
-            };
-            // It's important to reset the completing_command after await no matter the result is err
-            // or not, and otherwise the join handle will be polled again after ready.
-            let next_completing_command_status = if let Err(e) = &join_result {
-                CompletingCommand::Err(e.clone())
-            } else {
-                CompletingCommand::None
-            };
-            let completed_command =
-                replace(&mut self.completing_command, next_completing_command_status);
-            join_result.map(move | version_stats| {
-                if let Some(new_version_stats) = version_stats {
-                    self.hummock_version_stats = new_version_stats;
-                }
-                must_match!(
-                    completed_command,
-                    CompletingCommand::Completing { command_ctx, table_ids_to_finish, require_next_checkpoint, .. } => {
-                        BarrierCompleteOutput {
-                            command_ctx,
-                            require_next_checkpoint,
-                            table_ids_to_finish,
+        match &mut self.completing_command {
+            CompletingCommand::GlobalStreamingGraph { join_handle, .. } => {
+                let join_result: MetaResult<_> = try {
+                    join_handle
+                        .await
+                        .context("failed to join completing command")??
+                };
+                // It's important to reset the completing_command after await no matter the result is err
+                // or not, and otherwise the join handle will be polled again after ready.
+                let next_completing_command_status = if let Err(e) = &join_result {
+                    CompletingCommand::Err(e.clone())
+                } else {
+                    CompletingCommand::None
+                };
+                let completed_command =
+                    replace(&mut self.completing_command, next_completing_command_status);
+                join_result.map(move | version_stats| {
+                        if let Some(new_version_stats) = version_stats {
+                            self.hummock_version_stats = new_version_stats;
                         }
-                    }
-                )
-            })
-        } else {
-            pending().await
+                        must_match!(
+                            completed_command,
+                            CompletingCommand::GlobalStreamingGraph { command_ctx, table_ids_to_finish, require_next_checkpoint, .. } => {
+                                Some(BarrierCompleteOutput {
+                                    command_ctx,
+                                    require_next_checkpoint,
+                                    table_ids_to_finish,
+                                })
+                            }
+                        )
+                    })
+            }
+            CompletingCommand::CreatingStreamingJob {
+                table_id,
+                epoch,
+                join_handle,
+            } => {
+                let table_id = *table_id;
+                let epoch = *epoch;
+                let join_result: MetaResult<_> = try {
+                    join_handle
+                        .await
+                        .context("failed to join completing command")??
+                };
+                // It's important to reset the completing_command after await no matter the result is err
+                // or not, and otherwise the join handle will be polled again after ready.
+                let next_completing_command_status = if let Err(e) = &join_result {
+                    CompletingCommand::Err(e.clone())
+                } else {
+                    CompletingCommand::None
+                };
+                self.completing_command = next_completing_command_status;
+                if let Some(finished_epoch) = self
+                    .creating_streaming_job_controls
+                    .get_mut(&table_id)
+                    .expect("should exist")
+                    .ack_completed(epoch)
+                {
+                    debug!(finished_epoch, ?table_id, "finish creating job");
+                    let creating_streaming_job = self
+                        .creating_streaming_job_controls
+                        .remove(&table_id)
+                        .expect("should exist");
+                    let state = &mut self
+                        .command_ctx_queue
+                        .get_mut(&finished_epoch)
+                        .expect("should exist")
+                        .state;
+                    assert!(state.finishing_table_ids.remove(&table_id));
+                    state
+                        .finished_table_ids
+                        .insert(table_id, creating_streaming_job.info);
+                }
+                join_result.map(|_| None)
+            }
+            CompletingCommand::None | CompletingCommand::Err(_) => pending().await,
         }
     }
 }
@@ -1560,6 +1626,7 @@ impl GlobalBarrierManagerContext {
 
 pub type BarrierManagerRef = GlobalBarrierManagerContext;
 
+#[expect(clippy::type_complexity)]
 fn collect_resp_info(
     resps: Vec<BarrierCompleteResponse>,
 ) -> (
