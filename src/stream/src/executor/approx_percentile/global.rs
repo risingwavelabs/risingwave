@@ -84,13 +84,10 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
         )
         .await?;
 
-        let mut received_input = false;
-
         #[for_await]
         for message in input_stream {
             match message? {
                 Message::Chunk(chunk) => {
-                    received_input = true;
                     for (_, row) in chunk.rows() {
                         // Decoding
                         let sign_datum = row.datum_at(0);
@@ -125,15 +122,6 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
                     }
                 }
                 Message::Barrier(barrier) => {
-                    // If we haven't received any input, we don't need to update the state.
-                    // This is unless row count state is empty, then we need to persist the state,
-                    // and yield a NULL downstream.
-                    if !received_input && row_count_state.is_some() {
-                        count_state_table.commit(barrier.epoch).await?;
-                        bucket_state_table.commit(barrier.epoch).await?;
-                        yield Message::Barrier(barrier);
-                        continue;
-                    }
                     // We maintain an invariant, iff row_count_state is none,
                     // we haven't pushed any data to downstream.
                     // Naturally, if row_count_state is some,
