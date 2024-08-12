@@ -76,6 +76,7 @@ impl TestSuite {
         self.complex_cancel(false).await?;
         self.complex_cancel(true).await?;
         self.subquery_with_param().await?;
+        self.create_mview_with_parameter().await?;
         Ok(())
     }
 
@@ -378,13 +379,36 @@ impl TestSuite {
                 .is_err(),
             true
         );
-        test_eq!(
-            client
-                .query("create materialized view v as select $1", &[])
-                .await
-                .is_err(),
-            true
-        );
+
+        Ok(())
+    }
+
+    async fn create_mview_with_parameter(&self) -> anyhow::Result<()> {
+        let client = self.create_client(false).await?;
+
+        let statement = client
+            .prepare_typed(
+                "create materialized view mv as select $1 as x",
+                &[Type::INT4],
+            )
+            .await?;
+
+        client.execute(&statement, &[&42_i32]).await?;
+
+        let rows = client.query("select * from mv", &[]).await?;
+        test_eq!(rows.len(), 1);
+        test_eq!(rows.first().unwrap().get::<usize, i32>(0), 42);
+
+        // Test renaming mv because it relies on parsing and rewrite the `create MV` query
+        client
+            .execute("alter materialized view mv rename to mv2", &[])
+            .await?;
+
+        let rows = client.query("select * from mv2", &[]).await?;
+        test_eq!(rows.len(), 1);
+        test_eq!(rows.first().unwrap().get::<usize, i32>(0), 42);
+
+        client.execute("drop materialized view mv2", &[]).await?;
 
         Ok(())
     }

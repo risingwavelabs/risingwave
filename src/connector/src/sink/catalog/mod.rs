@@ -15,6 +15,7 @@
 pub mod desc;
 
 use std::collections::BTreeMap;
+use std::fmt::{Display, Formatter};
 
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -28,6 +29,7 @@ use risingwave_pb::catalog::{
     PbCreateType, PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus,
 };
 use risingwave_pb::secret::PbSecretRef;
+use serde_derive::Serialize;
 
 use super::{
     SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
@@ -120,26 +122,38 @@ pub struct SinkFormatDesc {
     pub format: SinkFormat,
     pub encode: SinkEncode,
     pub options: BTreeMap<String, String>,
-
+    pub secret_refs: BTreeMap<String, PbSecretRef>,
     pub key_encode: Option<SinkEncode>,
 }
 
 /// TODO: consolidate with [`crate::source::SourceFormat`] and [`crate::parser::ProtocolProperties`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum SinkFormat {
     AppendOnly,
     Upsert,
     Debezium,
 }
 
+impl Display for SinkFormat {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 /// TODO: consolidate with [`crate::source::SourceEncode`] and [`crate::parser::EncodingProperties`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum SinkEncode {
     Json,
     Protobuf,
     Avro,
     Template,
     Text,
+}
+
+impl Display for SinkEncode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 impl SinkFormatDesc {
@@ -170,6 +184,7 @@ impl SinkFormatDesc {
             format,
             encode,
             options: Default::default(),
+            secret_refs: Default::default(),
             key_encode: None,
         }))
     }
@@ -203,7 +218,7 @@ impl SinkFormatDesc {
             encode: encode.into(),
             options,
             key_encode,
-            secret_refs: Default::default(),
+            secret_refs: self.secret_refs.clone(),
         }
     }
 }
@@ -235,7 +250,13 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             E::Protobuf => SinkEncode::Protobuf,
             E::Template => SinkEncode::Template,
             E::Avro => SinkEncode::Avro,
-            e @ (E::Unspecified | E::Native | E::Csv | E::Bytes | E::None | E::Text) => {
+            e @ (E::Unspecified
+            | E::Native
+            | E::Csv
+            | E::Bytes
+            | E::None
+            | E::Text
+            | E::Parquet) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink encode unsupported: {}",
                     e.as_str_name()
@@ -252,6 +273,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             | E::Protobuf
             | E::Template
             | E::Native
+            | E::Parquet
             | E::None) => {
                 return Err(SinkError::Config(anyhow!(
                     "unsupported {} as sink key encode",
@@ -259,13 +281,13 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
                 )))
             }
         };
-        let options = value.options.into_iter().collect();
 
         Ok(Self {
             format,
             encode,
-            options,
+            options: value.options,
             key_encode,
+            secret_refs: value.secret_refs,
         })
     }
 }
@@ -342,6 +364,9 @@ pub struct SinkCatalog {
 
     /// The secret reference for the sink, mapping from property name to secret id.
     pub secret_refs: BTreeMap<String, PbSecretRef>,
+
+    /// Only for the sink whose target is a table. Columns of the target table when the sink is created. At this point all the default columns of the target table are all handled by the project operator in the sink plan.
+    pub original_target_columns: Vec<ColumnCatalog>,
 }
 
 impl SinkCatalog {
@@ -384,6 +409,11 @@ impl SinkCatalog {
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             create_type: self.create_type.to_proto() as i32,
             secret_refs: self.secret_refs.clone(),
+            original_target_columns: self
+                .original_target_columns
+                .iter()
+                .map(|c| c.to_protobuf())
+                .collect_vec(),
         }
     }
 
@@ -419,6 +449,11 @@ impl SinkCatalog {
 
     pub fn downstream_pk_indices(&self) -> Vec<usize> {
         self.downstream_pk.clone()
+    }
+
+    pub fn unique_identity(&self) -> String {
+        // We need to align with meta here, so we've utilized the proto method.
+        self.to_proto().unique_identity()
     }
 }
 
@@ -478,6 +513,11 @@ impl From<PbSink> for SinkCatalog {
             created_at_cluster_version: pb.created_at_cluster_version,
             create_type: CreateType::from_proto(create_type),
             secret_refs: pb.secret_refs,
+            original_target_columns: pb
+                .original_target_columns
+                .into_iter()
+                .map(ColumnCatalog::from)
+                .collect_vec(),
         }
     }
 }

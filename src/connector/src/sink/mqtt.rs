@@ -31,8 +31,8 @@ use with_options::WithOptions;
 
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
 use super::encoder::{
-    DateHandlingMode, JsonEncoder, ProtoEncoder, ProtoHeader, RowEncoder, SerTo, TimeHandlingMode,
-    TimestampHandlingMode, TimestamptzHandlingMode,
+    DateHandlingMode, JsonEncoder, JsonbHandlingMode, ProtoEncoder, ProtoHeader, RowEncoder, SerTo,
+    TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode,
 };
 use super::writer::AsyncTruncateSinkWriterExt;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
@@ -133,7 +133,7 @@ impl MqttConfig {
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY {
             Err(SinkError::Config(anyhow!(
-                "Mqtt sink only support append-only mode"
+                "MQTT sink only supports append-only mode"
             )))
         } else {
             Ok(config)
@@ -175,7 +175,7 @@ impl Sink for MqttSink {
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
             return Err(SinkError::Mqtt(anyhow!(
-                "Mqtt sink only support append-only mode"
+                "MQTT sink only supports append-only mode"
             )));
         }
 
@@ -221,7 +221,7 @@ impl MqttSinkWriter {
         }
 
         let timestamptz_mode = TimestamptzHandlingMode::from_options(&format_desc.options)?;
-
+        let jsonb_handling_mode = JsonbHandlingMode::from_options(&format_desc.options)?;
         let encoder = match format_desc.format {
             SinkFormat::AppendOnly => match format_desc.encode {
                 SinkEncode::Json => RowEncoderWrapper::Json(JsonEncoder::new(
@@ -231,6 +231,7 @@ impl MqttSinkWriter {
                     TimestampHandlingMode::Milli,
                     timestamptz_mode,
                     TimeHandlingMode::Milli,
+                    jsonb_handling_mode,
                 )),
                 SinkEncode::Protobuf => {
                     let (descriptor, sid) = crate::schema::protobuf::fetch_descriptor(
@@ -260,7 +261,7 @@ impl MqttSinkWriter {
             },
             _ => {
                 return Err(SinkError::Config(anyhow!(
-                    "Mqtt sink only support append-only mode"
+                    "MQTT sink only supports append-only mode"
                 )))
             }
         };

@@ -18,7 +18,7 @@ use std::mem;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
-use risingwave_expr::aggregate::{agg_kinds, AggKind};
+use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
 
 use super::{BoxedRule, Rule};
 use crate::expr::{CollectInputRef, ExprType, FunctionCall, InputRef, Literal};
@@ -57,8 +57,11 @@ impl Rule for DistinctAggRule {
                 c.agg_kind
             );
             let agg_kind_ok = !matches!(c.agg_kind, agg_kinds::simply_cannot_two_phase!());
-            let order_ok = matches!(c.agg_kind, agg_kinds::result_unaffected_by_order_by!())
-                || c.order_by.is_empty();
+            let order_ok = matches!(
+                c.agg_kind,
+                agg_kinds::result_unaffected_by_order_by!()
+                    | AggKind::Builtin(PbAggKind::ApproxPercentile)
+            ) || c.order_by.is_empty();
             agg_kind_ok && order_ok
         }) {
             tracing::warn!("DistinctAggRule: unsupported agg kind, fallback to backend impl");

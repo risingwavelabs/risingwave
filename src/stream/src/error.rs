@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::array::ArrayError;
+use risingwave_common::secret::SecretError;
 use risingwave_connector::error::ConnectorError;
-use risingwave_connector::sink::SinkError;
 use risingwave_expr::ExprError;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::ToTonicStatus;
@@ -65,13 +65,6 @@ pub enum ErrorKind {
         StreamExecutorError,
     ),
 
-    #[error("Sink error: {0}")]
-    Sink(
-        #[from]
-        #[backtrace]
-        SinkError,
-    ),
-
     #[error("Actor {actor_id} exited unexpectedly: {source}")]
     UnexpectedExit {
         actor_id: ActorId,
@@ -85,6 +78,13 @@ pub enum ErrorKind {
         actor_id: ActorId,
         reason: &'static str,
     },
+
+    #[error("Secret error: {0}")]
+    Secret(
+        #[from]
+        #[backtrace]
+        SecretError,
+    ),
 
     #[error(transparent)]
     Uncategorized(

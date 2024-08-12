@@ -19,7 +19,6 @@ mod nexmark_chaos;
 mod nexmark_q4;
 mod nexmark_source;
 mod no_shuffle;
-mod plan;
 mod schedulability;
 mod singleton_migration;
 mod sink;

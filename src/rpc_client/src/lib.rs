@@ -88,24 +88,40 @@ pub struct RpcClientPool<S> {
     clients: Cache<HostAddr, Arc<Vec<S>>>,
 }
 
-impl<S> Default for RpcClientPool<S>
-where
-    S: RpcClient,
-{
-    fn default() -> Self {
-        Self::new(1)
+impl<S> std::fmt::Debug for RpcClientPool<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RpcClientPool")
+            .field("connection_pool_size", &self.connection_pool_size)
+            .field("type", &type_name::<S>())
+            .field("len", &self.clients.entry_count())
+            .finish()
     }
 }
+
+/// Intentionally not implementing `Default` to let callers be explicit about the pool size.
+impl<S> !Default for RpcClientPool<S> {}
 
 impl<S> RpcClientPool<S>
 where
     S: RpcClient,
 {
+    /// Create a new pool with the given `connection_pool_size`, which is the number of
+    /// connections to each node that will be reused.
     pub fn new(connection_pool_size: u16) -> Self {
         Self {
             connection_pool_size,
             clients: Cache::new(u64::MAX),
         }
+    }
+
+    /// Create a pool for testing purposes. Same as [`Self::adhoc`].
+    pub fn for_test() -> Self {
+        Self::adhoc()
+    }
+
+    /// Create a pool for ad-hoc usage, where the number of connections to each node is 1.
+    pub fn adhoc() -> Self {
+        Self::new(1)
     }
 
     /// Gets the RPC client for the given node. If the connection is not established, a

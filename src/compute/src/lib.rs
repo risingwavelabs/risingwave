@@ -18,7 +18,6 @@
 #![feature(let_chains)]
 #![feature(lint_reasons)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(lazy_cell)]
 #![cfg_attr(coverage, feature(coverage_attribute))]
 
 #[macro_use]
@@ -136,6 +135,15 @@ pub struct ComputeNodeOpts {
     #[deprecated = "connector node has been deprecated."]
     #[clap(long, hide = true, env = "RW_CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
+
+    /// The path of the temp secret file directory.
+    #[clap(
+        long,
+        hide = true,
+        env = "RW_TEMP_SECRET_FILE_DIR",
+        default_value = "./secrets"
+    )]
+    pub temp_secret_file_dir: String,
 }
 
 impl risingwave_common::opts::Opts for ComputeNodeOpts {

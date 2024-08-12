@@ -133,12 +133,7 @@ pub fn visit_stream_node_tables_inner<F>(
                 optional!(node.memo_table, "TemporalJoinMemo");
             }
             NodeBody::DynamicFilter(node) => {
-                if node.condition_always_relax {
-                    always!(node.left_table, "DynamicFilterLeftNotSatisfy");
-                } else {
-                    always!(node.left_table, "DynamicFilterLeft");
-                }
-
+                always!(node.left_table, "DynamicFilterLeft");
                 always!(node.right_table, "DynamicFilterRight");
             }
 
@@ -268,6 +263,11 @@ pub fn visit_stream_node_tables_inner<F>(
             // Note: add internal tables for new nodes here.
             NodeBody::Materialize(node) if !internal_tables_only => {
                 always!(node.table, "Materialize")
+            }
+
+            NodeBody::GlobalApproxPercentile(node) => {
+                always!(node.bucket_state_table, "GlobalApproxPercentileBucketState");
+                always!(node.count_state_table, "GlobalApproxPercentileCountState");
             }
             _ => {}
         }

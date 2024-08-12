@@ -87,7 +87,7 @@ impl EsStreamChunkConverter {
             Box::new(|row: RowRef<'_>| {
                 Ok(row
                     .datum_at(0)
-                    .ok_or_else(|| anyhow!("No value find in row, index is 0"))?
+                    .ok_or_else(|| anyhow!("No value found in row, index is 0"))?
                     .to_text())
             })
         } else if pk_indices.len() == 1 {
@@ -95,7 +95,7 @@ impl EsStreamChunkConverter {
             Box::new(move |row: RowRef<'_>| {
                 Ok(row
                     .datum_at(index)
-                    .ok_or_else(|| anyhow!("No value find in row, index is 0"))?
+                    .ok_or_else(|| anyhow!("No value found in row, index is 0"))?
                     .to_text())
             })
         } else {
@@ -108,7 +108,7 @@ impl EsStreamChunkConverter {
                 for index in &pk_indices {
                     keys.push(
                         row.datum_at(*index)
-                            .ok_or_else(|| anyhow!("No value find in row, index is {}", index))?
+                            .ok_or_else(|| anyhow!("No value found in row, index is {}", index))?
                             .to_text(),
                     );
                 }
@@ -144,7 +144,7 @@ impl EsStreamChunkConverter {
             if let Some(index) = self.index_column {
                 index_builder.append(Some(
                     row.datum_at(index)
-                        .ok_or_else(|| anyhow!("No value find in row, index is {}", index))?
+                        .ok_or_else(|| anyhow!("No value found in row, index is {}", index))?
                         .into_utf8(),
                 ));
             } else {

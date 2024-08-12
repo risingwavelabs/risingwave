@@ -28,7 +28,9 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 use with_options::WithOptions;
 
-use super::encoder::{DateHandlingMode, TimeHandlingMode, TimestamptzHandlingMode};
+use super::encoder::{
+    DateHandlingMode, JsonbHandlingMode, TimeHandlingMode, TimestamptzHandlingMode,
+};
 use super::utils::chunk_to_json;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::connector_common::NatsCommon;
@@ -77,7 +79,7 @@ impl NatsConfig {
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY {
             Err(SinkError::Config(anyhow!(
-                "Nats sink only support append-only mode"
+                "NATS sink only supports append-only mode"
             )))
         } else {
             Ok(config)
@@ -115,7 +117,7 @@ impl Sink for NatsSink {
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
             return Err(SinkError::Nats(anyhow!(
-                "Nats sink only support append-only mode"
+                "NATS sink only supports append-only mode"
             )));
         }
         let _client = (self.config.common.build_client().await)
@@ -151,6 +153,7 @@ impl NatsSinkWriter {
                 TimestampHandlingMode::Milli,
                 TimestamptzHandlingMode::UtcWithoutSuffix,
                 TimeHandlingMode::Milli,
+                JsonbHandlingMode::String,
             ),
         })
     }
@@ -164,7 +167,7 @@ impl AsyncTruncateSinkWriter for NatsSinkWriter {
         chunk: StreamChunk,
         mut add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        let mut data = chunk_to_json(chunk, &self.json_encoder).unwrap();
+        let mut data = chunk_to_json(chunk, &self.json_encoder)?;
         for item in &mut data {
             let publish_ack_future = Retry::spawn(
                 ExponentialBackoff::from_millis(100).map(jitter).take(3),

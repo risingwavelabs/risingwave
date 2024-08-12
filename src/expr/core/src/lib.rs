@@ -15,7 +15,6 @@
 #![feature(let_chains)]
 #![feature(lint_reasons)]
 #![feature(iterator_try_collect)]
-#![feature(lazy_cell)]
 #![feature(coroutines)]
 #![feature(never_type)]
 #![feature(error_generic_member_access)]

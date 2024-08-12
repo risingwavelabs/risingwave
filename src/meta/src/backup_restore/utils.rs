@@ -120,11 +120,15 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendI
 }
 
 pub async fn get_backup_store(opts: RestoreOpts) -> BackupResult<MetaSnapshotStorageRef> {
+    let mut config = ObjectStoreConfig::default();
+    config.retry.read_attempt_timeout_ms = opts.read_attempt_timeout_ms;
+    config.retry.read_retry_attempts = opts.read_retry_attempts as usize;
+
     let object_store = build_remote_object_store(
         &opts.backup_storage_url,
         Arc::new(ObjectStoreMetrics::unused()),
         "Meta Backup",
-        Arc::new(ObjectStoreConfig::default()),
+        Arc::new(config),
     )
     .await;
     let backup_store =

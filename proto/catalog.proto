@@ -52,6 +52,11 @@ message StreamSourceInfo {
   // deprecated
   plan_common.RowFormatType row_format = 1;
   string row_schema_location = 2;
+  // This means *use **confluent** schema registry* and is `false` for **aws glue** schema registry.
+  // Eventually we will deprecate it and rely on `enum SchemaLocation` derived from `format_encode_options` below.
+  // * schema.location     false
+  // * schema.registry     true
+  // * aws.glue.schema_arn false
   bool use_schema_registry = 3;
   string proto_message_name = 4;
   int32 csv_delimiter = 5;
@@ -72,7 +77,7 @@ message StreamSourceInfo {
   //
   // Currently, the following sources can be shared:
   //
-  // - Direct CDC sources (mysql & postgresql)
+  // - Direct CDC sources (mysql & postgresql & sqlserver)
   // - MQ sources (Kafka)
   bool cdc_source_job = 13;
   // Only used when `cdc_source_job` is `true`.
@@ -130,6 +135,8 @@ message Source {
 
   // Per-source catalog version, used by schema change.
   uint64 version = 100;
+
+  optional uint32 rate_limit = 101;
 }
 
 enum SinkType {
@@ -190,6 +197,9 @@ message Sink {
   // Handle the sink relies on any sceret. The key is the propertity name and the value is the secret id and type.
   // Used for connect options.
   map<string, secret.SecretRef> secret_refs = 25;
+
+  // only for the sink whose target is a table. Columns of the target table when the sink is created. At this point all the default columns of the target table are all handled by the project operator in the sink plan.
+  repeated plan_common.ColumnCatalog original_target_columns = 26;
 }
 
 message Subscription {
@@ -457,4 +467,9 @@ message Secret {
   bytes value = 4;
   uint32 owner = 5;
   uint32 schema_id = 6;
+}
+
+message OptionsWithSecret {
+  map<string, string> options = 1;
+  map<string, secret.SecretRef> secret_refs = 2;
 }

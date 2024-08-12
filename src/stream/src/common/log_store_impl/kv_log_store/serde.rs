@@ -23,7 +23,7 @@ use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -835,7 +835,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
             }
             if *stream_epoch < epoch {
                 return Err(anyhow!(
-                    "current epoch {} has exceed epoch {} of stream not started",
+                    "current epoch {} has exceeded the epoch {} of the stream that has not started",
                     epoch,
                     stream_epoch
                 ));
@@ -935,7 +935,7 @@ mod tests {
     use rand::prelude::SliceRandom;
     use rand::thread_rng;
     use risingwave_common::array::{Op, StreamChunk};
-    use risingwave_common::buffer::Bitmap;
+    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::DataType;

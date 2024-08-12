@@ -27,8 +27,8 @@ use pgwire::pg_server::SessionId;
 use risingwave_batch::error::BatchError;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail;
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::catalog::TableDesc;
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
+use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{VirtualNode, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::util::scan_range::ScanRange;
@@ -269,6 +269,7 @@ impl Query {
 
 #[derive(Debug, Clone)]
 pub struct SourceFetchInfo {
+    pub schema: Schema,
     pub connector: ConnectorProperties,
     pub timebound: (Option<i64>, Option<i64>),
     pub as_of: Option<AsOf>,
@@ -351,12 +352,14 @@ impl SourceScanInfo {
                             })
                             .map_err(|_e| anyhow!("fail to parse timestamp"))?,
                     ),
-                    Some(AsOf::ProcessTime) => unreachable!(),
+                    Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+                        unreachable!()
+                    }
                     None => None,
                 };
 
                 let split_info = iceberg_enumerator
-                    .list_splits_batch(time_travel_info, batch_parallelism)
+                    .list_splits_batch(fetch_info.schema, time_travel_info, batch_parallelism)
                     .await?
                     .into_iter()
                     .map(SplitImpl::Iceberg)
@@ -431,6 +434,12 @@ pub struct TablePartitionInfo {
 pub enum PartitionInfo {
     Table(TablePartitionInfo),
     Source(Vec<SplitImpl>),
+    File(Vec<String>),
+}
+
+#[derive(Clone, Debug)]
+pub struct FileScanInfo {
+    pub file_location: Vec<String>,
 }
 
 /// Fragment part of `Query`.
@@ -444,6 +453,7 @@ pub struct QueryStage {
     /// Indicates whether this stage contains a table scan node and the table's information if so.
     pub table_scan_info: Option<TableScanInfo>,
     pub source_info: Option<SourceScanInfo>,
+    pub file_scan_info: Option<FileScanInfo>,
     pub has_lookup_join: bool,
     pub dml_table_id: Option<TableId>,
     pub session_id: SessionId,
@@ -467,16 +477,21 @@ impl QueryStage {
         self.has_lookup_join
     }
 
-    pub fn clone_with_exchange_info(&self, exchange_info: Option<ExchangeInfo>) -> Self {
+    pub fn clone_with_exchange_info(
+        &self,
+        exchange_info: Option<ExchangeInfo>,
+        parallelism: Option<u32>,
+    ) -> Self {
         if let Some(exchange_info) = exchange_info {
             return Self {
                 query_id: self.query_id.clone(),
                 id: self.id,
                 root: self.root.clone(),
                 exchange_info: Some(exchange_info),
-                parallelism: self.parallelism,
+                parallelism,
                 table_scan_info: self.table_scan_info.clone(),
                 source_info: self.source_info.clone(),
+                file_scan_info: self.file_scan_info.clone(),
                 has_lookup_join: self.has_lookup_join,
                 dml_table_id: self.dml_table_id,
                 session_id: self.session_id,
@@ -507,6 +522,7 @@ impl QueryStage {
             parallelism: Some(task_parallelism),
             table_scan_info: self.table_scan_info.clone(),
             source_info: Some(source_info),
+            file_scan_info: self.file_scan_info.clone(),
             has_lookup_join: self.has_lookup_join,
             dml_table_id: self.dml_table_id,
             session_id: self.session_id,
@@ -553,6 +569,7 @@ struct QueryStageBuilder {
     /// See also [`QueryStage::table_scan_info`].
     table_scan_info: Option<TableScanInfo>,
     source_info: Option<SourceScanInfo>,
+    file_scan_file: Option<FileScanInfo>,
     has_lookup_join: bool,
     dml_table_id: Option<TableId>,
     session_id: SessionId,
@@ -570,6 +587,7 @@ impl QueryStageBuilder {
         exchange_info: Option<ExchangeInfo>,
         table_scan_info: Option<TableScanInfo>,
         source_info: Option<SourceScanInfo>,
+        file_scan_file: Option<FileScanInfo>,
         has_lookup_join: bool,
         dml_table_id: Option<TableId>,
         session_id: SessionId,
@@ -584,6 +602,7 @@ impl QueryStageBuilder {
             children_stages: vec![],
             table_scan_info,
             source_info,
+            file_scan_file,
             has_lookup_join,
             dml_table_id,
             session_id,
@@ -606,6 +625,7 @@ impl QueryStageBuilder {
             parallelism: self.parallelism,
             table_scan_info: self.table_scan_info,
             source_info: self.source_info,
+            file_scan_info: self.file_scan_file,
             has_lookup_join: self.has_lookup_join,
             dml_table_id: self.dml_table_id,
             session_id: self.session_id,
@@ -698,15 +718,10 @@ impl StageGraph {
             // If the stage has parallelism, it means it's a complete stage.
             complete_stages.insert(
                 stage.id,
-                Arc::new(stage.clone_with_exchange_info(exchange_info)),
+                Arc::new(stage.clone_with_exchange_info(exchange_info, stage.parallelism)),
             );
             None
-        } else {
-            assert!(matches!(
-                stage.source_info,
-                Some(SourceScanInfo::Incomplete(_))
-            ));
-
+        } else if matches!(stage.source_info, Some(SourceScanInfo::Incomplete(_))) {
             let complete_source_info = stage
                 .source_info
                 .as_ref()
@@ -739,6 +754,17 @@ impl StageGraph {
             let parallelism = complete_stage.parallelism;
             complete_stages.insert(stage.id, complete_stage);
             parallelism
+        } else {
+            assert!(stage.file_scan_info.is_some());
+            let parallelism = min(
+                self.batch_parallelism / 2,
+                stage.file_scan_info.as_ref().unwrap().file_location.len(),
+            );
+            complete_stages.insert(
+                stage.id,
+                Arc::new(stage.clone_with_exchange_info(exchange_info, Some(parallelism as u32))),
+            );
+            None
         };
 
         for child_stage_id in self.child_edges.get(&stage.id).unwrap_or(&HashSet::new()) {
@@ -852,6 +878,13 @@ impl BatchPlanFragmenter {
         } else {
             None
         };
+
+        let file_scan_info = if table_scan_info.is_none() && source_info.is_none() {
+            Self::collect_stage_file_scan(root.clone())?
+        } else {
+            None
+        };
+
         let mut has_lookup_join = false;
         let parallelism = match root.distribution() {
             Distribution::Single => {
@@ -899,12 +932,14 @@ impl BatchPlanFragmenter {
                     lookup_join_parallelism
                 } else if source_info.is_some() {
                     0
+                } else if file_scan_info.is_some() {
+                    1
                 } else {
                     self.batch_parallelism
                 }
             }
         };
-        if source_info.is_none() && parallelism == 0 {
+        if source_info.is_none() && file_scan_info.is_none() && parallelism == 0 {
             return Err(BatchError::EmptyWorkerNodes.into());
         }
         let parallelism = if parallelism == 0 {
@@ -920,6 +955,7 @@ impl BatchPlanFragmenter {
             exchange_info,
             table_scan_info,
             source_info,
+            file_scan_info,
             has_lookup_join,
             dml_table_id,
             root.ctx().session_ctx().session_id(),
@@ -1009,12 +1045,11 @@ impl BatchPlanFragmenter {
             let batch_kafka_scan: &BatchKafkaScan = batch_kafka_node;
             let source_catalog = batch_kafka_scan.source_catalog();
             if let Some(source_catalog) = source_catalog {
-                let property = ConnectorProperties::extract(
-                    source_catalog.with_properties.clone().into_iter().collect(),
-                    false,
-                )?;
+                let property =
+                    ConnectorProperties::extract(source_catalog.with_properties.clone(), false)?;
                 let timestamp_bound = batch_kafka_scan.kafka_timestamp_range_value();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
+                    schema: batch_kafka_scan.base.schema().clone(),
                     connector: property,
                     timebound: timestamp_bound,
                     as_of: None,
@@ -1024,12 +1059,11 @@ impl BatchPlanFragmenter {
             let batch_iceberg_scan: &BatchIcebergScan = batch_iceberg_scan;
             let source_catalog = batch_iceberg_scan.source_catalog();
             if let Some(source_catalog) = source_catalog {
-                let property = ConnectorProperties::extract(
-                    source_catalog.with_properties.clone().into_iter().collect(),
-                    false,
-                )?;
+                let property =
+                    ConnectorProperties::extract(source_catalog.with_properties.clone(), false)?;
                 let as_of = batch_iceberg_scan.as_of();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
+                    schema: batch_iceberg_scan.base.schema().clone(),
                     connector: property,
                     timebound: (None, None),
                     as_of,
@@ -1040,12 +1074,11 @@ impl BatchPlanFragmenter {
             let source_node: &BatchSource = source_node;
             let source_catalog = source_node.source_catalog();
             if let Some(source_catalog) = source_catalog {
-                let property = ConnectorProperties::extract(
-                    source_catalog.with_properties.clone().into_iter().collect(),
-                    false,
-                )?;
+                let property =
+                    ConnectorProperties::extract(source_catalog.with_properties.clone(), false)?;
                 let as_of = source_node.as_of();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
+                    schema: source_node.base.schema().clone(),
                     connector: property,
                     timebound: (None, None),
                     as_of,
@@ -1056,6 +1089,24 @@ impl BatchPlanFragmenter {
         node.inputs()
             .into_iter()
             .find_map(|n| Self::collect_stage_source(n).transpose())
+            .transpose()
+    }
+
+    fn collect_stage_file_scan(node: PlanRef) -> SchedulerResult<Option<FileScanInfo>> {
+        if node.node_type() == PlanNodeType::BatchExchange {
+            // Do not visit next stage.
+            return Ok(None);
+        }
+
+        if let Some(batch_file_scan) = node.as_batch_file_scan() {
+            return Ok(Some(FileScanInfo {
+                file_location: batch_file_scan.core.file_location.clone(),
+            }));
+        }
+
+        node.inputs()
+            .into_iter()
+            .find_map(|n| Self::collect_stage_file_scan(n).transpose())
             .transpose()
     }
 

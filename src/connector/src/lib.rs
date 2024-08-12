@@ -20,7 +20,6 @@
 #![feature(box_patterns)]
 #![feature(trait_alias)]
 #![feature(lint_reasons)]
-#![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
@@ -58,7 +57,7 @@ pub use paste::paste;
 pub use risingwave_jni_core::{call_method, call_static_method, jvm_runtime};
 
 mod with_options;
-pub use with_options::WithPropertiesExt;
+pub use with_options::{WithOptionsSecResolved, WithPropertiesExt};
 
 #[cfg(test)]
 mod with_options_test;

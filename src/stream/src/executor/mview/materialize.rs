@@ -22,7 +22,7 @@ use bytes::Bytes;
 use futures::stream;
 use itertools::Itertools;
 use risingwave_common::array::Op;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, TableId};
 use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::types::DefaultOrd;
@@ -272,7 +272,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     }
                     Self::may_update_depended_subscriptions(
                         &mut self.depended_subscription_ids,
-                        b.mutation.as_deref(),
+                        &b,
                         mv_table_id,
                     );
                     let op_consistency_level = get_op_consistency_level(
@@ -305,51 +305,36 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     /// return true when changed
     fn may_update_depended_subscriptions(
         depended_subscriptions: &mut HashSet<u32>,
-        mutation: Option<&Mutation>,
+        barrier: &Barrier,
         mv_table_id: TableId,
     ) {
-        let Some(mutation) = mutation else {
-            return;
-        };
-        match mutation {
-            Mutation::CreateSubscription {
-                subscription_id,
-                upstream_mv_table_id,
-            } => {
+        for subscriber_id in barrier.added_subscriber_on_mv_table(mv_table_id) {
+            if !depended_subscriptions.insert(subscriber_id) {
+                warn!(
+                    ?depended_subscriptions,
+                    ?mv_table_id,
+                    subscriber_id,
+                    "subscription id already exists"
+                );
+            }
+        }
+
+        if let Some(Mutation::DropSubscriptions {
+            subscriptions_to_drop,
+        }) = barrier.mutation.as_deref()
+        {
+            for (subscriber_id, upstream_mv_table_id) in subscriptions_to_drop {
                 if *upstream_mv_table_id == mv_table_id
-                    && !depended_subscriptions.insert(*subscription_id)
+                    && !depended_subscriptions.remove(subscriber_id)
                 {
                     warn!(
                         ?depended_subscriptions,
                         ?mv_table_id,
-                        subscription_id,
-                        "subscription id already exists"
+                        subscriber_id,
+                        "drop non existing subscriber_id id"
                     );
                 }
             }
-            Mutation::DropSubscription {
-                subscription_id,
-                upstream_mv_table_id,
-            } => {
-                if *upstream_mv_table_id == mv_table_id
-                    && !depended_subscriptions.remove(subscription_id)
-                {
-                    warn!(
-                        ?depended_subscriptions,
-                        ?mv_table_id,
-                        subscription_id,
-                        "drop non existing subscription id"
-                    );
-                }
-            }
-            Mutation::Stop(_)
-            | Mutation::Update(_)
-            | Mutation::Add(_)
-            | Mutation::SourceChangeSplit(_)
-            | Mutation::Pause
-            | Mutation::Resume
-            | Mutation::Throttle(_)
-            | Mutation::AddAndUpdate(_, _) => {}
         }
     }
 }

@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::must_match;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -54,9 +54,9 @@ pub struct OnlyOutputIfHasInput;
 impl Strategy for AlwaysOutput {
     fn infer_change_type(
         prev_row_count: usize,
-        curr_row_count: usize,
+        _curr_row_count: usize,
         prev_outputs: Option<&OwnedRow>,
-        curr_outputs: &OwnedRow,
+        _curr_outputs: &OwnedRow,
     ) -> Option<RecordType> {
         match prev_outputs {
             None => {
@@ -68,14 +68,17 @@ impl Strategy for AlwaysOutput {
                 // Generate output no matter whether current row count is 0 or not.
                 Some(RecordType::Insert)
             }
-            Some(prev_outputs) => {
-                if prev_row_count == 0 && curr_row_count == 0 || prev_outputs == curr_outputs {
-                    // No rows exist, or output is not changed.
-                    None
-                } else {
-                    Some(RecordType::Update)
-                }
-            }
+            // NOTE(kwannoel): We always output, even if the update is a no-op.
+            // e.g. the following will still be emitted downstream:
+            // ```
+            // U- 1
+            // U+ 1
+            // ```
+            // This is to support `approx_percentile` via `row_merge`, which requires
+            // both the lhs and rhs to always output updates per epoch, or not all.
+            // Otherwise we are unable to construct a full row, if only one side updates,
+            // as the `row_merge` executor is stateless.
+            Some(_prev_outputs) => Some(RecordType::Update),
         }
     }
 }

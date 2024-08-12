@@ -26,7 +26,6 @@
 #![feature(lint_reasons)]
 #![feature(coroutines)]
 #![feature(map_try_insert)]
-#![feature(lazy_cell)]
 #![feature(error_generic_member_access)]
 #![feature(let_chains)]
 #![feature(portable_simd)]
@@ -35,7 +34,6 @@
 #![allow(incomplete_features)]
 #![feature(iterator_try_collect)]
 #![feature(iter_order_by)]
-#![feature(exclusive_range_pattern)]
 #![feature(binary_heap_into_iter_sorted)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(map_entry_replace)]
@@ -65,7 +63,7 @@ pub mod array;
 #[macro_use]
 pub mod util;
 pub mod acl;
-pub mod buffer;
+pub mod bitmap;
 pub mod cache;
 pub mod cast;
 pub mod catalog;
@@ -80,7 +78,10 @@ pub use risingwave_common_metrics::{
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
     register_guarded_int_gauge_vec_with_registry,
 };
-pub use {risingwave_common_metrics as metrics, risingwave_license as license};
+pub use {
+    risingwave_common_metrics as metrics, risingwave_common_secret as secret,
+    risingwave_license as license,
+};
 pub mod lru;
 pub mod opts;
 pub mod range;

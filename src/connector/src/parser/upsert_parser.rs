@@ -18,7 +18,7 @@ use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColum
 use super::bytes_parser::BytesAccessBuilder;
 use super::unified::{AccessImpl, ChangeEventOperation};
 use super::{
-    AccessBuilderImpl, ByteStreamSourceParser, BytesProperties, EncodingProperties, EncodingType,
+    AccessBuilderImpl, ByteStreamSourceParser, BytesProperties, EncodingProperties,
     SourceStreamChunkRowWriter, SpecificParserConfig,
 };
 use crate::error::ConnectorResult;
@@ -34,16 +34,11 @@ pub struct UpsertParser {
     source_ctx: SourceContextRef,
 }
 
-async fn build_accessor_builder(
-    config: EncodingProperties,
-    encoding_type: EncodingType,
-) -> ConnectorResult<AccessBuilderImpl> {
+async fn build_accessor_builder(config: EncodingProperties) -> ConnectorResult<AccessBuilderImpl> {
     match config {
         EncodingProperties::Json(_)
         | EncodingProperties::Protobuf(_)
-        | EncodingProperties::Avro(_) => {
-            Ok(AccessBuilderImpl::new_default(config, encoding_type).await?)
-        }
+        | EncodingProperties::Avro(_) => Ok(AccessBuilderImpl::new_default(config).await?),
         _ => bail!("unsupported encoding for Upsert"),
     }
 }
@@ -80,8 +75,7 @@ impl UpsertParser {
         } else {
             unreachable!("format upsert must have key column")
         };
-        let payload_builder =
-            build_accessor_builder(props.encoding_config, EncodingType::Value).await?;
+        let payload_builder = build_accessor_builder(props.encoding_config).await?;
         Ok(Self {
             key_builder,
             payload_builder,
