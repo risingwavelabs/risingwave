@@ -15,9 +15,11 @@
 use std::cmp::Ordering;
 use std::fmt::{self, Debug, Display};
 
+use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{PbArray, PbArrayType};
+use serde::Serializer;
 
 use super::{
     Array, ArrayBuilder, ArrayImpl, ArrayResult, DatumRef, DefaultOrdered, ListArray,
@@ -25,6 +27,7 @@ use super::{
 };
 use crate::bitmap::Bitmap;
 use crate::types::{DataType, Scalar, ToText};
+use crate::util::memcmp_encoding;
 
 #[derive(Debug, Clone, EstimateSize)]
 pub struct MapArrayBuilder {
@@ -107,6 +110,8 @@ impl ArrayBuilder for MapArrayBuilder {
 ///   And we could still try our best to ban it to prevent misuse.
 ///
 ///   Currently we choose the second behavior. i.e., first sort the map by key, then compare/hash.
+///   Note that `Eq` is intuitive, but `Ord` still looks strange. We assume no users really care about
+///   which map is larger, but just provide a implementation to prevent undefined behavior.
 ///
 ///   See more discussion in <https://github.com/risingwavelabs/risingwave/issues/7981>.
 ///
@@ -291,6 +296,7 @@ mod scalar {
     }
 }
 
+/// Refer to [`MapArray`] for the semantics of the comparison.
 mod cmp {
     use super::*;
     use crate::array::DefaultOrd;
@@ -374,6 +380,37 @@ impl<'a> MapRef<'a> {
     ) -> impl DoubleEndedIterator + ExactSizeIterator<Item = (ScalarRefImpl<'a>, DatumRef<'a>)> + 'a
     {
         self.iter().sorted_by_key(|(k, _v)| DefaultOrdered(*k))
+    }
+
+    /// Note: Map should not be used as key. But we don't want to panic.
+    /// See [`MapArray`] for the semantics. See also the `Ord` implementation.
+    /// TODO: ban it in fe <https://github.com/risingwavelabs/risingwave/issues/7981>
+    pub fn memcmp_serialize(
+        self,
+        serializer: &mut memcomparable::Serializer<impl BufMut>,
+    ) -> memcomparable::Result<()> {
+        let mut inner_serializer = memcomparable::Serializer::new(vec![]);
+        for (k, v) in self.iter_sorted() {
+            memcmp_encoding::serialize_datum_in_composite(Some(k), &mut inner_serializer)?;
+            memcmp_encoding::serialize_datum_in_composite(v, &mut inner_serializer)?;
+        }
+        serializer.serialize_bytes(&inner_serializer.into_inner())
+    }
+}
+
+impl MapValue {
+    /// Note: Map should not be used as key. But we don't want to panic.
+    /// See [`MapArray`] for the semantics. See also the `Ord` implementation.
+    /// TODO: ban it in fe <https://github.com/risingwavelabs/risingwave/issues/7981>
+    pub fn memcmp_deserialize(
+        datatype: &MapType,
+        deserializer: &mut memcomparable::Deserializer<impl Buf>,
+    ) -> memcomparable::Result<Self> {
+        let list = ListValue::memcmp_deserialize(
+            &DataType::Struct(datatype.clone().into_struct()),
+            deserializer,
+        )?;
+        Ok(Self::from_list_entries(list))
     }
 }
 

@@ -151,9 +151,9 @@ fn calculate_encoded_size_inner(
                 deserializer.deserialize_decimal()?;
                 0 // the len is not used since decimal is not a fixed length type
             }
-            // these two types is var-length and should only be determine at runtime.
+            // these types are var-length and should only be determine at runtime.
             // TODO: need some test for this case (e.g. e2e test)
-            DataType::List { .. } => deserializer.skip_bytes()?,
+            DataType::List { .. } | DataType::Map(_) => deserializer.skip_bytes()?,
             DataType::Struct(t) => t
                 .types()
                 .map(|field| {
@@ -170,11 +170,6 @@ fn calculate_encoded_size_inner(
             DataType::Varchar => deserializer.skip_bytes()?,
             DataType::Bytea => deserializer.skip_bytes()?,
             DataType::Int256 => Int256::MEMCMP_ENCODED_SIZE,
-            DataType::Map(_) => {
-                // Map should not be used as key.
-                // This should be banned in frontend and this branch should actually be unreachable.
-                return Err(memcomparable::Error::NotSupported("map"));
-            }
         };
 
         // consume offset of fixed_type

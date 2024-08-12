@@ -413,15 +413,15 @@ impl ListValue {
     }
 
     pub fn memcmp_deserialize(
-        datatype: &DataType,
+        item_datatype: &DataType,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
         let bytes = serde_bytes::ByteBuf::deserialize(deserializer)?;
         let mut inner_deserializer = memcomparable::Deserializer::new(bytes.as_slice());
-        let mut builder = datatype.create_array_builder(0);
+        let mut builder = item_datatype.create_array_builder(0);
         while inner_deserializer.has_remaining() {
             builder.append(memcmp_encoding::deserialize_datum_in_composite(
-                datatype,
+                item_datatype,
                 &mut inner_deserializer,
             )?)
         }

@@ -627,8 +627,6 @@ impl_value_encoding_hash_key_serde!(JsonbVal);
 // use the memcmp encoding for safety.
 impl_memcmp_encoding_hash_key_serde!(StructValue);
 impl_memcmp_encoding_hash_key_serde!(ListValue);
-// Note: Map should not be used as key. It's memcmp_encoding is just unreachable!().
-// We are also effectively banning it here.
 impl_memcmp_encoding_hash_key_serde!(MapValue);
 
 #[cfg(test)]

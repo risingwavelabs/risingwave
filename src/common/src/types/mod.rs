@@ -1016,9 +1016,7 @@ impl ScalarRefImpl<'_> {
             Self::Jsonb(v) => v.memcmp_serialize(ser)?,
             Self::Struct(v) => v.memcmp_serialize(ser)?,
             Self::List(v) => v.memcmp_serialize(ser)?,
-            // Map should not be used as key.
-            // This should be banned in frontend and this branch should actually be unreachable.
-            Self::Map(_) => Err(memcomparable::Error::NotSupported("map"))?,
+            Self::Map(v) => v.memcmp_serialize(ser)?,
         };
         Ok(())
     }
@@ -1073,11 +1071,7 @@ impl ScalarImpl {
             Ty::Jsonb => Self::Jsonb(JsonbVal::memcmp_deserialize(de)?),
             Ty::Struct(t) => StructValue::memcmp_deserialize(t.types(), de)?.to_scalar_value(),
             Ty::List(t) => ListValue::memcmp_deserialize(t, de)?.to_scalar_value(),
-            Ty::Map(_) => {
-                // Map should not be used as key.
-                // This should be banned in frontend and this branch should actually be unreachable.
-                Err(memcomparable::Error::NotSupported("map"))?
-            }
+            Ty::Map(t) => MapValue::memcmp_deserialize(t, de)?.to_scalar_value(),
         })
     }
 
