@@ -13,6 +13,10 @@
 // limitations under the License.
 
 use std::sync::LazyLock;
+use prometheus::HistogramVec;
+use prometheus::core::GenericCounterVec;
+use prometheus::register_histogram_vec_with_registry;
+use prometheus::register_int_counter_vec_with_registry;
 
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
@@ -29,6 +33,13 @@ pub struct FrontendMetrics {
     pub latency_local_execution: Histogram,
     pub active_sessions: IntGauge,
     pub batch_total_mem: TrAdderGauge,
+    pub valid_subsription_cursor_nums: GenericCounterVec<AtomicU64>, 
+    pub invalid_subsription_cursor_nums: GenericCounterVec<AtomicU64>,
+    pub subscription_cursor_error_count: GenericCounterVec<AtomicU64>,
+    pub subscription_cursor_query_duration: HistogramVec,
+    pub subscription_cursor_declare_duration: HistogramVec,
+    pub subscription_cursor_fetch_duration: HistogramVec,
+    pub subscription_cursor_last_fetch_duration: HistogramVec,
 }
 
 pub static GLOBAL_FRONTEND_METRICS: LazyLock<FrontendMetrics> =
@@ -67,11 +78,77 @@ impl FrontendMetrics {
             .register(Box::new(batch_total_mem.clone()))
             .unwrap();
 
+        let valid_subsription_cursor_nums = register_int_counter_vec_with_registry!(
+            "valid_subsription_cursor_nums",
+            "The num of valid subscription cursor",
+            &["subscription_id"],
+            registry
+        )
+        .unwrap();
+
+        let invalid_subsription_cursor_nums = register_int_counter_vec_with_registry!(
+            "invalid_subsription_cursor_nums",
+            "The num of invalid subscription cursor",
+            &["subscription_id"],
+            registry
+        )
+        .unwrap();
+
+        let subscription_cursor_error_count = register_int_counter_vec_with_registry!(
+            "subscription_cursor_error_count",
+            "The error num of subscription cursor",
+            &["cursor_name"],
+            registry
+        )
+        .unwrap();
+
+        let opts = histogram_opts!(
+            "subscription_cursor_query_duration",
+            "Subscription cursor internal query has lasted",
+            exponential_buckets(0.1, 2.0, 22).unwrap(), 
+        );
+        let subscription_cursor_query_duration =
+            register_histogram_vec_with_registry!(opts, &["cursorname"], registry)
+                .unwrap();
+
+        let opts = histogram_opts!(
+            "subscription_cursor_declare_duration",
+            "Subscription cursor duration of declare",
+            exponential_buckets(0.1, 2.0, 22).unwrap(), 
+        );
+        let subscription_cursor_declare_duration =
+            register_histogram_vec_with_registry!(opts, &["cursor_name"], registry)
+                .unwrap();
+
+        let opts = histogram_opts!(
+            "subscription_cursor_fetch_duration",
+            "Subscription cursor duration of fetch",
+            exponential_buckets(0.1, 2.0, 22).unwrap(), 
+        );
+        let subscription_cursor_fetch_duration =
+            register_histogram_vec_with_registry!(opts, &["cursor_name"], registry)
+                .unwrap();
+
+        let opts = histogram_opts!(
+            "subscription_cursor_last_fetch_duration",
+            "Since the last fetch, the time up to now",
+            exponential_buckets(0.1, 2.0, 22).unwrap(), 
+        );
+        let subscription_cursor_last_fetch_duration =
+            register_histogram_vec_with_registry!(opts, &["cursor_name"], registry)
+                .unwrap();   
         Self {
             query_counter_local_execution,
             latency_local_execution,
             active_sessions,
             batch_total_mem,
+            valid_subsription_cursor_nums,
+            invalid_subsription_cursor_nums,
+            subscription_cursor_error_count,
+            subscription_cursor_query_duration,
+            subscription_cursor_declare_duration,
+            subscription_cursor_fetch_duration,
+            subscription_cursor_last_fetch_duration,
         }
     }
 

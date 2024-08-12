@@ -25,6 +25,7 @@ use futures::StreamExt;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::StatementType;
 use pgwire::types::{Format, Row};
+use crate::monitor::FrontendMetrics;
 use risingwave_common::catalog::Field;
 use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::QueryMode;
@@ -649,12 +650,19 @@ impl SubscriptionCursor {
     }
 }
 
-#[derive(Default)]
+
 pub struct CursorManager {
     cursor_map: tokio::sync::Mutex<HashMap<String, Cursor>>,
+    frontend_metrics: Arc<FrontendMetrics>,
 }
 
 impl CursorManager {
+    pub fn new(frontend_metrics: Arc<FrontendMetrics>) -> Self {
+        Self {
+            cursor_map: tokio::sync::Mutex::new(HashMap::new()),
+            frontend_metrics,
+        }
+    }
     pub async fn add_subscription_cursor(
         &self,
         cursor_name: String,
@@ -695,6 +703,7 @@ impl CursorManager {
         chunk_stream: CursorDataChunkStream,
         fields: Vec<Field>,
     ) -> Result<()> {
+        // self.frontend_metrics
         let cursor = QueryCursor::new(chunk_stream, fields)?;
         self.cursor_map
             .lock()
