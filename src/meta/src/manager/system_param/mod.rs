@@ -77,7 +77,7 @@ impl SystemParamsManager {
             return Err(require_sql_meta_store_err().into());
         }
 
-        info!("system parameters: {:?}", params);
+        info!(initial_params = ?SystemParamsReader::new(&params), "initialize system parameters");
         check_missing_params(&params).map_err(|e| anyhow!(e))?;
 
         Ok(Self {
