@@ -191,6 +191,7 @@ impl BatchPlanFragmenter {
 
     /// Split the plan node into each stages, based on exchange node.
     fn split_into_stage(&mut self, batch_node: PlanRef) -> SchedulerResult<()> {
+        println!("split_into_stage{:?}",batch_node);
         let root_stage = self.new_stage(
             batch_node,
             Some(Distribution::Single.to_prost(
@@ -884,6 +885,7 @@ impl BatchPlanFragmenter {
         } else {
             None
         };
+        println!("split_into_stage{:?},{:?},{:?}",source_info,table_scan_info,root.distribution());
 
         let mut has_lookup_join = false;
         let parallelism = match root.distribution() {

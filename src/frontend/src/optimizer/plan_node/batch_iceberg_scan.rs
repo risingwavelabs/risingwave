@@ -111,6 +111,7 @@ impl ToBatchPb for BatchIcebergScan {
             with_properties,
             split: vec![],
             secret_refs,
+            is_iceberg_count: self.core.is_iceberg_count,
         })
     }
 }

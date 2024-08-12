@@ -83,6 +83,7 @@ impl LogicalSource {
             kind,
             ctx,
             as_of,
+            is_iceberg_count: false,
         };
 
         if core.as_of.is_some() && !core.support_time_travel() {

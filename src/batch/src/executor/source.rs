@@ -116,6 +116,8 @@ impl BoxedExecutorBuilder for SourceExecutor {
                     source.context.get_config().developer.chunk_size,
                     schema,
                     source.plan_node().get_identity().clone(),
+                    source_node.is_iceberg_count,
+                    split.record_counts,
                 )))
             } else {
                 unreachable!()

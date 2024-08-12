@@ -64,6 +64,7 @@ message SourceNode {
   repeated bytes split = 4;
   catalog.StreamSourceInfo info = 5;
   map<string, secret.SecretRef> secret_refs = 6;
+  bool is_iceberg_count = 7;
 }
 
 message FileScanNode {

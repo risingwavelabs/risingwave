@@ -401,6 +401,12 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         ));
 
+        let plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Iceberg count star",
+            vec![AggCountForIcebergRule::create()],
+            ApplyOrder::TopDown,
+        ));
+
         assert_eq!(plan.convention(), Convention::Batch);
         Ok(plan)
     }
@@ -442,6 +448,12 @@ impl PlanRoot {
             "Push Limit To Scan",
             vec![BatchPushLimitToScanRule::create()],
             ApplyOrder::BottomUp,
+        ));
+
+        let plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Iceberg count star",
+            vec![AggCountForIcebergRule::create()],
+            ApplyOrder::TopDown,
         ));
 
         assert_eq!(plan.convention(), Convention::Batch);

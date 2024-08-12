@@ -20,13 +20,14 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use futures_async_stream::for_await;
 use iceberg::scan::FileScanTask;
-use iceberg::spec::TableMetadata;
+use iceberg::spec::{ManifestList, TableMetadata};
 use itertools::Itertools;
 pub use parquet_file_reader::*;
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
+use tokio_stream::StreamExt;
 
 use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
@@ -144,6 +145,7 @@ pub struct IcebergSplit {
     pub snapshot_id: i64,
     pub table_meta: TableMetadataJsonStr,
     pub files: Vec<IcebergFileScanTaskJsonStr>,
+    pub record_counts: Vec<u64>,
 }
 
 impl SplitMetaData for IcebergSplit {
@@ -238,6 +240,27 @@ impl IcebergSplitEnumerator {
             },
         };
         let mut files = vec![];
+        let mut record_counts = vec![];
+
+        let manifest_list: ManifestList = table.metadata().snapshot_by_id(snapshot_id)
+            .unwrap()
+            .load_manifest_list(table.file_io(), table.metadata())
+            .await
+            .map_err(|e| anyhow!(e))?;
+
+        for entry in manifest_list.entries() {
+            let manifest = entry
+                .load_manifest(table.file_io())
+                .await
+                .map_err(|e| anyhow!(e))?;
+            let mut manifest_entries_stream =
+                futures::stream::iter(manifest.entries().iter().filter(|e| e.is_alive()));
+
+            while let Some(manifest_entry) = manifest_entries_stream.next().await {
+                let file = manifest_entry.data_file();
+                record_counts.push(file.record_count());
+            }
+        }
 
         let scan = table
             .scan()
@@ -255,6 +278,9 @@ impl IcebergSplitEnumerator {
         }
 
         let table_meta = TableMetadataJsonStr::serialize(table.metadata());
+        if files.len() != record_counts.len() {
+            bail!("The number of files does not match the number of record count.");
+        }
 
         let split_num = batch_parallelism;
         // evenly split the files into splits based on the parallelism.
@@ -269,6 +295,7 @@ impl IcebergSplitEnumerator {
                 snapshot_id,
                 table_meta: table_meta.clone(),
                 files: files[start..end].to_vec(),
+                record_counts: record_counts[start..end].to_vec(),
             };
             splits.push(split);
         }
