@@ -42,7 +42,7 @@ filter_stack_trace_for_all_logs() {
   done
 }
 
-trap filter_stack_trace_for_all_logs ERR
+# trap filter_stack_trace_for_all_logs ERR
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, background_ddl"
 seq "$TEST_NUM" | parallel MADSIM_TEST_SEED={} './risingwave_simulation \
