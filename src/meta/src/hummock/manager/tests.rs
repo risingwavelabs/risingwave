@@ -538,7 +538,7 @@ async fn test_hummock_manager_basic() {
     );
     for _ in 0..2 {
         hummock_manager
-            .unpin_version_before(context_id_1, u64::MAX)
+            .unpin_version_before(context_id_1, HummockVersionId::MAX)
             .await
             .unwrap();
         assert_eq!(
@@ -571,8 +571,8 @@ async fn test_hummock_manager_basic() {
         );
         // pinned by context_id_1
         assert_eq!(
-            hummock_manager.get_min_pinned_version_id().await,
-            init_version_id + commit_log_count + register_log_count - 2,
+            hummock_manager.get_min_pinned_version_id().await + 2,
+            init_version_id + commit_log_count + register_log_count,
         );
     }
     // objects_to_delete is always empty because no compaction is ever invoked.
@@ -597,7 +597,7 @@ async fn test_hummock_manager_basic() {
         ((commit_log_count + register_log_count) as usize, 0)
     );
     hummock_manager
-        .unpin_version_before(context_id_1, u64::MAX)
+        .unpin_version_before(context_id_1, HummockVersionId::MAX)
         .await
         .unwrap();
     assert_eq!(
@@ -605,7 +605,7 @@ async fn test_hummock_manager_basic() {
         init_version_id + commit_log_count + register_log_count
     );
     hummock_manager
-        .unpin_version_before(context_id_2, u64::MAX)
+        .unpin_version_before(context_id_2, HummockVersionId::MAX)
         .await
         .unwrap();
     assert_eq!(

@@ -21,7 +21,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::{Channel, NotificationClient, ObserverError};
 use risingwave_hummock_sdk::key::TableKey;
-use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
+use risingwave_hummock_sdk::{HummockReadEpoch, HummockVersionId, SyncResult};
 use risingwave_hummock_trace::{
     GlobalReplay, LocalReplay, LocalReplayRead, ReplayItem, ReplayRead, ReplayStateStore,
     ReplayWrite, Result, TraceError, TracedBytes, TracedInitOptions, TracedNewLocalOptions,
@@ -162,7 +162,9 @@ impl ReplayStateStore for GlobalReplayImpl {
 
         // wait till version updated
         if let Some(prev_version_id) = prev_version_id {
-            self.store.wait_version_update(prev_version_id).await;
+            self.store
+                .wait_version_update(HummockVersionId::new(prev_version_id))
+                .await;
         }
         Ok(version)
     }

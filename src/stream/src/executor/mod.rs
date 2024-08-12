@@ -105,6 +105,8 @@ mod wrapper;
 
 mod approx_percentile;
 
+mod row_merge;
+
 #[cfg(test)]
 mod integration_tests;
 pub mod test_utils;
@@ -143,6 +145,7 @@ pub use project_set::*;
 pub use rearranged_chain::RearrangedChainExecutor;
 pub use receiver::ReceiverExecutor;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+pub use row_merge::RowMergeExecutor;
 pub use simple_agg::SimpleAggExecutor;
 pub use sink::SinkExecutor;
 pub use sort::*;
