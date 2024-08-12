@@ -1,6 +1,6 @@
 -- noinspection SqlNoDataSourceInspectionForFile
 -- noinspection SqlResolveForFile
-CREATE SINK nexmark_q20 AS
+CREATE SINK nexmark_q20_temporal_filter AS
 SELECT auction,
        bidder,
        price,
@@ -17,7 +17,7 @@ SELECT auction,
        seller,
        category,
        A.extra     as auction_extra
-FROM bid AS B
+FROM bid_filtered AS B
          INNER JOIN auction AS A on B.auction = A.id
 WHERE A.category = 10
 WITH ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');

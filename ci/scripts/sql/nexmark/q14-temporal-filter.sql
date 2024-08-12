@@ -1,11 +1,6 @@
 -- noinspection SqlNoDataSourceInspectionForFile
 -- noinspection SqlResolveForFile
-CREATE FUNCTION count_char(s varchar, c varchar) RETURNS int LANGUAGE rust AS $$
-fn count_char(s: &str, c: &str) -> i32 {
-  s.matches(c).count() as i32
-}
-$$;
-CREATE SINK nexmark_q14 AS
+CREATE SINK nexmark_q14_temporal_filter AS
 SELECT auction,
        bidder,
        0.908 * price as price,
@@ -20,10 +15,12 @@ SELECT auction,
                THEN 'nightTime'
            ELSE 'otherTime'
            END       AS bidTimeType,
-       date_time,
+       date_time
        -- extra
-       count_char(extra, 'c') AS c_counts
-FROM bid
+       -- TODO: count_char is an UDF, add it back when we support similar functionality.
+       -- https://github.com/nexmark/nexmark/blob/master/nexmark-flink/src/main/java/com/github/nexmark/flink/udf/CountChar.java
+       -- count_char(extra, 'c') AS c_counts
+FROM bid_filtered
 WHERE 0.908 * price > 1000000
   AND 0.908 * price < 50000000
 WITH ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');

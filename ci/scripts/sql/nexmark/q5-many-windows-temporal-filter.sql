@@ -5,7 +5,7 @@
 -- The percentage between window size and hop interval stays the same as the one in original nexmark.
 -- noinspection SqlNoDataSourceInspectionForFile
 -- noinspection SqlResolveForFile
-CREATE SINK nexmark_q5_many_windows
+CREATE SINK nexmark_q5_many_windows_temporal_filter
 AS
 SELECT
     AuctionBids.auction, AuctionBids.num
@@ -15,7 +15,7 @@ FROM (
         count(*) AS num,
         window_start AS starttime
     FROM
-        HOP(bid, date_time, INTERVAL '5' SECOND, INTERVAL '5' MINUTE)
+        HOP(bid_filtered, date_time, INTERVAL '5' SECOND, INTERVAL '5' MINUTE) as bid
     GROUP BY
         bid.auction,
         window_start
@@ -29,7 +29,7 @@ JOIN (
             count(*) AS num,
             window_start AS starttime_c
     FROM
-            HOP(bid, date_time, INTERVAL '5' SECOND, INTERVAL '5' MINUTE)
+            HOP(bid_filtered, date_time, INTERVAL '5' SECOND, INTERVAL '5' MINUTE) as bid
         GROUP BY
             bid.auction,
             window_start

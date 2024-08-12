@@ -1,10 +1,11 @@
 -- noinspection SqlNoDataSourceInspectionForFile
 -- noinspection SqlResolveForFile
-CREATE SINK nexmark_q1
-AS
+CREATE SINK nexmark_q10_temporal_filter AS
 SELECT auction,
        bidder,
-       0.908 * price as price,
-       date_time
-FROM bid
+       price,
+       date_time,
+       TO_CHAR(date_time, 'YYYY-MM-DD') as date,
+       TO_CHAR(date_time, 'HH:MI')      as time
+FROM bid_filtered
 WITH ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');
