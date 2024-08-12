@@ -76,38 +76,21 @@ impl LogicalAgg {
         let mut core = self.core.clone();
 
         // ====== Handle approx percentile aggs
-        let SeparatedAggInfo { normal, approx } = self.separate_normal_and_special_agg();
+        let (
+            needs_row_merge,
+            non_approx_percentile_col_mapping,
+            approx_percentile_col_mapping,
+            approx_percentile,
+        ) = self.prepare_approx_percentile(&mut core, stream_input.clone())?;
 
-        let AggInfo {
-            calls: non_approx_percentile_agg_calls,
-            col_mapping: non_approx_percentile_col_mapping,
-        } = normal;
-        let AggInfo {
-            calls: approx_percentile_agg_calls,
-            col_mapping: approx_percentile_col_mapping,
-        } = approx;
-
-        let needs_row_merge = (!non_approx_percentile_agg_calls.is_empty()
-            && !approx_percentile_agg_calls.is_empty())
-            || approx_percentile_agg_calls.len() >= 2;
-        core.input = if needs_row_merge {
-            // If there's row merge, we need to share the input.
-            StreamShare::new_from_input(stream_input.clone()).into()
-        } else {
-            stream_input
-        };
-        core.agg_calls = non_approx_percentile_agg_calls;
-
-        let approx_percentile =
-            self.build_approx_percentile_aggs(core.input.clone(), &approx_percentile_agg_calls)?;
-
-        // ====== Handle normal aggs
         if core.agg_calls.is_empty() {
             if let Some(approx_percentile) = approx_percentile {
                 return Ok(approx_percentile);
             };
             bail!("expected at least one agg call");
         }
+
+        // ====== Handle normal aggs
         let total_agg_calls = core
             .agg_calls
             .iter()
@@ -123,21 +106,13 @@ impl LogicalAgg {
             new_stream_simple_agg(Agg::new(total_agg_calls, IndexSet::empty(), exchange));
 
         // ====== Merge approx percentile and normal aggs
-        if let Some(approx_percentile) = approx_percentile {
-            if needs_row_merge {
-                let row_merge = StreamRowMerge::new(
-                    approx_percentile,
-                    global_agg.into(),
-                    approx_percentile_col_mapping,
-                    non_approx_percentile_col_mapping,
-                )?;
-                Ok(row_merge.into())
-            } else {
-                Ok(approx_percentile)
-            }
-        } else {
-            Ok(global_agg.into())
-        }
+        Self::add_row_merge_if_needed(
+            needs_row_merge,
+            approx_percentile,
+            global_agg.into(),
+            approx_percentile_col_mapping,
+            non_approx_percentile_col_mapping,
+        )
     }
 
     /// Generate plan for stateless/stateful 2-phase streaming agg.
@@ -148,10 +123,25 @@ impl LogicalAgg {
         stream_input: PlanRef,
         dist_key: &[usize],
     ) -> Result<PlanRef> {
-        let input_col_num = stream_input.schema().len();
+        let mut core = self.core.clone();
+
+        let (
+            needs_row_merge,
+            non_approx_percentile_col_mapping,
+            approx_percentile_col_mapping,
+            approx_percentile,
+        ) = self.prepare_approx_percentile(&mut core, stream_input.clone())?;
+
+        if core.agg_calls.is_empty() {
+            if let Some(approx_percentile) = approx_percentile {
+                return Ok(approx_percentile);
+            };
+            bail!("expected at least one agg call");
+        }
 
         // Generate vnode via project
         // TODO(kwannoel): We should apply Project optimization rules here.
+        let input_col_num = stream_input.schema().len(); // get schema len before moving `stream_input`.
         let project = StreamProject::new(generic::Project::with_vnode_col(stream_input, dist_key));
         let vnode_col_idx = project.base.schema().len() - 1;
 
@@ -160,7 +150,7 @@ impl LogicalAgg {
         local_group_key.insert(vnode_col_idx);
         let n_local_group_key = local_group_key.len();
         let local_agg = new_stream_hash_agg(
-            Agg::new(self.agg_calls().to_vec(), local_group_key, project.into()),
+            Agg::new(core.agg_calls.to_vec(), local_group_key, project.into()),
             Some(vnode_col_idx),
         );
         // Global group key excludes vnode.
@@ -173,11 +163,11 @@ impl LogicalAgg {
             .expect("some input group key could not be mapped");
 
         // Generate global agg step
-        if self.group_key().is_empty() {
+        let global_agg = if self.group_key().is_empty() {
             let exchange =
                 RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
             let global_agg = new_stream_simple_agg(Agg::new(
-                self.agg_calls()
+                core.agg_calls
                     .iter()
                     .enumerate()
                     .map(|(partial_output_idx, agg_call)| {
@@ -187,7 +177,7 @@ impl LogicalAgg {
                 global_group_key.into_iter().collect(),
                 exchange,
             ));
-            Ok(global_agg.into())
+            global_agg.into()
         } else {
             let exchange = RequiredDist::shard_by_key(input_col_num, &global_group_key)
                 .enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
@@ -195,7 +185,7 @@ impl LogicalAgg {
             // we can just follow it.
             let global_agg = new_stream_hash_agg(
                 Agg::new(
-                    self.agg_calls()
+                    core.agg_calls
                         .iter()
                         .enumerate()
                         .map(|(partial_output_idx, agg_call)| {
@@ -208,8 +198,15 @@ impl LogicalAgg {
                 ),
                 None,
             );
-            Ok(global_agg.into())
-        }
+            global_agg.into()
+        };
+        Self::add_row_merge_if_needed(
+            needs_row_merge,
+            approx_percentile,
+            global_agg,
+            approx_percentile_col_mapping,
+            non_approx_percentile_col_mapping,
+        )
     }
 
     fn gen_single_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
@@ -301,6 +298,72 @@ impl LogicalAgg {
             self.gen_shuffle_plan(stream_input)
         } else {
             self.gen_single_plan(stream_input)
+        }
+    }
+
+    /// Prepares metadata and the `approx_percentile` plan, if there's one present.
+    fn prepare_approx_percentile(
+        &self,
+        core: &mut Agg<PlanRef>,
+        stream_input: PlanRef,
+    ) -> Result<(bool, ColIndexMapping, ColIndexMapping, Option<PlanRef>)> {
+        let SeparatedAggInfo { normal, approx } = self.separate_normal_and_special_agg();
+
+        let AggInfo {
+            calls: non_approx_percentile_agg_calls,
+            col_mapping: non_approx_percentile_col_mapping,
+        } = normal;
+        let AggInfo {
+            calls: approx_percentile_agg_calls,
+            col_mapping: approx_percentile_col_mapping,
+        } = approx;
+        if !self.group_key().is_empty() && !non_approx_percentile_agg_calls.is_empty() {
+            bail_not_implemented!("two-phase approx percentile agg with group key, please use single phase agg for approx_percentile with group key");
+        }
+
+        let needs_row_merge = (!non_approx_percentile_agg_calls.is_empty()
+            && !approx_percentile_agg_calls.is_empty())
+            || approx_percentile_agg_calls.len() >= 2;
+        core.input = if needs_row_merge {
+            // If there's row merge, we need to share the input.
+            StreamShare::new_from_input(stream_input.clone()).into()
+        } else {
+            stream_input
+        };
+        core.agg_calls = non_approx_percentile_agg_calls;
+
+        let approx_percentile =
+            self.build_approx_percentile_aggs(core.input.clone(), &approx_percentile_agg_calls)?;
+        Ok((
+            needs_row_merge,
+            non_approx_percentile_col_mapping,
+            approx_percentile_col_mapping,
+            approx_percentile,
+        ))
+    }
+
+    /// Add `RowMerge` if needed
+    fn add_row_merge_if_needed(
+        needs_row_merge: bool,
+        approx_percentile: Option<PlanRef>,
+        global_agg: PlanRef,
+        approx_percentile_col_mapping: ColIndexMapping,
+        non_approx_percentile_col_mapping: ColIndexMapping,
+    ) -> Result<PlanRef> {
+        if let Some(approx_percentile) = approx_percentile {
+            if needs_row_merge {
+                let row_merge = StreamRowMerge::new(
+                    approx_percentile,
+                    global_agg,
+                    approx_percentile_col_mapping,
+                    non_approx_percentile_col_mapping,
+                )?;
+                Ok(row_merge.into())
+            } else {
+                Ok(approx_percentile)
+            }
+        } else {
+            Ok(global_agg)
         }
     }
 
