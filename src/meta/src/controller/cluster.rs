@@ -84,6 +84,7 @@ impl From<WorkerInfo> for PbWorkerNode {
                 is_streaming: p.is_streaming,
                 is_serving: p.is_serving,
                 is_unschedulable: p.is_unschedulable,
+                secondary_host: p.secondary_host.clone(),
             }),
             transactional_id: info.0.transaction_id.map(|id| id as _),
             resource: info.2.resource,
@@ -670,7 +671,7 @@ impl ClusterControllerInner {
         };
         let insert_res = Worker::insert(worker).exec(&txn).await?;
         let worker_id = insert_res.last_insert_id as WorkerId;
-        if r#type == PbWorkerType::ComputeNode {
+        if r#type == PbWorkerType::ComputeNode || r#type == PbWorkerType::Frontend {
             let property = worker_property::ActiveModel {
                 worker_id: Set(worker_id),
                 parallelism: Set(add_property
@@ -680,6 +681,7 @@ impl ClusterControllerInner {
                 is_streaming: Set(add_property.is_streaming),
                 is_serving: Set(add_property.is_serving),
                 is_unschedulable: Set(add_property.is_unschedulable),
+                secondary_host: Set(add_property.secondary_host),
             };
             WorkerProperty::insert(property).exec(&txn).await?;
         }

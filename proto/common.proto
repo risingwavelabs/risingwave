@@ -54,6 +54,9 @@ message WorkerNode {
     bool is_streaming = 1;
     bool is_serving = 2;
     bool is_unschedulable = 3;
+    // Secondary host address for the worker node.
+    // This is used for frontend node to register its rpc address
+    string secondary_host = 4;
   }
   message Resource {
     string rw_version = 1;

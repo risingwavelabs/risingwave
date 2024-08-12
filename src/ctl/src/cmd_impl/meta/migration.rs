@@ -162,6 +162,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 is_serving: Set(pb_property.is_serving),
                 is_unschedulable: Set(pb_property.is_unschedulable),
                 parallelism: Set(worker.worker_node.parallelism() as _),
+                secondary_host: Set(pb_property.secondary_host.clone()),
             };
             WorkerProperty::insert(property)
                 .exec(&meta_store_sql.conn)

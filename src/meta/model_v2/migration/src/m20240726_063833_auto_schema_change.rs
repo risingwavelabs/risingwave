@@ -13,6 +13,15 @@ impl MigrationTrait for Migration {
                     .add_column(ColumnDef::new(Table::CdcTableName).string())
                     .to_owned(),
             )
+            .await?;
+
+        manager
+            .alter_table(
+                MigrationTable::alter()
+                    .table(WorkerProperty::Table)
+                    .add_column(ColumnDef::new(WorkerProperty::SecondaryHost).string())
+                    .to_owned(),
+            )
             .await
     }
 
@@ -24,6 +33,15 @@ impl MigrationTrait for Migration {
                     .drop_column(Table::CdcTableName)
                     .to_owned(),
             )
+            .await?;
+
+        manager
+            .alter_table(
+                MigrationTable::alter()
+                    .table(WorkerProperty::Table)
+                    .drop_column(WorkerProperty::SecondaryHost)
+                    .to_owned(),
+            )
             .await
     }
 }
@@ -32,4 +50,10 @@ impl MigrationTrait for Migration {
 enum Table {
     Table,
     CdcTableName,
+}
+
+#[derive(DeriveIden)]
+enum WorkerProperty {
+    Table,
+    SecondaryHost,
 }

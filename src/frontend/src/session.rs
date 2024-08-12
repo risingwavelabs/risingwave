@@ -69,6 +69,7 @@ use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
+use risingwave_pb::meta::add_worker_node_request::Property as AddWorkerNodeProperty;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::Object;
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
@@ -261,20 +262,21 @@ impl FrontendEnv {
             .unwrap();
         info!("advertise addr is {}", frontend_address);
 
-        let addr: HostAddr = opts.frontend_rpc_listener_addr.parse().unwrap();
-        // Use the host of advertise address for the frontend rpc address.
+        let rpc_addr: HostAddr = opts.frontend_rpc_listener_addr.parse().unwrap();
         let frontend_rpc_addr = HostAddr {
+            // Use the host of advertise address for the frontend rpc address.
             host: frontend_address.host.clone(),
-            port: addr.port,
+            port: rpc_addr.port,
         };
         // Register in meta by calling `AddWorkerNode` RPC.
-        // Use the rpc server address as the frontend address, since Meta needs to get frontend rpc
-        // client based on this address.
         let (meta_client, system_params_reader) = MetaClient::register_new(
             opts.meta_addr,
             WorkerType::Frontend,
-            &frontend_rpc_addr,
-            Default::default(),
+            &frontend_address,
+            AddWorkerNodeProperty {
+                secondary_host: frontend_rpc_addr.to_string(),
+                ..Default::default()
+            },
             &config.meta,
         )
         .await?;
@@ -351,7 +353,7 @@ impl FrontendEnv {
         let observer_join_handle = observer_manager.start().await;
         join_handles.push(observer_join_handle);
 
-        meta_client.activate(&frontend_rpc_addr).await?;
+        meta_client.activate(&frontend_address).await?;
 
         let frontend_metrics = Arc::new(GLOBAL_FRONTEND_METRICS.clone());
         let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
@@ -389,7 +391,7 @@ impl FrontendEnv {
                 .unwrap();
         });
         info!(
-            "Frontend RPC Listener is set up on {}",
+            "Health Check RPC Listener is set up on {}",
             opts.frontend_rpc_listener_addr.clone()
         );
 

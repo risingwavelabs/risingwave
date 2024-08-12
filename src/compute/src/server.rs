@@ -127,6 +127,7 @@ pub async fn compute_node_serve(
             is_streaming: opts.role.for_streaming(),
             is_serving: opts.role.for_serving(),
             is_unschedulable: false,
+            secondary_host: "".to_string(),
         },
         &config.meta,
     )
