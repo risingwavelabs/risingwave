@@ -1,4 +1,4 @@
 -- noinspection SqlNoDataSourceInspectionForFile
 -- noinspection SqlResolveForFile
-DROP SINK nexmark_q14;
-DROP FUNCTION count_char;
+DROP SINK nexmark_q13_non_lookup_cond;
+DROP TABLE side_input;
