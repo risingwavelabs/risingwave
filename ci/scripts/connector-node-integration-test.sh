@@ -5,7 +5,7 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
-VERSION=11
+VERSION=17
 
 while getopts 'p:v:' opt; do
     case ${opt} in
