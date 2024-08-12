@@ -151,6 +151,7 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
                             &[DataType::Float64],
                         )
                     } else {
+                        /// TODO(kwannoel): If our bucket_count reaches 0, we should just remove the bucket.
                         StreamChunk::from_rows(
                             &[
                                 (Op::UpdateDelete, &[prev_output.clone()]),
