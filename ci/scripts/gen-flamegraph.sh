@@ -29,6 +29,8 @@ get_nexmark_queries_to_run() {
       -H "X-GitHub-Api-Version: 2022-11-28" \
       https://api.github.com/repos/risingwavelabs/risingwave/issues/"$PULL_REQUEST"/labels \
     | parse_labels)
+  elif [[ "$NEXMARK_QUERIES" == "representative" ]]; then
+    export NEXMARK_QUERIES="nexmark-q4 nexmark-q7 nexmark-q8 nexmark-q16"
   elif [[ "$NEXMARK_QUERIES" == "all" ]]; then
     export NEXMARK_QUERIES="$(ls $QUERY_DIR | grep -v "\.drop\.sql" | grep -v "ddl.sql" | sed 's/\(.*\)\.sql/nexmark-\1/' | sort)"
   else
