@@ -310,7 +310,8 @@ pub async fn run_slt_task(
                             || err_string
                                 .contains("error reading a body from connection: broken pipe"))
                             || (err_string.contains("failed to inject barrier")
-                                || err_string.contains("get error from control stream"))
+                                || err_string.contains("get error from control stream")
+                                || err_string.contains("cluster is under recovering"))
                                 && i < MAX_RETRY;
                         if !should_retry {
                             panic!("{}", err);
