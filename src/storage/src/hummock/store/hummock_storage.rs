@@ -32,7 +32,7 @@ use risingwave_hummock_sdk::key::{
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{HummockReadEpoch, HummockVersionId};
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -458,7 +458,7 @@ impl HummockStorage {
                             v.vnodes().iter_ones().collect_vec()
                         })
                         .collect_vec();
-                    panic!("There are {} read version associated with vnode {}. read_version_vnodes={:?}", read_version_vnodes.len(), vnode.to_index(), read_version_vnodes);
+                    return Err(HummockError::other(format!("There are {} read version associated with vnode {}. read_version_vnodes={:?}", read_version_vnodes.len(), vnode.to_index(), read_version_vnodes)).into());
                 }
                 read_filter_for_version(
                     epoch,
@@ -780,7 +780,7 @@ impl HummockStorage {
         &self.hummock_version_reader
     }
 
-    pub async fn wait_version_update(&self, old_id: u64) -> u64 {
+    pub async fn wait_version_update(&self, old_id: HummockVersionId) -> HummockVersionId {
         use tokio::task::yield_now;
         loop {
             let cur_id = self.pinned_version.load().id();

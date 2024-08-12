@@ -52,7 +52,7 @@ use tracing::{error, info, warn, Instrument};
 
 use self::command::CommandContext;
 use self::notifier::Notifier;
-use crate::barrier::info::InflightActorInfo;
+use crate::barrier::info::InflightGraphInfo;
 use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
@@ -81,6 +81,7 @@ mod trace;
 pub use self::command::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, ReplaceTablePlan, Reschedule,
 };
+pub use self::info::InflightSubscriptionInfo;
 pub use self::rpc::StreamRpcManager;
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
@@ -489,7 +490,8 @@ impl GlobalBarrierManager {
 
         let initial_invalid_state = BarrierManagerState::new(
             TracedEpoch::new(Epoch(INVALID_EPOCH)),
-            InflightActorInfo::default(),
+            InflightGraphInfo::default(),
+            InflightSubscriptionInfo::default(),
             None,
         );
 
@@ -716,8 +718,8 @@ impl GlobalBarrierManager {
 
                     info!(?changed_worker, "worker changed");
 
-                    self.state
-                        .resolve_worker_nodes(self.active_streaming_nodes.current().values().cloned());
+                    self.state.inflight_graph_info
+                        .on_new_worker_node_map(self.active_streaming_nodes.current());
                     if let ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) = changed_worker {
                         self.control_stream_manager.add_worker(node).await;
                     }
@@ -748,7 +750,7 @@ impl GlobalBarrierManager {
                         Err(e) => {
                             let failed_command = self.checkpoint_control.command_wait_collect_from_worker(worker_id);
                             if failed_command.is_some()
-                                || self.state.inflight_actor_infos.actor_map.contains_key(&worker_id) {
+                                || self.state.inflight_graph_info.contains_worker(worker_id) {
                                 let errors = self.control_stream_manager.collect_errors(worker_id, e).await;
                                 let err = merge_node_rpc_errors("get error from control stream", errors);
                                 if let Some(failed_command) = failed_command {
@@ -756,7 +758,7 @@ impl GlobalBarrierManager {
                                 }
                                 self.failure_recovery(err).await;
                             } else {
-                                warn!(e = ?e.as_report(), worker_id, "no barrier to collect from worker, ignore err");
+                                warn!(e = %e.as_report(), worker_id, "no barrier to collect from worker, ignore err");
                             }
                         }
                     }
@@ -799,7 +801,8 @@ impl GlobalBarrierManager {
             span,
         } = scheduled;
 
-        let info = self.state.apply_command(&command);
+        let (pre_applied_graph_info, pre_applied_subscription_info) =
+            self.state.apply_command(&command);
 
         let (prev_epoch, curr_epoch) = self.state.next_epoch_pair();
         self.pending_non_checkpoint_barriers
@@ -818,7 +821,9 @@ impl GlobalBarrierManager {
         span.record("epoch", curr_epoch.value().0);
 
         let command_ctx = Arc::new(CommandContext::new(
-            info,
+            self.active_streaming_nodes.current().clone(),
+            pre_applied_subscription_info,
+            pre_applied_graph_info.existing_table_ids().collect(),
             prev_epoch.clone(),
             curr_epoch.clone(),
             self.state.paused_reason(),
@@ -832,8 +837,8 @@ impl GlobalBarrierManager {
 
         let node_to_collect = match self.control_stream_manager.inject_barrier(
             &command_ctx,
-            &command_ctx.info.fragment_infos,
-            Some(&self.state.inflight_actor_infos.fragment_infos),
+            &pre_applied_graph_info,
+            Some(&self.state.inflight_graph_info),
         ) {
             Ok(node_to_collect) => node_to_collect,
             Err(err) => {
@@ -1186,24 +1191,17 @@ impl GlobalBarrierManagerContext {
     /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
     /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor
     /// will create or drop before this barrier flow through them.
-    async fn resolve_actor_info(
-        &self,
-        active_nodes: &ActiveStreamingWorkerNodes,
-    ) -> MetaResult<InflightActorInfo> {
-        let subscriptions = self
-            .metadata_manager
-            .get_mv_depended_subscriptions()
-            .await?;
+    async fn resolve_graph_info(&self) -> MetaResult<InflightGraphInfo> {
         let info = match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 let all_actor_infos = mgr.fragment_manager.load_all_actors().await;
 
-                InflightActorInfo::resolve(active_nodes, all_actor_infos, subscriptions)
+                InflightGraphInfo::new(all_actor_infos.fragment_infos)
             }
             MetadataManager::V2(mgr) => {
                 let all_actor_infos = mgr.catalog_controller.load_all_actors().await?;
 
-                InflightActorInfo::resolve(active_nodes, all_actor_infos, subscriptions)
+                InflightGraphInfo::new(all_actor_infos.fragment_infos)
             }
         };
 
@@ -1304,7 +1302,7 @@ fn collect_commit_epoch_info(
         synced_ssts.iter().map(|sst| &sst.sst_info),
         epochs,
         command_ctx
-            .info
+            .subscription_info
             .mv_depended_subscriptions
             .iter()
             .filter_map(|(mv_table_id, subscriptions)| {
@@ -1337,10 +1335,7 @@ fn collect_commit_epoch_info(
         sst_to_worker,
         new_table_fragment_info,
         table_new_change_log,
-        BTreeMap::from_iter([(
-            epoch,
-            InflightActorInfo::existing_table_ids(&command_ctx.info.fragment_infos).collect(),
-        )]),
+        BTreeMap::from_iter([(epoch, command_ctx.table_ids_to_commit.clone())]),
         epoch,
         vec![],
     )
