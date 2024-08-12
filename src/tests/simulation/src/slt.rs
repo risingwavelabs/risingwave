@@ -305,10 +305,13 @@ pub async fn run_slt_task(
                         let err_string = err.to_string();
                         // cluster could be still under recovering if killed before, retry if
                         // meets `no reader for dml in table with id {}`.
+                        // TODO: make it more robust (https://github.com/risingwavelabs/risingwave/issues/17995)
                         let should_retry = (err_string.contains("no reader for dml in table")
                             || err_string
                                 .contains("error reading a body from connection: broken pipe"))
-                            || err_string.contains("failed to inject barrier") && i < MAX_RETRY;
+                            || (err_string.contains("failed to inject barrier")
+                                || err_string.contains("get error from control stream"))
+                                && i < MAX_RETRY;
                         if !should_retry {
                             panic!("{}", err);
                         }
