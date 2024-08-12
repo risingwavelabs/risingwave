@@ -492,6 +492,7 @@ impl CompactorRunner {
             rest_data.next_sstable().await?;
         }
         let mut total_read_bytes = 0;
+        // TODO: use estimated_sst_size instead of file_size
         for sst in &self.left.sstables {
             total_read_bytes += sst.file_size;
         }

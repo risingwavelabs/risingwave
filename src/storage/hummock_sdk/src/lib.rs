@@ -190,6 +190,7 @@ impl LocalSstableInfo {
     }
 
     pub fn file_size(&self) -> u64 {
+        assert_eq!(self.sst_info.file_size, self.sst_info.estimated_sst_size);
         self.sst_info.file_size
     }
 }

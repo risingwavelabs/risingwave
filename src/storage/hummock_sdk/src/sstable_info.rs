@@ -33,6 +33,7 @@ pub struct SstableInfo {
     pub uncompressed_file_size: u64,
     pub range_tombstone_count: u64,
     pub bloom_filter_kind: PbBloomFilterType,
+    pub estimated_sst_size: u64,
 }
 
 impl SstableInfo {
@@ -48,7 +49,8 @@ impl SstableInfo {
             + size_of::<u64>() // max_epoch
             + size_of::<u64>() // uncompressed_file_size
             + size_of::<u64>() // range_tombstone_count
-            + size_of::<u32>(); // bloom_filter_kind
+            + size_of::<u32>() // bloom_filter_kind
+            + size_of::<u64>(); // estimated_sst_size
         basic += self.key_range.left.len() + self.key_range.right.len() + size_of::<bool>();
 
         basic
@@ -87,6 +89,11 @@ impl From<PbSstableInfo> for SstableInfo {
             range_tombstone_count: pb_sstable_info.range_tombstone_count,
             bloom_filter_kind: PbBloomFilterType::try_from(pb_sstable_info.bloom_filter_kind)
                 .unwrap(),
+            estimated_sst_size: if pb_sstable_info.estimated_sst_size == 0 {
+                pb_sstable_info.file_size
+            } else {
+                pb_sstable_info.estimated_sst_size
+            },
         }
     }
 }
@@ -118,6 +125,11 @@ impl From<&PbSstableInfo> for SstableInfo {
             range_tombstone_count: pb_sstable_info.range_tombstone_count,
             bloom_filter_kind: PbBloomFilterType::try_from(pb_sstable_info.bloom_filter_kind)
                 .unwrap(),
+            estimated_sst_size: if pb_sstable_info.estimated_sst_size == 0 {
+                pb_sstable_info.file_size
+            } else {
+                pb_sstable_info.estimated_sst_size
+            },
         }
     }
 }
@@ -154,6 +166,11 @@ impl From<SstableInfo> for PbSstableInfo {
             uncompressed_file_size: sstable_info.uncompressed_file_size,
             range_tombstone_count: sstable_info.range_tombstone_count,
             bloom_filter_kind: sstable_info.bloom_filter_kind.into(),
+            estimated_sst_size: if sstable_info.estimated_sst_size == 0 {
+                sstable_info.file_size
+            } else {
+                sstable_info.estimated_sst_size
+            },
         }
     }
 }
@@ -187,6 +204,11 @@ impl From<&SstableInfo> for PbSstableInfo {
             uncompressed_file_size: sstable_info.uncompressed_file_size,
             range_tombstone_count: sstable_info.range_tombstone_count,
             bloom_filter_kind: sstable_info.bloom_filter_kind.into(),
+            estimated_sst_size: if sstable_info.estimated_sst_size == 0 {
+                sstable_info.file_size
+            } else {
+                sstable_info.estimated_sst_size
+            },
         }
     }
 }
