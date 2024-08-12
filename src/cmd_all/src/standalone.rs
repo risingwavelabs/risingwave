@@ -467,6 +467,7 @@ mod test {
                             heap_profiling_dir: None,
                             dangerous_max_idle_secs: None,
                             connector_rpc_endpoint: None,
+                            license_key: None,
                             temp_secret_file_dir: "./meta/secrets/",
                         },
                     ),

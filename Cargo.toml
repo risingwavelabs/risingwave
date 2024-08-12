@@ -133,6 +133,7 @@ tonic = { package = "madsim-tonic", version = "0.5.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.5" }
 otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "e6cd165b9bc85783b42c106e99186b86b73e3507" }
 prost = { version = "0.13" }
+prost-build = { version = "0.13" }
 icelake = { git = "https://github.com/icelake-io/icelake", rev = "07d53893d7788b4e41fc11efad8a6be828405c31", features = [
     "prometheus",
 ] }
