@@ -872,7 +872,19 @@ impl HummockVersion {
                 for sub_level in &l0.sub_levels {
                     if sub_level.level_type == PbLevelType::Overlapping {
                         // TODO: use table_id / vnode / key_range filter
-                        split_count += sub_level.table_infos.len() * 2;
+                        split_count += sub_level
+                            .table_infos
+                            .iter()
+                            .map(|sst| {
+                                if let group_split::SstSplitType::Both =
+                                    group_split::need_to_split(sst, split_key.clone())
+                                {
+                                    2
+                                } else {
+                                    0
+                                }
+                            })
+                            .sum::<u64>();
                         continue;
                     }
 

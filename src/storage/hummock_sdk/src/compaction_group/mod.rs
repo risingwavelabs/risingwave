@@ -169,12 +169,28 @@ pub mod group_split {
             return vec![];
         }
         if level.level_type == PbLevelType::Overlapping {
-            // TODO: filter the Overlapping sst with table_id / vnode / key_range
-            level
-                .table_infos
-                .iter_mut()
-                .map(|sst| split_sst(sst, new_sst_id, None))
-                .collect_vec()
+            let mut left_sst = vec![];
+            let mut right_sst = vec![];
+
+            for sst in &mut level.table_infos {
+                let sst_split_type = need_to_split(sst, split_key.clone());
+                match sst_split_type {
+                    SstSplitType::Left => {
+                        left_sst.push(sst.clone());
+                    }
+                    SstSplitType::Right => {
+                        right_sst.push(sst.clone());
+                    }
+                    SstSplitType::Both => {
+                        let branch_sst = split_sst(sst, new_sst_id, Some(split_key.clone()));
+                        right_sst.push(branch_sst.clone());
+                        left_sst.push(sst.clone());
+                    }
+                }
+            }
+
+            level.table_infos = left_sst;
+            right_sst
         } else {
             let pos = get_split_pos(&level.table_infos, split_key.clone());
             if pos >= level.table_infos.len() {

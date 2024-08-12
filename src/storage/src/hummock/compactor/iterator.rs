@@ -700,13 +700,14 @@ mod tests {
 
     use crate::hummock::compactor::ConcatSstableIterator;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::iterator::HummockIterator;
+    use crate::hummock::iterator::{HummockIterator, MergeIterator};
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_test_sstable_info, test_key_of, test_value_of,
         TEST_KEYS_COUNT,
     };
     use crate::hummock::value::HummockValue;
-    use crate::hummock::BlockMeta;
+    use crate::hummock::{BlockMeta, Sstable};
+    use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]
     async fn test_concat_iterator() {
@@ -1153,6 +1154,73 @@ mod tests {
                     .table_id
                     .table_id()
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_iterator_same_obj() {
+        let sstable_store = mock_sstable_store().await;
+
+        let table_info = gen_test_sstable_info(
+            default_builder_opt_for_test(),
+            1 as u64,
+            (1..10000).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i)))),
+            sstable_store.clone(),
+        )
+        .await;
+
+        let split_key = test_key_of(5000).encode();
+
+        let mut sst_1 = table_info.clone();
+        let mut sst_2 = table_info.clone();
+
+        sst_1.key_range.right = split_key.clone().into();
+        sst_1.key_range.right_exclusive = true;
+        sst_2.key_range.left = split_key.clone().into();
+
+        {
+            // test concate
+            let mut iter = ConcatSstableIterator::for_test(
+                vec![0],
+                vec![sst_1.clone(), sst_2.clone()],
+                KeyRange::default(),
+                sstable_store.clone(),
+            );
+
+            iter.rewind().await.unwrap();
+
+            let mut key_count = 0;
+            while iter.is_valid() {
+                iter.next().await.unwrap();
+                key_count += 1;
+            }
+
+            assert_eq!(10000 - 1, key_count);
+        }
+
+        {
+            let concat_1 = ConcatSstableIterator::for_test(
+                vec![0],
+                vec![sst_1.clone()],
+                KeyRange::default(),
+                sstable_store.clone(),
+            );
+
+            let concat_2 = ConcatSstableIterator::for_test(
+                vec![0],
+                vec![sst_2.clone()],
+                KeyRange::default(),
+                sstable_store.clone(),
+            );
+
+            let mut key_count = 0;
+            let mut iter = MergeIterator::for_compactor(vec![concat_1, concat_2]);
+            iter.rewind().await.unwrap();
+            while iter.is_valid() {
+                key_count += 1;
+                iter.next().await.unwrap();
+            }
+            assert_eq!(10000 - 1, key_count);
         }
     }
 }
