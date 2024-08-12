@@ -928,6 +928,7 @@ mod tests {
             is_streaming: true,
             is_serving: true,
             is_unschedulable: false,
+            secondary_host: "".to_string(),
         };
         let hosts = mock_worker_hosts_for_test(worker_count);
         let mut worker_ids = vec![];
@@ -1018,6 +1019,7 @@ mod tests {
             is_streaming: true,
             is_serving: true,
             is_unschedulable: false,
+            secondary_host: "".to_string(),
         };
         let worker_id = cluster_ctl
             .add_worker(
