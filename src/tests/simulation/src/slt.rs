@@ -305,10 +305,16 @@ pub async fn run_slt_task(
                         let err_string = err.to_string();
                         // cluster could be still under recovering if killed before, retry if
                         // meets `no reader for dml in table with id {}`.
-                        let should_retry = (err_string.contains("no reader for dml in table")
-                            || err_string
-                                .contains("error reading a body from connection: broken pipe"))
-                            || err_string.contains("failed to inject barrier") && i < MAX_RETRY;
+                        let allowed_errs = [
+                            "no reader for dml in table",
+                            "error reading a body from connection: broken pipe",
+                            "failed to inject barrier",
+                            "get error from control stream",
+                        ];
+                        let should_retry = i < MAX_RETRY
+                            && allowed_errs
+                                .iter()
+                                .any(|allowed_err| err_string.contains(allowed_err));
                         if !should_retry {
                             panic!("{}", err);
                         }
