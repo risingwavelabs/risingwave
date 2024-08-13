@@ -145,7 +145,6 @@ def test_empty_source(config, prefix, fmt):
         s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
     ) FORMAT PLAIN ENCODE {_encode()};''')
 
-   
     stmt = f'select count(*), sum(id), sum(sex), sum(mark) from {_source()}'
     print(f'Execute {stmt}')
     cur.execute(stmt)
@@ -209,4 +208,3 @@ if __name__ == "__main__":
         client.remove_object(config["S3_BUCKET"], _s3(idx))
         
     test_empty_source(config, run_id, fmt)
-
