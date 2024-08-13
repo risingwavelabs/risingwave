@@ -153,7 +153,6 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
     }
 
     pub async fn apply_row(&mut self, row: impl Row) -> StreamExecutorResult<()> {
-
         // Decoding
         let sign_datum = row.datum_at(0);
         let sign = sign_datum.unwrap().into_int16();
@@ -225,32 +224,28 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         let new_output = if !self.output_changed {
             last_output.clone().flatten()
         } else {
-            let new_output = self.cache.get_output(self.row_count, self.quantile, self.base);
+            let new_output = self
+                .cache
+                .get_output(self.row_count, self.quantile, self.base);
             self.last_output = Some(new_output.clone());
             new_output
         };
         match last_output {
-            None => {
-                StreamChunk::from_rows(&[(Op::Insert, &[new_output])], &[DataType::Float64])
-            }
-            Some(last_output) if !self.output_changed => {
-                StreamChunk::from_rows(
-                    &[
-                        (Op::UpdateDelete, &[last_output.clone()]),
-                        (Op::UpdateInsert, &[last_output]),
-                    ],
-                    &[DataType::Float64],
-                )
-            },
-            Some(last_output) => {
-                StreamChunk::from_rows(
-                    &[
-                        (Op::UpdateDelete, &[last_output.clone()]),
-                        (Op::UpdateInsert, &[new_output.clone()]),
-                    ],
-                    &[DataType::Float64],
-                )
-            }
+            None => StreamChunk::from_rows(&[(Op::Insert, &[new_output])], &[DataType::Float64]),
+            Some(last_output) if !self.output_changed => StreamChunk::from_rows(
+                &[
+                    (Op::UpdateDelete, &[last_output.clone()]),
+                    (Op::UpdateInsert, &[last_output]),
+                ],
+                &[DataType::Float64],
+            ),
+            Some(last_output) => StreamChunk::from_rows(
+                &[
+                    (Op::UpdateDelete, &[last_output.clone()]),
+                    (Op::UpdateInsert, &[new_output.clone()]),
+                ],
+                &[DataType::Float64],
+            ),
         }
     }
 }
