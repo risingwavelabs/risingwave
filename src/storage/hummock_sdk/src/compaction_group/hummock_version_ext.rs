@@ -358,10 +358,6 @@ impl HummockVersion {
         new_sst_start_id: u64,
     ) {
         let mut new_sst_id = new_sst_start_id;
-        if !self.levels.contains_key(&parent_group_id) {
-            warn!(parent_group_id, "non-existing parent group id to init from");
-            return;
-        }
         if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId {
             if new_sst_start_id != 0 {
                 if cfg!(debug_assertions) {
@@ -376,6 +372,10 @@ impl HummockVersion {
                     );
                 }
             }
+            return;
+        }
+        if !self.levels.contains_key(&parent_group_id) {
+            warn!(parent_group_id, "non-existing parent group id to init from");
             return;
         }
         let [parent_levels, cur_levels] = self
@@ -1340,11 +1340,12 @@ mod tests {
     use crate::version::{
         GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, IntraLevelDelta,
     };
+    use crate::HummockVersionId;
 
     #[test]
     fn test_get_sst_object_ids() {
         let mut version = HummockVersion::default();
-        version.id = 0;
+        version.id = HummockVersionId::new(0);
         version.levels = HashMap::from_iter([(
             0,
             Levels {
@@ -1391,7 +1392,7 @@ mod tests {
     #[test]
     fn test_apply_version_delta() {
         let mut version = HummockVersion::default();
-        version.id = 0;
+        version.id = HummockVersionId::new(0);
         version.levels = HashMap::from_iter([
             (
                 0,
@@ -1415,7 +1416,7 @@ mod tests {
             ),
         ]);
         let mut version_delta = HummockVersionDelta::default();
-        version_delta.id = 1;
+        version_delta.id = HummockVersionId::new(1);
         version_delta.group_deltas = HashMap::from_iter([
             (
                 2,
@@ -1474,7 +1475,7 @@ mod tests {
         };
         assert_eq!(version, {
             let mut version = HummockVersion::default();
-            version.id = 1;
+            version.id = HummockVersionId::new(1);
             version.levels = HashMap::from_iter([
                 (
                     2,

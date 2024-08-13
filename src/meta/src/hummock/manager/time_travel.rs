@@ -142,7 +142,8 @@ impl HummockManager {
                 .select_only()
                 .column(hummock_time_travel_version::Column::VersionId)
                 .filter(
-                    hummock_time_travel_version::Column::VersionId.lt(earliest_valid_version_id),
+                    hummock_time_travel_version::Column::VersionId
+                        .lt(earliest_valid_version_id.to_u64()),
                 )
                 .order_by_desc(hummock_time_travel_version::Column::VersionId)
                 .into_tuple()
@@ -152,7 +153,10 @@ impl HummockManager {
             hummock_time_travel_delta::Entity::find()
                 .select_only()
                 .column(hummock_time_travel_delta::Column::VersionId)
-                .filter(hummock_time_travel_delta::Column::VersionId.lt(earliest_valid_version_id))
+                .filter(
+                    hummock_time_travel_delta::Column::VersionId
+                        .lt(earliest_valid_version_id.to_u64()),
+                )
                 .into_tuple()
                 .all(&txn)
                 .await?;
@@ -212,23 +216,28 @@ impl HummockManager {
         }
 
         let res = hummock_time_travel_version::Entity::delete_many()
-            .filter(hummock_time_travel_version::Column::VersionId.lt(earliest_valid_version_id))
+            .filter(
+                hummock_time_travel_version::Column::VersionId
+                    .lt(earliest_valid_version_id.to_u64()),
+            )
             .exec(&txn)
             .await?;
         tracing::debug!(
-            epoch_watermark_version_id = version_watermark.version_id,
-            earliest_valid_version_id,
+            epoch_watermark_version_id = ?version_watermark.version_id,
+            ?earliest_valid_version_id,
             "delete {} rows from hummock_time_travel_version",
             res.rows_affected
         );
 
         let res = hummock_time_travel_delta::Entity::delete_many()
-            .filter(hummock_time_travel_delta::Column::VersionId.lt(earliest_valid_version_id))
+            .filter(
+                hummock_time_travel_delta::Column::VersionId.lt(earliest_valid_version_id.to_u64()),
+            )
             .exec(&txn)
             .await?;
         tracing::debug!(
-            epoch_watermark_version_id = version_watermark.version_id,
-            earliest_valid_version_id,
+            epoch_watermark_version_id = ?version_watermark.version_id,
+            ?earliest_valid_version_id,
             "delete {} rows from hummock_time_travel_delta",
             res.rows_affected
         );
@@ -380,7 +389,7 @@ impl HummockManager {
         }
 
         let epoch = delta.max_committed_epoch;
-        let version_id = delta.id;
+        let version_id: u64 = delta.id.to_u64();
         let m = hummock_epoch_to_version::ActiveModel {
             epoch: Set(epoch.try_into().unwrap()),
             version_id: Set(version_id.try_into().unwrap()),
@@ -415,9 +424,10 @@ impl HummockManager {
             )
             .await?;
             let m = hummock_time_travel_version::ActiveModel {
-                version_id: Set(
-                    risingwave_meta_model_v2::HummockVersionId::try_from(version.id).unwrap(),
-                ),
+                version_id: Set(risingwave_meta_model_v2::HummockVersionId::try_from(
+                    version.id.to_u64(),
+                )
+                .unwrap()),
                 version: Set((&IncompleteHummockVersion::from((version, &select_groups))
                     .to_protobuf())
                     .into()),
@@ -442,9 +452,10 @@ impl HummockManager {
         // Ignore delta which adds no data.
         if written > 0 {
             let m = hummock_time_travel_delta::ActiveModel {
-                version_id: Set(
-                    risingwave_meta_model_v2::HummockVersionId::try_from(delta.id).unwrap(),
-                ),
+                version_id: Set(risingwave_meta_model_v2::HummockVersionId::try_from(
+                    delta.id.to_u64(),
+                )
+                .unwrap()),
                 version_delta: Set((&IncompleteHummockVersionDelta::from((
                     &delta,
                     &select_groups,
@@ -483,7 +494,7 @@ fn replay_archive(
         // Need to work around the assertion in `apply_version_delta`.
         // Because compaction deltas are not included in time travel archive.
         while last_version.id < d.prev_id {
-            last_version.id += 1;
+            last_version.id = last_version.id + 1;
         }
         last_version.apply_version_delta(&d);
     }

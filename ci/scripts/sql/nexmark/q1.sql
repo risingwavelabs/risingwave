@@ -7,4 +7,4 @@ SELECT auction,
        0.908 * price as price,
        date_time
 FROM bid
-WITH ( connector = 'blackhole', type = 'append-only');
+WITH ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');

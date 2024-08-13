@@ -28,7 +28,7 @@ use risingwave_hummock_sdk::table_watermark::{
     TableWatermarks, TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionStateTableInfo};
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::StateTableInfoDelta;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use spin::Mutex;
@@ -117,7 +117,7 @@ fn gen_version(
     ));
     let mut version = HummockVersion::default();
     let committed_epoch = test_epoch(new_epoch_idx as _);
-    version.id = new_epoch_idx as _;
+    version.id = HummockVersionId::new(new_epoch_idx as _);
     version.max_committed_epoch = committed_epoch;
     version.table_watermarks = (0..table_count)
         .map(|table_id| (TableId::new(table_id as _), table_watermarks.clone()))
