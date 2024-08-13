@@ -108,6 +108,7 @@ impl Binder {
         }
 
         let mut inputs: Vec<_> = f
+            .arg_list
             .args
             .iter()
             .map(|arg| self.bind_function_arg(arg.clone()))
@@ -135,7 +136,11 @@ impl Binder {
                 }
                 UserDefinedFunction::new(func.clone(), scalar_inputs).into()
             } else {
-                self.bind_builtin_scalar_function(&function_name, scalar_inputs, f.variadic)?
+                self.bind_builtin_scalar_function(
+                    &function_name,
+                    scalar_inputs,
+                    f.arg_list.variadic,
+                )?
             };
             return self.bind_aggregate_function(f, AggKind::WrapScalar(scalar.to_expr_proto()));
         }
@@ -180,7 +185,9 @@ impl Binder {
 
                 // The actual inline logic for sql udf
                 // Note that we will always create new udf context for each sql udf
-                let Ok(context) = UdfContext::create_udf_context(&f.args, &Arc::clone(func)) else {
+                let Ok(context) =
+                    UdfContext::create_udf_context(&f.arg_list.args, &Arc::clone(func))
+                else {
                     return Err(ErrorCode::InvalidInputSyntax(
                         "failed to create the `udf_context`, please recheck your function definition and syntax".to_string()
                     )
@@ -265,7 +272,7 @@ impl Binder {
             return self.bind_aggregate_function(f, AggKind::Builtin(kind));
         }
 
-        if f.distinct || !f.order_by.is_empty() || f.filter.is_some() {
+        if f.arg_list.distinct || !f.arg_list.order_by.is_empty() || f.filter.is_some() {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                     "DISTINCT, ORDER BY or FILTER is only allowed in aggregation functions, but `{}` is not an aggregation function", function_name
                 )
@@ -303,17 +310,18 @@ impl Binder {
             return Ok(TableFunction::new(function_type, inputs)?.into());
         }
 
-        self.bind_builtin_scalar_function(function_name.as_str(), inputs, f.variadic)
+        self.bind_builtin_scalar_function(function_name.as_str(), inputs, f.arg_list.variadic)
     }
 
     fn bind_array_transform(&mut self, f: Function) -> Result<ExprImpl> {
-        let [array, lambda] = <[FunctionArg; 2]>::try_from(f.args).map_err(|args| -> RwError {
-            ErrorCode::BindError(format!(
-                "`array_transform` expect two inputs `array` and `lambda`, but {} were given",
-                args.len()
-            ))
-            .into()
-        })?;
+        let [array, lambda] =
+            <[FunctionArg; 2]>::try_from(f.arg_list.args).map_err(|args| -> RwError {
+                ErrorCode::BindError(format!(
+                    "`array_transform` expect two inputs `array` and `lambda`, but {} were given",
+                    args.len()
+                ))
+                .into()
+            })?;
 
         let bound_array = self.bind_function_arg(array)?;
         let [bound_array] = <[ExprImpl; 1]>::try_from(bound_array).map_err(|bound_array| -> RwError {
