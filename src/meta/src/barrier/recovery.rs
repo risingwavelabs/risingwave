@@ -331,8 +331,16 @@ impl GlobalBarrierManager {
                         .context
                         .hummock_manager
                         .on_current_version(|version| {
+                            let max_committed_epoch = version.visible_table_committed_epoch();
+                            for (table_id, info) in version.state_table_info.info() {
+                                assert_eq!(
+                                    info.committed_epoch, max_committed_epoch,
+                                    "table {} with invisible epoch is not purged",
+                                    table_id
+                                );
+                            }
                             (
-                                TracedEpoch::new(Epoch::from(version.max_committed_epoch)),
+                                TracedEpoch::new(Epoch::from(max_committed_epoch)),
                                 version.id,
                             )
                         })

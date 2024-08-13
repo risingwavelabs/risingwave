@@ -132,8 +132,17 @@ pub fn get_committed_read_version_tuple(
     epoch: HummockEpoch,
 ) -> (TableKeyRange, ReadVersionTuple) {
     if let Some(table_watermarks) = version.version().table_watermarks.get(&table_id) {
-        TableWatermarksIndex::new_committed(table_watermarks.clone(), version.max_committed_epoch())
-            .rewrite_range_with_table_watermark(epoch, &mut key_range)
+        TableWatermarksIndex::new_committed(
+            table_watermarks.clone(),
+            version
+                .version()
+                .state_table_info
+                .info()
+                .get(&table_id)
+                .expect("should exist when having table watermark")
+                .committed_epoch,
+        )
+        .rewrite_range_with_table_watermark(epoch, &mut key_range)
     }
     (key_range, (vec![], vec![], version))
 }
@@ -202,8 +211,12 @@ impl HummockStorage {
             await_tree_reg.clone(),
         );
 
-        let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
-        let min_current_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
+        let seal_epoch = Arc::new(AtomicU64::new(
+            pinned_version.visible_table_committed_epoch(),
+        ));
+        let min_current_epoch = Arc::new(AtomicU64::new(
+            pinned_version.visible_table_committed_epoch(),
+        ));
         let hummock_event_handler = HummockEventHandler::new(
             version_update_rx,
             pinned_version,
@@ -388,9 +401,17 @@ impl HummockStorage {
     ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
         let pinned_version = self.pinned_version.load();
         validate_safe_epoch(pinned_version.version(), table_id, epoch)?;
+        let table_committed_epoch = pinned_version
+            .version()
+            .state_table_info
+            .info()
+            .get(&table_id)
+            .map(|info| info.committed_epoch);
 
         // check epoch if lower mce
-        let ret = if epoch <= pinned_version.max_committed_epoch() {
+        let ret = if let Some(table_committed_epoch) = table_committed_epoch
+            && epoch <= table_committed_epoch
+        {
             // read committed_version directly without build snapshot
             get_committed_read_version_tuple((**pinned_version).clone(), table_id, key_range, epoch)
         } else {
@@ -427,20 +448,20 @@ impl HummockStorage {
             if read_version_vec.is_empty() {
                 if matched_replicated_read_version_cnt > 0 {
                     tracing::warn!(
-                        "Read(table_id={} vnode={} epoch={}) is not allowed on replicated read version ({} found). Fall back to committed version (epoch={})",
+                        "Read(table_id={} vnode={} epoch={}) is not allowed on replicated read version ({} found). Fall back to committed version (epoch={:?})",
                         table_id,
                         vnode.to_index(),
                         epoch,
                         matched_replicated_read_version_cnt,
-                        pinned_version.max_committed_epoch()
+                        table_committed_epoch,
                     );
                 } else {
                     tracing::debug!(
-                        "No read version found for read(table_id={} vnode={} epoch={}). Fall back to committed version (epoch={})",
+                        "No read version found for read(table_id={} vnode={} epoch={}). Fall back to committed version (epoch={:?})",
                         table_id,
                         vnode.to_index(),
                         epoch,
-                        pinned_version.max_committed_epoch()
+                        table_committed_epoch
                     );
                 }
                 get_committed_read_version_tuple(
@@ -505,7 +526,7 @@ impl HummockStorage {
             .expect("should send success");
         rx.await.expect("should wait success");
 
-        let epoch = self.pinned_version.load().max_committed_epoch();
+        let epoch = self.pinned_version.load().visible_table_committed_epoch();
         self.min_current_epoch
             .store(HummockEpoch::MAX, MemOrdering::SeqCst);
         self.seal_epoch.store(epoch, MemOrdering::SeqCst);

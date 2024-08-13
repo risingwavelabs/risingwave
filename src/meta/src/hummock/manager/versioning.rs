@@ -178,7 +178,7 @@ impl HummockManager {
             .hummock_version_deltas
             .range(start_id..)
             .map(|(_id, delta)| delta)
-            .filter(|delta| delta.max_committed_epoch <= committed_epoch_limit)
+            .filter(|delta| delta.visible_table_committed_epoch() <= committed_epoch_limit)
             .take(num_limit as _)
             .cloned()
             .collect();

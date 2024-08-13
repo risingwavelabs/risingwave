@@ -507,7 +507,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -614,7 +614,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -806,7 +806,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -1035,7 +1035,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -1231,7 +1231,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -1371,7 +1371,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -1701,7 +1701,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
