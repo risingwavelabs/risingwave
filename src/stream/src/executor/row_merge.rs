@@ -161,15 +161,23 @@ impl RowMergeExecutor {
         for (i, (op, lhs_row)) in lhs_chunk.rows().enumerate() {
             ops.push(op);
             for (j, d) in lhs_row.iter().enumerate() {
-                let out_index = lhs_mapping.map(j);
-                merged_rows[i][out_index] = d.to_owned_datum();
+                // NOTE(kwannoel): Unnecessary columns will not have a mapping,
+                // for instance extra row count column.
+                // those can be skipped here.
+                if let Some(out_index) = lhs_mapping.try_map(j) {
+                    merged_rows[i][out_index] = d.to_owned_datum();
+                }
             }
         }
 
         for (i, (_, rhs_row)) in rhs_chunk.rows().enumerate() {
             for (j, d) in rhs_row.iter().enumerate() {
-                let out_index = rhs_mapping.map(j);
-                merged_rows[i][out_index] = d.to_owned_datum();
+                // NOTE(kwannoel): Unnecessary columns will not have a mapping,
+                // for instance extra row count column.
+                // those can be skipped here.
+                if let Some(out_index) = rhs_mapping.try_map(j) {
+                    merged_rows[i][out_index] = d.to_owned_datum();
+                }
             }
         }
         let mut builder = DataChunkBuilder::new(data_types.to_vec(), cardinality);

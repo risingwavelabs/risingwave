@@ -529,11 +529,18 @@ impl HummockEventHandler {
                     .recv()
                     .await
                     .expect("should not be empty");
-                latest_version = Some(Self::resolve_version_update_info(
+                let prev_version_id = latest_version_ref.id();
+                let new_version = Self::resolve_version_update_info(
                     latest_version_ref.clone(),
                     version_update,
                     None,
-                ));
+                );
+                info!(
+                    ?prev_version_id,
+                    new_version_id = ?new_version.id(),
+                    "recv new version"
+                );
+                latest_version = Some(new_version);
             }
 
             self.apply_version_update(
