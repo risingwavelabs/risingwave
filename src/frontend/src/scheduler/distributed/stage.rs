@@ -380,9 +380,33 @@ impl StageRunner {
                 ));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
-            let chunk_size = (source_info.split_info().unwrap().len() as f32
+            // If their is no file in source, the `chunk_size` is set to 1.
+            let chunk_size = ((source_info.split_info().unwrap().len() as f32
                 / self.stage.parallelism.unwrap() as f32)
-                .ceil() as usize;
+                .ceil() as usize)
+                .max(1);
+            // No file in source, schedule an empty task.
+            if source_info.split_info().unwrap().is_empty() {
+                const EMPTY_TASK_ID: u64 = 0;
+                let task_id = PbTaskId {
+                    query_id: self.stage.query_id.id.clone(),
+                    stage_id: self.stage.id,
+                    task_id: EMPTY_TASK_ID,
+                };
+                let plan_fragment =
+                    self.create_plan_fragment(EMPTY_TASK_ID, Some(PartitionInfo::Source(vec![])));
+                let worker = self.choose_worker(
+                    &plan_fragment,
+                    EMPTY_TASK_ID as u32,
+                    self.stage.dml_table_id,
+                )?;
+                futures.push(self.schedule_task(
+                    task_id,
+                    plan_fragment,
+                    worker,
+                    expr_context.clone(),
+                ));
+            }
             for (id, split) in source_info
                 .split_info()
                 .unwrap()
