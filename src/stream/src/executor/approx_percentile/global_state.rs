@@ -38,61 +38,50 @@ pub struct GlobalApproxPercentileState<S: StateStore> {
 
 // Initialization
 impl<S: StateStore> GlobalApproxPercentileState<S> {
-    pub async fn new(
+    pub fn new(
         quantile: f64,
         base: f64,
-        mut bucket_state_table: StateTable<S>,
-        mut count_state_table: StateTable<S>,
+        bucket_state_table: StateTable<S>,
+        count_state_table: StateTable<S>,
+    ) -> Self {
+        Self {
+            quantile,
+            base,
+            row_count: 0,
+            bucket_state_table,
+            count_state_table,
+            cache: BucketTableCache::new(),
+            last_output: None,
+            output_changed: false,
+        }
+    }
+
+    pub async fn init(
+        &mut self,
         init_epoch: EpochPair,
-    ) -> StreamExecutorResult<Self> {
-        bucket_state_table.init_epoch(init_epoch);
-        count_state_table.init_epoch(init_epoch);
+    ) -> StreamExecutorResult<()> {
+        // Init state tables.
+        self.count_state_table.init_epoch(init_epoch);
+        self.bucket_state_table.init_epoch(init_epoch);
+
         // Refill row_count
-        let mut row_count_state = Self::get_row_count_state(&count_state_table).await?;
+        let row_count_state = self.get_row_count_state().await?;
         let row_count = Self::decode_row_count(&row_count_state)?;
 
         // Refill cache
-        let mut cache = BucketTableCache::new();
-        Self::refill_cache(&bucket_state_table, &mut cache).await?;
+        self.refill_cache().await?;
 
         // Update the last output downstream
         let last_output = if row_count_state.is_none() {
             None
         } else {
-            Some(cache.get_output(row_count, quantile, base))
+            Some(self.cache.get_output(row_count, self.quantile, self.base))
         };
-
-        Ok(Self {
-            quantile,
-            base,
-            row_count,
-            bucket_state_table,
-            count_state_table,
-            cache,
-            last_output,
-            output_changed: false,
-        })
+        self.last_output = last_output;
+        Ok(())
     }
 
-    async fn get_row_count_state(count_state_table: &StateTable<S>) -> StreamExecutorResult<Option<OwnedRow>> {
-        count_state_table.get_row(&[Datum::None; 0]).await
-    }
-
-    fn decode_row_count(row_count_state: &Option<OwnedRow>) -> StreamExecutorResult<i64> {
-        if let Some(row) = row_count_state.as_ref() {
-            let Some(datum) = row.datum_at(0) else {
-                bail!("Invalid row count state: {:?}", row)
-            };
-            Ok(datum.into_int64())
-        } else {
-            Ok(0)
-        }
-    }
-
-    async fn refill_cache(
-        bucket_state_table: &StateTable<S>,
-        cache: &mut BucketTableCache,
-    ) -> StreamExecutorResult<()> {
+    async fn refill_cache(&mut self) -> StreamExecutorResult<()> {
         let neg_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (
             Bound::Unbounded,
             Bound::Excluded([Datum::from(ScalarImpl::Int16(0))].to_owned_row()),
@@ -102,11 +91,11 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
             Bound::Unbounded,
         );
         #[for_await]
-        for keyed_row in bucket_state_table
+        for keyed_row in self.bucket_state_table
             .rev_iter_with_prefix(&[Datum::None; 0], &neg_bounds, PrefetchOptions::default())
             .await?
             .chain(
-                bucket_state_table
+                self.bucket_state_table
                     .iter_with_prefix(
                         &[Datum::None; 0],
                         &non_neg_bounds,
@@ -121,13 +110,13 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
             let count = row.datum_at(2).unwrap().into_int64();
             match sign {
                 -1 => {
-                    cache.neg_buckets.insert(bucket_id, count as i64);
+                    self.cache.neg_buckets.insert(bucket_id, count as i64);
                 }
                 0 => {
-                    cache.zeros = count as i64;
+                    self.cache.zeros = count as i64;
                 }
                 1 => {
-                    cache.pos_buckets.insert(bucket_id, count as i64);
+                    self.cache.pos_buckets.insert(bucket_id, count as i64);
                 }
                 _ => {
                     bail!("Invalid sign: {}", sign);
@@ -136,12 +125,27 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         }
         Ok(())
     }
+
+    async fn get_row_count_state(&self) -> StreamExecutorResult<Option<OwnedRow>> {
+        self.count_state_table.get_row(&[Datum::None; 0]).await
+    }
+
+    fn decode_row_count(row_count_state: &Option<OwnedRow>) -> StreamExecutorResult<i64> {
+        if let Some(row) = row_count_state.as_ref() {
+            let Some(datum) = row.datum_at(0) else {
+                bail!("Invalid row count state: {:?}", row)
+            };
+            Ok(datum.into_int64())
+        } else {
+            Ok(0)
+        }
+    }
 }
 
 // Update
 impl<S: StateStore> GlobalApproxPercentileState<S> {
     pub async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
-        for (op, row) in chunk.rows() {
+        for (_op, row) in chunk.rows() {
             self.apply_row(row).await?;
         }
         Ok(())
@@ -186,7 +190,7 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         }
 
         // Update cache
-        self.cache.update(sign, bucket_id, old_bucket_row_count, new_value);
+        self.cache.update(sign, bucket_id, new_value);
 
         Ok(())
     }
@@ -208,7 +212,7 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
 
 // Read
 impl<S: StateStore> GlobalApproxPercentileState<S> {
-    pub async fn get_output(&self) -> StreamChunk {
+    pub fn get_output(&self) -> StreamChunk {
         match &self.last_output {
             None => {
                 let new_output = self.cache.get_output(self.row_count, self.quantile, self.base);
@@ -288,7 +292,7 @@ impl BucketTableCache {
         Datum::None
     }
 
-    pub fn update(&mut self, sign: i16, bucket_id: i32, old_value: i64, new_value: i64) {
+    pub fn update(&mut self, sign: i16, bucket_id: i32, new_value: i64) {
         match sign {
             -1 => {
                 if new_value == 0 {
