@@ -288,7 +288,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         let fmt_layer = match deployment {
             Deployment::Ci => fmt_layer
                 .compact()
-                .with_filter(FilterFn::new(|metadata| metadata.is_event())) // filter-out all span-related info
+                // .with_filter(FilterFn::new(|metadata| metadata.is_event())) // filter-out all span-related info
                 .boxed(),
             Deployment::Cloud => fmt_layer
                 .json()
