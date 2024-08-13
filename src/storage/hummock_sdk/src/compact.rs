@@ -47,6 +47,7 @@ pub fn compact_task_output_to_string(compact_task: &CompactTask) -> String {
 pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     use std::fmt::Write;
 
+    let mut object_id_set = HashSet::new();
     let mut s = String::new();
     writeln!(
         s,
@@ -74,6 +75,9 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
             .table_infos
             .iter()
             .map(|table| {
+                if !object_id_set.insert(table.object_id) {
+                    panic!("LI)K object_id {} is duplicated", table.object_id);
+                }
                 for tid in &table.table_ids {
                     if !existing_table_ids.contains(tid) {
                         dropped_table_ids.insert(tid);
@@ -83,18 +87,22 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
                 }
                 if table.total_key_count != 0 {
                     format!(
-                        "[id: {}, obj_id: {} {}KB stale_ratio {}]",
+                        "[id: {}, obj_id: {} {}KB estimated_sst_size {}KB stale_ratio {} key_range {:?}]",
                         table.sst_id,
                         table.object_id,
                         table.file_size / 1024,
+                        table.estimated_sst_size / 1024,
                         (table.stale_key_count * 100 / table.total_key_count),
+                        table.key_range,
                     )
                 } else {
                     format!(
-                        "[id: {}, obj_id: {} {}KB]",
+                        "[id: {}, obj_id: {} {}KB estimated_sst_size {}KB key_range {:?}]",
                         table.sst_id,
                         table.object_id,
                         table.file_size / 1024,
+                        table.estimated_sst_size / 1024,
+                        table.key_range,
                     )
                 }
             })

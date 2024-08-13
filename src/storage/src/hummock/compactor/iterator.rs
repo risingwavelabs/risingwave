@@ -191,6 +191,14 @@ impl SstableStreamIterator {
             self.next().await?;
         }
 
+        println!(
+            "LI)K {} {} seek done block {} block_meta {:?}",
+            self.sstable_info.sst_id,
+            self.sstable_info.object_id,
+            self.block_idx,
+            self.block_metas[self.block_idx]
+        );
+
         Ok(())
     }
 
@@ -265,10 +273,29 @@ impl SstableStreamIterator {
         if self.key_range_right_exclusive {
             if self.key().cmp(&self.key_range_right.to_ref()).is_ge() {
                 self.block_iter = None;
+                println!(
+                    "LI)K {} {} next done block {} block_meta {:?} key {:?} key_range_right {:?} key_range_right_exclusive",
+                    self.sstable_info.sst_id,
+                    self.sstable_info.object_id,
+                    self.block_idx,
+                    self.block_metas[self.block_idx],
+                    self.key(),
+                    self.key_range_right.to_ref()
+                );
             }
         } else {
             if self.key().cmp(&self.key_range_right.to_ref()).is_gt() {
                 self.block_iter = None;
+
+                println!(
+                    "LI)K {} {} next done block {} block_meta {:?} key {:?} key_range_right {:?}",
+                    self.sstable_info.sst_id,
+                    self.sstable_info.object_id,
+                    self.block_idx,
+                    self.block_metas[self.block_idx],
+                    self.key(),
+                    self.key_range_right.to_ref()
+                );
             }
         }
 
@@ -695,7 +722,8 @@ mod tests {
     use std::collections::HashSet;
 
     use risingwave_common::catalog::TableId;
-    use risingwave_hummock_sdk::key::{next_full_key, prev_full_key, FullKey};
+    use risingwave_hummock_sdk::compaction_group::group_split;
+    use risingwave_hummock_sdk::key::{next_full_key, prev_full_key, FullKey, FullKeyTracker};
     use risingwave_hummock_sdk::key_range::KeyRange;
 
     use crate::hummock::compactor::ConcatSstableIterator;
@@ -1172,14 +1200,20 @@ mod tests {
         let split_key = test_key_of(5000).encode();
 
         let mut sst_1 = table_info.clone();
-        let mut sst_2 = table_info.clone();
+        let total_key_count = sst_1.total_key_count;
 
-        sst_1.key_range.right = split_key.clone().into();
-        sst_1.key_range.right_exclusive = true;
-        sst_2.key_range.left = split_key.clone().into();
+        let mut new_sst_id = 100;
+        let sst_2 =
+            group_split::split_sst(&mut sst_1, &mut new_sst_id, Some(split_key.clone().into()));
+        sst_1.table_ids.push(0);
+
+        println!("sst_1 {:?}", sst_1);
+        println!("sst_2 {:?}", sst_2);
 
         {
             // test concate
+            let mut full_key_tracker = FullKeyTracker::<Vec<u8>>::new(FullKey::default());
+
             let mut iter = ConcatSstableIterator::for_test(
                 vec![0],
                 vec![sst_1.clone(), sst_2.clone()],
@@ -1191,14 +1225,17 @@ mod tests {
 
             let mut key_count = 0;
             while iter.is_valid() {
-                iter.next().await.unwrap();
+                let is_new_user_key = full_key_tracker.observe(iter.key());
+                assert!(is_new_user_key);
                 key_count += 1;
+                iter.next().await.unwrap();
             }
 
-            assert_eq!(10000 - 1, key_count);
+            assert_eq!(total_key_count, key_count);
         }
 
         {
+            let mut full_key_tracker = FullKeyTracker::<Vec<u8>>::new(FullKey::default());
             let concat_1 = ConcatSstableIterator::for_test(
                 vec![0],
                 vec![sst_1.clone()],
@@ -1217,10 +1254,11 @@ mod tests {
             let mut iter = MergeIterator::for_compactor(vec![concat_1, concat_2]);
             iter.rewind().await.unwrap();
             while iter.is_valid() {
+                full_key_tracker.observe(iter.key());
                 key_count += 1;
                 iter.next().await.unwrap();
             }
-            assert_eq!(10000 - 1, key_count);
+            assert_eq!(total_key_count, key_count);
         }
     }
 }

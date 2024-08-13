@@ -174,6 +174,7 @@ pub mod group_split {
 
             for sst in &mut level.table_infos {
                 let sst_split_type = need_to_split(sst, split_key.clone());
+                println!("sst {} sst_split_type: {:?}", sst.sst_id, sst_split_type);
                 match sst_split_type {
                     SstSplitType::Left => {
                         left_sst.push(sst.clone());
