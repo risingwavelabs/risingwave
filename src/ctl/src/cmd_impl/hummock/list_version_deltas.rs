@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 
 use crate::CtlContext;
 
 pub async fn list_version_deltas(
     context: &CtlContext,
-    start_id: u64,
+    start_id: HummockVersionId,
     num_epochs: u32,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;

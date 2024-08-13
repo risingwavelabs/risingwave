@@ -85,7 +85,7 @@ pub trait Session: Send + Sync {
         self: Arc<Self>,
         sql: Option<Statement>,
         params_types: Vec<Option<DataType>>,
-    ) -> Result<Self::PreparedStatement, BoxedError>;
+    ) -> impl Future<Output = Result<Self::PreparedStatement, BoxedError>> + Send;
 
     // TODO: maybe this function should be async and return the notice more timely
     /// try to take the current notices from the session
@@ -424,7 +424,7 @@ mod tests {
                 .into())
         }
 
-        fn parse(
+        async fn parse(
             self: Arc<Self>,
             _sql: Option<Statement>,
             _params_types: Vec<Option<DataType>>,

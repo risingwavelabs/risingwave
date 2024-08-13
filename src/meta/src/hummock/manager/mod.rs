@@ -380,7 +380,7 @@ impl HummockManager {
                         .into_iter()
                         .map(|m| {
                             (
-                                m.id as HummockVersionId,
+                                HummockVersionId::new(m.id as _),
                                 HummockVersionDelta::from_persisted_protobuf(
                                     &PbHummockVersionDelta::from(m),
                                 ),
