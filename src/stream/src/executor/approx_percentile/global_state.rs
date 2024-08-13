@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::Bound;
+use std::mem;
 
 use risingwave_common::array::Op;
 use risingwave_common::bail;
@@ -152,7 +153,6 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
     }
 
     pub async fn apply_row(&mut self, row: impl Row) -> StreamExecutorResult<()> {
-        self.output_changed = true;
 
         // Decoding
         let sign_datum = row.datum_at(0);
@@ -163,6 +163,12 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         let bucket_id_datum = bucket_id_datum.to_owned_datum();
         let delta_datum = row.datum_at(2);
         let delta: i32 = delta_datum.unwrap().into_int32();
+
+        if delta == 0 {
+            return Ok(());
+        }
+
+        self.output_changed = true;
 
         // Updates
         self.row_count = self.row_count.checked_add(delta as i64).unwrap();
@@ -176,13 +182,17 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         };
 
         let new_value = old_bucket_row_count.checked_add(delta as i64).unwrap();
-        let new_value_datum = Datum::from(ScalarImpl::Int64(new_value));
-        let new_row = &[sign_datum, bucket_id_datum, new_value_datum];
-
-        if old_row.is_none() {
-            self.bucket_state_table.insert(new_row);
+        if new_value == 0 {
+            self.bucket_state_table.delete(old_row);
         } else {
-            self.bucket_state_table.update(old_row, new_row);
+            let new_value_datum = Datum::from(ScalarImpl::Int64(new_value));
+            let new_row = &[sign_datum, bucket_id_datum, new_value_datum];
+
+            if old_row.is_none() {
+                self.bucket_state_table.insert(new_row);
+            } else {
+                self.bucket_state_table.update(old_row, new_row);
+            }
         }
 
         // Update cache
@@ -210,25 +220,29 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
 
 // Read
 impl<S: StateStore> GlobalApproxPercentileState<S> {
-    pub fn get_output(&self) -> StreamChunk {
-        match &self.last_output {
+    pub fn get_output(&mut self) -> StreamChunk {
+        let last_output = mem::take(&mut self.last_output);
+        let new_output = if !self.output_changed {
+            last_output.clone().flatten()
+        } else {
+            let new_output = self.cache.get_output(self.row_count, self.quantile, self.base);
+            self.last_output = Some(new_output.clone());
+            new_output
+        };
+        match last_output {
             None => {
-                let new_output = self
-                    .cache
-                    .get_output(self.row_count, self.quantile, self.base);
-                StreamChunk::from_rows(&[(Op::Insert, &[new_output.clone()])], &[DataType::Float64])
+                StreamChunk::from_rows(&[(Op::Insert, &[new_output])], &[DataType::Float64])
             }
-            Some(last_output) if !self.output_changed => StreamChunk::from_rows(
-                &[
-                    (Op::UpdateDelete, &[last_output.clone()]),
-                    (Op::UpdateInsert, &[last_output.clone()]),
-                ],
-                &[DataType::Float64],
-            ),
+            Some(last_output) if !self.output_changed => {
+                StreamChunk::from_rows(
+                    &[
+                        (Op::UpdateDelete, &[last_output.clone()]),
+                        (Op::UpdateInsert, &[last_output]),
+                    ],
+                    &[DataType::Float64],
+                )
+            },
             Some(last_output) => {
-                let new_output = self
-                    .cache
-                    .get_output(self.row_count, self.quantile, self.base);
                 StreamChunk::from_rows(
                     &[
                         (Op::UpdateDelete, &[last_output.clone()]),
@@ -266,7 +280,7 @@ impl BucketTableCache {
         let mut acc_count = 0;
         for (bucket_id, count) in self.neg_buckets.iter().rev() {
             acc_count += count;
-            if acc_count >= quantile_count {
+            if acc_count > quantile_count {
                 // approx value = -2 * y^i / (y + 1)
                 let approx_percentile = -2.0 * base.powi(*bucket_id) / (base + 1.0);
                 let approx_percentile = ScalarImpl::Float64(approx_percentile.into());
