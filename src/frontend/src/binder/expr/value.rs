@@ -100,7 +100,7 @@ impl Binder {
         Ok(literal)
     }
 
-    fn bind_date_time_field(field: AstDateTimeField) -> DateTimeField {
+    pub(crate) fn bind_date_time_field(field: AstDateTimeField) -> DateTimeField {
         // This is a binder function rather than `impl From<AstDateTimeField> for DateTimeField`,
         // so that the `sqlparser` crate and the `common` crate are kept independent.
         match field {
@@ -212,7 +212,7 @@ impl Binder {
             .map(|e| self.bind_expr_inner(e))
             .collect::<Result<Vec<ExprImpl>>>()?;
         let data_type =
-            DataType::new_struct(exprs.iter().map(|e| e.return_type()).collect_vec(), vec![]);
+            DataType::new_unnamed_struct(exprs.iter().map(|e| e.return_type()).collect_vec());
         let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Row, exprs, data_type).into();
         Ok(expr)
     }

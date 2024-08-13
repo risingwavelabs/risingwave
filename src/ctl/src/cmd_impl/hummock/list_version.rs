@@ -30,11 +30,11 @@ pub async fn list_version(
     } else if verbose {
         version.levels.iter_mut().for_each(|(_cg_id, levels)| {
             // l0
-            if levels.l0.is_some() {
-                let l0 = levels.l0.as_mut().unwrap();
+            {
+                let l0 = &mut levels.l0;
                 for sub_level in &mut l0.sub_levels {
                     for t in &mut sub_level.table_infos {
-                        t.key_range = None;
+                        t.remove_key_range();
                     }
                 }
             }
@@ -42,7 +42,7 @@ pub async fn list_version(
             // l1 ~ lmax
             for level in &mut levels.levels {
                 for t in &mut level.table_infos {
-                    t.key_range = None;
+                    t.remove_key_range();
                 }
             }
         });
@@ -51,30 +51,31 @@ pub async fn list_version(
     } else {
         println!(
             "Version {} max_committed_epoch {}",
-            version.id, version.max_committed_epoch
+            version.id,
+            version.visible_table_committed_epoch()
         );
 
         for (cg, levels) in &version.levels {
             println!("CompactionGroup {}", cg);
 
             // l0
-            if levels.l0.is_some() {
-                for sub_level in levels.l0.as_ref().unwrap().sub_levels.iter().rev() {
+            {
+                for sub_level in levels.l0.sub_levels.iter().rev() {
                     println!(
                         "sub_level_id {} type {} sst_num {} size {}",
                         sub_level.sub_level_id,
-                        sub_level.level_type().as_str_name(),
+                        sub_level.level_type.as_str_name(),
                         sub_level.table_infos.len(),
                         sub_level.total_file_size
                     )
                 }
             }
 
-            for level in levels.get_levels() {
+            for level in &levels.levels {
                 println!(
                     "level_idx {} type {} sst_num {} size {}",
                     level.level_idx,
-                    level.level_type().as_str_name(),
+                    level.level_type.as_str_name(),
                     level.table_infos.len(),
                     level.total_file_size
                 )

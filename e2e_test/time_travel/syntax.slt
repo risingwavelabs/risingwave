@@ -1,0 +1,58 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET QUERY_MODE TO local;
+
+statement ok
+CREATE TABLE t (k INT);
+
+query error
+SELECT * FROM t FOR SYSTEM_TIME AS OF 963716300;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to batch service failed: Internal error
+  2: Storage error
+  3: Hummock error
+  4: Meta error: gRPC request to hummock service failed: Internal error: time travel: version not found for epoch 0
+
+
+query error
+SELECT * FROM t FOR SYSTEM_TIME AS OF '2000-02-20T12:13:14-08:30';
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to batch service failed: Internal error
+  2: Storage error
+  3: Hummock error
+  4: Meta error: gRPC request to hummock service failed: Internal error: time travel: version not found for epoch 0
+
+
+query error
+SELECT * FROM t FOR SYSTEM_TIME AS OF NOW() - '100' YEAR;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to batch service failed: Internal error
+  2: Storage error
+  3: Hummock error
+  4: Meta error: gRPC request to hummock service failed: Internal error: time travel: version not found for epoch 0
+
+
+query I
+SELECT *  FROM t FOR SYSTEM_TIME AS OF '2130-02-10T12:13:14-08:30';
+----
+
+query I
+SELECT *  FROM t FOR SYSTEM_TIME AS OF 5066075780;
+----
+
+statement ok
+DROP TABLE t;
+
+statement ok
+SET QUERY_MODE TO auto;

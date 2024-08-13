@@ -23,6 +23,7 @@ use futures::stream::{BoxStream, FuturesUnordered};
 use futures::StreamExt;
 use itertools::Itertools;
 use parking_lot::Mutex;
+use risingwave_common::error::tonic::extra::Score;
 use risingwave_pb::stream_service::barrier_complete_response::{
     GroupedSstableInfo, PbCreateMviewProgress,
 };
@@ -31,14 +32,15 @@ use rw_futures_util::{pending_on_none, AttachedFuture};
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tonic::{Code, Status};
 
 use self::managed_state::ManagedBarrierState;
 use crate::error::{IntoUnexpectedExit, StreamError, StreamResult};
 use crate::task::{
-    ActorHandle, ActorId, AtomicU64Ref, SharedContext, StreamEnvironment, UpDownActorIds,
+    ActorHandle, ActorId, AtomicU64Ref, PartialGraphId, SharedContext, StreamEnvironment,
+    UpDownActorIds,
 };
 
 mod managed_state;
@@ -48,13 +50,16 @@ mod tests;
 
 pub use progress::CreateMviewProgress;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
-use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
+use risingwave_hummock_sdk::{HummockVersionId, LocalSstableInfo, SyncResult};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::streaming_control_stream_request::{InitRequest, Request};
-use risingwave_pb::stream_service::streaming_control_stream_response::InitResponse;
+use risingwave_pb::stream_service::streaming_control_stream_response::{
+    InitResponse, ShutdownResponse,
+};
 use risingwave_pb::stream_service::{
     streaming_control_stream_response, BarrierCompleteResponse, BuildActorInfo,
     StreamingControlStreamRequest, StreamingControlStreamResponse,
@@ -62,7 +67,10 @@ use risingwave_pb::stream_service::{
 
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Actor, Barrier, DispatchExecutor, Mutation, StreamExecutorError};
+use crate::executor::{
+    Actor, Barrier, BarrierInner, DispatchExecutor, DispatcherBarrier, Mutation,
+    StreamExecutorError,
+};
 use crate::task::barrier_manager::managed_state::ManagedBarrierStateDebugInfo;
 use crate::task::barrier_manager::progress::BackfillState;
 
@@ -114,14 +122,37 @@ impl ControlStreamHandle {
 
             let err = err.into_inner();
             if sender.send(Err(err)).is_err() {
-                warn!("failed to notify finish of control stream");
+                warn!("failed to notify reset of control stream");
             }
         }
     }
 
-    fn inspect_result(&mut self, result: StreamResult<()>) {
-        if let Err(e) = result {
-            self.reset_stream_with_err(e.to_status_unnamed(Code::Internal));
+    /// Send `Shutdown` message to the control stream and wait for the stream to be closed
+    /// by the meta service.
+    async fn shutdown_stream(&mut self) {
+        if let Some((sender, _)) = self.pair.take() {
+            if sender
+                .send(Ok(StreamingControlStreamResponse {
+                    response: Some(streaming_control_stream_response::Response::Shutdown(
+                        ShutdownResponse::default(),
+                    )),
+                }))
+                .is_err()
+            {
+                warn!("failed to notify shutdown of control stream");
+            } else {
+                tracing::info!("waiting for meta service to close control stream...");
+
+                // Wait for the stream to be closed, to ensure that the `Shutdown` message has
+                // been acknowledged by the meta service for more precise error report.
+                //
+                // This is because the meta service will reset the control stream manager and
+                // drop the connection to us upon recovery. As a result, the receiver part of
+                // this sender will also be dropped, causing the stream to close.
+                sender.closed().await;
+            }
+        } else {
+            debug!("control stream has been reset, ignore shutdown");
         }
     }
 
@@ -187,24 +218,28 @@ impl CreateActorContext {
     }
 }
 
+pub(crate) type SubscribeMutationItem = (u64, Option<Arc<Mutation>>);
+
 pub(super) enum LocalBarrierEvent {
     ReportActorCollected {
         actor_id: ActorId,
-        barrier: Barrier,
+        epoch: EpochPair,
     },
     ReportCreateProgress {
-        current_epoch: u64,
+        epoch: EpochPair,
         actor: ActorId,
         state: BackfillState,
     },
-    ReadBarrierMutation {
-        barrier: Barrier,
-        mutation_sender: oneshot::Sender<Option<Arc<Mutation>>>,
+    SubscribeBarrierMutation {
+        actor_id: ActorId,
+        epoch: EpochPair,
+        mutation_sender: mpsc::UnboundedSender<SubscribeMutationItem>,
     },
     #[cfg(test)]
     Flush(oneshot::Sender<()>),
 }
 
+#[derive(strum_macros::Display)]
 pub(super) enum LocalActorOperation {
     NewControlStream {
         handle: ControlStreamHandle,
@@ -240,6 +275,9 @@ pub(super) enum LocalActorOperation {
     },
     InspectState {
         result_sender: oneshot::Sender<String>,
+    },
+    Shutdown {
+        result_sender: oneshot::Sender<()>,
     },
 }
 
@@ -370,7 +408,8 @@ pub(super) struct LocalBarrierWorker {
 
     actor_failure_rx: UnboundedReceiver<(ActorId, StreamError)>,
 
-    root_failure: Option<StreamError>,
+    /// Cached result of [`Self::try_find_root_failure`].
+    cached_root_failure: Option<ScoredStreamError>,
 }
 
 impl LocalBarrierWorker {
@@ -378,8 +417,7 @@ impl LocalBarrierWorker {
         let (event_tx, event_rx) = unbounded_channel();
         let (failure_tx, failure_rx) = unbounded_channel();
         let shared_context = Arc::new(SharedContext::new(
-            actor_manager.env.server_address().clone(),
-            actor_manager.env.config(),
+            &actor_manager.env,
             LocalBarrierManager {
                 barrier_event_sender: event_tx,
                 actor_failure_sender: failure_tx,
@@ -399,7 +437,7 @@ impl LocalBarrierWorker {
             current_shared_context: shared_context,
             barrier_event_rx: event_rx,
             actor_failure_rx: failure_rx,
-            root_failure: None,
+            cached_root_failure: None,
         }
     }
 
@@ -425,27 +463,38 @@ impl LocalBarrierWorker {
                 (sender, create_actors_result) = self.actor_manager_state.next_created_actors() => {
                     self.handle_actor_created(sender, create_actors_result);
                 }
-                completed_epoch = self.state.next_completed_epoch() => {
-                    let result = self.on_epoch_completed(completed_epoch);
-                    self.control_stream_handle.inspect_result(result);
+                (partial_graph_id, completed_epoch) = self.state.next_completed_epoch() => {
+                    let result = self.on_epoch_completed(partial_graph_id, completed_epoch);
+                    if let Err(err) = result {
+                        self.notify_other_failure(err, "failed to complete epoch").await;
+                    }
                 },
                 event = self.barrier_event_rx.recv() => {
                     self.handle_barrier_event(event.expect("should not be none"));
                 },
                 failure = self.actor_failure_rx.recv() => {
                     let (actor_id, err) = failure.unwrap();
-                    self.notify_failure(actor_id, err).await;
+                    self.notify_actor_failure(actor_id, err).await;
                 },
                 actor_op = actor_op_rx.recv() => {
                     if let Some(actor_op) = actor_op {
                         match actor_op {
                             LocalActorOperation::NewControlStream { handle, init_request  } => {
                                 self.control_stream_handle.reset_stream_with_err(Status::internal("control stream has been reset to a new one"));
-                                self.reset(init_request.prev_epoch).await;
+                                self.reset(HummockVersionId::new(init_request.version_id)).await;
                                 self.control_stream_handle = handle;
                                 self.control_stream_handle.send_response(StreamingControlStreamResponse {
                                     response: Some(streaming_control_stream_response::Response::Init(InitResponse {}))
                                 });
+                            }
+                            LocalActorOperation::Shutdown { result_sender } => {
+                                if !self.actor_manager_state.handles.is_empty() {
+                                    tracing::warn!(
+                                        "shutdown with running actors, scaling or migration will be triggered"
+                                    );
+                                }
+                                self.control_stream_handle.shutdown_stream().await;
+                                let _ = result_sender.send(());
                             }
                             actor_op => {
                                 self.handle_actor_op(actor_op);
@@ -458,7 +507,9 @@ impl LocalBarrierWorker {
                 },
                 request = self.control_stream_handle.next_request() => {
                     let result = self.handle_streaming_control_request(request);
-                    self.control_stream_handle.inspect_result(result);
+                    if let Err(err) = result {
+                        self.notify_other_failure(err, "failed to inject barrier").await;
+                    }
                 },
             }
         }
@@ -494,7 +545,14 @@ impl LocalBarrierWorker {
                         .into_iter()
                         .map(TableId::new)
                         .collect(),
+                    PartialGraphId::new(req.partial_graph_id),
                 )?;
+                Ok(())
+            }
+            Request::RemovePartialGraph(req) => {
+                self.remove_partial_graphs(
+                    req.partial_graph_ids.into_iter().map(PartialGraphId::new),
+                );
                 Ok(())
             }
             Request::Init(_) => {
@@ -505,21 +563,23 @@ impl LocalBarrierWorker {
 
     fn handle_barrier_event(&mut self, event: LocalBarrierEvent) {
         match event {
-            LocalBarrierEvent::ReportActorCollected { actor_id, barrier } => {
-                self.collect(actor_id, &barrier)
+            LocalBarrierEvent::ReportActorCollected { actor_id, epoch } => {
+                self.collect(actor_id, epoch)
             }
             LocalBarrierEvent::ReportCreateProgress {
-                current_epoch,
+                epoch,
                 actor,
                 state,
             } => {
-                self.update_create_mview_progress(current_epoch, actor, state);
+                self.update_create_mview_progress(epoch, actor, state);
             }
-            LocalBarrierEvent::ReadBarrierMutation {
-                barrier,
+            LocalBarrierEvent::SubscribeBarrierMutation {
+                actor_id,
+                epoch,
                 mutation_sender,
             } => {
-                self.read_barrier_mutation(barrier, mutation_sender);
+                self.state
+                    .subscribe_actor_mutation(actor_id, epoch.prev, mutation_sender);
             }
             #[cfg(test)]
             LocalBarrierEvent::Flush(sender) => sender.send(()).unwrap(),
@@ -528,8 +588,8 @@ impl LocalBarrierWorker {
 
     fn handle_actor_op(&mut self, actor_op: LocalActorOperation) {
         match actor_op {
-            LocalActorOperation::NewControlStream { .. } => {
-                unreachable!("NewControlStream event should be handled separately in async context")
+            LocalActorOperation::NewControlStream { .. } | LocalActorOperation::Shutdown { .. } => {
+                unreachable!("event {actor_op} should be handled separately in async context")
             }
             LocalActorOperation::DropActors {
                 actors,
@@ -581,9 +641,17 @@ impl LocalBarrierWorker {
 
 // event handler
 impl LocalBarrierWorker {
-    fn on_epoch_completed(&mut self, epoch: u64) -> StreamResult<()> {
-        let result = self
+    fn on_epoch_completed(
+        &mut self,
+        partial_graph_id: PartialGraphId,
+        epoch: u64,
+    ) -> StreamResult<()> {
+        let state = self
             .state
+            .graph_states
+            .get_mut(&partial_graph_id)
+            .expect("should exist");
+        let result = state
             .pop_completed_epoch(epoch)
             .expect("should exist")
             .expect("should have completed")?;
@@ -608,18 +676,18 @@ impl LocalBarrierWorker {
                 streaming_control_stream_response::Response::CompleteBarrier(
                     BarrierCompleteResponse {
                         request_id: "todo".to_string(),
+                        partial_graph_id: partial_graph_id.into(),
+                        epoch,
                         status: None,
                         create_mview_progress,
                         synced_sstables: synced_sstables
                             .into_iter()
                             .map(
                                 |LocalSstableInfo {
-                                     compaction_group_id,
                                      sst_info,
                                      table_stats,
                                  }| GroupedSstableInfo {
-                                    compaction_group_id,
-                                    sst: Some(sst_info),
+                                    sst: Some(sst_info.into()),
                                     table_stats_map: to_prost_table_stats_map(table_stats),
                                 },
                             )
@@ -627,11 +695,11 @@ impl LocalBarrierWorker {
                         worker_id: self.actor_manager.env.worker_id(),
                         table_watermarks: table_watermarks
                             .into_iter()
-                            .map(|(key, value)| (key.table_id, value.to_protobuf()))
+                            .map(|(key, value)| (key.table_id, value.into()))
                             .collect(),
                         old_value_sstables: old_value_ssts
                             .into_iter()
-                            .map(|sst| sst.sst_info)
+                            .map(|sst| sst.sst_info.into())
                             .collect(),
                     },
                 ),
@@ -640,15 +708,6 @@ impl LocalBarrierWorker {
 
         self.control_stream_handle.send_response(result);
         Ok(())
-    }
-
-    /// Read mutation from barrier state.
-    fn read_barrier_mutation(
-        &mut self,
-        barrier: Barrier,
-        sender: oneshot::Sender<Option<Arc<Mutation>>>,
-    ) {
-        self.state.read_barrier_mutation(&barrier, sender);
     }
 
     /// Register sender for source actors, used to send barriers.
@@ -666,15 +725,19 @@ impl LocalBarrierWorker {
 
     /// Broadcast a barrier to all senders. Save a receiver which will get notified when this
     /// barrier is finished, in managed mode.
+    ///
+    /// Note that the error returned here is typically a [`StreamError::barrier_send`], which is not
+    /// the root cause of the failure. The caller should then call [`Self::try_find_root_failure`]
+    /// to find the root cause.
     fn send_barrier(
         &mut self,
         barrier: &Barrier,
         to_send: HashSet<ActorId>,
         to_collect: HashSet<ActorId>,
         table_ids: HashSet<TableId>,
+        partial_graph_id: PartialGraphId,
     ) -> StreamResult<()> {
-        #[cfg(not(test))]
-        {
+        if !cfg!(test) {
             // The barrier might be outdated and been injected after recovery in some certain extreme
             // scenarios. So some newly creating actors in the barrier are possibly not rebuilt during
             // recovery. Check it here and return an error here if some actors are not found to
@@ -706,21 +769,21 @@ impl LocalBarrierWorker {
             to_collect
         );
 
-        // There must be some actors to collect from.
-        assert!(!to_collect.is_empty());
-
         for actor_id in &to_collect {
-            if let Some(e) = self.failure_actors.get(actor_id) {
+            if self.failure_actors.contains_key(actor_id) {
                 // The failure actors could exit before the barrier is issued, while their
                 // up-downstream actors could be stuck somehow. Return error directly to trigger the
                 // recovery.
-                // try_find_root_failure is not used merely because it requires async.
-                return Err(self.root_failure.clone().unwrap_or(e.clone()));
+                return Err(StreamError::barrier_send(
+                    barrier.clone(),
+                    *actor_id,
+                    "actor has already failed",
+                ));
             }
         }
 
         self.state
-            .transform_to_issued(barrier, to_collect, table_ids);
+            .transform_to_issued(barrier, to_collect, table_ids, partial_graph_id);
 
         for actor_id in to_send {
             match self.barrier_senders.get(&actor_id) {
@@ -760,6 +823,23 @@ impl LocalBarrierWorker {
         Ok(())
     }
 
+    fn remove_partial_graphs(&mut self, partial_graph_ids: impl Iterator<Item = PartialGraphId>) {
+        for partial_graph_id in partial_graph_ids {
+            if let Some(graph) = self.state.graph_states.remove(&partial_graph_id) {
+                assert!(
+                    graph.is_empty(),
+                    "non empty graph to be removed: {}",
+                    &graph
+                );
+            } else {
+                warn!(
+                    partial_graph_id = partial_graph_id.0,
+                    "no partial graph to remove"
+                );
+            }
+        }
+    }
+
     /// Reset all internal states.
     pub(super) fn reset_state(&mut self) {
         *self = Self::new(self.actor_manager.clone());
@@ -767,27 +847,43 @@ impl LocalBarrierWorker {
 
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
     /// and collect this barrier with its own `actor_id` using this function.
-    fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) {
-        self.state.collect(actor_id, barrier)
+    fn collect(&mut self, actor_id: ActorId, epoch: EpochPair) {
+        self.state.collect(actor_id, epoch)
     }
 
-    /// When a actor exit unexpectedly, it should report this event using this function, so meta
-    /// will notice actor's exit while collecting.
-    async fn notify_failure(&mut self, actor_id: ActorId, err: StreamError) {
+    /// When a actor exit unexpectedly, the error is reported using this function. The control stream
+    /// will be reset and the meta service will then trigger recovery.
+    async fn notify_actor_failure(&mut self, actor_id: ActorId, err: StreamError) {
         self.add_failure(actor_id, err.clone());
-        let root_err = self.try_find_root_failure().await;
+        let root_err = self.try_find_root_failure().await.unwrap(); // always `Some` because we just added one
 
-        let failed_epochs = self.state.epochs_await_on_actor(actor_id).collect_vec();
-        if !failed_epochs.is_empty() {
+        if let Some(actor_state) = self.state.actor_states.get(&actor_id)
+            && (!actor_state.inflight_barriers.is_empty() || actor_state.is_running())
+        {
             self.control_stream_handle.reset_stream_with_err(
                 anyhow!(root_err)
-                    .context(format!(
-                        "failed to collect barrier for epoch {:?}",
-                        failed_epochs
-                    ))
+                    .context("failed to collect barrier")
                     .to_status_unnamed(Code::Internal),
             );
         }
+    }
+
+    /// When some other failure happens (like failed to send barrier), the error is reported using
+    /// this function. The control stream will be reset and the meta service will then trigger recovery.
+    ///
+    /// This is similar to [`Self::notify_actor_failure`], but since there's not always an actor failure,
+    /// the given `err` will be used if there's no root failure found.
+    async fn notify_other_failure(&mut self, err: StreamError, message: impl Into<String>) {
+        let root_err = self
+            .try_find_root_failure()
+            .await
+            .unwrap_or_else(|| ScoredStreamError::new(err));
+
+        self.control_stream_handle.reset_stream_with_err(
+            anyhow!(root_err)
+                .context(message.into())
+                .to_status_unnamed(Code::Internal),
+        );
     }
 
     fn add_failure(&mut self, actor_id: ActorId, err: StreamError) {
@@ -800,10 +896,14 @@ impl LocalBarrierWorker {
         }
     }
 
-    async fn try_find_root_failure(&mut self) -> StreamError {
-        if let Some(root_failure) = &self.root_failure {
-            return root_failure.clone();
+    /// Collect actor errors for a while and find the one that might be the root cause.
+    ///
+    /// Returns `None` if there's no actor error received.
+    async fn try_find_root_failure(&mut self) -> Option<ScoredStreamError> {
+        if self.cached_root_failure.is_some() {
+            return self.cached_root_failure.clone();
         }
+
         // fetch more actor errors within a timeout
         let _ = tokio::time::timeout(Duration::from_secs(3), async {
             while let Some((actor_id, error)) = self.actor_failure_rx.recv().await {
@@ -811,11 +911,15 @@ impl LocalBarrierWorker {
             }
         })
         .await;
-        self.root_failure = try_find_root_actor_failure(self.failure_actors.values());
 
-        self.root_failure
-            .clone()
-            .expect("failure actors should not be empty")
+        // Find the error with highest score.
+        self.cached_root_failure = self
+            .failure_actors
+            .values()
+            .map(|e| ScoredStreamError::new(e.clone()))
+            .max_by_key(|e| e.score);
+
+        self.cached_root_failure.clone()
     }
 }
 
@@ -891,10 +995,10 @@ impl LocalBarrierManager {
 
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
     /// and collect this barrier with its own `actor_id` using this function.
-    pub fn collect(&self, actor_id: ActorId, barrier: &Barrier) {
+    pub fn collect<M>(&self, actor_id: ActorId, barrier: &BarrierInner<M>) {
         self.send_event(LocalBarrierEvent::ReportActorCollected {
             actor_id,
-            barrier: barrier.clone(),
+            epoch: barrier.epoch,
         })
     }
 
@@ -907,79 +1011,103 @@ impl LocalBarrierManager {
     }
 
     /// When a `RemoteInput` get a barrier, it should wait and read the barrier mutation from the barrier manager.
-    pub async fn read_barrier_mutation(
+    pub fn subscribe_barrier_mutation(
         &self,
-        barrier: &Barrier,
-    ) -> StreamResult<Option<Arc<Mutation>>> {
-        let (tx, rx) = oneshot::channel();
-        self.send_event(LocalBarrierEvent::ReadBarrierMutation {
-            barrier: barrier.clone(),
+        actor_id: ActorId,
+        first_barrier: &DispatcherBarrier,
+    ) -> mpsc::UnboundedReceiver<SubscribeMutationItem> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.send_event(LocalBarrierEvent::SubscribeBarrierMutation {
+            actor_id,
+            epoch: first_barrier.epoch,
             mutation_sender: tx,
         });
-        rx.await
-            .map_err(|_| anyhow!("barrier manager maybe reset").into())
+        rx
     }
 }
 
-/// Tries to find the root cause of actor failures, based on hard-coded rules.
-pub fn try_find_root_actor_failure<'a>(
-    actor_errors: impl IntoIterator<Item = &'a StreamError>,
-) -> Option<StreamError> {
-    // Explicitly list all error kinds here to notice developers to update this function when
-    // there are changes in error kinds.
+/// A [`StreamError`] with a score, used to find the root cause of actor failures.
+#[derive(Debug, Clone)]
+struct ScoredStreamError {
+    error: StreamError,
+    score: Score,
+}
 
-    fn stream_executor_error_score(e: &StreamExecutorError) -> i32 {
-        use crate::executor::error::ErrorKind;
-        match e.inner() {
-            // `ChannelClosed` or `ExchangeChannelClosed` is likely to be caused by actor exit
-            // and not the root cause.
-            ErrorKind::ChannelClosed(_) | ErrorKind::ExchangeChannelClosed(_) => 1,
+impl std::fmt::Display for ScoredStreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(f)
+    }
+}
 
-            // Normal errors.
-            ErrorKind::Uncategorized(_)
-            | ErrorKind::Storage(_)
-            | ErrorKind::ArrayError(_)
-            | ErrorKind::ExprError(_)
-            | ErrorKind::SerdeError(_)
-            | ErrorKind::SinkError(_)
-            | ErrorKind::RpcError(_)
-            | ErrorKind::AlignBarrier(_, _)
-            | ErrorKind::ConnectorError(_)
-            | ErrorKind::DmlError(_)
-            | ErrorKind::NotImplemented(_) => 999,
-        }
+impl std::error::Error for ScoredStreamError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.error.source()
     }
 
-    fn stream_error_score(e: &StreamError) -> i32 {
-        use crate::error::ErrorKind;
-        match e.inner() {
-            // `UnexpectedExit` wraps the original error. Score on the inner error.
-            ErrorKind::UnexpectedExit { source, .. } => stream_error_score(source),
-
-            // `BarrierSend` is likely to be caused by actor exit and not the root cause.
-            ErrorKind::BarrierSend { .. } => 1,
-
-            // Executor errors first.
-            ErrorKind::Executor(ee) => 2000 + stream_executor_error_score(ee),
-
-            // Then other errors.
-            ErrorKind::Uncategorized(_)
-            | ErrorKind::Storage(_)
-            | ErrorKind::Expression(_)
-            | ErrorKind::Array(_)
-            | ErrorKind::Sink(_) => 1000,
-        }
+    fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
+        self.error.provide(request);
+        // HIGHLIGHT: Provide the score to make it retrievable from meta service.
+        request.provide_value(self.score);
     }
+}
 
-    actor_errors
-        .into_iter()
-        .max_by_key(|&e| stream_error_score(e))
-        .cloned()
+impl ScoredStreamError {
+    /// Score the given error based on hard-coded rules.
+    fn new(error: StreamError) -> Self {
+        // Explicitly list all error kinds here to notice developers to update this function when
+        // there are changes in error kinds.
+
+        fn stream_executor_error_score(e: &StreamExecutorError) -> i32 {
+            use crate::executor::error::ErrorKind;
+            match e.inner() {
+                // `ChannelClosed` or `ExchangeChannelClosed` is likely to be caused by actor exit
+                // and not the root cause.
+                ErrorKind::ChannelClosed(_) | ErrorKind::ExchangeChannelClosed(_) => 1,
+
+                // Normal errors.
+                ErrorKind::Uncategorized(_)
+                | ErrorKind::Storage(_)
+                | ErrorKind::ArrayError(_)
+                | ErrorKind::ExprError(_)
+                | ErrorKind::SerdeError(_)
+                | ErrorKind::SinkError(_, _)
+                | ErrorKind::RpcError(_)
+                | ErrorKind::AlignBarrier(_, _)
+                | ErrorKind::ConnectorError(_)
+                | ErrorKind::DmlError(_)
+                | ErrorKind::NotImplemented(_) => 999,
+            }
+        }
+
+        fn stream_error_score(e: &StreamError) -> i32 {
+            use crate::error::ErrorKind;
+            match e.inner() {
+                // `UnexpectedExit` wraps the original error. Score on the inner error.
+                ErrorKind::UnexpectedExit { source, .. } => stream_error_score(source),
+
+                // `BarrierSend` is likely to be caused by actor exit and not the root cause.
+                ErrorKind::BarrierSend { .. } => 1,
+
+                // Executor errors first.
+                ErrorKind::Executor(ee) => 2000 + stream_executor_error_score(ee),
+
+                // Then other errors.
+                ErrorKind::Uncategorized(_)
+                | ErrorKind::Storage(_)
+                | ErrorKind::Expression(_)
+                | ErrorKind::Array(_)
+                | ErrorKind::Secret(_) => 1000,
+            }
+        }
+
+        let score = Score(stream_error_score(&error));
+        Self { error, score }
+    }
 }
 
 #[cfg(test)]
 impl LocalBarrierManager {
-    pub(super) fn spawn_for_test() -> EventSender<LocalActorOperation> {
+    fn spawn_for_test() -> EventSender<LocalActorOperation> {
         use std::sync::atomic::AtomicU64;
         let (tx, rx) = unbounded_channel();
         let _join_handle = LocalBarrierWorker::spawn(
@@ -1009,5 +1137,88 @@ impl LocalBarrierManager {
         let (tx, rx) = oneshot::channel();
         self.send_event(LocalBarrierEvent::Flush(tx));
         rx.await.unwrap()
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod barrier_test_utils {
+    use std::sync::Arc;
+
+    use assert_matches::assert_matches;
+    use futures::StreamExt;
+    use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
+    use risingwave_pb::stream_service::{
+        streaming_control_stream_request, streaming_control_stream_response, InjectBarrierRequest,
+        StreamingControlStreamRequest, StreamingControlStreamResponse,
+    };
+    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+    use tokio_stream::wrappers::UnboundedReceiverStream;
+    use tonic::Status;
+
+    use crate::executor::Barrier;
+    use crate::task::barrier_manager::{ControlStreamHandle, EventSender, LocalActorOperation};
+    use crate::task::{ActorId, LocalBarrierManager, SharedContext};
+
+    pub(crate) struct LocalBarrierTestEnv {
+        pub shared_context: Arc<SharedContext>,
+        pub(super) actor_op_tx: EventSender<LocalActorOperation>,
+        pub request_tx: UnboundedSender<Result<StreamingControlStreamRequest, Status>>,
+        pub response_rx: UnboundedReceiver<Result<StreamingControlStreamResponse, Status>>,
+    }
+
+    impl LocalBarrierTestEnv {
+        pub(crate) async fn for_test() -> Self {
+            let actor_op_tx = LocalBarrierManager::spawn_for_test();
+
+            let (request_tx, request_rx) = unbounded_channel();
+            let (response_tx, mut response_rx) = unbounded_channel();
+
+            actor_op_tx.send_event(LocalActorOperation::NewControlStream {
+                handle: ControlStreamHandle::new(
+                    response_tx,
+                    UnboundedReceiverStream::new(request_rx).boxed(),
+                ),
+                init_request: InitRequest { version_id: 0 },
+            });
+
+            assert_matches!(
+                response_rx.recv().await.unwrap().unwrap().response.unwrap(),
+                streaming_control_stream_response::Response::Init(_)
+            );
+
+            let shared_context = actor_op_tx
+                .send_and_await(LocalActorOperation::GetCurrentSharedContext)
+                .await
+                .unwrap();
+
+            Self {
+                shared_context,
+                actor_op_tx,
+                request_tx,
+                response_rx,
+            }
+        }
+
+        pub(crate) fn inject_barrier(
+            &self,
+            barrier: &Barrier,
+            actor_to_send: impl IntoIterator<Item = ActorId>,
+            actor_to_collect: impl IntoIterator<Item = ActorId>,
+        ) {
+            self.request_tx
+                .send(Ok(StreamingControlStreamRequest {
+                    request: Some(streaming_control_stream_request::Request::InjectBarrier(
+                        InjectBarrierRequest {
+                            request_id: "".to_string(),
+                            barrier: Some(barrier.to_protobuf()),
+                            actor_ids_to_send: actor_to_send.into_iter().collect(),
+                            actor_ids_to_collect: actor_to_collect.into_iter().collect(),
+                            table_ids_to_sync: vec![],
+                            partial_graph_id: u32::MAX,
+                        },
+                    )),
+                }))
+                .unwrap();
+        }
     }
 }

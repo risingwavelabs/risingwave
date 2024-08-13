@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_license::LicenseManager;
+
 use super::diff::SystemParamsDiff;
 use super::reader::SystemParamsReader;
 use crate::util::tracing::layer::toggle_otel_layer;
 
 /// Node-independent handler for system parameter changes.
-///
-/// Currently, it is only used to enable or disable the distributed tracing layer.
 #[derive(Debug)]
 pub struct CommonHandler;
 
@@ -32,8 +32,13 @@ impl CommonHandler {
 
     /// Handle the change of system parameters.
     pub fn handle_change(&self, diff: &SystemParamsDiff) {
+        // Toggle the distributed tracing layer.
         if let Some(enabled) = diff.enable_tracing {
-            toggle_otel_layer(enabled)
+            toggle_otel_layer(enabled);
+        }
+        // Refresh the license key.
+        if let Some(key) = diff.license_key.as_ref() {
+            LicenseManager::get().refresh(key.as_ref());
         }
     }
 }

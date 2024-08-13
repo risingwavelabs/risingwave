@@ -93,7 +93,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         chunk_size: usize,
         input_data_types: Vec<DataType>,
     ) -> StreamExecutorResult<Self> {
-        let sink = build_sink(sink_param.clone())?;
+        let sink = build_sink(sink_param.clone())
+            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
         let sink_input_schema: Schema = columns
             .iter()
             .map(|column| Field::from(&column.column_desc))
@@ -345,9 +346,15 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                     // Force append-only by dropping UPDATE/DELETE messages. We do this when the
                                     // user forces the sink to be append-only while it is actually not based on
                                     // the frontend derivation result.
-                                    delete_chunks.push(force_delete_only(c.clone()));
+                                    let chunk = force_delete_only(c.clone());
+                                    if chunk.cardinality() > 0 {
+                                        delete_chunks.push(chunk);
+                                    }
                                 }
-                                insert_chunks.push(force_append_only(c));
+                                let chunk = force_append_only(c);
+                                if chunk.cardinality() > 0 {
+                                    insert_chunks.push(chunk);
+                                }
                             }
                             delete_chunks
                                 .into_iter()
@@ -356,20 +363,32 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         } else {
                             chunks
                         };
-                        let chunks = if re_construct_with_sink_pk {
-                            StreamChunkCompactor::new(down_stream_pk.clone(), chunks)
+                        if re_construct_with_sink_pk {
+                            let chunks = StreamChunkCompactor::new(down_stream_pk.clone(), chunks)
                                 .reconstructed_compacted_chunks(
                                     chunk_size,
                                     input_data_types.clone(),
                                     sink_type != SinkType::ForceAppendOnly,
-                                )
+                                );
+                            for c in chunks {
+                                yield Message::Chunk(c);
+                            }
                         } else {
-                            chunks
+                            let mut chunk_builder =
+                                StreamChunkBuilder::new(chunk_size, input_data_types.clone());
+                            for chunk in chunks {
+                                for (op, row) in chunk.rows() {
+                                    if let Some(c) = chunk_builder.append_row(op, row) {
+                                        yield Message::Chunk(c);
+                                    }
+                                }
+                            }
+
+                            if let Some(c) = chunk_builder.take() {
+                                yield Message::Chunk(c);
+                            }
                         };
 
-                        for c in chunks {
-                            yield Message::Chunk(c);
-                        }
                         if let Some(w) = mem::take(&mut watermark) {
                             yield Message::Watermark(w)
                         }
@@ -463,6 +482,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     warn!(
                         error = %e.as_report(),
                         executor_id = sink_writer_param.executor_id,
+                        sink_id = sink_param.sink_id.sink_id,
                         "rewind successfully after sink error"
                     );
                     sink_writer_param.vnode_bitmap = curr_vnode_bitmap;
@@ -476,7 +496,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     );
                     Err(e)
                 }
-            }?;
+            }
+            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
         }
         Err(anyhow!("end of stream").into())
     }
@@ -557,6 +578,7 @@ mod test {
             sink_id: 0.into(),
             sink_name: "test".into(),
             properties,
+
             columns: columns
                 .iter()
                 .filter(|col| !col.is_hidden)
@@ -685,6 +707,7 @@ mod test {
             sink_id: 0.into(),
             sink_name: "test".into(),
             properties,
+
             columns: columns
                 .iter()
                 .filter(|col| !col.is_hidden)
@@ -786,6 +809,7 @@ mod test {
             sink_id: 0.into(),
             sink_name: "test".into(),
             properties,
+
             columns: columns
                 .iter()
                 .filter(|col| !col.is_hidden)

@@ -82,7 +82,10 @@ impl MetaNodeService {
 
         match &config.meta_backend {
             MetaBackend::Memory => {
-                cmd.arg("--backend").arg("mem");
+                cmd.arg("--backend")
+                    .arg("sql")
+                    .arg("--sql-endpoint")
+                    .arg("sqlite::memory:");
             }
             MetaBackend::Etcd => {
                 let etcd_config = config.provide_etcd_backend.as_ref().unwrap();
@@ -109,9 +112,9 @@ impl MetaNodeService {
                     .join(&sqlite_config[0].id)
                     .join(&sqlite_config[0].file);
                 cmd.arg("--backend")
-                    .arg("sql")
+                    .arg("sqlite")
                     .arg("--sql-endpoint")
-                    .arg(format!("sqlite://{}?mode=rwc", file_path.display()));
+                    .arg(file_path);
             }
             MetaBackend::Postgres => {
                 let pg_config = config.provide_postgres_backend.as_ref().unwrap();
@@ -123,16 +126,18 @@ impl MetaNodeService {
                 is_persistent_meta_store = true;
 
                 cmd.arg("--backend")
-                    .arg("sql")
+                    .arg("postgres")
                     .arg("--sql-endpoint")
                     .arg(format!(
-                        "postgres://{}:{}@{}:{}/{}",
-                        pg_store_config.user,
-                        pg_store_config.password,
-                        pg_store_config.address,
-                        pg_store_config.port,
-                        pg_store_config.database
-                    ));
+                        "{}:{}",
+                        pg_store_config.address, pg_store_config.port,
+                    ))
+                    .arg("--sql-username")
+                    .arg(&pg_store_config.user)
+                    .arg("--sql-password")
+                    .arg(&pg_store_config.password)
+                    .arg("--sql-database")
+                    .arg(&pg_store_config.database);
             }
             MetaBackend::Mysql => {
                 let mysql_config = config.provide_mysql_backend.as_ref().unwrap();
@@ -144,16 +149,18 @@ impl MetaNodeService {
                 is_persistent_meta_store = true;
 
                 cmd.arg("--backend")
-                    .arg("sql")
+                    .arg("mysql")
                     .arg("--sql-endpoint")
                     .arg(format!(
-                        "mysql://{}:{}@{}:{}/{}",
-                        mysql_store_config.user,
-                        mysql_store_config.password,
-                        mysql_store_config.address,
-                        mysql_store_config.port,
-                        mysql_store_config.database
-                    ));
+                        "{}:{}",
+                        mysql_store_config.address, mysql_store_config.port,
+                    ))
+                    .arg("--sql-username")
+                    .arg(&mysql_store_config.user)
+                    .arg("--sql-password")
+                    .arg(&mysql_store_config.password)
+                    .arg("--sql-database")
+                    .arg(&mysql_store_config.database);
             }
         }
 

@@ -155,7 +155,7 @@ impl RearrangedChainExecutor {
                             // Update the progress since we've consumed all chunks before this
                             // phantom.
                             self.progress.update(
-                                last_rearranged_epoch.curr,
+                                last_rearranged_epoch,
                                 barrier.epoch.curr,
                                 processed_rows,
                             );
@@ -201,7 +201,7 @@ impl RearrangedChainExecutor {
                         continue;
                     };
                     if let Some(barrier) = msg.as_barrier() {
-                        self.progress.finish(barrier.epoch.curr, processed_rows);
+                        self.progress.finish(barrier.epoch, processed_rows);
                     }
                     yield msg;
                 }
@@ -214,7 +214,7 @@ impl RearrangedChainExecutor {
             for msg in upstream {
                 let msg: Message = msg?;
                 if let Some(barrier) = msg.as_barrier() {
-                    self.progress.finish(barrier.epoch.curr, processed_rows);
+                    self.progress.finish(barrier.epoch, processed_rows);
                 }
                 yield msg;
             }

@@ -22,13 +22,15 @@ use std::time::Instant;
 
 use anyhow::anyhow;
 use async_recursion::async_recursion;
+use await_tree::InstrumentAwait;
 use futures::stream::BoxStream;
 use futures::FutureExt;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::config::MetricLevel;
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -277,6 +279,12 @@ impl LocalStreamManager {
             })
             .await
     }
+
+    pub async fn shutdown(&self) -> StreamResult<()> {
+        self.actor_op_tx
+            .send_and_await(|result_sender| LocalActorOperation::Shutdown { result_sender })
+            .await
+    }
 }
 
 impl LocalBarrierWorker {
@@ -290,7 +298,7 @@ impl LocalBarrierWorker {
     }
 
     /// Force stop all actors on this worker, and then drop their resources.
-    pub(super) async fn reset(&mut self, prev_epoch: u64) {
+    pub(super) async fn reset(&mut self, version_id: HummockVersionId) {
         let actor_handles = self.actor_manager_state.drain_actor_handles();
         for (actor_id, handle) in &actor_handles {
             tracing::debug!("force stopping actor {}", actor_id);
@@ -314,9 +322,13 @@ impl LocalBarrierWorker {
         if let Some(m) = self.actor_manager.await_tree_reg.as_ref() {
             m.clear();
         }
-        dispatch_state_store!(&self.actor_manager.env.state_store(), store, {
-            store.clear_shared_buffer(prev_epoch).await;
-        });
+
+        if let Some(hummock) = self.actor_manager.env.state_store().as_hummock() {
+            hummock
+                .clear_shared_buffer(version_id)
+                .verbose_instrument_await("store_clear_shared_buffer")
+                .await
+        }
         self.reset_state();
         self.actor_manager.env.dml_manager_ref().clear();
     }
@@ -656,8 +668,15 @@ impl LocalBarrierWorker {
             };
             self.actor_manager_state.handles.insert(actor_id, handle);
 
-            if self.actor_manager.streaming_metrics.level >= MetricLevel::Debug {
-                tracing::info!("Tokio metrics are enabled because metrics_level >= Debug");
+            if self.actor_manager.streaming_metrics.level >= MetricLevel::Debug
+                || self
+                    .actor_manager
+                    .env
+                    .config()
+                    .developer
+                    .enable_actor_tokio_metrics
+            {
+                tracing::info!("Tokio metrics are enabled.");
                 let streaming_metrics = self.actor_manager.streaming_metrics.clone();
                 let actor_monitor_task = self.actor_manager.runtime.spawn(async move {
                     let metrics = streaming_metrics.new_actor_metrics(actor_id);

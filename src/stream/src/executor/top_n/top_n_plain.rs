@@ -68,7 +68,7 @@ impl<S: StateStore> TopNExecutor<S, true> {
         let mut inner =
             InnerTopNExecutor::new(schema, storage_key, offset_and_limit, order_by, state_table)?;
 
-        inner.cache.high_capacity = 2;
+        inner.cache.high_cache_capacity = 2;
 
         Ok(TopNExecutorWrapper { input, ctx, inner })
     }

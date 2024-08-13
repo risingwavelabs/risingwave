@@ -22,13 +22,13 @@ use itertools::Itertools;
 use prost::Message;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::call_static_method;
-use risingwave_jni_core::jvm_runtime::JVM;
+use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, JVM};
 use risingwave_pb::connector_service::{SourceType, ValidateSourceRequest, ValidateSourceResponse};
 
 use crate::error::ConnectorResult;
 use crate::source::cdc::{
     table_schema_exclude_additional_columns, CdcProperties, CdcSourceTypeTrait, Citus,
-    DebeziumCdcSplit, Mongodb, Mysql, Postgres,
+    DebeziumCdcSplit, Mongodb, Mysql, Postgres, SqlServer,
 };
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
@@ -70,39 +70,44 @@ where
             SourceType::from(T::source_type())
         );
 
+        let jvm = JVM.get_or_init()?;
         let source_id = context.info.source_id;
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let mut env = JVM.get_or_init()?.attach_current_thread()?;
+            execute_with_jni_env(jvm, |env| {
+                let validate_source_request = ValidateSourceRequest {
+                    source_id: source_id as u64,
+                    source_type: props.get_source_type_pb() as _,
+                    properties: props.properties,
+                    table_schema: Some(table_schema_exclude_additional_columns(
+                        &props.table_schema,
+                    )),
+                    is_source_job: props.is_cdc_source_job,
+                    is_backfill_table: props.is_backfill_table,
+                };
 
-            let validate_source_request = ValidateSourceRequest {
-                source_id: source_id as u64,
-                source_type: props.get_source_type_pb() as _,
-                properties: props.properties,
-                table_schema: Some(table_schema_exclude_additional_columns(&props.table_schema)),
-                is_source_job: props.is_cdc_source_job,
-                is_backfill_table: props.is_backfill_table,
-            };
+                let validate_source_request_bytes =
+                    env.byte_array_from_slice(&Message::encode_to_vec(&validate_source_request))?;
 
-            let validate_source_request_bytes =
-                env.byte_array_from_slice(&Message::encode_to_vec(&validate_source_request))?;
+                let validate_source_response_bytes = call_static_method!(
+                    env,
+                    {com.risingwave.connector.source.JniSourceValidateHandler},
+                    {byte[] validate(byte[] validateSourceRequestBytes)},
+                    &validate_source_request_bytes
+                )?;
 
-            let validate_source_response_bytes = call_static_method!(
-                env,
-                {com.risingwave.connector.source.JniSourceValidateHandler},
-                {byte[] validate(byte[] validateSourceRequestBytes)},
-                &validate_source_request_bytes
-            )?;
+                let validate_source_response: ValidateSourceResponse = Message::decode(
+                    risingwave_jni_core::to_guarded_slice(&validate_source_response_bytes, env)?
+                        .deref(),
+                )?;
 
-            let validate_source_response: ValidateSourceResponse = Message::decode(
-                risingwave_jni_core::to_guarded_slice(&validate_source_response_bytes, &mut env)?
-                    .deref(),
-            )?;
+                if let Some(error) = validate_source_response.error {
+                    return Err(
+                        anyhow!(error.error_message).context("source cannot pass validation")
+                    );
+                }
 
-            if let Some(error) = validate_source_response.error {
-                return Err(anyhow!(error.error_message).context("source cannot pass validation"));
-            }
-
-            Ok(())
+                Ok(())
+            })
         })
         .await
         .context("failed to validate source")??;
@@ -173,6 +178,18 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Mongodb> {
 
     fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
         // CDC source only supports single split
+        vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
+            self.source_id,
+            None,
+            None,
+        )]
+    }
+}
+
+impl ListCdcSplits for DebeziumSplitEnumerator<SqlServer> {
+    type CdcSourceType = SqlServer;
+
+    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
         vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
             self.source_id,
             None,

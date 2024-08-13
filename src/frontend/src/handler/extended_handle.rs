@@ -23,7 +23,7 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{CreateSink, Query, Statement};
 
 use super::query::BoundResult;
-use super::{handle, query, HandlerArgs, RwPgResponse};
+use super::{fetch_cursor, handle, query, HandlerArgs, RwPgResponse};
 use crate::error::Result;
 use crate::session::SessionImpl;
 
@@ -47,6 +47,17 @@ pub struct PreparedResult {
     pub bound_result: BoundResult,
 }
 
+/// Partial was a concept in the PostgreSQL protocol.
+///
+/// In the extended-query protocol, execution of SQL commands is divided into multiple steps.
+/// The state retained between steps is represented by two types of objects: prepared statements
+/// and portals. A prepared statement represents the result of parsing and semantic analysis of a
+/// textual query string. A prepared statement is not in itself ready to execute, because it might
+/// lack specific values for parameters.
+/// A portal represents a ready-to-execute or already-partially-executed statement,
+/// with any missing parameter values filled in.
+///
+/// Reference: <https://www.postgresql.org/docs/current/protocol-overview.html#PROTOCOL-QUERY-CONCEPTS>
 #[expect(clippy::enum_variant_names)]
 #[derive(Clone)]
 pub enum Portal {
@@ -65,6 +76,7 @@ impl std::fmt::Display for Portal {
     }
 }
 
+/// See the docs of [`Portal`].
 #[derive(Clone)]
 pub struct PortalResult {
     pub statement: Statement,
@@ -82,7 +94,7 @@ impl std::fmt::Display for PortalResult {
     }
 }
 
-pub fn handle_parse(
+pub async fn handle_parse(
     session: Arc<SessionImpl>,
     statement: Statement,
     specific_param_types: Vec<Option<DataType>>,
@@ -97,7 +109,17 @@ pub fn handle_parse(
         | Statement::Update { .. } => {
             query::handle_parse(handler_args, statement, specific_param_types)
         }
-        Statement::CreateView { query, .. } => {
+        Statement::FetchCursor { .. } => {
+            fetch_cursor::handle_parse(handler_args, statement, specific_param_types).await
+        }
+        Statement::CreateView {
+            query,
+            materialized,
+            ..
+        } => {
+            if *materialized {
+                return query::handle_parse(handler_args, statement, specific_param_types);
+            }
             if have_parameter_in_query(query) {
                 bail_not_implemented!("CREATE VIEW with parameters");
             }
@@ -179,12 +201,10 @@ pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal) -> Result
             let _guard = session.txn_begin_implicit(); // TODO(bugen): is this behavior correct?
             let sql: Arc<str> = Arc::from(portal.statement.to_string());
             let handler_args = HandlerArgs::new(session, &portal.statement, sql)?;
-            match &portal.statement {
-                Statement::Query(_)
-                | Statement::Insert { .. }
-                | Statement::Delete { .. }
-                | Statement::Update { .. } => query::handle_execute(handler_args, portal).await,
-                _ => unreachable!(),
+            if let Statement::FetchCursor { .. } = &portal.statement {
+                fetch_cursor::handle_fetch_cursor_execute(handler_args, portal).await
+            } else {
+                query::handle_execute(handler_args, portal).await
             }
         }
         Portal::PureStatement(stmt) => {

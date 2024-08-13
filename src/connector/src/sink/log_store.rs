@@ -24,7 +24,7 @@ use await_tree::InstrumentAwait;
 use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
 
@@ -85,7 +85,7 @@ impl TruncateOffset {
             } => {
                 if epoch != *offset_epoch {
                     bail!(
-                        "new item epoch {} not match current chunk offset epoch {}",
+                        "new item epoch {} does not match current chunk offset epoch {}",
                         epoch,
                         offset_epoch
                     );
@@ -96,7 +96,7 @@ impl TruncateOffset {
             } => {
                 if epoch <= *offset_epoch {
                     bail!(
-                        "new item epoch {} not exceed barrier offset epoch {}",
+                        "new item epoch {} does not exceed barrier offset epoch {}",
                         epoch,
                         offset_epoch
                     );
@@ -220,11 +220,11 @@ pub struct BackpressureMonitoredLogReader<R: LogReader> {
     inner: R,
     /// Start time to wait for new future after poll ready
     wait_new_future_start_time: Option<Instant>,
-    wait_new_future_duration_ns: LabelGuardedIntCounter<3>,
+    wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
 }
 
 impl<R: LogReader> BackpressureMonitoredLogReader<R> {
-    fn new(inner: R, wait_new_future_duration_ns: LabelGuardedIntCounter<3>) -> Self {
+    fn new(inner: R, wait_new_future_duration_ns: LabelGuardedIntCounter<4>) -> Self {
         Self {
             inner,
             wait_new_future_start_time: None,

@@ -9,3 +9,15 @@ flush;
 
 statement ok
 create subscription sub from t1 with(retention = '1D');
+
+statement ok
+create table t2 (v1 int, v2 int);
+
+statement ok
+create table t3 (v1 int primary key, v2 int);
+
+statement ok
+create subscription sub2 from t3 with(retention = '1D');
+
+statement ok
+create sink s1 into t3 from t2;

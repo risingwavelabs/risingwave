@@ -184,6 +184,14 @@ impl FromStr for crate::expr::table_function::PbType {
     }
 }
 
+impl FromStr for crate::expr::agg_call::PbType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::from_str_name(&s.to_uppercase()).ok_or(())
+    }
+}
+
 impl stream_plan::MaterializeNode {
     pub fn dist_key_indices(&self) -> Vec<u32> {
         self.get_table()
@@ -204,6 +212,13 @@ impl stream_plan::MaterializeNode {
     }
 }
 
+// Encapsulating the use of parallelism.
+impl common::WorkerNode {
+    pub fn parallelism(&self) -> usize {
+        self.parallelism as usize
+    }
+}
+
 impl stream_plan::SourceNode {
     pub fn column_ids(&self) -> Option<Vec<i32>> {
         Some(
@@ -214,6 +229,21 @@ impl stream_plan::SourceNode {
                 .map(|c| c.get_column_desc().unwrap().column_id)
                 .collect(),
         )
+    }
+}
+
+impl meta::table_fragments::ActorStatus {
+    pub fn worker_id(&self) -> u32 {
+        self.location
+            .as_ref()
+            .expect("actor location should be exist")
+            .worker_node_id
+    }
+}
+
+impl common::ActorLocation {
+    pub fn from_worker(worker_node_id: u32) -> Option<Self> {
+        Some(Self { worker_node_id })
     }
 }
 
@@ -263,6 +293,26 @@ impl catalog::StreamSourceInfo {
     /// Refer to [`Self::cdc_source_job`] for details.
     pub fn is_shared(&self) -> bool {
         self.cdc_source_job
+    }
+}
+
+impl catalog::Sink {
+    // TODO: remove this placeholder
+    // creating table sink does not have an id, so we need a placeholder
+    pub const UNIQUE_IDENTITY_FOR_CREATING_TABLE_SINK: &'static str = "PLACE_HOLDER";
+
+    pub fn unique_identity(&self) -> String {
+        // TODO: use a more unique name
+        format!("{}", self.id)
+    }
+}
+
+impl std::fmt::Debug for meta::SystemParams {
+    /// Directly formatting `SystemParams` can be inaccurate or leak sensitive information.
+    ///
+    /// Use `SystemParamsReader` instead.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SystemParams").finish_non_exhaustive()
     }
 }
 

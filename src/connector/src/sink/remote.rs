@@ -31,7 +31,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
-use risingwave_jni_core::jvm_runtime::JVM;
+use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, JVM};
 use risingwave_jni_core::{
     call_static_method, gen_class_name, JniReceiverType, JniSenderType, JniSinkWriterStreamRequest,
 };
@@ -169,7 +169,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
         && param.downstream_pk.len() > 1
         && !param.properties.contains_key(ES_OPTION_DELIMITER)
     {
-        bail!("Es sink only support single pk or pk with delimiter option");
+        bail!("Es sink only supports single pk or pk with delimiter option");
     }
     // FIXME: support struct and array in stream sink
     param.columns.iter().map(|col| {
@@ -194,7 +194,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                     Ok(())
                 } else{
                     Err(SinkError::Remote(anyhow!(
-                        "Remote sink only support list<int16, int32, int64, float, double, varchar>, got {:?}: {:?}",
+                        "Remote sink only supports list<int16, int32, int64, float, double, varchar>, got {:?}: {:?}",
                         col.name,
                         col.data_type,
                     )))
@@ -205,13 +205,13 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                     Ok(())
                 }else{
                     Err(SinkError::Remote(anyhow!(
-                        "Only Es sink support struct, got {:?}: {:?}",
+                        "Only Es sink supports struct, got {:?}: {:?}",
                         col.name,
                         col.data_type,
                     )))
                 }
             },
-            DataType::Serial | DataType::Int256 => Err(SinkError::Remote(anyhow!(
+            DataType::Serial | DataType::Int256 | DataType::Map(_) => Err(SinkError::Remote(anyhow!(
                             "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Timestamptz, Bytea, List and Varchar, (Es sink support Struct) got {:?}: {:?}",
                             col.name,
                             col.data_type,
@@ -221,28 +221,29 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
     let sink_param = param.to_proto();
 
     spawn_blocking(move || -> anyhow::Result<()> {
-        let mut env = jvm.attach_current_thread()?;
-        let validate_sink_request = ValidateSinkRequest {
-            sink_param: Some(sink_param),
-        };
-        let validate_sink_request_bytes =
-            env.byte_array_from_slice(&Message::encode_to_vec(&validate_sink_request))?;
+        execute_with_jni_env(jvm, |env| {
+            let validate_sink_request = ValidateSinkRequest {
+                sink_param: Some(sink_param),
+            };
+            let validate_sink_request_bytes =
+                env.byte_array_from_slice(&Message::encode_to_vec(&validate_sink_request))?;
 
-        let validate_sink_response_bytes = call_static_method!(
-            env,
-            {com.risingwave.connector.JniSinkValidationHandler},
-            {byte[] validate(byte[] validateSourceRequestBytes)},
-            &validate_sink_request_bytes
-        )?;
+            let validate_sink_response_bytes = call_static_method!(
+                env,
+                {com.risingwave.connector.JniSinkValidationHandler},
+                {byte[] validate(byte[] validateSourceRequestBytes)},
+                &validate_sink_request_bytes
+            )?;
 
-        let validate_sink_response: ValidateSinkResponse = Message::decode(
-            risingwave_jni_core::to_guarded_slice(&validate_sink_response_bytes, &mut env)?.deref(),
-        )?;
+            let validate_sink_response: ValidateSinkResponse = Message::decode(
+                risingwave_jni_core::to_guarded_slice(&validate_sink_response_bytes, env)?.deref(),
+            )?;
 
-        validate_sink_response.error.map_or_else(
-            || Ok(()), // If there is no error message, return Ok here.
-            |err| bail!("sink cannot pass validation: {}", err.error_message),
-        )
+            validate_sink_response.error.map_or_else(
+                || Ok(()), // If there is no error message, return Ok here.
+                |err| bail!("sink cannot pass validation: {}", err.error_message),
+            )
+        })
     })
     .await
     .context("JoinHandle returns error")??;
@@ -346,7 +347,7 @@ impl LogSinker for RemoteLogSinker {
                 })?;
                 if sent_offset != persisted_offset {
                     bail!(
-                        "new response offset {:?} not match the buffer offset {:?}",
+                        "new response offset {:?} does not match the buffer offset {:?}",
                         persisted_offset,
                         sent_offset
                     );
@@ -534,7 +535,7 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
             self.param.clone(),
             writer_param.vnode_bitmap.ok_or_else(|| {
                 SinkError::Remote(anyhow!(
-                    "sink needs coordination should not have singleton input"
+                    "sink needs coordination and should not have singleton input"
                 ))
             })?,
             CoordinatedRemoteSinkWriter::new(self.param.clone(), writer_param.sink_metrics.clone())
@@ -770,34 +771,31 @@ impl EmbeddedConnectorClient {
 
         let jvm = self.jvm;
         std::thread::spawn(move || {
-            let mut env = match jvm
-                .attach_current_thread()
-                .context("failed to attach current thread")
-            {
-                Ok(env) => env,
-                Err(e) => {
-                    let _ = response_tx.blocking_send(Err(e));
-                    return;
-                }
-            };
+            let result = execute_with_jni_env(jvm, |env| {
+                let result = call_static_method!(
+                    env,
+                    class_name,
+                    method_name,
+                    {{void}, {long requestRx, long responseTx}},
+                    &mut request_rx as *mut JniReceiverType<REQ>,
+                    &mut response_tx as *mut JniSenderType<RSP>
+                );
 
-            let result = call_static_method!(
-                env,
-                class_name,
-                method_name,
-                {{void}, {long requestRx, long responseTx}},
-                &mut request_rx as *mut JniReceiverType<REQ>,
-                &mut response_tx as *mut JniSenderType<RSP>
-            );
+                match result {
+                    Ok(_) => {
+                        tracing::info!("end of jni call {}::{}", class_name, method_name);
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e.as_report(), "jni call error");
+                    }
+                };
 
-            match result {
-                Ok(_) => {
-                    tracing::info!("end of jni call {}::{}", class_name, method_name);
-                }
-                Err(e) => {
-                    tracing::error!(error = %e.as_report(), "jni call error");
-                }
-            };
+                Ok(())
+            });
+
+            if let Err(e) = result {
+                let _ = response_tx.blocking_send(Err(e));
+            }
         });
         response_rx
     }

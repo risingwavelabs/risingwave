@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
 use anyhow::Context;
@@ -156,18 +156,12 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             .await?;
         if worker.worker_type() == WorkerType::ComputeNode {
             let pb_property = worker.worker_node.property.as_ref().unwrap();
-            let parallel_unit_ids = worker
-                .worker_node
-                .parallel_units
-                .iter()
-                .map(|pu| pu.id as i32)
-                .collect_vec();
             let property = worker_property::ActiveModel {
                 worker_id: Set(worker.worker_id() as _),
-                parallel_unit_ids: Set(parallel_unit_ids.into()),
                 is_streaming: Set(pb_property.is_streaming),
                 is_serving: Set(pb_property.is_serving),
                 is_unschedulable: Set(pb_property.is_unschedulable),
+                parallelism: Set(worker.worker_node.parallelism() as _),
             };
             WorkerProperty::insert(property)
                 .exec(&meta_store_sql.conn)
@@ -489,15 +483,35 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     }
     println!("table fragments migrated");
 
+    let mut object_dependencies = vec![];
+
     // catalogs.
     // source
     if !sources.is_empty() {
         let source_models: Vec<source::ActiveModel> = sources
             .into_iter()
             .map(|mut src| {
+                let mut dependent_secret_ids = HashSet::new();
                 if let Some(id) = src.connection_id.as_mut() {
                     *id = *connection_rewrite.get(id).unwrap();
                 }
+                for secret_ref in src.secret_refs.values_mut() {
+                    secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+                    dependent_secret_ids.insert(secret_ref.secret_id);
+                }
+                if let Some(info) = &mut src.info {
+                    for secret_ref in info.format_encode_secret_refs.values_mut() {
+                        secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+                        dependent_secret_ids.insert(secret_ref.secret_id);
+                    }
+                }
+                object_dependencies.extend(dependent_secret_ids.into_iter().map(|secret_id| {
+                    object_dependency::ActiveModel {
+                        id: NotSet,
+                        oid: Set(secret_id as _),
+                        used_by: Set(src.id as _),
+                    }
+                }));
                 src.into()
             })
             .collect();
@@ -506,8 +520,6 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             .await?;
     }
     println!("sources migrated");
-
-    let mut object_dependencies = vec![];
 
     // table
     for table in tables {
@@ -554,13 +566,21 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 if let Some(id) = s.connection_id.as_mut() {
                     *id = *connection_rewrite.get(id).unwrap();
                 }
-                for secret_id in s.secret_ref.values_mut() {
-                    secret_id.secret_id = *secret_rewrite.get(&secret_id.secret_id).unwrap();
+                let mut dependent_secret_ids = HashSet::new();
+                for secret_ref in s.secret_refs.values_mut() {
+                    secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+                    dependent_secret_ids.insert(secret_ref.secret_id);
                 }
-                object_dependencies.extend(s.secret_ref.values().map(|id| {
+                if let Some(desc) = &mut s.format_desc {
+                    for secret_ref in desc.secret_refs.values_mut() {
+                        secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+                        dependent_secret_ids.insert(secret_ref.secret_id);
+                    }
+                }
+                object_dependencies.extend(dependent_secret_ids.into_iter().map(|secret_id| {
                     object_dependency::ActiveModel {
                         id: NotSet,
-                        oid: Set(id.secret_id as _),
+                        oid: Set(secret_id as _),
                         used_by: Set(s.id as _),
                     }
                 }));
@@ -719,10 +739,10 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             version_delta
                 .into_iter()
                 .map(|vd| hummock_version_delta::ActiveModel {
-                    id: Set(vd.id as _),
-                    prev_id: Set(vd.prev_id as _),
-                    max_committed_epoch: Set(vd.max_committed_epoch as _),
-                    safe_epoch: Set(vd.safe_epoch as _),
+                    id: Set(vd.id.to_u64() as _),
+                    prev_id: Set(vd.prev_id.to_u64() as _),
+                    max_committed_epoch: Set(vd.visible_table_committed_epoch() as _),
+                    safe_epoch: Set(vd.visible_table_safe_epoch() as _),
                     trivial_move: Set(vd.trivial_move),
                     full_version_delta: Set((&vd.to_protobuf()).into()),
                 })

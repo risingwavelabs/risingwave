@@ -15,10 +15,10 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Decimal};
@@ -144,6 +144,10 @@ impl Sink for SqlServerSink {
     const SINK_NAME: &'static str = SQLSERVER_SINK;
 
     async fn validate(&self) -> Result<()> {
+        risingwave_common::license::Feature::SqlServerSink
+            .check_available()
+            .map_err(|e| anyhow::anyhow!(e))?;
+
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
                 "Primary key not defined for upsert SQL Server sink (please define in `primary_key` field)")));
@@ -155,7 +159,7 @@ impl Sink for SqlServerSink {
 
         // Query table metadata from SQL Server.
         let mut sql_server_table_metadata = HashMap::new();
-        let mut sql_client = SqlClient::new(&self.config).await?;
+        let mut sql_client = SqlServerClient::new(&self.config).await?;
         let query_table_metadata_error = || {
             SinkError::SqlServer(anyhow!(format!(
                 "SQL Server table {} metadata error",
@@ -177,7 +181,7 @@ WHERE
 ORDER BY
     col.column_id;"#;
         let rows = sql_client
-            .client
+            .inner_client
             .query(QUERY_TABLE_METADATA, &[&self.config.table])
             .await?
             .into_results()
@@ -268,7 +272,7 @@ pub struct SqlServerSinkWriter {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
-    sql_client: SqlClient,
+    sql_client: SqlServerClient,
     ops: Vec<SqlOp>,
 }
 
@@ -279,7 +283,7 @@ impl SqlServerSinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        let sql_client = SqlClient::new(&config).await?;
+        let sql_client = SqlServerClient::new(&config).await?;
         let writer = Self {
             config,
             schema,
@@ -440,7 +444,7 @@ impl SqlServerSinkWriter {
                 }
             }
         }
-        query.execute(&mut self.sql_client.client).await?;
+        query.execute(&mut self.sql_client.inner_client).await?;
         Ok(())
     }
 }
@@ -491,11 +495,12 @@ impl SinkWriter for SqlServerSinkWriter {
     }
 }
 
-struct SqlClient {
-    client: Client<tokio_util::compat::Compat<TcpStream>>,
+#[derive(Debug)]
+pub struct SqlServerClient {
+    pub inner_client: Client<tokio_util::compat::Compat<TcpStream>>,
 }
 
-impl SqlClient {
+impl SqlServerClient {
     async fn new(msconfig: &SqlServerConfig) -> Result<Self> {
         let mut config = Config::new();
         config.host(&msconfig.host);
@@ -503,11 +508,43 @@ impl SqlClient {
         config.authentication(AuthMethod::sql_server(&msconfig.user, &msconfig.password));
         config.database(&msconfig.database);
         config.trust_cert();
+        Self::new_with_config(config).await
+    }
 
-        let tcp = TcpStream::connect(config.get_addr()).await.unwrap();
-        tcp.set_nodelay(true).unwrap();
-        let client = Client::connect(config, tcp.compat_write()).await?;
-        Ok(Self { client })
+    pub async fn new_with_config(mut config: Config) -> Result<Self> {
+        let tcp = TcpStream::connect(config.get_addr())
+            .await
+            .context("failed to connect to sql server")
+            .map_err(SinkError::SqlServer)?;
+        tcp.set_nodelay(true)
+            .context("failed to setting nodelay when connecting to sql server")
+            .map_err(SinkError::SqlServer)?;
+
+        let client = match Client::connect(config.clone(), tcp.compat_write()).await {
+            // Connection successful.
+            Ok(client) => client,
+            // The server wants us to redirect to a different address
+            Err(tiberius::error::Error::Routing { host, port }) => {
+                config.host(&host);
+                config.port(port);
+                let tcp = TcpStream::connect(config.get_addr())
+                    .await
+                    .context("failed to connect to sql server after routing")
+                    .map_err(SinkError::SqlServer)?;
+                tcp.set_nodelay(true)
+                    .context(
+                        "failed to setting nodelay when connecting to sql server after routing",
+                    )
+                    .map_err(SinkError::SqlServer)?;
+                // we should not have more than one redirect, so we'll short-circuit here.
+                Client::connect(config, tcp.compat_write()).await?
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        Ok(Self {
+            inner_client: client,
+        })
     }
 }
 
@@ -550,6 +587,7 @@ fn bind_params(
                 ScalarRefImpl::List(_) => return Err(data_type_not_supported("List")),
                 ScalarRefImpl::Int256(_) => return Err(data_type_not_supported("Int256")),
                 ScalarRefImpl::Serial(_) => return Err(data_type_not_supported("Serial")),
+                ScalarRefImpl::Map(_) => return Err(data_type_not_supported("Map")),
             },
             None => match schema[col_idx].data_type {
                 DataType::Boolean => {
@@ -597,6 +635,7 @@ fn bind_params(
                 DataType::Jsonb => return Err(data_type_not_supported("Jsonb")),
                 DataType::Serial => return Err(data_type_not_supported("Serial")),
                 DataType::Int256 => return Err(data_type_not_supported("Int256")),
+                DataType::Map(_) => return Err(data_type_not_supported("Map")),
             },
         };
     }
@@ -630,6 +669,7 @@ fn check_data_type_compatibility(data_type: &DataType) -> Result<()> {
         DataType::Jsonb => Err(data_type_not_supported("Jsonb")),
         DataType::Serial => Err(data_type_not_supported("Serial")),
         DataType::Int256 => Err(data_type_not_supported("Int256")),
+        DataType::Map(_) => Err(data_type_not_supported("Map")),
     }
 }
 

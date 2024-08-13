@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
+    HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
     INVALID_VERSION_ID,
 };
 use risingwave_pb::hummock::{
@@ -196,8 +196,8 @@ impl HummockManager {
 
     pub async fn commit_epoch_sanity_check(
         &self,
-        epoch: HummockEpoch,
-        sstables: &[ExtendedSstableInfo],
+        max_committed_epoch: HummockEpoch,
+        sstables: &[LocalSstableInfo],
         sst_to_context: &HashMap<HummockSstableObjectId, HummockContextId>,
         current_version: &HummockVersion,
     ) -> Result<()> {
@@ -221,11 +221,12 @@ impl HummockManager {
             }
         }
 
-        if epoch <= current_version.max_committed_epoch {
+        // TODO: allow equal when supporting partial checkpoint
+        if max_committed_epoch <= current_version.visible_table_committed_epoch() {
             return Err(anyhow::anyhow!(
                 "Epoch {} <= max_committed_epoch {}",
-                epoch,
-                current_version.max_committed_epoch
+                max_committed_epoch,
+                current_version.visible_table_committed_epoch()
             )
             .into());
         }
@@ -246,13 +247,13 @@ impl HummockManager {
             };
             let sst_infos = sstables
                 .iter()
-                .map(|ExtendedSstableInfo { sst_info, .. }| sst_info.clone())
+                .map(|LocalSstableInfo { sst_info, .. }| sst_info.clone())
                 .collect_vec();
             if compactor
                 .send_event(ResponseEvent::ValidationTask(ValidationTask {
-                    sst_infos,
+                    sst_infos: sst_infos.into_iter().map(|sst| sst.into()).collect_vec(),
                     sst_id_to_worker_id: sst_to_context.clone(),
-                    epoch,
+                    epoch: max_committed_epoch,
                 }))
                 .is_err()
             {
@@ -283,15 +284,15 @@ impl HummockManager {
             context_id,
             HummockPinnedVersion {
                 context_id,
-                min_pinned_id: INVALID_VERSION_ID,
+                min_pinned_id: INVALID_VERSION_ID.to_u64(),
             },
         );
         let version_id = versioning.current_version.id;
         let ret = versioning.current_version.clone();
-        if context_pinned_version.min_pinned_id == INVALID_VERSION_ID
-            || context_pinned_version.min_pinned_id > version_id
+        if HummockVersionId::new(context_pinned_version.min_pinned_id) == INVALID_VERSION_ID
+            || HummockVersionId::new(context_pinned_version.min_pinned_id) > version_id
         {
-            context_pinned_version.min_pinned_id = version_id;
+            context_pinned_version.min_pinned_id = version_id.to_u64();
             commit_multi_var!(self.meta_store_ref(), context_pinned_version)?;
             trigger_pin_unpin_version_state(&self.metrics, &context_info.pinned_versions);
         }
@@ -327,12 +328,12 @@ impl HummockManager {
             },
         );
         assert!(
-            context_pinned_version.min_pinned_id <= unpin_before,
+            context_pinned_version.min_pinned_id <= unpin_before.to_u64(),
             "val must be monotonically non-decreasing. old = {}, new = {}.",
             context_pinned_version.min_pinned_id,
             unpin_before
         );
-        context_pinned_version.min_pinned_id = unpin_before;
+        context_pinned_version.min_pinned_id = unpin_before.to_u64();
         commit_multi_var!(self.meta_store_ref(), context_pinned_version)?;
         trigger_pin_unpin_version_state(&self.metrics, &context_info.pinned_versions);
 
@@ -427,7 +428,7 @@ impl HummockManager {
         let _timer = start_measure_real_process_timer!(self, "unpin_snapshot_before");
         // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
         // visible in the snapshot.
-        let max_committed_epoch = versioning.current_version.max_committed_epoch;
+        let max_committed_epoch = versioning.current_version.visible_table_committed_epoch();
         // Ensure the unpin will not clean the latest one.
         let snapshot_committed_epoch = hummock_snapshot.committed_epoch;
         #[cfg(not(test))]
@@ -492,10 +493,10 @@ impl HummockManager {
 
 fn trigger_safepoint_stat(metrics: &MetaMetrics, safepoints: &[HummockVersionId]) {
     if let Some(sp) = safepoints.iter().min() {
-        metrics.min_safepoint_version_id.set(*sp as _);
+        metrics.min_safepoint_version_id.set(sp.to_u64() as _);
     } else {
         metrics
             .min_safepoint_version_id
-            .set(HummockVersionId::MAX as _);
+            .set(HummockVersionId::MAX.to_u64() as _);
     }
 }

@@ -15,17 +15,19 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use anyhow::Context as _;
+use anyhow::{anyhow, Context as _};
 use futures::pin_mut;
 use futures_async_stream::try_stream;
 use pin_project::pin_project;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_pb::task_service::{permits, GetStreamResponse};
 use risingwave_rpc_client::ComputeClientPool;
+use tokio::sync::mpsc;
 
 use super::error::ExchangeChannelClosed;
 use super::permit::Receiver;
 use crate::executor::prelude::*;
+use crate::executor::{DispatcherBarrier, DispatcherMessage};
 use crate::task::{
     FragmentId, LocalBarrierManager, SharedContext, UpDownActorIds, UpDownFragmentIds,
 };
@@ -64,23 +66,80 @@ pub struct LocalInput {
 }
 type LocalInputStreamInner = impl MessageStream;
 
+async fn process_msg<'a>(
+    msg: DispatcherMessage,
+    get_mutation_subscriber: impl for<'b> FnOnce(
+            &'b DispatcherBarrier,
+        )
+            -> &'a mut mpsc::UnboundedReceiver<crate::task::SubscribeMutationItem>
+        + 'a,
+) -> StreamExecutorResult<Message> {
+    let barrier = match msg {
+        DispatcherMessage::Chunk(c) => {
+            return Ok(Message::Chunk(c));
+        }
+        DispatcherMessage::Barrier(b) => b,
+        DispatcherMessage::Watermark(watermark) => {
+            return Ok(Message::Watermark(watermark));
+        }
+    };
+    let mutation_subscriber = get_mutation_subscriber(&barrier);
+
+    let mutation = mutation_subscriber
+        .recv()
+        .await
+        .ok_or_else(|| anyhow!("failed to receive mutation of barrier {:?}", barrier))
+        .map(|(prev_epoch, mutation)| {
+            assert_eq!(prev_epoch, barrier.epoch.prev);
+            mutation
+        })?;
+    Ok(Message::Barrier(Barrier {
+        epoch: barrier.epoch,
+        mutation,
+        kind: barrier.kind,
+        tracing_context: barrier.tracing_context,
+        passed_actors: barrier.passed_actors,
+    }))
+}
+
 impl LocalInput {
-    pub fn new(channel: Receiver, actor_id: ActorId) -> Self {
+    pub fn new(
+        channel: Receiver,
+        upstream_actor_id: ActorId,
+        self_actor_id: ActorId,
+        local_barrier_manager: LocalBarrierManager,
+    ) -> Self {
         Self {
-            inner: Self::run(channel, actor_id),
-            actor_id,
+            inner: Self::run(
+                channel,
+                upstream_actor_id,
+                self_actor_id,
+                local_barrier_manager,
+            ),
+            actor_id: upstream_actor_id,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn run(mut channel: Receiver, actor_id: ActorId) {
-        let span: await_tree::Span = format!("LocalInput (actor {actor_id})").into();
+    async fn run(
+        mut channel: Receiver,
+        upstream_actor_id: ActorId,
+        self_actor_id: ActorId,
+        local_barrier_manager: LocalBarrierManager,
+    ) {
+        let span: await_tree::Span = format!("LocalInput (actor {upstream_actor_id})").into();
+        let mut mutation_subscriber = None;
         while let Some(msg) = channel.recv().verbose_instrument_await(span.clone()).await {
-            yield msg;
+            yield process_msg(msg, |barrier| {
+                mutation_subscriber.get_or_insert_with(|| {
+                    local_barrier_manager.subscribe_barrier_mutation(self_actor_id, barrier)
+                })
+            })
+            .await?;
         }
         // Always emit an error outside the loop. This is because we use barrier as the control
         // message to stop the stream. Reaching here means the channel is closed unexpectedly.
-        Err(ExchangeChannelClosed::local_input(actor_id))?
+        Err(ExchangeChannelClosed::local_input(upstream_actor_id))?
     }
 }
 
@@ -147,6 +206,7 @@ impl RemoteInput {
         metrics: Arc<StreamingMetrics>,
         batched_permits_limit: usize,
     ) {
+        let self_actor_id = up_down_ids.1;
         let client = client_pool.get_by_addr(upstream_addr).await?;
         let (stream, permits_tx) = client
             .get_stream(up_down_ids.0, up_down_ids.1, up_down_frag.0, up_down_frag.1)
@@ -162,17 +222,18 @@ impl RemoteInput {
         let span: await_tree::Span = format!("RemoteInput (actor {up_actor_id})").into();
 
         let mut batched_permits_accumulated = 0;
+        let mut mutation_subscriber = None;
 
         pin_mut!(stream);
         while let Some(data_res) = stream.next().verbose_instrument_await(span.clone()).await {
             match data_res {
                 Ok(GetStreamResponse { message, permits }) => {
                     let msg = message.unwrap();
-                    let bytes = Message::get_encoded_len(&msg);
+                    let bytes = DispatcherMessage::get_encoded_len(&msg);
 
                     exchange_frag_recv_size_metrics.inc_by(bytes as u64);
 
-                    let msg_res = Message::from_protobuf(&msg);
+                    let msg_res = DispatcherMessage::from_protobuf(&msg);
                     if let Some(add_back_permits) = match permits.unwrap().value {
                         // For records, batch the permits we received to reduce the backward
                         // `AddPermits` messages.
@@ -194,23 +255,14 @@ impl RemoteInput {
                             .context("RemoteInput backward permits channel closed.")?;
                     }
 
-                    let mut msg = msg_res.context("RemoteInput decode message error")?;
+                    let msg = msg_res.context("RemoteInput decode message error")?;
 
-                    // Read barrier mutation from local barrier manager and attach it to the barrier message.
-                    if cfg!(not(test)) {
-                        if let Message::Barrier(barrier) = &mut msg {
-                            assert!(
-                                barrier.mutation.is_none(),
-                                "Mutation should be erased in remote side"
-                            );
-                            let mutation = local_barrier_manager
-                                .read_barrier_mutation(barrier)
-                                .await
-                                .context("Read barrier mutation error")?;
-                            barrier.mutation = mutation;
-                        }
-                    }
-                    yield msg;
+                    yield process_msg(msg, |barrier| {
+                        mutation_subscriber.get_or_insert_with(|| {
+                            local_barrier_manager.subscribe_barrier_mutation(self_actor_id, barrier)
+                        })
+                    })
+                    .await?;
                 }
 
                 Err(e) => Err(ExchangeChannelClosed::remote_input(up_down_ids.0, Some(e)))?,
@@ -256,12 +308,14 @@ pub(crate) fn new_input(
         LocalInput::new(
             context.take_receiver((upstream_actor_id, actor_id))?,
             upstream_actor_id,
+            actor_id,
+            context.local_barrier_manager.clone(),
         )
         .boxed_input()
     } else {
         RemoteInput::new(
             context.local_barrier_manager.clone(),
-            context.compute_client_pool.clone(),
+            context.compute_client_pool.as_ref().to_owned(),
             upstream_addr,
             (upstream_actor_id, actor_id),
             (upstream_fragment_id, fragment_id),

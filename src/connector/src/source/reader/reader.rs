@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -26,7 +25,6 @@ use risingwave_common::catalog::ColumnId;
 use rw_futures_util::select_all;
 use thiserror_ext::AsReport as _;
 
-use crate::dispatch_source_prop;
 use crate::error::ConnectorResult;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
@@ -38,6 +36,7 @@ use crate::source::{
     create_split_reader, BoxChunkSourceStream, BoxTryStream, Column, ConnectorProperties,
     ConnectorState, SourceColumnDesc, SourceContext, SplitReader, WaitCheckpointTask,
 };
+use crate::{dispatch_source_prop, WithOptionsSecResolved};
 
 #[derive(Clone, Debug)]
 pub struct SourceReader {
@@ -49,7 +48,7 @@ pub struct SourceReader {
 
 impl SourceReader {
     pub fn new(
-        properties: BTreeMap<String, String>,
+        properties: WithOptionsSecResolved,
         columns: Vec<SourceColumnDesc>,
         connector_message_buffer_size: usize,
         parser_config: SpecificParserConfig,
@@ -108,9 +107,7 @@ impl SourceReader {
     /// Refer to `WaitCheckpointWorker` for more details.
     pub async fn create_wait_checkpoint_task(&self) -> ConnectorResult<Option<WaitCheckpointTask>> {
         Ok(match &self.config {
-            ConnectorProperties::PostgresCdc(_prop) => {
-                Some(WaitCheckpointTask::CommitCdcOffset(None))
-            }
+            ConnectorProperties::PostgresCdc(_) => Some(WaitCheckpointTask::CommitCdcOffset(None)),
             ConnectorProperties::GooglePubsub(prop) => Some(WaitCheckpointTask::AckPubsubMessage(
                 prop.subscription_client().await?,
                 vec![],

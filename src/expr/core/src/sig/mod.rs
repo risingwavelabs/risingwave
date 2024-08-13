@@ -21,10 +21,11 @@ use std::sync::LazyLock;
 
 use itertools::Itertools;
 use risingwave_common::types::DataType;
+use risingwave_pb::expr::agg_call::PbType as AggregateFunctionType;
 use risingwave_pb::expr::expr_node::PbType as ScalarFunctionType;
 use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 
-use crate::aggregate::{AggCall, AggKind as AggregateFunctionType, BoxedAggregateFunction};
+use crate::aggregate::{AggCall, BoxedAggregateFunction};
 use crate::error::Result;
 use crate::expr::BoxedExpression;
 use crate::table_function::BoxedTableFunction;
@@ -358,7 +359,7 @@ impl FuncName {
         match self {
             Self::Scalar(ty) => ty.as_str_name().into(),
             Self::Table(ty) => ty.as_str_name().into(),
-            Self::Aggregate(ty) => ty.to_protobuf().as_str_name().into(),
+            Self::Aggregate(ty) => ty.as_str_name().into(),
             Self::Udf(name) => name.clone().into(),
         }
     }
@@ -394,6 +395,8 @@ pub enum SigDataType {
     AnyArray,
     /// Accepts any struct data type
     AnyStruct,
+    /// TODO: not all type can be used as a map key.
+    AnyMap,
 }
 
 impl From<DataType> for SigDataType {
@@ -409,6 +412,7 @@ impl std::fmt::Display for SigDataType {
             Self::Any => write!(f, "any"),
             Self::AnyArray => write!(f, "anyarray"),
             Self::AnyStruct => write!(f, "anystruct"),
+            Self::AnyMap => write!(f, "anymap"),
         }
     }
 }
@@ -421,6 +425,7 @@ impl SigDataType {
             Self::Any => true,
             Self::AnyArray => dt.is_array(),
             Self::AnyStruct => dt.is_struct(),
+            Self::AnyMap => dt.is_map(),
         }
     }
 

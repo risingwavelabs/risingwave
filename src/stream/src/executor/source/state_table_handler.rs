@@ -28,7 +28,7 @@ use std::ops::{Bound, Deref};
 use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{JsonbVal, ScalarImpl, ScalarRef, ScalarRefImpl};
@@ -144,7 +144,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     ) -> StreamExecutorResult<()> {
         if states.is_empty() {
             // TODO should be a clear Error Code
-            bail!("states require not null");
+            bail!("states should not be null");
         } else {
             for split in states {
                 self.set_complete(split.id(), split.encode_to_json())

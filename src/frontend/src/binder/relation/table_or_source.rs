@@ -25,6 +25,7 @@ use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 
 use super::BoundShare;
+use crate::binder::relation::BoundShareInput;
 use crate::binder::{Binder, Relation};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -119,9 +120,9 @@ impl Binder {
                                 table_name
                             );
                         }
-                    } else if let Ok((table_catalog, schema_name)) =
-                        self.catalog
-                            .get_table_by_name(&self.db_name, schema_path, table_name)
+                    } else if let Ok((table_catalog, schema_name)) = self
+                        .catalog
+                        .get_created_table_by_name(&self.db_name, schema_path, table_name)
                     {
                         self.resolve_table_relation(table_catalog.clone(), schema_name, as_of)?
                     } else if let Ok((source_catalog, _)) =
@@ -162,7 +163,9 @@ impl Binder {
                             if let Ok(schema) =
                                 self.catalog.get_schema_by_name(&self.db_name, schema_name)
                             {
-                                if let Some(table_catalog) = schema.get_table_by_name(table_name) {
+                                if let Some(table_catalog) =
+                                    schema.get_created_table_by_name(table_name)
+                                {
                                     return self.resolve_table_relation(
                                         table_catalog.clone(),
                                         &schema_name.clone(),
@@ -281,7 +284,10 @@ impl Binder {
         };
         let input = Either::Left(query);
         Ok((
-            Relation::Share(Box::new(BoundShare { share_id, input })),
+            Relation::Share(Box::new(BoundShare {
+                share_id,
+                input: BoundShareInput::Query(input),
+            })),
             columns.iter().map(|c| (false, c.clone())).collect_vec(),
         ))
     }
@@ -310,7 +316,7 @@ impl Binder {
         };
         let (table_catalog, schema_name) =
             self.catalog
-                .get_table_by_name(db_name, schema_path, table_name)?;
+                .get_created_table_by_name(db_name, schema_path, table_name)?;
         let table_catalog = table_catalog.clone();
 
         let table_id = table_catalog.id();
@@ -348,7 +354,7 @@ impl Binder {
 
         let (table, _schema_name) =
             self.catalog
-                .get_table_by_name(db_name, schema_path, table_name)?;
+                .get_created_table_by_name(db_name, schema_path, table_name)?;
 
         match table.table_type() {
             TableType::Table => {}

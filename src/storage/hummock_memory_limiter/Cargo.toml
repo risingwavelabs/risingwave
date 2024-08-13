@@ -35,3 +35,4 @@ workspace = true
 
 [lib]
 doctest = false
+

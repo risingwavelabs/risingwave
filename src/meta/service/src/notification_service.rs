@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use itertools::Itertools;
+use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_meta::manager::{MetadataManager, SessionParamsManagerImpl};
 use risingwave_meta::MetaResult;
 use risingwave_pb::backup_service::MetaBackupManifestId;
-use risingwave_pb::catalog::Table;
+use risingwave_pb::catalog::{Secret, Table};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::hummock::WriteLimits;
@@ -47,20 +48,23 @@ pub struct NotificationServiceImpl {
 }
 
 impl NotificationServiceImpl {
-    pub fn new(
+    pub async fn new(
         env: MetaSrvEnv,
         metadata_manager: MetadataManager,
         hummock_manager: HummockManagerRef,
         backup_manager: BackupManagerRef,
         serving_vnode_mapping: ServingVnodeMappingRef,
-    ) -> Self {
-        Self {
+    ) -> MetaResult<Self> {
+        let service = Self {
             env,
             metadata_manager,
             hummock_manager,
             backup_manager,
             serving_vnode_mapping,
-        }
+        };
+        let (secrets, _catalog_version) = service.get_decrypted_secret_snapshot().await?;
+        LocalSecretManager::global().init_secrets(secrets);
+        Ok(service)
     }
 
     async fn get_catalog_snapshot(
@@ -142,25 +146,70 @@ impl NotificationServiceImpl {
         }
     }
 
+    /// Get decrypted secret snapshot
+    async fn get_decrypted_secret_snapshot(
+        &self,
+    ) -> MetaResult<(Vec<Secret>, NotificationVersion)> {
+        let secrets = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                let catalog_guard = mgr.catalog_manager.get_catalog_core_guard().await;
+                catalog_guard.database.list_secrets()
+            }
+            MetadataManager::V2(mgr) => {
+                let catalog_guard = mgr.catalog_controller.get_inner_read_guard().await;
+                catalog_guard.list_secrets().await?
+            }
+        };
+        let notification_version = self.env.notification_manager().current_version().await;
+
+        let decrypted_secrets = self.decrypt_secrets(secrets)?;
+
+        Ok((decrypted_secrets, notification_version))
+    }
+
+    fn decrypt_secrets(&self, secrets: Vec<Secret>) -> MetaResult<Vec<Secret>> {
+        // Skip getting `secret_store_private_key` if there is no secret
+        if secrets.is_empty() {
+            return Ok(vec![]);
+        }
+        let secret_store_private_key = self
+            .env
+            .opts
+            .secret_store_private_key
+            .clone()
+            .ok_or_else(|| anyhow!("secret_store_private_key is not configured"))?;
+        let mut decrypted_secrets = Vec::with_capacity(secrets.len());
+        for mut secret in secrets {
+            let encrypted_secret = SecretEncryption::deserialize(secret.get_value())
+                .context(format!("failed to deserialize secret {}", secret.name))?;
+            let decrypted_secret = encrypted_secret
+                .decrypt(secret_store_private_key.as_slice())
+                .context(format!("failed to decrypt secret {}", secret.name))?;
+            secret.value = decrypted_secret;
+            decrypted_secrets.push(secret);
+        }
+        Ok(decrypted_secrets)
+    }
+
     async fn get_worker_slot_mapping_snapshot(
         &self,
     ) -> MetaResult<(Vec<FragmentWorkerSlotMapping>, NotificationVersion)> {
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 let fragment_guard = mgr.fragment_manager.get_fragment_read_guard().await;
-                let parallel_unit_mappings =
+                let worker_slot_mappings =
                     fragment_guard.all_running_fragment_mappings().collect_vec();
                 let notification_version = self.env.notification_manager().current_version().await;
-                Ok((parallel_unit_mappings, notification_version))
+                Ok((worker_slot_mappings, notification_version))
             }
             MetadataManager::V2(mgr) => {
                 let fragment_guard = mgr.catalog_controller.get_inner_read_guard().await;
-                let parallel_unit_mappings = fragment_guard
+                let worker_slot_mappings = fragment_guard
                     .all_running_fragment_mappings()
                     .await?
                     .collect_vec();
                 let notification_version = self.env.notification_manager().current_version().await;
-                Ok((parallel_unit_mappings, notification_version))
+                Ok((worker_slot_mappings, notification_version))
             }
         }
     }
@@ -247,6 +296,9 @@ impl NotificationServiceImpl {
             catalog_version,
         ) = self.get_catalog_snapshot().await?;
 
+        // Use the plain text secret value for frontend. The secret value will be masked in frontend handle.
+        let decrypted_secrets = self.decrypt_secrets(secrets)?;
+
         let (streaming_worker_slot_mappings, streaming_worker_slot_mapping_version) =
             self.get_worker_slot_mapping_snapshot().await?;
         let serving_worker_slot_mappings = self.get_serving_vnode_mappings();
@@ -276,7 +328,7 @@ impl NotificationServiceImpl {
             subscriptions,
             functions,
             connections,
-            secrets,
+            secrets: decrypted_secrets,
             users,
             nodes,
             hummock_snapshot,
@@ -294,13 +346,16 @@ impl NotificationServiceImpl {
 
     async fn hummock_subscribe(&self) -> MetaResult<MetaSnapshot> {
         let (tables, catalog_version) = self.get_tables_and_creating_tables_snapshot().await?;
-        let hummock_version = self.hummock_manager.get_current_version().await;
+        let hummock_version = self
+            .hummock_manager
+            .on_current_version(|version| version.into())
+            .await;
         let hummock_write_limits = self.hummock_manager.write_limits().await;
         let meta_backup_manifest_id = self.backup_manager.manifest().manifest_id;
 
         Ok(MetaSnapshot {
             tables,
-            hummock_version: Some(hummock_version.to_protobuf()),
+            hummock_version: Some(hummock_version),
             version: Some(SnapshotVersion {
                 catalog_version,
                 ..Default::default()
@@ -315,8 +370,16 @@ impl NotificationServiceImpl {
         })
     }
 
-    fn compute_subscribe(&self) -> MetaSnapshot {
-        MetaSnapshot::default()
+    async fn compute_subscribe(&self) -> MetaResult<MetaSnapshot> {
+        let (secrets, catalog_version) = self.get_decrypted_secret_snapshot().await?;
+        Ok(MetaSnapshot {
+            secrets,
+            version: Some(SnapshotVersion {
+                catalog_version,
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
     }
 }
 
@@ -355,7 +418,7 @@ impl NotificationService for NotificationServiceImpl {
                     .await?;
                 self.hummock_subscribe().await?
             }
-            SubscribeType::Compute => self.compute_subscribe(),
+            SubscribeType::Compute => self.compute_subscribe().await?,
             SubscribeType::Unspecified => unreachable!(),
         };
 
