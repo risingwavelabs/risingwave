@@ -30,6 +30,8 @@ download_and_prepare_rw "$profile" source
 echo "--- os limits"
 ulimit -a
 
+export RUST_MIN_STACK=524288
+
 echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./
 mkdir ./connector-node
