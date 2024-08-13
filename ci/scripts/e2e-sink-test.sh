@@ -66,6 +66,7 @@ sleep 1
 
 echo "--- testing remote sinks"
 export JVM_HEAP_SIZE=2147483648
+export JAVA_OPTS="-Xss1m"
 # check sink destination postgres
 sqllogictest -p 4566 -d dev './e2e_test/sink/remote/jdbc.load.slt'
 sleep 1
