@@ -495,7 +495,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rename_with_complex_agg() {
+    fn test_rename_with_complex_funcs() {
         let definition = "CREATE MATERIALIZED VIEW mv1 AS SELECT \
                             agg1(\
                               foo.v1, func2(foo.v2) \
