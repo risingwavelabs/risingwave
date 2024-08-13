@@ -188,10 +188,6 @@ impl ReplayStateStore for GlobalReplayImpl {
             .map_err(|_| TraceError::ValidateReadEpochFailed)?;
         Ok(())
     }
-
-    async fn clear_shared_buffer(&self, prev_epoch: u64) {
-        self.store.clear_shared_buffer(prev_epoch).await
-    }
 }
 pub(crate) struct LocalReplayImpl(LocalHummockStorage);
 
