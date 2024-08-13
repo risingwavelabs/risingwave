@@ -14029,7 +14029,7 @@ dependencies = [
 [[package]]
 name = "sqlx"
 version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=d8a8f2e#d8a8f2e4e3ea3d10491e5a90152a198cf335ae4d"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=f126c0f#f126c0fd1e26b648d97b6ea4ef294129322f812d"
 dependencies = [
  "sqlx-core",
  "sqlx-macros",
@@ -14041,7 +14041,7 @@ dependencies = [
 [[package]]
 name = "sqlx-core"
 version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=d8a8f2e#d8a8f2e4e3ea3d10491e5a90152a198cf335ae4d"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=f126c0f#f126c0fd1e26b648d97b6ea4ef294129322f812d"
 dependencies = [
  "ahash 0.8.11",
  "atoi",
@@ -14085,7 +14085,7 @@ dependencies = [
 [[package]]
 name = "sqlx-macros"
 version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=d8a8f2e#d8a8f2e4e3ea3d10491e5a90152a198cf335ae4d"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=f126c0f#f126c0fd1e26b648d97b6ea4ef294129322f812d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -14097,7 +14097,7 @@ dependencies = [
 [[package]]
 name = "sqlx-macros-core"
 version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=d8a8f2e#d8a8f2e4e3ea3d10491e5a90152a198cf335ae4d"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=f126c0f#f126c0fd1e26b648d97b6ea4ef294129322f812d"
 dependencies = [
  "atomic-write-file",
  "dotenvy",
@@ -14123,7 +14123,7 @@ dependencies = [
 [[package]]
 name = "sqlx-mysql"
 version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=d8a8f2e#d8a8f2e4e3ea3d10491e5a90152a198cf335ae4d"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=f126c0f#f126c0fd1e26b648d97b6ea4ef294129322f812d"
 dependencies = [
  "atoi",
  "base64 0.21.7",
@@ -14169,7 +14169,7 @@ dependencies = [
 [[package]]
 name = "sqlx-postgres"
 version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=d8a8f2e#d8a8f2e4e3ea3d10491e5a90152a198cf335ae4d"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=f126c0f#f126c0fd1e26b648d97b6ea4ef294129322f812d"
 dependencies = [
  "atoi",
  "base64 0.21.7",
@@ -14213,7 +14213,7 @@ dependencies = [
 [[package]]
 name = "sqlx-sqlite"
 version = "0.7.3"
-source = "git+https://github.com/kwannoel/sqlx.git?rev=d8a8f2e#d8a8f2e4e3ea3d10491e5a90152a198cf335ae4d"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=f126c0f#f126c0fd1e26b648d97b6ea4ef294129322f812d"
 dependencies = [
  "async-channel 2.2.1",
  "atoi",
