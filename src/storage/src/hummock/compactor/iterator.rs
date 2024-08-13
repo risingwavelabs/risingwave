@@ -1198,7 +1198,7 @@ mod tests {
 
         let table_info = gen_test_sstable_info(
             default_builder_opt_for_test(),
-            1 as u64,
+            1_u64,
             (1..10000).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i)))),
             sstable_store.clone(),
         )
