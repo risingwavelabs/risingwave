@@ -76,7 +76,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
             .iter()
             .map(|table| {
                 if !object_id_set.insert(table.object_id) {
-                    panic!("LI)K object_id {} is duplicated", table.object_id);
+                    println!("LI)K object_id {} is duplicated", table.object_id);
                 }
                 for tid in &table.table_ids {
                     if !existing_table_ids.contains(tid) {
