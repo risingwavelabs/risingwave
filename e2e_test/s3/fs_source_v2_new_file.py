@@ -71,6 +71,8 @@ if __name__ == "__main__":
         config, len(data_batch1), ITEM_NUM_PER_FILE, run_id, fmt, need_drop_table=False
     )
 
+    sleep(10)
+
     formatted_batch2 = FORMATTER[fmt](data_batch2)
     upload_to_s3_bucket(config, client, run_id, formatted_batch2, split_idx)
 
