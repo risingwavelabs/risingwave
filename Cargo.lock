@@ -5775,7 +5775,7 @@ name = "futures-timer"
 version = "3.0.2"
 source = "git+https://github.com/madsim-rs/futures-timer.git?rev=05b33b4#05b33b4ede22b0517f49da59404d6e6d2848a192"
 dependencies = [
- "madsim 0.2.30",
+ "madsim 0.2.30 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -7466,36 +7466,6 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.25"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=fb3dc13#fb3dc132bc3a541df3bb64b05a44d538371fbc8c"
-dependencies = [
- "ahash 0.8.11",
- "async-channel 2.2.1",
- "async-stream",
- "async-task",
- "bincode 1.3.3",
- "bytes",
- "downcast-rs",
- "futures-util",
- "lazy_static",
- "libc",
- "madsim-macros 0.2.12 (git+https://github.com/madsim-rs/madsim.git?rev=fb3dc13)",
- "naive-timer",
- "panic-message",
- "rand",
- "rand_xoshiro",
- "rustversion",
- "serde",
- "spin 0.9.8",
- "tokio",
- "tokio-util",
- "toml 0.8.12",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "madsim"
 version = "0.2.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f88753ddf8d3cd43b9cf71a93626dd9aad3c24086a04420beb31922e1f856d02"
@@ -7526,6 +7496,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "madsim"
+version = "0.2.30"
+source = "git+https://github.com/madsim-rs/madsim.git#ea9dabd72add06837703294796c4afaf7bd75915"
+dependencies = [
+ "ahash 0.8.11",
+ "async-channel 2.2.1",
+ "async-stream",
+ "async-task",
+ "bincode 1.3.3",
+ "bytes",
+ "downcast-rs",
+ "futures-util",
+ "lazy_static",
+ "libc",
+ "madsim-macros 0.2.12 (git+https://github.com/madsim-rs/madsim.git)",
+ "naive-timer",
+ "panic-message",
+ "rand",
+ "rand_xoshiro",
+ "rustversion",
+ "serde",
+ "spin 0.9.8",
+ "tokio",
+ "tokio-util",
+ "toml 0.8.12",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "madsim-aws-sdk-s3"
 version = "0.5.0+1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7538,7 +7538,7 @@ dependencies = [
  "aws-types",
  "bytes",
  "http 1.1.0",
- "madsim 0.2.30",
+ "madsim 0.2.30 (registry+https://github.com/rust-lang/crates.io-index)",
  "spin 0.9.8",
  "tracing",
 ]
@@ -7552,7 +7552,7 @@ dependencies = [
  "etcd-client",
  "futures-util",
  "http 0.2.9",
- "madsim 0.2.30",
+ "madsim 0.2.30 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde",
  "serde_with 3.8.0",
  "spin 0.9.8",
@@ -7578,7 +7578,7 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.12"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=fb3dc13#fb3dc132bc3a541df3bb64b05a44d538371fbc8c"
+source = "git+https://github.com/madsim-rs/madsim.git#ea9dabd72add06837703294796c4afaf7bd75915"
 dependencies = [
  "darling 0.14.4",
  "proc-macro2",
@@ -7598,7 +7598,7 @@ dependencies = [
  "futures-util",
  "libc",
  "log",
- "madsim 0.2.30",
+ "madsim 0.2.30 (registry+https://github.com/rust-lang/crates.io-index)",
  "rdkafka-sys",
  "serde",
  "serde_derive",
@@ -7612,21 +7612,21 @@ dependencies = [
 
 [[package]]
 name = "madsim-tokio"
-version = "0.2.24"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=fb3dc13#fb3dc132bc3a541df3bb64b05a44d538371fbc8c"
+version = "0.2.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "569929c869275edc1e2c1f1381a688a6e5a4200302b58caff819e07414ccddb9"
 dependencies = [
- "madsim 0.2.25",
+ "madsim 0.2.30 (registry+https://github.com/rust-lang/crates.io-index)",
  "spin 0.9.8",
  "tokio",
 ]
 
 [[package]]
 name = "madsim-tokio"
-version = "0.2.28"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "569929c869275edc1e2c1f1381a688a6e5a4200302b58caff819e07414ccddb9"
+version = "0.2.29"
+source = "git+https://github.com/madsim-rs/madsim.git#ea9dabd72add06837703294796c4afaf7bd75915"
 dependencies = [
- "madsim 0.2.30",
+ "madsim 0.2.30 (git+https://github.com/madsim-rs/madsim.git)",
  "spin 0.9.8",
  "tokio",
 ]
@@ -7640,7 +7640,7 @@ dependencies = [
  "async-stream",
  "chrono",
  "futures-util",
- "madsim 0.2.30",
+ "madsim 0.2.30 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
  "tonic 0.10.2",
  "tower",
@@ -11992,7 +11992,7 @@ dependencies = [
  "hyper-rustls 0.24.2",
  "hyper-tls 0.5.0",
  "itertools 0.12.1",
- "madsim 0.2.30",
+ "madsim 0.2.30 (registry+https://github.com/rust-lang/crates.io-index)",
  "madsim-aws-sdk-s3",
  "madsim-tokio 0.2.28",
  "opendal",
@@ -12143,7 +12143,7 @@ dependencies = [
  "glob",
  "itertools 0.12.1",
  "lru 0.7.6",
- "madsim 0.2.30",
+ "madsim 0.2.30 (registry+https://github.com/rust-lang/crates.io-index)",
  "madsim-aws-sdk-s3",
  "madsim-etcd-client",
  "madsim-rdkafka",
@@ -14029,7 +14029,7 @@ dependencies = [
 [[package]]
 name = "sqlx"
 version = "0.7.3"
-source = "git+https://github.com/KveinAxel/sqlx.git?rev=f7bc5da#f7bc5da9013a6d7866681edff0cda708631739ef"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=d8a8f2e#d8a8f2e4e3ea3d10491e5a90152a198cf335ae4d"
 dependencies = [
  "sqlx-core",
  "sqlx-macros",
@@ -14041,7 +14041,7 @@ dependencies = [
 [[package]]
 name = "sqlx-core"
 version = "0.7.3"
-source = "git+https://github.com/KveinAxel/sqlx.git?rev=f7bc5da#f7bc5da9013a6d7866681edff0cda708631739ef"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=d8a8f2e#d8a8f2e4e3ea3d10491e5a90152a198cf335ae4d"
 dependencies = [
  "ahash 0.8.11",
  "atoi",
@@ -14062,7 +14062,7 @@ dependencies = [
  "hex",
  "indexmap 2.2.6",
  "log",
- "madsim-tokio 0.2.24",
+ "madsim-tokio 0.2.29",
  "memchr",
  "native-tls",
  "once_cell",
@@ -14085,7 +14085,7 @@ dependencies = [
 [[package]]
 name = "sqlx-macros"
 version = "0.7.3"
-source = "git+https://github.com/KveinAxel/sqlx.git?rev=f7bc5da#f7bc5da9013a6d7866681edff0cda708631739ef"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=d8a8f2e#d8a8f2e4e3ea3d10491e5a90152a198cf335ae4d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -14097,14 +14097,14 @@ dependencies = [
 [[package]]
 name = "sqlx-macros-core"
 version = "0.7.3"
-source = "git+https://github.com/KveinAxel/sqlx.git?rev=f7bc5da#f7bc5da9013a6d7866681edff0cda708631739ef"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=d8a8f2e#d8a8f2e4e3ea3d10491e5a90152a198cf335ae4d"
 dependencies = [
  "atomic-write-file",
  "dotenvy",
  "either",
  "heck 0.4.1",
  "hex",
- "madsim-tokio 0.2.24",
+ "madsim-tokio 0.2.29",
  "once_cell",
  "proc-macro2",
  "quote",
@@ -14123,7 +14123,7 @@ dependencies = [
 [[package]]
 name = "sqlx-mysql"
 version = "0.7.3"
-source = "git+https://github.com/KveinAxel/sqlx.git?rev=f7bc5da#f7bc5da9013a6d7866681edff0cda708631739ef"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=d8a8f2e#d8a8f2e4e3ea3d10491e5a90152a198cf335ae4d"
 dependencies = [
  "atoi",
  "base64 0.21.7",
@@ -14169,7 +14169,7 @@ dependencies = [
 [[package]]
 name = "sqlx-postgres"
 version = "0.7.3"
-source = "git+https://github.com/KveinAxel/sqlx.git?rev=f7bc5da#f7bc5da9013a6d7866681edff0cda708631739ef"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=d8a8f2e#d8a8f2e4e3ea3d10491e5a90152a198cf335ae4d"
 dependencies = [
  "atoi",
  "base64 0.21.7",
@@ -14213,7 +14213,7 @@ dependencies = [
 [[package]]
 name = "sqlx-sqlite"
 version = "0.7.3"
-source = "git+https://github.com/KveinAxel/sqlx.git?rev=f7bc5da#f7bc5da9013a6d7866681edff0cda708631739ef"
+source = "git+https://github.com/kwannoel/sqlx.git?rev=d8a8f2e#d8a8f2e4e3ea3d10491e5a90152a198cf335ae4d"
 dependencies = [
  "async-channel 2.2.1",
  "atoi",
@@ -14225,7 +14225,7 @@ dependencies = [
  "futures-util",
  "libsqlite3-sys",
  "log",
- "madsim-tokio 0.2.24",
+ "madsim-tokio 0.2.29",
  "percent-encoding",
  "serde",
  "sqlx-core",
