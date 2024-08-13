@@ -30,8 +30,6 @@ download_and_prepare_rw "$profile" source
 echo "--- os limits"
 ulimit -a
 
-export RUST_MIN_STACK=524288
-
 echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./
 mkdir ./connector-node
@@ -67,6 +65,7 @@ sqllogictest -p 4566 -d dev './e2e_test/sink/sink_into_table/*.slt'
 sleep 1
 
 echo "--- testing remote sinks"
+export JVM_HEAP_SIZE=2147483648
 # check sink destination postgres
 sqllogictest -p 4566 -d dev './e2e_test/sink/remote/jdbc.load.slt'
 sleep 1
