@@ -310,6 +310,7 @@ pub async fn run_slt_task(
                             "error reading a body from connection: broken pipe",
                             "failed to inject barrier",
                             "get error from control stream",
+                            "cluster is under recovering",
                         ];
                         let should_retry = i < MAX_RETRY
                             && allowed_errs
