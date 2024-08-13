@@ -24,6 +24,7 @@ def run_demo(demo: str, format: str, wait_time=40):
     project_dir = dirname(file_dir)
     demo_dir = os.path.join(project_dir, demo)
     print("Running demo: {}".format(demo))
+    print(f'The value of RW_LICENSE_KEY is: {os.getenv("RW_LICENSE_KEY")}')
 
     subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=demo_dir, check=True)
     sleep(wait_time)
