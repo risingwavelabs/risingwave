@@ -150,16 +150,13 @@ format plain encode protobuf (
   message = 'recursive.AllTypes');
 
 statement ok
-drop sink sink_csr_nested;
+drop table from_kafka cascade;
 
 statement ok
-drop sink sink_csr_trivial;
+drop table from_kafka_csr_trivial cascade;
 
 statement ok
-drop sink sink0;
+drop table from_kafka_csr_nested cascade;
 
 statement ok
-drop table into_kafka;
-
-statement ok
-drop table from_kafka;
+drop table into_kafka cascade;
