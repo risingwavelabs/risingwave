@@ -730,6 +730,8 @@ pub fn infer_type_name<'a>(
     };
 
     if candidates.is_empty() {
+        // TODO: when type mismatches, show what are supported signatures for the
+        // function with the given name.
         bail_no_function!("{}", sig());
     }
 

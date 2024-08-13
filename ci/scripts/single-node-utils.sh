@@ -19,7 +19,7 @@ start_single_node() {
 }
 
 stop_single_node() {
-  pkill risingwave
+  killall --wait risingwave
   rm -rf "$HOME/.risingwave/state_store"
   rm -rf "$HOME/.risingwave/meta_store"
 }
@@ -47,7 +47,6 @@ wait_single_node() {
 
 restart_single_node() {
   stop_single_node
-  sleep 5
   start_single_node "$PREFIX_LOG"/single-node-restarted.log &
   wait_single_node
 }

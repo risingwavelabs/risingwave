@@ -30,7 +30,6 @@ use risingwave_pb::meta::SystemParams;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tracing::info;
 
 use self::model::SystemParamsModel;
 use super::NotificationManagerRef;
@@ -77,7 +76,7 @@ impl SystemParamsManager {
             return Err(require_sql_meta_store_err().into());
         }
 
-        info!("system parameters: {:?}", params);
+        tracing::info!(initial_params = ?SystemParamsReader::new(&params), "initialize system parameters");
         check_missing_params(&params).map_err(|e| anyhow!(e))?;
 
         Ok(Self {

@@ -14,9 +14,9 @@
 
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::row::Row;
-use risingwave_common::types::ToOwnedDatum;
+use risingwave_common::types::{DataType, ListRef, MapType, MapValue, ToOwnedDatum};
 use risingwave_expr::expr::Context;
-use risingwave_expr::function;
+use risingwave_expr::{function, ExprError};
 
 #[function("array(...) -> anyarray", type_infer = "panic")]
 fn array(row: impl Row, ctx: &Context) -> ListValue {
@@ -26,6 +26,32 @@ fn array(row: impl Row, ctx: &Context) -> ListValue {
 #[function("row(...) -> struct", type_infer = "panic")]
 fn row_(row: impl Row) -> StructValue {
     StructValue::new(row.iter().map(|d| d.to_owned_datum()).collect())
+}
+
+fn map_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
+    let map = MapType::try_from_kv(args[0].as_list().clone(), args[1].as_list().clone())?;
+    Ok(map.into())
+}
+
+/// # Example
+///
+/// ```slt
+/// query T
+/// select map_from_entries(null::int[], array[1,2,3]);
+/// ----
+/// NULL
+///
+/// query T
+/// select map_from_entries(array['a','b','c'], array[1,2,3]);
+/// ----
+/// {"a":1,"b":2,"c":3}
+/// ```
+#[function(
+    "map_from_entries(anyarray, anyarray) -> anymap",
+    type_infer = "map_type_infer"
+)]
+fn map(key: ListRef<'_>, value: ListRef<'_>) -> Result<MapValue, ExprError> {
+    MapValue::try_from_kv(key.to_owned(), value.to_owned()).map_err(ExprError::Custom)
 }
 
 #[cfg(test)]

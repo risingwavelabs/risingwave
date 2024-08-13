@@ -99,7 +99,7 @@ paste = "1"
 pg_bigdecimal = { git = "https://github.com/risingwavelabs/rust-pg_bigdecimal", rev = "0b7893d88894ca082b4525f94f812da034486f7c" }
 postgres-openssl = "0.5.0"
 prometheus = { version = "0.13", features = ["process"] }
-prost = { version = "0.12", features = ["no-recursion-limit"] }
+prost = { workspace = true, features = ["no-recursion-limit"] }
 prost-reflect = "0.13"
 prost-types = "0.12"
 protobuf-native = "0.2.2"
@@ -154,7 +154,7 @@ thiserror-ext = { workspace = true }
 tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "f834f2deeb9e2fb08afaf73865f330cf31a3876a", default-features = false, features = [
     "chrono",
     "sql-browser-tokio",
-    "vendored-openssl",
+    "rustls",
     "rust_decimal",
     "bigdecimal",
     "tds73",
