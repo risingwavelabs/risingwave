@@ -891,9 +891,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76cb6d108605c5489fff1ef9c520656946ad05ed0de3ea6d26d56bcb34bdb8c5"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-buffer 52.0.0",
+ "arrow-schema 52.0.0",
  "atomic-time",
  "rquickjs",
 ]
@@ -905,10 +905,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4506efc6fbc200c083add2a7ed4e3616a859941a745e922320ae7051d90d12ec"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-ipc 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-buffer 52.0.0",
+ "arrow-ipc 52.0.0",
+ "arrow-schema 52.0.0",
  "lazy_static",
  "pyo3",
  "pyo3-build-config",
@@ -921,9 +921,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb829e25925161d93617d4b053bae03fe51e708f2cce088d85df856011d4f369"
 dependencies = [
  "anyhow",
- "arrow-array 50.0.0",
- "arrow-ipc 50.0.0",
- "arrow-schema 50.0.0",
+ "arrow-array 52.0.0",
+ "arrow-ipc 52.0.0",
+ "arrow-schema 52.0.0",
  "async-trait",
  "base64 0.22.0",
  "genawaiter",
@@ -5275,7 +5275,7 @@ dependencies = [
  "http 0.2.9",
  "thiserror",
  "tokio",
- "tonic 0.10.2",
+ "tonic 0.11.0",
  "tower",
  "tracing",
  "trust-dns-resolver 0.23.2",
@@ -5335,7 +5335,7 @@ dependencies = [
  "bigdecimal 0.4.5",
  "google-cloud-auth",
  "google-cloud-gax",
- "google-cloud-googleapis",
+ "google-cloud-googleapis 0.13.0",
  "google-cloud-token",
  "num-bigint",
  "reqwest 0.12.4",
@@ -5376,6 +5376,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "google-cloud-googleapis"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4a213e794a47db2d924df10caf76a6ba6336d64a396110aa8c78b4d496b73c3"
+dependencies = [
+ "prost 0.12.1",
+ "prost-types 0.12.1",
+ "tonic 0.11.0",
+]
+
+[[package]]
 name = "google-cloud-metadata"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5396,7 +5407,7 @@ dependencies = [
  "async-stream",
  "google-cloud-auth",
  "google-cloud-gax",
- "google-cloud-googleapis",
+ "google-cloud-googleapis 0.13.0",
  "google-cloud-token",
  "prost-types 0.12.1",
  "thiserror",
@@ -9160,7 +9171,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.1",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -10358,7 +10369,7 @@ dependencies = [
  "glob",
  "google-cloud-bigquery",
  "google-cloud-gax",
- "google-cloud-googleapis",
+ "google-cloud-googleapis 0.14.0",
  "google-cloud-pubsub",
  "http 0.2.9",
  "iceberg",
@@ -14106,6 +14117,7 @@ dependencies = [
  "axum 0.6.20",
  "base64 0.21.7",
  "bytes",
+ "flate2",
  "h2 0.3.26",
  "http 0.2.9",
  "http-body 0.4.5",
@@ -14114,7 +14126,10 @@ dependencies = [
  "percent-encoding",
  "pin-project",
  "prost 0.12.1",
+ "rustls-pemfile 2.1.1",
+ "rustls-pki-types",
  "tokio",
+ "tokio-rustls 0.25.0",
  "tokio-stream",
  "tower",
  "tower-layer",
