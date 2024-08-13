@@ -12,10 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
 use super::global_state::GlobalApproxPercentileState;
-
 use crate::executor::prelude::*;
 
 pub struct GlobalApproxPercentileExecutor<S: StateStore> {
@@ -37,12 +34,8 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
         bucket_state_table: StateTable<S>,
         count_state_table: StateTable<S>,
     ) -> Self {
-        let global_state = GlobalApproxPercentileState::new(
-            quantile,
-            base,
-            bucket_state_table,
-            count_state_table,
-        );
+        let global_state =
+            GlobalApproxPercentileState::new(quantile, base, bucket_state_table, count_state_table);
         Self {
             _ctx,
             input,

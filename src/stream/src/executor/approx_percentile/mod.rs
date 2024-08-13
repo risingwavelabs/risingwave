@@ -13,5 +13,5 @@
 // limitations under the License.
 
 pub mod global;
-pub mod local;
 mod global_state;
+pub mod local;

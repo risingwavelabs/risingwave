@@ -13,14 +13,16 @@
 // limitations under the License.
 
 use std::collections::Bound;
+
 use risingwave_common::array::Op;
 use risingwave_common::bail;
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::{Datum, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
-use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
+use risingwave_storage::StateStore;
+
 use crate::executor::prelude::*;
 use crate::executor::StreamExecutorResult;
 
@@ -56,10 +58,7 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         }
     }
 
-    pub async fn init(
-        &mut self,
-        init_epoch: EpochPair,
-    ) -> StreamExecutorResult<()> {
+    pub async fn init(&mut self, init_epoch: EpochPair) -> StreamExecutorResult<()> {
         // Init state tables.
         self.count_state_table.init_epoch(init_epoch);
         self.bucket_state_table.init_epoch(init_epoch);
@@ -91,7 +90,8 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
             Bound::Unbounded,
         );
         #[for_await]
-        for keyed_row in self.bucket_state_table
+        for keyed_row in self
+            .bucket_state_table
             .rev_iter_with_prefix(&[Datum::None; 0], &neg_bounds, PrefetchOptions::default())
             .await?
             .chain(
@@ -177,11 +177,7 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
 
         let new_value = old_bucket_row_count.checked_add(delta as i64).unwrap();
         let new_value_datum = Datum::from(ScalarImpl::Int64(new_value));
-        let new_row = &[
-            sign_datum,
-            bucket_id_datum,
-            new_value_datum,
-        ];
+        let new_row = &[sign_datum, bucket_id_datum, new_value_datum];
 
         if old_row.is_none() {
             self.bucket_state_table.insert(new_row);
@@ -202,7 +198,9 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         let last_row_count_state = self.count_state_table.get_row(&[Datum::None; 0]).await?;
         match last_row_count_state {
             None => self.count_state_table.insert(row_count_row),
-            Some(last_row_count_state) => self.count_state_table.update(last_row_count_state, row_count_row),
+            Some(last_row_count_state) => self
+                .count_state_table
+                .update(last_row_count_state, row_count_row),
         }
         self.count_state_table.commit(epoch).await?;
         self.bucket_state_table.commit(epoch).await?;
@@ -215,23 +213,22 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
     pub fn get_output(&self) -> StreamChunk {
         match &self.last_output {
             None => {
-                let new_output = self.cache.get_output(self.row_count, self.quantile, self.base);
-                StreamChunk::from_rows(
-                    &[(Op::Insert, &[new_output.clone()])],
-                    &[DataType::Float64],
-                )
+                let new_output = self
+                    .cache
+                    .get_output(self.row_count, self.quantile, self.base);
+                StreamChunk::from_rows(&[(Op::Insert, &[new_output.clone()])], &[DataType::Float64])
             }
-            Some(last_output) if !self.output_changed => {
-                StreamChunk::from_rows(
-                    &[
-                        (Op::UpdateDelete, &[last_output.clone()]),
-                        (Op::UpdateInsert, &[last_output.clone()]),
-                    ],
-                    &[DataType::Float64],
-                )
-            }
+            Some(last_output) if !self.output_changed => StreamChunk::from_rows(
+                &[
+                    (Op::UpdateDelete, &[last_output.clone()]),
+                    (Op::UpdateInsert, &[last_output.clone()]),
+                ],
+                &[DataType::Float64],
+            ),
             Some(last_output) => {
-                let new_output = self.cache.get_output(self.row_count, self.quantile, self.base);
+                let new_output = self
+                    .cache
+                    .get_output(self.row_count, self.quantile, self.base);
                 StreamChunk::from_rows(
                     &[
                         (Op::UpdateDelete, &[last_output.clone()]),
@@ -251,7 +248,7 @@ type BucketId = i32;
 struct BucketTableCache {
     neg_buckets: EstimatedBTreeMap<BucketId, Count>,
     zeros: Count,
-    pos_buckets: EstimatedBTreeMap<BucketId, Count>
+    pos_buckets: EstimatedBTreeMap<BucketId, Count>,
 }
 
 impl BucketTableCache {
