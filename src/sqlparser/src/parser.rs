@@ -4983,8 +4983,8 @@ impl Parser<'_> {
             let arg_list = FunctionArgList {
                 distinct,
                 args,
-                order_by,
                 variadic,
+                order_by,
             };
 
             self.expect_token(&Token::RParen)?;
