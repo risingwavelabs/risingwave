@@ -27,8 +27,8 @@ use crate::binder::{Binder, Clause};
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef};
-use crate::handler::create_mv::ordinal;
 use crate::user::UserId;
+use crate::utils::ordinal;
 
 #[derive(Debug, Clone)]
 pub struct BoundInsert {
