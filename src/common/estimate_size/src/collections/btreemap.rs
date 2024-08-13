@@ -44,7 +44,7 @@ impl<K, V> EstimatedBTreeMap<K, V> {
         self.inner.is_empty()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> + DoubleEndedIterator {
         self.inner.iter()
     }
 
