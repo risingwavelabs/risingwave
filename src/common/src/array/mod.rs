@@ -26,6 +26,7 @@ pub mod interval_array;
 mod iterator;
 mod jsonb_array;
 pub mod list_array;
+mod map_array;
 mod num256_array;
 mod primitive_array;
 mod proto_reader;
@@ -53,6 +54,7 @@ pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
 pub use jsonb_array::{JsonbArray, JsonbArrayBuilder};
 pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
+pub use map_array::{MapArray, MapArrayBuilder, MapRef, MapValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
 use risingwave_common_estimate_size::EstimateSize;
@@ -104,6 +106,7 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     type ArrayType: Array<Builder = Self>;
 
     /// Create a new builder with `capacity`.
+    /// TODO: remove this function from the trait. Let it be methods of each concrete builders.
     fn new(capacity: usize) -> Self;
 
     /// # Panics
@@ -134,6 +137,8 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     fn append_array(&mut self, other: &Self::ArrayType);
 
     /// Pop an element from the builder.
+    ///
+    /// It's used in `rollback` in source parser.
     ///
     /// # Returns
     ///
@@ -331,6 +336,10 @@ macro_rules! array_impl_enum {
 
 for_all_array_variants! { array_impl_enum }
 
+// We cannot put the From implementations in impl_convert,
+// because then we can't prove for all `T: PrimitiveArrayItemType`,
+// it's implemented.
+
 impl<T: PrimitiveArrayItemType> From<PrimitiveArray<T>> for ArrayImpl {
     fn from(arr: PrimitiveArray<T>) -> Self {
         T::erase_array_type(arr)
@@ -379,6 +388,12 @@ impl From<BytesArray> for ArrayImpl {
     }
 }
 
+impl From<MapArray> for ArrayImpl {
+    fn from(arr: MapArray) -> Self {
+        Self::Map(arr)
+    }
+}
+
 /// `impl_convert` implements several conversions for `Array` and `ArrayBuilder`.
 /// * `ArrayImpl -> &Array` with `impl.as_int16()`.
 /// * `ArrayImpl -> Array` with `impl.into_int16()`.
@@ -390,6 +405,9 @@ macro_rules! impl_convert {
         $(
             paste! {
                 impl ArrayImpl {
+                    /// # Panics
+                    ///
+                    /// Panics if type mismatches.
                     pub fn [<as_ $suffix_name>](&self) -> &$array {
                         match self {
                             Self::$variant_name(ref array) => array,
@@ -397,6 +415,9 @@ macro_rules! impl_convert {
                         }
                     }
 
+                    /// # Panics
+                    ///
+                    /// Panics if type mismatches.
                     pub fn [<into_ $suffix_name>](self) -> $array {
                         match self {
                             Self::$variant_name(array) => array,
@@ -405,6 +426,7 @@ macro_rules! impl_convert {
                     }
                 }
 
+                // FIXME: panic in From here is not proper.
                 impl <'a> From<&'a ArrayImpl> for &'a $array {
                     fn from(array: &'a ArrayImpl) -> Self {
                         match array {
