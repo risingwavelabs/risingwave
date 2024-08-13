@@ -37,7 +37,8 @@ use thiserror_ext::AsReport;
 use crate::array::{
     ArrayBuilderImpl, ArrayError, ArrayResult, PrimitiveArrayItemType, NULL_VAL_FOR_HASH,
 };
-pub use crate::array::{ListRef, ListValue, StructRef, StructValue};
+// Complex type's value is based on the array
+pub use crate::array::{ListRef, ListValue, MapRef, MapValue, StructRef, StructValue};
 use crate::cast::{str_to_bool, str_to_bytea};
 use crate::error::BoxedError;
 use crate::{
@@ -53,6 +54,7 @@ mod from_sql;
 mod interval;
 mod jsonb;
 mod macros;
+mod map_type;
 mod native_type;
 mod num256;
 mod ops;
@@ -78,6 +80,7 @@ pub use self::datetime::{Date, Time, Timestamp};
 pub use self::decimal::{Decimal, PowError as DecimalPowError};
 pub use self::interval::{test_utils, DateTimeField, Interval, IntervalDisplay};
 pub use self::jsonb::{JsonbRef, JsonbVal};
+pub use self::map_type::MapType;
 pub use self::native_type::*;
 pub use self::num256::{Int256, Int256Ref};
 pub use self::ops::{CheckedAdd, IsNegative};
@@ -99,8 +102,13 @@ pub type F32 = ordered_float::OrderedFloat<f32>;
 pub type F64 = ordered_float::OrderedFloat<f64>;
 
 /// The set of datatypes that are supported in RisingWave.
-// `EnumDiscriminants` will generate a `DataTypeName` enum with the same variants,
-// but without data fields.
+///
+/// # Trait implementations
+///
+/// - `EnumDiscriminants` generates [`DataTypeName`] enum with the same variants,
+///   but without data fields.
+/// - `FromStr` is only used internally for tests.
+///   The generated implementation isn't efficient, and doesn't handle whitespaces, etc.
 #[derive(
     Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumDiscriminants, FromStr,
 )]
@@ -166,8 +174,12 @@ pub enum DataType {
     #[display("rw_int256")]
     #[from_str(regex = "(?i)^rw_int256$")]
     Int256,
+    #[display("{0}")]
+    #[from_str(regex = "(?i)^(?P<0>.+)$")]
+    Map(MapType),
 }
 
+// For DataType::List
 impl std::str::FromStr for Box<DataType> {
     type Err = BoxedError;
 
@@ -200,8 +212,8 @@ impl TryFrom<DataTypeName> for DataType {
             DataTypeName::Time => Ok(DataType::Time),
             DataTypeName::Interval => Ok(DataType::Interval),
             DataTypeName::Jsonb => Ok(DataType::Jsonb),
-            DataTypeName::Struct | DataTypeName::List => {
-                Err("Functions returning struct or list can not be inferred. Please use `FunctionCall::new_unchecked`.")
+            DataTypeName::Struct | DataTypeName::List | DataTypeName::Map => {
+                Err("Functions returning composite types can not be inferred. Please use `FunctionCall::new_unchecked`.")
             }
         }
     }
@@ -236,6 +248,12 @@ impl From<&PbDataType> for DataType {
                 // The first (and only) item is the list element type.
                 Box::new((&proto.field_type[0]).into()),
             ),
+            PbTypeName::Map => {
+                // Map is physically the same as a list.
+                // So the first (and only) item is the list element type.
+                let list_entries_type: DataType = (&proto.field_type[0]).into();
+                DataType::Map(MapType::from_list_entries(list_entries_type))
+            }
             PbTypeName::Int256 => DataType::Int256,
         }
     }
@@ -263,6 +281,7 @@ impl From<DataTypeName> for PbTypeName {
             DataTypeName::Struct => PbTypeName::Struct,
             DataTypeName::List => PbTypeName::List,
             DataTypeName::Int256 => PbTypeName::Int256,
+            DataTypeName::Map => PbTypeName::Map,
         }
     }
 }
@@ -324,6 +343,11 @@ impl DataType {
             DataType::List(datatype) => {
                 pb.field_type = vec![datatype.to_protobuf()];
             }
+            DataType::Map(datatype) => {
+                // Same as List<Struct<K,V>>
+                pb.field_type =
+                    vec![DataType::Struct(datatype.clone().into_struct()).to_protobuf()];
+            }
             DataType::Boolean
             | DataType::Int16
             | DataType::Int32
@@ -366,6 +390,10 @@ impl DataType {
         matches!(self, DataType::Struct(_))
     }
 
+    pub fn is_map(&self) -> bool {
+        matches!(self, DataType::Map(_))
+    }
+
     pub fn is_int(&self) -> bool {
         matches!(self, DataType::Int16 | DataType::Int32 | DataType::Int64)
     }
@@ -383,14 +411,32 @@ impl DataType {
         Self::Struct(StructType::from_parts(field_names, fields))
     }
 
+    pub fn new_unnamed_struct(fields: Vec<DataType>) -> Self {
+        Self::Struct(StructType::unnamed(fields))
+    }
+
     pub fn as_struct(&self) -> &StructType {
         match self {
             DataType::Struct(t) => t,
-            _ => panic!("expect struct type"),
+            t => panic!("expect struct type, got {t}"),
         }
     }
 
-    /// Returns the inner type of a list type.
+    pub fn as_map(&self) -> &MapType {
+        match self {
+            DataType::Map(t) => t,
+            t => panic!("expect map type, got {t}"),
+        }
+    }
+
+    pub fn into_map(self) -> MapType {
+        match self {
+            DataType::Map(t) => t,
+            t => panic!("expect map type, got {t}"),
+        }
+    }
+
+    /// Returns the inner element's type of a list type.
     ///
     /// # Panics
     ///
@@ -398,11 +444,13 @@ impl DataType {
     pub fn as_list(&self) -> &DataType {
         match self {
             DataType::List(t) => t,
-            _ => panic!("expect list type"),
+            t => panic!("expect list type, got {t}"),
         }
     }
 
-    /// Return a new type that removes the outer list.
+    /// Return a new type that removes the outer list, and get the innermost element type.
+    ///
+    /// Use [`DataType::as_list`] if you only want the element type of a list.
     ///
     /// ```
     /// use risingwave_common::types::DataType::*;
@@ -446,6 +494,10 @@ impl From<DataType> for PbDataType {
 
 mod private {
     use super::*;
+
+    // Note: put pub trait inside a private mod just makes the name private,
+    // The trait methods will still be publicly available...
+    // a.k.a. ["Voldemort type"](https://rust-lang.github.io/rfcs/2145-type-privacy.html#lint-3-voldemort-types-its-reachable-but-i-cant-name-it)
 
     /// Common trait bounds of scalar and scalar reference types.
     ///
@@ -610,7 +662,7 @@ macro_rules! impl_self_as_scalar_ref {
         )*
     };
 }
-impl_self_as_scalar_ref! { &str, &[u8], Int256Ref<'_>, JsonbRef<'_>, ListRef<'_>, StructRef<'_>, ScalarRefImpl<'_> }
+impl_self_as_scalar_ref! { &str, &[u8], Int256Ref<'_>, JsonbRef<'_>, ListRef<'_>, StructRef<'_>, ScalarRefImpl<'_>, MapRef<'_> }
 
 /// `for_all_native_types` includes all native variants of our scalar types.
 ///
@@ -831,7 +883,7 @@ impl ScalarImpl {
                     .ok_or_else(|| "invalid value of Jsonb".to_string())?,
             ),
             DataType::Int256 => Self::Int256(Int256::from_binary(bytes)?),
-            DataType::Struct(_) | DataType::List(_) => {
+            DataType::Struct(_) | DataType::List(_) | DataType::Map(_) => {
                 return Err(format!("unsupported data type: {}", data_type).into());
             }
         };
@@ -864,6 +916,9 @@ impl ScalarImpl {
             DataType::Struct(_) => StructValue::from_str(s, data_type)?.into(),
             DataType::Jsonb => JsonbVal::from_str(s)?.into(),
             DataType::Bytea => str_to_bytea(s)?.into(),
+            DataType::Map(_) => {
+                todo!()
+            }
         })
     }
 }
@@ -930,7 +985,7 @@ impl ScalarRefImpl<'_> {
         self.to_text_with_type(data_type)
     }
 
-    /// Serialize the scalar.
+    /// Serialize the scalar into the `memcomparable` format.
     pub fn serialize(
         &self,
         ser: &mut memcomparable::Serializer<impl BufMut>,
@@ -961,6 +1016,7 @@ impl ScalarRefImpl<'_> {
             Self::Jsonb(v) => v.memcmp_serialize(ser)?,
             Self::Struct(v) => v.memcmp_serialize(ser)?,
             Self::List(v) => v.memcmp_serialize(ser)?,
+            Self::Map(v) => v.memcmp_serialize(ser)?,
         };
         Ok(())
     }
@@ -1015,6 +1071,7 @@ impl ScalarImpl {
             Ty::Jsonb => Self::Jsonb(JsonbVal::memcmp_deserialize(de)?),
             Ty::Struct(t) => StructValue::memcmp_deserialize(t.types(), de)?.to_scalar_value(),
             Ty::List(t) => ListValue::memcmp_deserialize(t, de)?.to_scalar_value(),
+            Ty::Map(t) => MapValue::memcmp_deserialize(t, de)?.to_scalar_value(),
         })
     }
 
@@ -1194,6 +1251,10 @@ mod tests {
                     ScalarImpl::List(ListValue::from_iter([233i64, 2333])),
                     DataType::List(Box::new(DataType::Int64)),
                 ),
+                DataTypeName::Map => {
+                    // map is not hashable
+                    continue;
+                }
             };
 
             test(Some(scalar), data_type.clone());

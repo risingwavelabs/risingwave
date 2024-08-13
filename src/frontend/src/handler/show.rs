@@ -588,7 +588,7 @@ mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
 
         let sql = r#"CREATE SOURCE t1 (column1 varchar)
-        WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+        WITH (connector = 'kafka', kafka.topic = 'abc', kafka.brokers = 'localhost:1001')
         FORMAT PLAIN ENCODE JSON"#;
         frontend.run_sql(sql).await.unwrap();
 
@@ -602,7 +602,7 @@ mod tests {
         let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t
-    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.brokers = 'localhost:1001')
     FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );

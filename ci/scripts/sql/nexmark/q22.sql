@@ -9,4 +9,4 @@ SELECT auction,
        split_part(url, '/', 5) as dir2,
        split_part(url, '/', 6) as dir3
 FROM bid
-WITH ( connector = 'blackhole', type = 'append-only');
+WITH ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');

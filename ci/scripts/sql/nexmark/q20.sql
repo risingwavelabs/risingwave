@@ -20,4 +20,4 @@ SELECT auction,
 FROM bid AS B
          INNER JOIN auction AS A on B.auction = A.id
 WHERE A.category = 10
-WITH ( connector = 'blackhole', type = 'append-only');
+WITH ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');

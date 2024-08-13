@@ -733,12 +733,12 @@ impl MetadataManager {
     pub async fn all_node_actors(
         &self,
         include_inactive: bool,
+        subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
     ) -> MetaResult<HashMap<WorkerId, Vec<BuildActorInfo>>> {
-        let subscriptions = self.get_mv_depended_subscriptions().await?;
         match &self {
             MetadataManager::V1(mgr) => Ok(mgr
                 .fragment_manager
-                .all_node_actors(include_inactive, &subscriptions)
+                .all_node_actors(include_inactive, subscriptions)
                 .await),
             MetadataManager::V2(mgr) => {
                 let table_fragments = mgr.catalog_controller.table_fragments().await?;
@@ -751,7 +751,7 @@ impl MetadataManager {
                         node_actors.extend(
                             actors
                                 .into_iter()
-                                .map(|actor| to_build_actor_info(actor, &subscriptions, table_id)),
+                                .map(|actor| to_build_actor_info(actor, subscriptions, table_id)),
                         )
                     }
                 }
