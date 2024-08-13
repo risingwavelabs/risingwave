@@ -380,7 +380,7 @@ impl StageRunner {
                 ));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
-            // If their is no file in source, the `chunk_size` is set to 1.
+            // If there is no file in source, the `chunk_size` is set to 1.
             let chunk_size = ((source_info.split_info().unwrap().len() as f32
                 / self.stage.parallelism.unwrap() as f32)
                 .ceil() as usize)
