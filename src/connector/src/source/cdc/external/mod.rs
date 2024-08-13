@@ -32,6 +32,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_pb::secret::PbSecretRef;
 use serde_derive::{Deserialize, Serialize};
+use tracing::info;
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::mysql_row_to_owned_row;
@@ -210,7 +211,17 @@ pub struct ExternalTableConfig {
     /// Choices include `disabled`, `preferred`, and `required`.
     /// This field is optional.
     #[serde(rename = "ssl.mode", default = "Default::default")]
-    pub sslmode: SslMode,
+    #[serde(alias = "debezium.database.sslmode")]
+    pub ssl_mode: SslMode,
+
+    /// `ssl.cert` specifies the path to the client certificate file.
+    #[serde(rename = "ssl.cert")]
+    #[serde(alias = "debezium.database.sslcert")]
+    pub ssl_cert: Option<String>,
+
+    #[serde(rename = "ssl.root.cert")]
+    #[serde(alias = "debezium.database.sslrootcert")]
+    pub ssl_root_cert: Option<String>,
 }
 
 impl ExternalTableConfig {
@@ -226,7 +237,7 @@ impl ExternalTableConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SslMode {
     #[serde(alias = "disable")]
@@ -235,6 +246,14 @@ pub enum SslMode {
     Preferred,
     #[serde(alias = "require")]
     Required,
+    /// verify that the server is trustworthy by checking the certificate chain
+    /// up to the root certificate stored on the client.
+    #[serde(alias = "verify-ca")]
+    VerifyCa,
+    /// Besides verify the certificate, will also verify that the serverhost name
+    /// matches the name stored in the server certificate.
+    #[serde(alias = "verify-full")]
+    VerifyFull,
 }
 
 impl Default for SslMode {
@@ -250,6 +269,8 @@ impl fmt::Display for SslMode {
             SslMode::Disabled => "disabled",
             SslMode::Preferred => "preferred",
             SslMode::Required => "required",
+            SslMode::VerifyCa => "verify-ca",
+            SslMode::VerifyFull => "verify-full",
         })
     }
 }

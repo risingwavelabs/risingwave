@@ -86,17 +86,28 @@ pub struct PostgresExternalTable {
 impl PostgresExternalTable {
     pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
         tracing::debug!("connect to postgres external table");
-        let options = PgConnectOptions::new()
+        let mut options = PgConnectOptions::new()
             .username(&config.username)
             .password(&config.password)
             .host(&config.host)
             .port(config.port.parse::<u16>().unwrap())
             .database(&config.database)
-            .ssl_mode(match config.sslmode {
+            .ssl_mode(match config.ssl_mode {
                 SslMode::Disabled => PgSslMode::Disable,
                 SslMode::Preferred => PgSslMode::Prefer,
                 SslMode::Required => PgSslMode::Require,
+                SslMode::VerifyCa => PgSslMode::VerifyCa,
+                SslMode::VerifyFull => PgSslMode::VerifyFull,
             });
+
+        if config.ssl_mode == SslMode::VerifyCa || config.ssl_mode == SslMode::VerifyFull {
+            if let Some(ref cert) = config.ssl_cert {
+                options = options.ssl_client_cert(cert.as_str());
+            }
+            if let Some(ref root_cert) = config.ssl_root_cert {
+                options = options.ssl_root_cert(root_cert.as_str());
+            }
+        }
 
         let connection = PgPool::connect_with(options).await?;
         let schema_discovery = SchemaDiscovery::new(connection, config.schema.as_str());
@@ -289,7 +300,7 @@ impl PostgresExternalTableReader {
             .dbname(&config.database);
 
         #[cfg(not(madsim))]
-        let connector = match config.sslmode {
+        let connector = match config.ssl_mode {
             SslMode::Disabled => {
                 pg_config.ssl_mode(tokio_postgres::config::SslMode::Disable);
                 MaybeMakeTlsConnector::NoTls(NoTls)
@@ -313,6 +324,12 @@ impl PostgresExternalTableReader {
                 let mut builder = SslConnector::builder(SslMethod::tls())?;
                 // disable certificate verification for `require`
                 builder.set_verify(SslVerifyMode::NONE);
+                MaybeMakeTlsConnector::Tls(MakeTlsConnector::new(builder.build()))
+            }
+            SslMode::VerifyCa | SslMode::VerifyFull => {
+                pg_config.ssl_mode(tokio_postgres::config::SslMode::Require);
+                let mut builder = SslConnector::builder(SslMethod::tls())?;
+                builder.set_verify(SslVerifyMode::PEER);
                 MaybeMakeTlsConnector::Tls(MakeTlsConnector::new(builder.build()))
             }
         };
@@ -482,7 +499,7 @@ mod tests {
             database: "mydb".to_string(),
             schema: "public".to_string(),
             table: "mytest".to_string(),
-            sslmode: Default::default(),
+            ssl_mode: Default::default(),
         };
 
         let table = PostgresExternalTable::connect(config).await.unwrap();

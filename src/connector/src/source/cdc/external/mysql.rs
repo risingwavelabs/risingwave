@@ -85,9 +85,12 @@ impl MySqlExternalTable {
             .host(&config.host)
             .port(config.port.parse::<u16>().unwrap())
             .database(&config.database)
-            .ssl_mode(match config.sslmode {
+            .ssl_mode(match config.ssl_mode {
                 SslMode::Disabled | SslMode::Preferred => sqlx::mysql::MySqlSslMode::Disabled,
                 SslMode::Required => sqlx::mysql::MySqlSslMode::Required,
+                _ => {
+                    return Err(anyhow!("unsupported SSL mode").into());
+                }
             });
 
         let connection = MySqlPool::connect_with(options).await?;
@@ -258,9 +261,9 @@ impl MySqlExternalTableReader {
             .tcp_port(config.port.parse::<u16>().unwrap())
             .db_name(Some(config.database));
 
-        opts_builder = match config.sslmode {
+        opts_builder = match config.ssl_mode {
             SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
-            SslMode::Required => {
+            SslMode::Required | SslMode::VerifyCa | SslMode::VerifyFull => {
                 let ssl_without_verify = mysql_async::SslOpts::default()
                     .with_danger_accept_invalid_certs(true)
                     .with_danger_skip_domain_validation(true);
@@ -479,7 +482,7 @@ mod tests {
             database: "mydb".to_string(),
             schema: "".to_string(),
             table: "part".to_string(),
-            sslmode: Default::default(),
+            ssl_mode: Default::default(),
         };
 
         let table = MySqlExternalTable::connect(config).await.unwrap();
