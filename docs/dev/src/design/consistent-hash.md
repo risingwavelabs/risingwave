@@ -20,23 +20,23 @@ First, we need to introduce a little about how we schedule the actors. Each work
 
 Here comes the main part, where we will construct a mapping that determines data distribution.
 
-For all data $k \in U_k$, where $U_k$ is an unbounded set, we apply a hash function $v = H(k)$, where $v$ falls to a limited range. The hash function $H$ ensures that all data are hashed **uniformly** to that range. We call $v$ vnode, namely virtual node, as is shown as the squares in the figure below.
+For all data \\( k \in U_k \\), where \\( U_k \\) is an unbounded set, we apply a hash function \\( v = H(k) \\), where \\( v \\) falls to a limited range. The hash function \\( H \\) ensures that all data are hashed **uniformly** to that range. We call \\( v \\) vnode, namely virtual node, as is shown as the squares in the figure below.
 
 ![initial data distribution](../images/consistent-hash/data-distribution.svg)
 
-Then we have vnode mapping, which ensures that vnodes are mapped evenly to parallel units in the cluster. In other words, the number of vnodes that are mapped to each parallel unit should be as close as possible. This is denoted by different colors in the figure above. As is depicted, we have 3 parallel units (shown as circles), each taking $\frac{1}{3}$ of total vnodes. Vnode mapping is [constructed and maintained by meta](https://github.com/risingwavelabs/risingwave/blob/main/src/meta/src/stream/scheduler.rs).
+Then we have vnode mapping, which ensures that vnodes are mapped evenly to parallel units in the cluster. In other words, the number of vnodes that are mapped to each parallel unit should be as close as possible. This is denoted by different colors in the figure above. As is depicted, we have 3 parallel units (shown as circles), each taking \\( \frac{1}{3} \\) of total vnodes. Vnode mapping is [constructed and maintained by meta](https://github.com/risingwavelabs/risingwave/blob/main/src/meta/src/stream/scheduler.rs).
 
-As long as the hash function $H$ could ensure uniformity, the data distribution determined by this strategy would be even across physical resources. The evenness will be retained even if data in $U_k$ are skewed to a certain range, say, most students scoring over 60 in a hundred-mark system.
+As long as the hash function \\( H \\) could ensure uniformity, the data distribution determined by this strategy would be even across physical resources. The evenness will be retained even if data in \\( U_k \\) are skewed to a certain range, say, most students scoring over 60 in a hundred-mark system.
 
 #### Data Redistribution
 
-Since $v = H(k)$, the way that data are mapped to vnodes will be invariant. Therefore, when scaling occurs, we only need to modify vnode mapping (the way that vnodes are mapped to parallel units), so as to redistribute the data.
+Since \\( v = H(k) \\), the way that data are mapped to vnodes will be invariant. Therefore, when scaling occurs, we only need to modify vnode mapping (the way that vnodes are mapped to parallel units), so as to redistribute the data.
 
-Let's take scaling out for example. Assume that we have one more parallel unit after scaling out, as is depicted as the orange circle in the figure below. Using the optimal strategy, we modify the vnode mapping in such a way that only $\frac{1}{4}$ of the data have to be moved, as is shown in the figure below. The vnodes whose data are required to be moved are highlighted with bold border in the figure.
+Let's take scaling out for example. Assume that we have one more parallel unit after scaling out, as is depicted as the orange circle in the figure below. Using the optimal strategy, we modify the vnode mapping in such a way that only \\( \frac{1}{4} \\) of the data have to be moved, as is shown in the figure below. The vnodes whose data are required to be moved are highlighted with bold border in the figure.
 
 ![optimal data redistribution](../images/consistent-hash/data-redistribution-1.svg)
 
-To minimize data movement when scaling occurs, we should be careful when we modify the vnode mapping. Below is an opposite example. Modifying vnode mapping like this will result in $\frac{1}{2}$ of the data being moved.
+To minimize data movement when scaling occurs, we should be careful when we modify the vnode mapping. Below is an opposite example. Modifying vnode mapping like this will result in \\( \frac{1}{2} \\) of the data being moved.
 
 ![worst data redistribution](../images/consistent-hash/data-redistribution-2.svg)
 
@@ -49,9 +49,9 @@ We know that a fragment has several actors as its different parallelisms, and th
 In the figure, we can see that one upstream actor dispatches data to three downstream actors. The downstream actors are scheduled on the parallel units mentioned in previous example respectively.
 
 Based on our consistent hash design, the dispatcher is informed of the latest vnode mapping by meta node. It then decides how to send data by following steps:
-1. Compute vnode of the data via the hash function $H$. Let the vnode be $v_k$.
-2. Look up vnode mapping and find out parallel unit $p_n$ that vnode $v_k$ maps to.
-3. Send data to the downstream actor that is scheduled on parallel unit $p_n$ (remember that one actor will be scheduled on exactly one parallel unit).
+1. Compute vnode of the data via the hash function \\( H \\). Let the vnode be \\( v_k \\).
+2. Look up vnode mapping and find out parallel unit \\( p_n \\) that vnode \\( v_k \\) maps to.
+3. Send data to the downstream actor that is scheduled on parallel unit \\( p_n \\) (remember that one actor will be scheduled on exactly one parallel unit).
 
 In this way, all actors' data (i.e. actors' states) will be distributed according to the vnode mapping constructed by meta.
 
@@ -78,7 +78,7 @@ We know that [Hummock](./state-store-overview.md#overview), our LSM-Tree-based s
 ```
 table_id | vnode | ...
 ```
-where `table_id` denotes the [state table](relational-table.md), and `vnode` is computed via $H$ on key of the data.
+where `table_id` denotes the [state table](relational-table.md), and `vnode` is computed via \\( H \\) on key of the data.
 
 To illustrate this, let's revisit the [previous example](#streaming). Executors of an operator will share the same logical state table, just as is shown in the figure below:
 

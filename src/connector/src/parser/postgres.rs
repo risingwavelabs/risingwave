@@ -116,7 +116,8 @@ fn postgres_cell_to_scalar_impl(
                 }
             }
         },
-        DataType::Struct(_) | DataType::Serial => {
+        DataType::Struct(_) | DataType::Serial | DataType::Map(_) => {
+            // Is this branch reachable?
             // Struct and Serial are not supported
             tracing::warn!(name, ?data_type, "unsupported data type, set to null");
             None
