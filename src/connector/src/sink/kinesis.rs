@@ -20,6 +20,7 @@ use aws_sdk_kinesis::primitives::Blob;
 use aws_sdk_kinesis::types::{PutRecordsRequestEntry, PutRecordsResultEntry};
 use aws_sdk_kinesis::Client as KinesisClient;
 use futures::{FutureExt, TryFuture};
+use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
@@ -237,7 +238,7 @@ mod opaque_type {
                     // 1. Prepare the records to be sent
 
                     // The maximum possible number of records that can be sent in this iteration.
-                    // Can be smaller than this number of the total payload size exceeds `MAX_TOTAL_RECORD_PAYLOAD_SIZE`
+                    // Can be smaller than this number when the total payload size exceeds `MAX_TOTAL_RECORD_PAYLOAD_SIZE`
                     let max_record_count = min(MAX_RECORD_COUNT, total_count - start_idx);
                     let mut records = Vec::with_capacity(max_record_count);
                     let mut total_payload_size = 0;
@@ -378,13 +379,10 @@ impl KinesisSinkPayloadWriter {
         // the type of error and can be one of the following values: ProvisionedThroughputExceededException or
         // InternalFailure. ErrorMessage provides more detailed information about the ProvisionedThroughputExceededException
         // exception including the account ID, stream name, and shard ID of the record that was throttled.
-        for (idx, result_entry) in output.records.into_iter().enumerate() {
-            if result_entry.shard_id.is_some() {
-                continue;
-            }
-            return Some((idx, result_entry));
-        }
-        None
+        output
+            .records
+            .into_iter()
+            .find_position(|entry| entry.shard_id.is_none())
     }
 
     fn put_record(&mut self, key: String, payload: Vec<u8>) {
