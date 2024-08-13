@@ -181,28 +181,32 @@ impl SourceReader {
 
 #[try_stream(boxed, ok = FsPageItem, error = crate::error::ConnectorError)]
 async fn build_opendal_fs_list_stream<Src: OpendalSource>(lister: OpendalEnumerator<Src>) {
-    let matcher = lister.get_matcher();
-    let mut object_metadata_iter = lister.list().await?;
+    loop {
+        let matcher = lister.get_matcher();
+        let mut object_metadata_iter = lister.list().await?;
 
-    while let Some(list_res) = object_metadata_iter.next().await {
-        match list_res {
-            Ok(res) => {
-                if matcher
-                    .as_ref()
-                    .map(|m| m.matches(&res.name))
-                    .unwrap_or(true)
-                {
-                    yield res
-                } else {
-                    // Currrntly due to the lack of prefix list, we just skip the unmatched files.
-                    continue;
+        while let Some(list_res) = object_metadata_iter.next().await {
+            match list_res {
+                Ok(res) => {
+                    if matcher
+                        .as_ref()
+                        .map(|m| m.matches(&res.name))
+                        .unwrap_or(true)
+                    {
+                        yield res
+                    } else {
+                        // Currrntly due to the lack of prefix list, we just skip the unmatched files.
+                        continue;
+                    }
+                }
+                Err(err) => {
+                    tracing::error!(error = %err.as_report(), "list object fail");
+                    return Err(err);
                 }
             }
-            Err(err) => {
-                tracing::error!(error = %err.as_report(), "list object fail");
-                return Err(err);
-            }
         }
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 }
 

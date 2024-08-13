@@ -146,45 +146,36 @@ impl<S: StateStore> FsListExecutor<S> {
 
         yield Message::Barrier(barrier);
 
-        loop {
-            // a list file stream never ends, keep list to find if there is any new file.
-            while let Some(msg) = stream.next().await {
-                match msg {
-                    Err(e) => {
-                        tracing::warn!(error = %e.as_report(), "encountered an error, recovering");
-                        stream
-                            .replace_data_stream(self.build_chunked_paginate_stream(&source_desc)?);
-                    }
-                    Ok(msg) => match msg {
-                        // Barrier arrives.
-                        Either::Left(msg) => match &msg {
-                            Message::Barrier(barrier) => {
-                                if let Some(mutation) = barrier.mutation.as_deref() {
-                                    match mutation {
-                                        Mutation::Pause => stream.pause_stream(),
-                                        Mutation::Resume => stream.resume_stream(),
-                                        _ => (),
-                                    }
-                                }
-
-                                // Propagate the barrier.
-                                yield msg;
-                            }
-                            // Only barrier can be received.
-                            _ => unreachable!(),
-                        },
-                        // Chunked FsPage arrives.
-                        Either::Right(chunk) => {
-                            yield Message::Chunk(chunk);
-                        }
-                    },
+        while let Some(msg) = stream.next().await {
+            match msg {
+                Err(e) => {
+                    tracing::warn!(error = %e.as_report(), "encountered an error, recovering");
+                    stream.replace_data_stream(self.build_chunked_paginate_stream(&source_desc)?);
                 }
-            }
+                Ok(msg) => match msg {
+                    // Barrier arrives.
+                    Either::Left(msg) => match &msg {
+                        Message::Barrier(barrier) => {
+                            if let Some(mutation) = barrier.mutation.as_deref() {
+                                match mutation {
+                                    Mutation::Pause => stream.pause_stream(),
+                                    Mutation::Resume => stream.resume_stream(),
+                                    _ => (),
+                                }
+                            }
 
-            stream.replace_data_stream(
-                self.build_chunked_paginate_stream(&source_desc)
-                    .map_err(StreamExecutorError::from)?,
-            );
+                            // Propagate the barrier.
+                            yield msg;
+                        }
+                        // Only barrier can be received.
+                        _ => unreachable!(),
+                    },
+                    // Chunked FsPage arrives.
+                    Either::Right(chunk) => {
+                        yield Message::Chunk(chunk);
+                    }
+                },
+            }
         }
     }
 }
