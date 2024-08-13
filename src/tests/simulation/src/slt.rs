@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::min;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -345,7 +346,7 @@ pub async fn run_slt_task(
 
             for i in 0usize.. {
                 tracing::debug!(iteration = i, "retry count");
-                let delay = Duration::from_secs(1 << i);
+                let delay = Duration::from_secs(min(1 << i, 10));
                 if i > 0 {
                     tokio::time::sleep(delay).await;
                 }

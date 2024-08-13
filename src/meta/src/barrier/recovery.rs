@@ -32,7 +32,7 @@ use risingwave_pb::stream_plan::AddMutation;
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tracing::{debug, warn, Instrument};
+use tracing::{debug, info, warn, Instrument};
 
 use super::{CheckpointControl, TracedEpoch};
 use crate::barrier::command::CommandContext;
@@ -341,12 +341,14 @@ impl GlobalBarrierManager {
                     let mut control_stream_manager =
                         ControlStreamManager::new(self.context.clone());
 
+                    let reset_start_time = Instant::now();
                     control_stream_manager
                         .reset(version_id, active_streaming_nodes.current())
                         .await
                         .inspect_err(|err| {
                             warn!(error = %err.as_report(), "reset compute nodes failed");
                         })?;
+                    info!(elapsed=?reset_start_time.elapsed(), "control stream reset");
 
                     self.context.sink_manager.reset().await;
 
@@ -403,6 +405,7 @@ impl GlobalBarrierManager {
 
                     let mut node_to_collect =
                         control_stream_manager.inject_barrier(&command_ctx, &info, Some(&info))?;
+                    debug!(?node_to_collect, "inject initial barrier");
                     while !node_to_collect.is_empty() {
                         let (worker_id, result) = control_stream_manager
                             .next_complete_barrier_response()
@@ -411,6 +414,7 @@ impl GlobalBarrierManager {
                         assert_eq!(resp.epoch, command_ctx.prev_epoch.value().0);
                         assert!(node_to_collect.remove(&worker_id));
                     }
+                    debug!("collected initial barrier");
 
                     (
                         BarrierManagerState::new(
