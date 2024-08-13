@@ -54,7 +54,7 @@ pub(super) fn is_vnode_split_to_left(vnode: VirtualNode) -> bool {
 }
 
 // By default, the split key is constructed with vnode = 0 and epoch = 0, so that we can split table_id to the right group
-pub(super) fn build_split_key(
+pub(crate) fn build_split_key(
     mut table_id: StateTableId,
     mut vnode: VirtualNode,
     table_ids: &Vec<u32>,
@@ -66,6 +66,17 @@ pub(super) fn build_split_key(
     }
 
     Bytes::from(FullKey::new(TableId::from(table_id), TableKey(vnode.to_be_bytes()), 0).encode())
+}
+
+pub fn build_split_key_with_table_id(table_id: StateTableId) -> Bytes {
+    Bytes::from(
+        FullKey::new(
+            TableId::from(table_id),
+            TableKey(VNODE_SPLIT_TO_RIGHT.to_be_bytes()),
+            0,
+        )
+        .encode(),
+    )
 }
 
 impl HummockManager {

@@ -19,6 +19,7 @@ use std::sync::Arc;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::group_split::split_sst;
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, to_prost_table_stats_map, PbTableStatsMap,
@@ -34,6 +35,7 @@ use sea_orm::TransactionTrait;
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
+use crate::hummock::manager::compaction_group_schedule::build_split_key_with_table_id;
 use crate::hummock::manager::transaction::{
     HummockVersionStatsTransaction, HummockVersionTransaction,
 };
@@ -504,11 +506,20 @@ impl HummockManager {
         let mut new_sst_id = next_sstable_object_id(&self.env, new_sst_id_number).await?;
         let mut commit_sstables: BTreeMap<u64, Vec<SstableInfo>> = BTreeMap::new();
 
-        for (mut sst, group_table_ids) in sst_to_cg_vec {
-            for (group_id, _match_ids) in group_table_ids {
-                let branch_sst = split_sst(&mut sst.sst_info, &mut new_sst_id, None);
+        for (sst, group_table_ids) in &mut sst_to_cg_vec {
+            let estimated_sst_size = sst.sst_info.estimated_sst_size;
+            for (group_id, match_ids) in group_table_ids {
+                let split_key = build_split_key_with_table_id(match_ids.last().unwrap() + 1);
+                let mut branch_sst = split_sst(
+                    &mut sst.sst_info,
+                    &mut new_sst_id,
+                    split_key,
+                    estimated_sst_size / 2,
+                    estimated_sst_size / 2,
+                );
+                std::mem::swap(&mut sst.sst_info, &mut branch_sst);
                 commit_sstables
-                    .entry(group_id)
+                    .entry(*group_id)
                     .or_default()
                     .push(branch_sst);
             }

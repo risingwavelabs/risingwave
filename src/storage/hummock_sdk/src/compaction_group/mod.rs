@@ -88,18 +88,14 @@ pub mod group_split {
     pub fn split_sst(
         origin_sst_info: &mut SstableInfo,
         new_sst_id: &mut u64,
-        split_key: Option<Bytes>,
+        split_key: Bytes,
+        left_size: u64,
+        right_size: u64,
     ) -> SstableInfo {
         let mut branch_table_info = origin_sst_info.clone();
         branch_table_info.sst_id = *new_sst_id;
         origin_sst_info.sst_id = *new_sst_id + 1;
         *new_sst_id += 1;
-
-        if split_key.is_none() {
-            return branch_table_info;
-        }
-
-        let split_key = split_key.unwrap();
 
         let (key_range_l, key_range_r) = {
             let key_range = &origin_sst_info.key_range;
@@ -124,14 +120,14 @@ pub mod group_split {
         {
             // origin_sst_info
             origin_sst_info.key_range = key_range_l.clone();
-            origin_sst_info.estimated_sst_size /= 2;
+            origin_sst_info.estimated_sst_size = left_size;
             origin_sst_info.table_ids = table_ids_l;
         }
 
         {
             // new sst
             branch_table_info.key_range = key_range_r.clone();
-            branch_table_info.estimated_sst_size /= 2;
+            branch_table_info.estimated_sst_size = right_size;
             branch_table_info.table_ids = table_ids_r;
         }
 
@@ -174,7 +170,10 @@ pub mod group_split {
 
             for sst in &mut level.table_infos {
                 let sst_split_type = need_to_split(sst, split_key.clone());
-                println!("sst {} sst_split_type: {:?}", sst.sst_id, sst_split_type);
+                println!(
+                    "sub_level {} sst {} object_id sst_split_type: {:?}",
+                    level.sub_level_id, sst.sst_id, sst.object_id, sst_split_type
+                );
                 match sst_split_type {
                     SstSplitType::Left => {
                         left_sst.push(sst.clone());
@@ -183,7 +182,14 @@ pub mod group_split {
                         right_sst.push(sst.clone());
                     }
                     SstSplitType::Both => {
-                        let branch_sst = split_sst(sst, new_sst_id, Some(split_key.clone()));
+                        let estimated_size = sst.estimated_sst_size;
+                        let branch_sst = split_sst(
+                            sst,
+                            new_sst_id,
+                            split_key.clone(),
+                            estimated_size / 2,
+                            estimated_size / 2,
+                        );
                         right_sst.push(branch_sst.clone());
                         left_sst.push(sst.clone());
                     }
@@ -213,7 +219,14 @@ pub mod group_split {
                 }
                 SstSplitType::Both => {
                     // split the sst
-                    let branch_sst = split_sst(sst, new_sst_id, Some(split_key));
+                    let estimated_size = sst.estimated_sst_size;
+                    let branch_sst = split_sst(
+                        sst,
+                        new_sst_id,
+                        split_key,
+                        estimated_size / 2,
+                        estimated_size / 2,
+                    );
                     insert_table_infos.push(branch_sst.clone());
                     // the sst at pos has been split to both left and right
                     // the branched sst has been inserted to the `insert_table_infos`
