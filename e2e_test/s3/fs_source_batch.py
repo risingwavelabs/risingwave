@@ -206,5 +206,5 @@ if __name__ == "__main__":
     # clean up s3 files
     for idx, _ in enumerate(formatted_files):
         client.remove_object(config["S3_BUCKET"], _s3(idx))
-        
+
     test_empty_source(config, run_id, fmt)
