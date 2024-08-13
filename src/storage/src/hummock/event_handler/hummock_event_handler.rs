@@ -28,7 +28,7 @@ use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::{Histogram, IntGauge};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
-use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
+use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId, SyncResult};
 use thiserror_ext::AsReport;
 use tokio::spawn;
 use tokio::sync::mpsc::error::SendError;
@@ -484,10 +484,10 @@ impl HummockEventHandler {
             .start_sync_epoch(new_sync_epoch, sync_result_sender, table_ids);
     }
 
-    async fn handle_clear(&mut self, notifier: oneshot::Sender<()>, prev_epoch: u64) {
+    async fn handle_clear(&mut self, notifier: oneshot::Sender<()>, version_id: HummockVersionId) {
         info!(
-            prev_epoch,
-            max_committed_epoch = self.uploader.max_committed_epoch(),
+            ?version_id,
+            current_version_id = ?self.uploader.hummock_version().id(),
             "handle clear event"
         );
 
@@ -495,7 +495,7 @@ impl HummockEventHandler {
 
         let current_version = self.uploader.hummock_version();
 
-        if current_version.max_committed_epoch() < prev_epoch {
+        if current_version.version().id < version_id {
             let mut latest_version = if let Some(CacheRefillerEvent {
                 pinned_version,
                 new_pinned_version,
@@ -510,7 +510,7 @@ impl HummockEventHandler {
                 );
 
                 info!(
-                    prev_epoch,
+                    ?version_id,
                     current_mce = current_version.max_committed_epoch(),
                     refiller_mce = new_pinned_version.max_committed_epoch(),
                     "refiller is clear in recovery"
@@ -522,31 +522,30 @@ impl HummockEventHandler {
             };
 
             while let latest_version_ref = latest_version.as_ref().unwrap_or(current_version)
-                && latest_version_ref.max_committed_epoch() < prev_epoch
+                && latest_version_ref.version().id < version_id
             {
                 let version_update = self
                     .version_update_rx
                     .recv()
                     .await
                     .expect("should not be empty");
-                latest_version = Some(Self::resolve_version_update_info(
+                let prev_version_id = latest_version_ref.id();
+                let new_version = Self::resolve_version_update_info(
                     latest_version_ref.clone(),
                     version_update,
                     None,
-                ));
+                );
+                info!(
+                    ?prev_version_id,
+                    new_version_id = ?new_version.id(),
+                    "recv new version"
+                );
+                latest_version = Some(new_version);
             }
 
             self.apply_version_update(
                 current_version.clone(),
                 latest_version.expect("must have some version update to raise the mce"),
-            );
-        }
-
-        assert!(self.uploader.max_committed_epoch() >= prev_epoch);
-        if self.uploader.max_committed_epoch() > prev_epoch {
-            warn!(
-                mce = self.uploader.max_committed_epoch(),
-                prev_epoch, "mce higher than clear prev_epoch"
             );
         }
 
@@ -569,7 +568,7 @@ impl HummockEventHandler {
             error!("failed to notify completion of clear event: {:?}", e);
         });
 
-        info!(prev_epoch, "clear finished");
+        info!(?version_id, "clear finished");
     }
 
     fn handle_version_update(&mut self, version_payload: HummockVersionUpdate) {
@@ -692,8 +691,8 @@ impl HummockEventHandler {
                 event = pin!(self.hummock_event_rx.recv()) => {
                     let Some(event) = event else { break };
                     match event {
-                        HummockEvent::Clear(notifier, prev_epoch) => {
-                            self.handle_clear(notifier, prev_epoch).await
+                        HummockEvent::Clear(notifier, version_id) => {
+                            self.handle_clear(notifier, version_id).await
                         },
                         HummockEvent::Shutdown => {
                             info!("event handler shutdown");
@@ -954,7 +953,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_clear_shared_buffer() {
-        let epoch0 = 233;
+        let epoch0 = test_epoch(233);
         let mut next_version_id = 1;
         let mut make_new_version = |max_committed_epoch| {
             let id = next_version_id;
@@ -996,16 +995,16 @@ mod tests {
         let latest_version = event_handler.pinned_version.clone();
         let latest_version_update_tx = event_handler.version_update_notifier_tx.clone();
 
-        let send_clear = |epoch| {
+        let send_clear = |version_id| {
             let (tx, rx) = oneshot::channel();
-            event_tx.send(HummockEvent::Clear(tx, epoch)).unwrap();
+            event_tx.send(HummockEvent::Clear(tx, version_id)).unwrap();
             rx
         };
 
         let _join_handle = spawn(event_handler.start_hummock_event_handler_worker());
 
         // test normal recovery
-        send_clear(epoch0).await.unwrap();
+        send_clear(initial_version.id()).await.unwrap();
 
         // test normal refill finish
         let epoch1 = epoch0 + 1;
@@ -1053,7 +1052,7 @@ mod tests {
             assert_eq!(new_version3.version(), &version3);
             assert_eq!(latest_version.load().version(), &version1);
 
-            let rx = send_clear(epoch3);
+            let rx = send_clear(version3.id);
             rx.await.unwrap();
             assert_eq!(latest_version.load().version(), &version3);
         }
@@ -1068,7 +1067,7 @@ mod tests {
         let epoch5 = epoch4 + 1;
         let version5 = make_new_version(epoch5);
         {
-            let mut rx = send_clear(epoch5);
+            let mut rx = send_clear(version5.id);
             assert_pending(&mut rx).await;
             version_update_tx
                 .send(HummockVersionUpdate::PinnedVersion(Box::new(
