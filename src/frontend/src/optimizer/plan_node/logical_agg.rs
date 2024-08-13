@@ -317,7 +317,7 @@ impl LogicalAgg {
             calls: approx_percentile_agg_calls,
             col_mapping: approx_percentile_col_mapping,
         } = approx;
-        if !self.group_key().is_empty() && !non_approx_percentile_agg_calls.is_empty() {
+        if !self.group_key().is_empty() && !approx_percentile_agg_calls.is_empty() {
             bail_not_implemented!("two-phase approx percentile agg with group key, please use single phase agg for approx_percentile with group key");
         }
 
