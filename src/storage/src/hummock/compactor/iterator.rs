@@ -176,6 +176,16 @@ impl SstableStreamIterator {
         // `next_block()` loads a new block (i.e., `block_iter` is not `None`), then `block_iter` is
         // also valid and pointing on the block's first KV-pair.
 
+        let seek_key = if let Some(seek_key) = seek_key {
+            if seek_key.cmp(&self.key_range_left.to_ref()).is_lt() {
+                Some(self.key_range_left.to_ref())
+            } else {
+                Some(seek_key)
+            }
+        } else {
+            Some(self.key_range_left.to_ref())
+        };
+
         if let (Some(block_iter), Some(seek_key)) = (self.block_iter.as_mut(), seek_key) {
             block_iter.seek(seek_key);
 
@@ -186,19 +196,6 @@ impl SstableStreamIterator {
         }
 
         self.prune_from_valid_block_iter().await?;
-
-        while self.is_valid() && self.key().cmp(&self.key_range_left.to_ref()).is_lt() {
-            self.next().await?;
-        }
-
-        println!(
-            "LI)K {} {} seek done block {} block_meta {:?}",
-            self.sstable_info.sst_id,
-            self.sstable_info.object_id,
-            self.block_idx,
-            self.block_metas[self.block_idx]
-        );
-
         Ok(())
     }
 
@@ -271,31 +268,26 @@ impl SstableStreamIterator {
         }
 
         if self.key_range_right_exclusive {
-            if self.key().cmp(&self.key_range_right.to_ref()).is_ge() {
+            if self
+                .block_iter
+                .as_ref()
+                .unwrap_or_else(|| panic!("no block iter sstinfo={}", self.sst_debug_info()))
+                .key()
+                .cmp(&self.key_range_right.to_ref())
+                .is_ge()
+            {
                 self.block_iter = None;
-                println!(
-                    "LI)K {} {} next done block {} block_meta {:?} key {:?} key_range_right {:?} key_range_right_exclusive",
-                    self.sstable_info.sst_id,
-                    self.sstable_info.object_id,
-                    self.block_idx,
-                    self.block_metas[self.block_idx],
-                    self.key(),
-                    self.key_range_right.to_ref()
-                );
             }
         } else {
-            if self.key().cmp(&self.key_range_right.to_ref()).is_gt() {
+            if self
+                .block_iter
+                .as_ref()
+                .unwrap_or_else(|| panic!("no block iter sstinfo={}", self.sst_debug_info()))
+                .key()
+                .cmp(&self.key_range_right.to_ref())
+                .is_gt()
+            {
                 self.block_iter = None;
-
-                println!(
-                    "LI)K {} {} next done block {} block_meta {:?} key {:?} key_range_right {:?}",
-                    self.sstable_info.sst_id,
-                    self.sstable_info.object_id,
-                    self.block_idx,
-                    self.block_metas[self.block_idx],
-                    self.key(),
-                    self.key_range_right.to_ref()
-                );
             }
         }
 
@@ -303,10 +295,25 @@ impl SstableStreamIterator {
     }
 
     pub fn key(&self) -> FullKey<&[u8]> {
-        self.block_iter
+        let key = self
+            .block_iter
             .as_ref()
             .unwrap_or_else(|| panic!("no block iter sstinfo={}", self.sst_debug_info()))
-            .key()
+            .key();
+
+        assert!(key.cmp(&self.key_range_left.to_ref()).is_ge());
+        if self.key_range_right_exclusive {
+            assert!(
+                key.cmp(&self.key_range_right.to_ref()).is_lt(),
+                "key {:?} key_range_right {:?}",
+                key,
+                self.key_range_right.to_ref()
+            );
+        } else {
+            assert!(key.cmp(&self.key_range_right.to_ref()).is_le());
+        }
+
+        key
     }
 
     pub fn value(&self) -> HummockValue<&[u8]> {
@@ -1206,9 +1213,6 @@ mod tests {
         let sst_2 =
             group_split::split_sst(&mut sst_1, &mut new_sst_id, Some(split_key.clone().into()));
         sst_1.table_ids.push(0);
-
-        println!("sst_1 {:?}", sst_1);
-        println!("sst_2 {:?}", sst_2);
 
         {
             // test concate
