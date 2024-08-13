@@ -14,7 +14,7 @@
 
 use std::borrow::Borrow;
 use std::cmp::Ordering;
-use std::fmt::{format, Debug};
+use std::fmt::Debug;
 use std::iter::once;
 use std::ops::Bound::*;
 use std::ops::{Bound, Deref, DerefMut, RangeBounds};

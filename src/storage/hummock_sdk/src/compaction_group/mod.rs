@@ -49,7 +49,6 @@ pub mod group_split {
     use std::cmp::Ordering;
 
     use bytes::Bytes;
-    use itertools::Itertools;
     use risingwave_pb::hummock::PbLevelType;
 
     use super::hummock_version_ext::{add_ssts_to_sub_level, insert_new_sub_level};
@@ -171,7 +170,7 @@ pub mod group_split {
             for sst in &mut level.table_infos {
                 let sst_split_type = need_to_split(sst, split_key.clone());
                 println!(
-                    "sub_level {} sst {} object_id sst_split_type: {:?}",
+                    "sub_level {} sst {} object_id {} sst_split_type: {:?}",
                     level.sub_level_id, sst.sst_id, sst.object_id, sst_split_type
                 );
                 match sst_split_type {
