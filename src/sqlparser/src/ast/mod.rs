@@ -2537,7 +2537,7 @@ impl FunctionArgList {
             distinct,
             args,
             variadic: false,
-            order_by: order_by,
+            order_by,
         }
     }
 }
