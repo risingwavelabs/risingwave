@@ -4983,11 +4983,7 @@ impl Parser<'_> {
                 vec![]
             };
 
-            let ignore_nulls = if self.parse_keywords(&[Keyword::IGNORE, Keyword::NULLS]) {
-                true
-            } else {
-                false
-            };
+            let ignore_nulls = self.parse_keywords(&[Keyword::IGNORE, Keyword::NULLS]);
 
             let arg_list = FunctionArgList {
                 distinct,
