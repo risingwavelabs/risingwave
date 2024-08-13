@@ -409,9 +409,11 @@ impl HummockVersion {
                 }
 
                 tracing::info!(
-                    "sub_level {:?} insert_table_infos {:?}",
+                    "sub_level {:?} insert_table_infos {:?} split_key {:?} sub_level_type {:?}",
                     sub_level.sub_level_id,
-                    insert_table_infos
+                    insert_table_infos,
+                    split_key,
+                    sub_level.level_type
                 );
 
                 sub_level

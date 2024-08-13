@@ -1086,8 +1086,8 @@ impl<T: AsRef<[u8]> + Ord + Eq, const SKIP_DEDUP: bool> FullKeyTracker<T, SKIP_D
                 {
                     // Epoch from the same user key should be monotonically decreasing
                     println!(
-                        "key {:?} epoch {:?} >= prev epoch {:?} full_key {:?}",
-                        user_key, max_epoch_with_gap, self.last_observed_epoch_with_gap, key
+                        "key {:?} epoch {:?} >= prev epoch {:?}",
+                        user_key, max_epoch_with_gap, self.last_observed_epoch_with_gap
                     );
 
                     return (

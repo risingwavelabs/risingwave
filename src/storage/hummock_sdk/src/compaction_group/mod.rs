@@ -237,7 +237,14 @@ pub mod group_split {
 
         for right_sub_level in &right_l0.sub_levels {
             let sub_level = right_sub_level.clone();
-            match get_sub_level_insert_hint(&left_levels.l0.sub_levels, &sub_level) {
+            let insert_hint = get_sub_level_insert_hint(&left_levels.l0.sub_levels, &sub_level);
+
+            println!(
+                "sub_level: {:?} type {:?} insert_hint {:?}",
+                sub_level.sub_level_id, sub_level.level_type, insert_hint
+            );
+
+            match insert_hint {
                 Ok(insert_hint) => {
                     add_ssts_to_sub_level(
                         &mut left_levels.l0,
