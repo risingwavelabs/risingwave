@@ -341,13 +341,10 @@ mod opaque_type {
                         Err(e) => {
                             remaining_no_progress_retry_count -= 1;
                             if remaining_no_progress_retry_count == 0 {
-                                #[expect(rw::format_error)]
-                                return Err(SinkError::Kinesis(anyhow!(
-                                    "failed to send records. sent {} out of {}, last err: {:?}",
-                                    start_idx,
-                                    total_count,
-                                    e.as_report()
-                                )));
+                                return Err(SinkError::Kinesis(anyhow!(e).context(format!(
+                                    "failed to send records. sent {} out of {}",
+                                    start_idx, total_count,
+                                ))));
                             } else {
                                 warn!(
                                     remaining_no_progress_retry_count,
