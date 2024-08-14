@@ -77,6 +77,7 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         } else {
             Some(self.cache.get_output(row_count, self.quantile, self.base))
         };
+        tracing::debug!(?last_output, "recovered last_output");
         self.last_output = last_output;
         Ok(())
     }
@@ -222,15 +223,16 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
     pub fn get_output(&mut self) -> StreamChunk {
         let last_output = mem::take(&mut self.last_output);
         let new_output = if !self.output_changed {
+            tracing::debug!("last_output: {:#?}", last_output);
             last_output.clone().flatten()
         } else {
             let new_output = self
                 .cache
                 .get_output(self.row_count, self.quantile, self.base);
-            self.last_output = Some(new_output.clone());
             new_output
         };
-        match last_output {
+        self.last_output = Some(new_output.clone());
+        let output_chunk = match last_output {
             None => StreamChunk::from_rows(&[(Op::Insert, &[new_output])], &[DataType::Float64]),
             Some(last_output) if !self.output_changed => StreamChunk::from_rows(
                 &[
@@ -246,7 +248,10 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
                 ],
                 &[DataType::Float64],
             ),
-        }
+        };
+        tracing::debug!("get_output: {:#?}", output_chunk, );
+        self.output_changed = false;
+        output_chunk
     }
 }
 
