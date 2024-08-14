@@ -224,18 +224,11 @@ impl HummockManager {
             }
         }
 
-        if is_visible_table_committed_epoch {
-            if committed_epoch <= current_version.visible_table_committed_epoch() {
-                return Err(anyhow::anyhow!(
-                    "Epoch {} <= max_committed_epoch {}",
-                    committed_epoch,
-                    current_version.visible_table_committed_epoch()
-                )
-                .into());
-            }
-        } else if committed_epoch > current_version.visible_table_committed_epoch() {
+        if is_visible_table_committed_epoch
+            && committed_epoch <= current_version.visible_table_committed_epoch()
+        {
             return Err(anyhow::anyhow!(
-                "Epoch {} > max_committed_epoch {}",
+                "Epoch {} <= max_committed_epoch {}",
                 committed_epoch,
                 current_version.visible_table_committed_epoch()
             )
@@ -247,9 +240,9 @@ impl HummockManager {
                 if committed_epoch <= info.committed_epoch {
                     return Err(anyhow::anyhow!(
                         "table {} Epoch {} <= committed_epoch {}",
+                        table_id,
                         committed_epoch,
                         info.committed_epoch,
-                        table_id
                     )
                     .into());
                 }
