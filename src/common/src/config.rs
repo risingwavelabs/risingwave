@@ -1927,17 +1927,19 @@ pub mod default {
     }
 
     pub mod compaction_config {
-        const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
-        const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
-        const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * 1024 * 1024; // 512MB
+        const MB: u64 = 1024 * 1024;
+        const GB: u64 = 1024 * 1024 * 1024;
+        const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * GB; // 2GB
+        const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * MB; // 128MB
+        const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * MB; // 512MB
 
         // decrease this configure when the generation of checkpoint barrier is not frequent.
         const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 12;
-        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024;
+        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * MB;
         // 32MB
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
         const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
-        const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
+        const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * MB; // 512MB;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 300;
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 100;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
@@ -1946,6 +1948,7 @@ pub mod default {
         const DEFAULT_EMERGENCY_PICKER: bool = true;
         const DEFAULT_MAX_LEVEL: u32 = 6;
         const DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT: u32 = 42;
+        const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE: u64 = 4 * MB;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -2015,6 +2018,10 @@ pub mod default {
 
         pub fn max_l0_compact_level_count() -> u32 {
             DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT
+        }
+
+        pub fn sst_allowed_trivial_move_min_size() -> u64 {
+            DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE
         }
     }
 

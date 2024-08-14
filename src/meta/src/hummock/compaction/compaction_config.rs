@@ -65,6 +65,9 @@ impl CompactionConfigBuilder {
                 tombstone_reclaim_ratio: compaction_config::tombstone_reclaim_ratio(),
                 enable_emergency_picker: compaction_config::enable_emergency_picker(),
                 max_l0_compact_level_count: Some(compaction_config::max_l0_compact_level_count()),
+                sst_allowed_trivial_move_min_size: Some(
+                    compaction_config::sst_allowed_trivial_move_min_size(),
+                ),
             },
         }
     }

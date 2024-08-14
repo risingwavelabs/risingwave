@@ -907,6 +907,9 @@ message CompactionConfig {
 
   // The limitation of the level count of l0 compaction
   optional uint32 max_l0_compact_level_count = 21;
+
+  // The limitation of base level trivial move sst size
+  optional uint64 sst_allowed_trivial_move_min_size = 22;
 }
 
 message TableStats {
