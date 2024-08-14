@@ -99,7 +99,7 @@ paste = "1"
 pg_bigdecimal = { git = "https://github.com/risingwavelabs/rust-pg_bigdecimal", rev = "0b7893d88894ca082b4525f94f812da034486f7c" }
 postgres-openssl = "0.5.0"
 prometheus = { version = "0.13", features = ["process"] }
-prost = { version = "0.12", features = ["no-recursion-limit"] }
+prost = { workspace = true, features = ["no-recursion-limit"] }
 prost-reflect = "0.13"
 prost-types = "0.12"
 protobuf-native = "0.2.2"
@@ -147,8 +147,19 @@ strum = "0.26"
 strum_macros = "0.26"
 tempfile = "3"
 thiserror = "1"
+
 thiserror-ext = { workspace = true }
-tiberius = { version = "0.12", default-features = false, features = ["chrono", "time", "tds73", "rust_decimal", "bigdecimal", "rustls"] }
+# To easiy get the type_name and impl IntoSql for rust_decimal, we fork the crate.
+# Another reason is that we are planning to refactor their IntoSql trait to allow specifying the type to convert.
+tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "f834f2deeb9e2fb08afaf73865f330cf31a3876a", default-features = false, features = [
+    "chrono",
+    "sql-browser-tokio",
+    "vendored-openssl",
+    "rust_decimal",
+    "bigdecimal",
+    "tds73",
+    "time",
+] }
 time = "0.3.30"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

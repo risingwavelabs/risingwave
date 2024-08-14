@@ -173,6 +173,7 @@ enum SourceType {
   POSTGRES = 2;
   CITUS = 3;
   MONGODB = 4;
+  SQL_SERVER = 5;
 }
 
 message GetEventStreamRequest {

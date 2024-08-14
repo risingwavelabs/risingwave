@@ -59,7 +59,7 @@ pub struct MetaSnapshotMetadata {
     #[serde(default)]
     pub format_version: u32,
     pub remarks: Option<String>,
-    #[serde(with = "table_id_key_map")]
+    #[serde(default, with = "table_id_key_map")]
     pub state_table_info: HashMap<TableId, PbStateTableInfo>,
     pub rw_version: Option<String>,
 }
@@ -114,7 +114,7 @@ impl From<&MetaSnapshotMetadata> for PbMetaSnapshotMetadata {
     fn from(m: &MetaSnapshotMetadata) -> Self {
         Self {
             id: m.id,
-            hummock_version_id: m.hummock_version_id,
+            hummock_version_id: m.hummock_version_id.to_u64(),
             max_committed_epoch: m.max_committed_epoch,
             safe_epoch: m.safe_epoch,
             format_version: Some(m.format_version),

@@ -4275,70 +4275,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a357d28ed41a50f9c765dbfe56cbc04a64e53e5fc58ba79fbc34c10ef3df831f"
 
 [[package]]
-name = "encoding"
-version = "0.2.33"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b0d943856b990d12d3b55b359144ff341533e516d94098b1d3fc1ac666d36ec"
-dependencies = [
- "encoding-index-japanese",
- "encoding-index-korean",
- "encoding-index-simpchinese",
- "encoding-index-singlebyte",
- "encoding-index-tradchinese",
-]
-
-[[package]]
-name = "encoding-index-japanese"
-version = "1.20141219.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04e8b2ff42e9a05335dbf8b5c6f7567e5591d0d916ccef4e0b1710d32a0d0c91"
-dependencies = [
- "encoding_index_tests",
-]
-
-[[package]]
-name = "encoding-index-korean"
-version = "1.20141219.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4dc33fb8e6bcba213fe2f14275f0963fd16f0a02c878e3095ecfdf5bee529d81"
-dependencies = [
- "encoding_index_tests",
-]
-
-[[package]]
-name = "encoding-index-simpchinese"
-version = "1.20141219.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d87a7194909b9118fc707194baa434a4e3b0fb6a5a757c73c3adb07aa25031f7"
-dependencies = [
- "encoding_index_tests",
-]
-
-[[package]]
-name = "encoding-index-singlebyte"
-version = "1.20141219.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3351d5acffb224af9ca265f435b859c7c01537c0849754d3db3fdf2bfe2ae84a"
-dependencies = [
- "encoding_index_tests",
-]
-
-[[package]]
-name = "encoding-index-tradchinese"
-version = "1.20141219.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd0e20d5688ce3cab59eb3ef3a2083a5c77bf496cb798dc6fcdb75f323890c18"
-dependencies = [
- "encoding_index_tests",
-]
-
-[[package]]
-name = "encoding_index_tests"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a246d82be1c9d791c5dfde9a2bd045fc3cbba3fa2b11ad558f27d01712f00569"
-
-[[package]]
 name = "encoding_rs"
 version = "0.8.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5976,7 +5912,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.2.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e6f4655ff9ce4ad57b577dc7f692dd902"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=24bd5869f2779a8b9786b5a6e1f9723844f5a82c#24bd5869f2779a8b9786b5a6e1f9723844f5a82c"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0",
@@ -6023,7 +5959,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.2.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=0c6e133e6f4655ff9ce4ad57b577dc7f692dd902#0c6e133e6f4655ff9ce4ad57b577dc7f692dd902"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=24bd5869f2779a8b9786b5a6e1f9723844f5a82c#24bd5869f2779a8b9786b5a6e1f9723844f5a82c"
 dependencies = [
  "async-trait",
  "chrono",
@@ -7916,6 +7852,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
+name = "openssl-src"
+version = "300.3.1+3.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7259953d42a81bf137fbbd73bd30a8e1914d6dce43c2b90ed575783a22608b91"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "openssl-sys"
 version = "0.9.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7923,6 +7868,7 @@ checksum = "7f9e8deee91df40a943c71b917e5874b951d32a802526c85721ce3b776c929d6"
 dependencies = [
  "cc",
  "libc",
+ "openssl-src",
  "pkg-config",
  "vcpkg",
 ]
@@ -7997,6 +7943,20 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
+]
+
+[[package]]
+name = "opentls"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f561874f8d6ecfb674fc08863414040c93cc90c0b6963fe679895fab8b65560"
+dependencies = [
+ "futures-util",
+ "log",
+ "openssl",
+ "openssl-probe",
+ "openssl-sys",
+ "url",
 ]
 
 [[package]]
@@ -11041,6 +11001,7 @@ dependencies = [
  "risingwave_common_heap_profiling",
  "risingwave_connector",
  "risingwave_hummock_sdk",
+ "risingwave_license",
  "risingwave_meta_dashboard",
  "risingwave_meta_model_migration",
  "risingwave_meta_model_v2",
@@ -11095,6 +11056,7 @@ name = "risingwave_meta_model_migration"
 version = "1.11.0-alpha"
 dependencies = [
  "async-std",
+ "sea-orm",
  "sea-orm-migration",
  "serde",
  "serde_json",
@@ -11225,6 +11187,7 @@ dependencies = [
  "pbjson",
  "pbjson-build",
  "prost 0.12.1",
+ "prost-build 0.12.1",
  "prost-helpers",
  "risingwave_error",
  "serde",
@@ -11889,18 +11852,6 @@ dependencies = [
  "linux-raw-sys 0.4.12",
  "once_cell",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "rustls"
-version = "0.20.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b80e3dec595989ea8510028f30c408a4630db12c9cbb8de34203b89d6577e99"
-dependencies = [
- "log",
- "ring 0.16.20",
- "sct",
- "webpki",
 ]
 
 [[package]]
@@ -13775,8 +13726,7 @@ dependencies = [
 [[package]]
 name = "tiberius"
 version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc6e2bf3e4b5be181a2a2ceff4b9b12e2684010d436a6958bd564fbc8094d44d"
+source = "git+https://github.com/risingwavelabs/tiberius.git?rev=f834f2deeb9e2fb08afaf73865f330cf31a3876a#f834f2deeb9e2fb08afaf73865f330cf31a3876a"
 dependencies = [
  "async-trait",
  "asynchronous-codec",
@@ -13785,19 +13735,18 @@ dependencies = [
  "bytes",
  "chrono",
  "connection-string",
- "encoding",
+ "encoding_rs",
  "enumflags2",
  "futures-util",
  "num-traits",
  "once_cell",
+ "opentls",
  "pin-project-lite",
  "pretty-hex",
  "rust_decimal",
- "rustls-native-certs 0.6.3",
- "rustls-pemfile 1.0.4",
  "thiserror",
  "time",
- "tokio-rustls 0.23.4",
+ "tokio",
  "tokio-util",
  "tracing",
  "uuid",
@@ -14006,17 +13955,6 @@ dependencies = [
  "madsim-tokio",
  "pin-project",
  "rand",
-]
-
-[[package]]
-name = "tokio-rustls"
-version = "0.23.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c43ee83903113e03984cb9e5cebe6c04a5116269e900e3ddba8f068a62adda59"
-dependencies = [
- "rustls 0.20.9",
- "tokio",
- "webpki",
 ]
 
 [[package]]
@@ -15335,16 +15273,6 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "webpki"
-version = "0.22.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed63aea5ce73d0ff405984102c42de94fc55a6b75765d621c65262469b3c9b53"
-dependencies = [
- "ring 0.17.5",
- "untrusted 0.9.0",
 ]
 
 [[package]]

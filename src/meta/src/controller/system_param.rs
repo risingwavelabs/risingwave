@@ -60,7 +60,7 @@ macro_rules! impl_system_params_from_db {
                 match model.name.as_str() {
                     $(
                         key_of!($field) => {
-                            params.$field = Some(model.value.parse::<$type>().unwrap());
+                            params.$field = Some(model.value.parse::<$type>().unwrap().into());
                             false
                         }
                     )*
@@ -143,7 +143,7 @@ impl SystemParamsController {
         let params = SystemParameter::find().all(&db).await?;
         let params = merge_params(system_params_from_db(params)?, init_params);
 
-        info!("system parameters: {:?}", params);
+        info!(initial_params = ?SystemParamsReader::new(&params), "initialize system parameters");
         check_missing_params(&params).map_err(|e| anyhow!(e))?;
 
         let ctl = Self {

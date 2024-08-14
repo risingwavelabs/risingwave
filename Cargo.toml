@@ -133,6 +133,7 @@ tonic = { package = "madsim-tonic", version = "0.4.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
 otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "492c244e0be91feb659c0cd48a624bbd96045a33" }
 prost = { version = "0.12" }
+prost-build = { version = "0.12" }
 icelake = { git = "https://github.com/icelake-io/icelake", rev = "07d53893d7788b4e41fc11efad8a6be828405c31", features = [
     "prometheus",
 ] }
@@ -142,8 +143,8 @@ arrow-buffer-iceberg = { package = "arrow-buffer", version = "52" }
 arrow-cast-iceberg = { package = "arrow-cast", version = "52" }
 # TODO
 # After apache/iceberg-rust#411 is merged, we move to the upstream version.
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0c6e133e6f4655ff9ce4ad57b577dc7f692dd902" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0c6e133e6f4655ff9ce4ad57b577dc7f692dd902" }
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "24bd5869f2779a8b9786b5a6e1f9723844f5a82c" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "24bd5869f2779a8b9786b5a6e1f9723844f5a82c" }
 opendal = "0.47"
 arrow-array = "50"
 arrow-arith = "50"
