@@ -75,9 +75,9 @@ use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEn
 use crate::error::ConnectorError;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
-// use crate::sink::file_sink::fs::FsSink;
-// use crate::sink::file_sink::gcs::GcsSink;
-// use crate::sink::file_sink::s3::S3Sink;
+use crate::sink::file_sink::fs::FsSink;
+use crate::sink::file_sink::gcs::GcsSink;
+use crate::sink::file_sink::s3::S3Sink;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
 const BOUNDED_CHANNEL_SIZE: usize = 16;
