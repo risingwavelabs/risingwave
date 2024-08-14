@@ -74,7 +74,7 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::{DatabaseId, SchemaId};
-use crate::error::ErrorCode::{self, InvalidInputSyntax, NotSupported, ProtocolError};
+use crate::error::ErrorCode::{self, Deprecated, InvalidInputSyntax, NotSupported, ProtocolError};
 use crate::error::{Result, RwError};
 use crate::expr::Expr;
 use crate::handler::create_table::{
@@ -1122,6 +1122,13 @@ pub fn validate_compatibility(
         .get_connector()
         .ok_or_else(|| RwError::from(ProtocolError("missing field 'connector'".to_string())))?;
 
+    if connector == OPENDAL_S3_CONNECTOR {
+        // reject s3_v2 creation
+        return Err(RwError::from(Deprecated(
+            OPENDAL_S3_CONNECTOR.to_string(),
+            S3_CONNECTOR.to_string(),
+        )));
+    }
     if connector == S3_CONNECTOR {
         // S3 connector is deprecated, use OPENDAL_S3_CONNECTOR instead
         // do s3 -> s3_v2 migration
