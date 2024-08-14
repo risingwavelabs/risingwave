@@ -77,7 +77,7 @@ impl HummockVersionStateTableInfo {
     pub fn from_protobuf(state_table_info: &HashMap<u32, PbStateTableInfo>) -> Self {
         let state_table_info = state_table_info
             .iter()
-            .map(|(table_id, info)| (TableId::new(*table_id), info.clone()))
+            .map(|(table_id, info)| (TableId::new(*table_id), *info))
             .collect();
         let compaction_group_member_tables =
             Self::build_compaction_group_member_tables(&state_table_info);
@@ -90,7 +90,7 @@ impl HummockVersionStateTableInfo {
     pub fn to_protobuf(&self) -> HashMap<u32, PbStateTableInfo> {
         self.state_table_info
             .iter()
-            .map(|(table_id, info)| (table_id.table_id, info.clone()))
+            .map(|(table_id, info)| (table_id.table_id, *info))
             .collect()
     }
 
@@ -642,7 +642,7 @@ impl From<&PbHummockVersionDelta> for HummockVersionDelta {
             state_table_info_delta: pb_version_delta
                 .state_table_info_delta
                 .iter()
-                .map(|(table_id, delta)| (TableId::new(*table_id), delta.clone()))
+                .map(|(table_id, delta)| (TableId::new(*table_id), *delta))
                 .collect(),
         }
     }
@@ -679,7 +679,7 @@ impl From<&HummockVersionDelta> for PbHummockVersionDelta {
             state_table_info_delta: version_delta
                 .state_table_info_delta
                 .iter()
-                .map(|(table_id, delta)| (table_id.table_id, delta.clone()))
+                .map(|(table_id, delta)| (table_id.table_id, *delta))
                 .collect(),
         }
     }
@@ -716,7 +716,7 @@ impl From<HummockVersionDelta> for PbHummockVersionDelta {
             state_table_info_delta: version_delta
                 .state_table_info_delta
                 .into_iter()
-                .map(|(table_id, delta)| (table_id.table_id, delta.clone()))
+                .map(|(table_id, delta)| (table_id.table_id, delta))
                 .collect(),
         }
     }
@@ -761,7 +761,7 @@ impl From<PbHummockVersionDelta> for HummockVersionDelta {
             state_table_info_delta: pb_version_delta
                 .state_table_info_delta
                 .iter()
-                .map(|(table_id, delta)| (TableId::new(*table_id), delta.clone()))
+                .map(|(table_id, delta)| (TableId::new(*table_id), *delta))
                 .collect(),
         }
     }
@@ -938,7 +938,7 @@ impl From<&GroupDelta> for PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupConstruct(pb_group_construct.clone())),
             },
             GroupDelta::GroupDestroy(pb_group_destroy) => PbGroupDelta {
-                delta_type: Some(PbDeltaType::GroupDestroy(pb_group_destroy.clone())),
+                delta_type: Some(PbDeltaType::GroupDestroy(*pb_group_destroy)),
             },
             GroupDelta::GroupMetaChange(pb_group_meta_change) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupMetaChange(pb_group_meta_change.clone())),
@@ -960,7 +960,7 @@ impl From<&PbGroupDelta> for GroupDelta {
                 GroupDelta::GroupConstruct(pb_group_construct.clone())
             }
             Some(PbDeltaType::GroupDestroy(pb_group_destroy)) => {
-                GroupDelta::GroupDestroy(pb_group_destroy.clone())
+                GroupDelta::GroupDestroy(*pb_group_destroy)
             }
             Some(PbDeltaType::GroupMetaChange(pb_group_meta_change)) => {
                 GroupDelta::GroupMetaChange(pb_group_meta_change.clone())

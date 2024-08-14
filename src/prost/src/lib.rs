@@ -19,6 +19,7 @@
 
 use std::str::FromStr;
 
+pub use prost::Message;
 use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
