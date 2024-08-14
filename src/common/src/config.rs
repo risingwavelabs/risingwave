@@ -1731,7 +1731,7 @@ pub mod default {
         }
 
         pub fn recover_mode() -> String {
-            "None".to_string()
+            "none".to_string()
         }
     }
 
