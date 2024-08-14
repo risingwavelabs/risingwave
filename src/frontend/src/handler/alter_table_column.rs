@@ -149,7 +149,7 @@ fn to_ast_data_type(ty: &DataType) -> Result<AstDataType> {
                 .try_collect()?;
             Ok(AstDataType::Struct(fields))
         }
-        DataType::Serial | DataType::Int256 => {
+        DataType::Serial | DataType::Int256 | DataType::Map(_) => {
             Err(anyhow!("unsupported data type: {:?}", ty).context("to_ast_data_type"))?
         }
     }
