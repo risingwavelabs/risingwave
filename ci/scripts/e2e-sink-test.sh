@@ -7,7 +7,6 @@ source ci/scripts/common.sh
 
 # prepare environment
 export CONNECTOR_LIBS_PATH="./connector-node/libs"
-export JVM_HEAP_SIZE=5368709120
 while getopts 'p:' opt; do
     case ${opt} in
         p )
