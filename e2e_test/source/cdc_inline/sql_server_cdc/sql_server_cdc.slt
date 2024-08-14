@@ -294,6 +294,13 @@ CREATE TABLE upper_table (
     PRIMARY KEY ("ID")
 )  from upper_mssql_source table 'UpperSchema.UpperTable';
 
+statement error Sql Server table 'upperSchema'.'upperTable' doesn't exist in 'UpperDB'
+CREATE TABLE upper_table (
+    "ID" INT,
+    "Name" VARCHAR,
+    PRIMARY KEY ("ID")
+)  from upper_mssql_source table 'upperSchema.upperTable';
+
 statement ok
 CREATE TABLE upper_table (
     "ID" INT,
