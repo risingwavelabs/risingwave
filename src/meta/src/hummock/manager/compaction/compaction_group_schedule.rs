@@ -526,7 +526,7 @@ impl HummockManager {
             table_write_throughput,
             *table_id,
             checkpoint_secs,
-            8,
+            60,
             self.env.opts.table_write_throughput_threshold,
         );
 

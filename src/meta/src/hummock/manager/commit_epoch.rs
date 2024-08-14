@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
-use risingwave_hummock_sdk::compaction_group::group_split::split_sst;
+use risingwave_hummock_sdk::compaction_group::group_split::{self, split_sst};
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
@@ -469,7 +469,7 @@ impl HummockManager {
         }
     }
 
-    async fn correct_commit_ssts(
+    pub(crate) async fn correct_commit_ssts(
         &self,
         sstables: Vec<LocalSstableInfo>,
         table_compaction_group_mapping: &HashMap<TableId, CompactionGroupId>,
@@ -510,18 +510,38 @@ impl HummockManager {
             let estimated_sst_size = sst.sst_info.estimated_sst_size;
             for (group_id, match_ids) in group_table_ids {
                 let split_key = build_split_key_with_table_id(match_ids.last().unwrap() + 1);
-                let mut branch_sst = split_sst(
-                    &mut sst.sst_info,
-                    &mut new_sst_id,
-                    split_key,
-                    estimated_sst_size / 2,
-                    estimated_sst_size / 2,
-                );
-                std::mem::swap(&mut sst.sst_info, &mut branch_sst);
-                commit_sstables
-                    .entry(*group_id)
-                    .or_default()
-                    .push(branch_sst);
+                let split_type = group_split::need_to_split(&sst.sst_info, split_key.clone());
+                match split_type {
+                    group_split::SstSplitType::Left => {
+                        commit_sstables
+                            .entry(*group_id)
+                            .or_default()
+                            .push(sst.sst_info.clone());
+                        break;
+                    }
+
+                    group_split::SstSplitType::Right => {
+                        // do nothing
+                        break;
+                    }
+
+                    group_split::SstSplitType::Both => {
+                        let mut branch_sst = split_sst(
+                            &mut sst.sst_info,
+                            &mut new_sst_id,
+                            split_key.clone(),
+                            estimated_sst_size / 2,
+                            estimated_sst_size / 2,
+                        );
+
+                        // push the left sst to commit_sstables
+                        std::mem::swap(&mut sst.sst_info, &mut branch_sst);
+                        commit_sstables
+                            .entry(*group_id)
+                            .or_default()
+                            .push(branch_sst);
+                    }
+                }
             }
         }
 

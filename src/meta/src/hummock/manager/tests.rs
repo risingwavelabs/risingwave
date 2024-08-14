@@ -22,11 +22,13 @@ use std::sync::Arc;
 use itertools::Itertools;
 use prometheus::Registry;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{test_epoch, EpochExt, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ssts;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::key::{gen_key_from_str, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStats, TableStatsMap};
@@ -2355,4 +2357,143 @@ async fn test_unregister_moved_table() {
             .collect_vec(),
         vec![101]
     );
+}
+
+#[tokio::test]
+async fn test_correct_commit_ssts() {
+    let (_, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let epoch = test_epoch(1);
+
+    {
+        // correct to three cg
+
+        let key_range_left = {
+            FullKey::for_test(
+                TableId::from(1),
+                gen_key_from_str(VirtualNode::from_index(1), ""),
+                epoch,
+            )
+            .encode()
+        };
+
+        let key_range_right = {
+            FullKey::for_test(
+                TableId::from(3),
+                gen_key_from_str(VirtualNode::from_index(240), ""),
+                epoch,
+            )
+            .encode()
+        };
+
+        let sst_1 = LocalSstableInfo {
+            sst_info: SstableInfo {
+                object_id: 11,
+                sst_id: 11,
+                key_range: KeyRange {
+                    left: key_range_left.into(),
+                    right: key_range_right.into(),
+                    right_exclusive: false,
+                },
+                table_ids: vec![1, 2, 3],
+                min_epoch: 20,
+                max_epoch: 20,
+                estimated_sst_size: 100,
+                file_size: 100,
+                ..Default::default()
+            },
+            table_stats: Default::default(),
+        };
+        println!("{:?}", sst_1);
+
+        let table_compaction_group_mapping = HashMap::from([
+            (TableId::from(1), 1),
+            (TableId::from(2), 2),
+            (TableId::from(3), 3),
+        ]);
+        let result = hummock_manager
+            .correct_commit_ssts(vec![sst_1], &table_compaction_group_mapping)
+            .await
+            .unwrap();
+        println!("result {:?}", result);
+        assert_eq!(3, result.len());
+
+        let cg_1_sst = result.get(&1).unwrap().get(0).unwrap();
+        assert_eq!(50, cg_1_sst.estimated_sst_size);
+        assert!(cg_1_sst.key_range.right_exclusive);
+        assert_eq!(&vec![1], &cg_1_sst.table_ids);
+
+        let cg_2_sst = result.get(&2).unwrap().get(0).unwrap();
+        assert_eq!(50, cg_2_sst.estimated_sst_size);
+        assert!(cg_2_sst.key_range.right_exclusive);
+        assert_eq!(&vec![2], &cg_2_sst.table_ids);
+
+        let cg_3_sst = result.get(&3).unwrap().get(0).unwrap();
+        assert_eq!(50, cg_3_sst.estimated_sst_size);
+        assert!(!cg_3_sst.key_range.right_exclusive);
+        assert_eq!(&vec![3], &cg_3_sst.table_ids);
+    }
+
+    {
+        // correct to two cg
+
+        let key_range_left = {
+            FullKey::for_test(
+                TableId::from(1),
+                gen_key_from_str(VirtualNode::from_index(1), ""),
+                epoch,
+            )
+            .encode()
+        };
+
+        let key_range_right = {
+            FullKey::for_test(
+                TableId::from(2),
+                gen_key_from_str(VirtualNode::from_index(240), ""),
+                epoch,
+            )
+            .encode()
+        };
+
+        let sst_1 = LocalSstableInfo {
+            sst_info: SstableInfo {
+                object_id: 11,
+                sst_id: 11,
+                key_range: KeyRange {
+                    left: key_range_left.into(),
+                    right: key_range_right.into(),
+                    right_exclusive: false,
+                },
+                table_ids: vec![1, 2],
+                min_epoch: 20,
+                max_epoch: 20,
+                estimated_sst_size: 100,
+                file_size: 100,
+                ..Default::default()
+            },
+            table_stats: Default::default(),
+        };
+        println!("{:?}", sst_1);
+
+        let table_compaction_group_mapping = HashMap::from([
+            (TableId::from(1), 1),
+            (TableId::from(2), 2),
+            (TableId::from(3), 3),
+        ]);
+        let result = hummock_manager
+            .correct_commit_ssts(vec![sst_1], &table_compaction_group_mapping)
+            .await
+            .unwrap();
+        println!("result {:?}", result);
+        assert_eq!(2, result.len());
+
+        let cg_1_sst = result.get(&1).unwrap().get(0).unwrap();
+        assert_eq!(50, cg_1_sst.estimated_sst_size);
+        assert!(cg_1_sst.key_range.right_exclusive);
+        assert_eq!(&vec![1], &cg_1_sst.table_ids);
+
+        let cg_2_sst = result.get(&2).unwrap().get(0).unwrap();
+        assert_eq!(50, cg_2_sst.estimated_sst_size);
+        assert!(!cg_2_sst.key_range.right_exclusive);
+        assert_eq!(&vec![2], &cg_2_sst.table_ids);
+    }
 }
