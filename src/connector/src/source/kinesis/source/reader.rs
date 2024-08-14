@@ -91,7 +91,10 @@ impl SplitReader for KinesisSplitReader {
         if !matches!(start_position, KinesisOffset::Timestamp(_))
             && properties.timestamp_offset.is_some()
         {
-            bail!("scan.startup.mode need to be set to 'timestamp' if you want to start with a specific timestamp");
+            // cannot bail! here because all new split readers will fail to start if user set 'scan.startup.mode' to 'timestamp'
+            tracing::warn!("scan.startup.mode need to be set to 'timestamp' if you want to start with a specific timestamp, starting shard {} from the beginning",
+                split.id()
+            );
         }
 
         let stream_name = properties.common.stream_name.clone();
