@@ -948,28 +948,28 @@ fn test_map() {
             ])
             Owned([
                 StructValue(
-                    Utf8("m2"),
-                    [
-                        StructValue(
-                            Utf8("d"),
-                            Int32(4),
-                        ),
-                        StructValue(
-                            Utf8("c"),
-                            Int32(3),
-                        ),
-                    ],
-                ),
-                StructValue(
                     Utf8("m1"),
                     [
+                        StructValue(
+                            Utf8("a"),
+                            Int32(1),
+                        ),
                         StructValue(
                             Utf8("b"),
                             Int32(2),
                         ),
+                    ],
+                ),
+                StructValue(
+                    Utf8("m2"),
+                    [
                         StructValue(
-                            Utf8("a"),
-                            Int32(1),
+                            Utf8("c"),
+                            Int32(3),
+                        ),
+                        StructValue(
+                            Utf8("d"),
+                            Int32(4),
                         ),
                     ],
                 ),

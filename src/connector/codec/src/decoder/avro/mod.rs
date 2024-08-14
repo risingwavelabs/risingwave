@@ -326,7 +326,12 @@ impl<'a> AvroParseOptions<'a> {
                     .create_array_builder(map.len());
                 // Since the map is HashMap, we can ensure
                 // key is non-null and unique, keys and values have the same length.
-                for (k, v) in map {
+
+                // NOTE: HashMap's iter order is non-deterministic, but MapValue's
+                // order matters. We sort by key here to have deterministic order
+                // in tests. We might consider removing this, or make all MapValue sorted
+                // in the future.
+                for (k, v) in map.iter().sorted_by_key(|(k, _v)| *k) {
                     let value_datum = Self {
                         schema,
                         relax_numeric: self.relax_numeric,
