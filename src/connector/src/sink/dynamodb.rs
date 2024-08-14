@@ -398,6 +398,7 @@ fn map_data_type(
             }
             AttributeValue::M(map)
         }
+        DataType::Map(_) => todo!(),
     };
     Ok(attr)
 }

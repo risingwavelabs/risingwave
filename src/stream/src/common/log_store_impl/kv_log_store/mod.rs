@@ -507,7 +507,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -614,7 +614,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -691,7 +691,10 @@ mod tests {
         drop(writer);
 
         // Recovery
-        test_env.storage.clear_shared_buffer(epoch2).await;
+        test_env
+            .storage
+            .clear_shared_buffer(test_env.manager.get_current_version().await.id)
+            .await;
 
         // Rebuild log reader and writer in recovery
         let factory = KvLogStoreFactory::new(
@@ -803,7 +806,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -904,7 +907,10 @@ mod tests {
         drop(writer);
 
         // Recovery
-        test_env.storage.clear_shared_buffer(epoch2).await;
+        test_env
+            .storage
+            .clear_shared_buffer(test_env.manager.get_current_version().await.id)
+            .await;
 
         // Rebuild log reader and writer in recovery
         let factory = KvLogStoreFactory::new(
@@ -1029,7 +1035,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -1139,7 +1145,10 @@ mod tests {
         drop(writer2);
 
         // Recovery
-        test_env.storage.clear_shared_buffer(epoch2).await;
+        test_env
+            .storage
+            .clear_shared_buffer(test_env.manager.get_current_version().await.id)
+            .await;
 
         let vnodes = build_bitmap(0..VirtualNode::COUNT);
         let factory = KvLogStoreFactory::new(
@@ -1222,7 +1231,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -1362,7 +1371,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -1692,7 +1701,7 @@ mod tests {
             .storage
             .get_pinned_version()
             .version()
-            .max_committed_epoch
+            .max_committed_epoch()
             .next_epoch();
         test_env
             .storage
@@ -1751,7 +1760,10 @@ mod tests {
         drop(writer);
 
         // Recovery
-        test_env.storage.clear_shared_buffer(epoch2).await;
+        test_env
+            .storage
+            .clear_shared_buffer(test_env.manager.get_current_version().await.id)
+            .await;
 
         // Rebuild log reader and writer in recovery
         let factory = KvLogStoreFactory::new(
@@ -1815,7 +1827,10 @@ mod tests {
         drop(writer);
 
         // Recovery
-        test_env.storage.clear_shared_buffer(epoch3).await;
+        test_env
+            .storage
+            .clear_shared_buffer(test_env.manager.get_current_version().await.id)
+            .await;
 
         // Rebuild log reader and writer in recovery
         let factory = KvLogStoreFactory::new(

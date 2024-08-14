@@ -249,7 +249,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::InetNtoa
             | Type::InetAton
             | Type::QuoteLiteral
-            | Type::QuoteNullable =>
+            | Type::QuoteNullable
+            | Type::MapFromEntries
+            | Type::MapAccess =>
             // expression output is deterministic(same result for the same input)
             {
                 func_call

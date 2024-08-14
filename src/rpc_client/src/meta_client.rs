@@ -245,7 +245,7 @@ impl MetaClient {
                 .add_worker_node(AddWorkerNodeRequest {
                     worker_type: worker_type as i32,
                     host: Some(addr.to_protobuf()),
-                    property: Some(property.clone()),
+                    property: Some(property),
                     resource: Some(risingwave_pb::common::worker_node::Resource {
                         rw_version: RW_VERSION.to_string(),
                         total_memory_bytes: system_memory_available_bytes() as _,

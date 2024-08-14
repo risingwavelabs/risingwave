@@ -261,6 +261,7 @@ impl BigQuerySink {
             DataType::Int256 => Err(SinkError::BigQuery(anyhow::anyhow!(
                 "Bigquery cannot support Int256"
             ))),
+            DataType::Map(_) => todo!(),
         }
     }
 
@@ -310,6 +311,7 @@ impl BigQuerySink {
                     "Bigquery cannot support Int256"
                 )))
             }
+            DataType::Map(_) => todo!(),
         };
         Ok(tfs)
     }
@@ -819,6 +821,7 @@ fn build_protobuf_field(
                 "Don't support Float32 and Int256"
             )))
         }
+        DataType::Map(_) => todo!(),
     }
     Ok((field, None))
 }
