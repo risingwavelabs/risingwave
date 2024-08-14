@@ -360,7 +360,7 @@ impl LogicalAgg {
                 )?;
                 Ok(row_merge.into())
             } else {
-                Ok(approx_percentile)
+                bail!("row_merge not needed, but approx_percentile and normal agg are present");
             }
         } else {
             Ok(global_agg)
