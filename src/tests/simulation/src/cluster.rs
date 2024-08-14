@@ -412,19 +412,19 @@ impl Cluster {
         //     .as_ref()
         //     .map(|dir| format!("{}/", dir.display()))
         //     .unwrap_or("".to_string());
-        //
+
         // let sqlite_path = format!(
         //     "sqlite://{}stest-{}.sqlite?mode=rwc",
         //     sqlite_dir,
         //     Uuid::new_v4()
         // );
 
-        // let sqlite_path = format!(
-        //     "sqlite::file:memdb{}?mode=memory&cache=shared",
-        //     Uuid::new_v4()
-        // );
+        let sqlite_path = format!(
+            "sqlite::file:memdb{}?mode=memory&cache=shared",
+            Uuid::new_v4()
+        );
 
-        let sqlite_path = "sqlite::memory:";
+        // let sqlite_path = "sqlite::memory:";
 
         // meta node
         for i in 1..=conf.meta_nodes {
