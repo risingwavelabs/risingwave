@@ -341,6 +341,7 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }
+foyer ={ git = "https://github.com/mrcroxx/foyer", rev = "7c186cd" }
 
 [workspace.metadata.dylint]
 libraries = [{ path = "./lints" }]
