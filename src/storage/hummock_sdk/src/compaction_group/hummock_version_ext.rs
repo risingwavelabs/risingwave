@@ -85,7 +85,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
             }
             GroupDelta::GroupDestroy(destroy_delta) => {
                 assert!(group_destroy.is_none());
-                group_destroy = Some(destroy_delta.clone());
+                group_destroy = Some(*destroy_delta);
             }
             GroupDelta::GroupMetaChange(meta_delta) => {
                 group_meta_changes.push(meta_delta.clone());
@@ -556,7 +556,7 @@ impl HummockVersion {
     pub fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
         assert_eq!(self.id, version_delta.prev_id);
 
-        let changed_table_info = self.state_table_info.apply_delta(
+        let (changed_table_info, is_commit_epoch) = self.state_table_info.apply_delta(
             &version_delta.state_table_info_delta,
             &version_delta.removed_table_ids,
         );
@@ -630,6 +630,7 @@ impl HummockVersion {
                     .append(&mut moving_tables);
             }
             let has_destroy = summary.group_destroy.is_some();
+            let visible_table_committed_epoch = self.visible_table_committed_epoch();
             let levels = self
                 .levels
                 .get_mut(compaction_group_id)
@@ -647,12 +648,12 @@ impl HummockVersion {
             }
 
             assert!(
-                self.max_committed_epoch <= version_delta.max_committed_epoch,
+                visible_table_committed_epoch <= version_delta.visible_table_committed_epoch(),
                 "new max commit epoch {} is older than the current max commit epoch {}",
-                version_delta.max_committed_epoch,
-                self.max_committed_epoch
+                version_delta.visible_table_committed_epoch(),
+                visible_table_committed_epoch
             );
-            if self.max_committed_epoch < version_delta.max_committed_epoch {
+            if is_commit_epoch {
                 // `max_committed_epoch` increases. It must be a `commit_epoch`
                 let GroupDeltasSummary {
                     delete_sst_levels,
@@ -700,7 +701,7 @@ impl HummockVersion {
             }
         }
         self.id = version_delta.id;
-        self.max_committed_epoch = version_delta.max_committed_epoch;
+        self.set_max_committed_epoch(version_delta.visible_table_committed_epoch());
         self.set_safe_epoch(version_delta.visible_table_safe_epoch());
 
         // apply to table watermark
@@ -790,7 +791,7 @@ impl HummockVersion {
             if !contains {
                 warn!(
                         ?table_id,
-                        max_committed_epoch = version_delta.max_committed_epoch,
+                        max_committed_epoch = version_delta.visible_table_committed_epoch(),
                         "table change log dropped due to no further change log at newly committed epoch",
                     );
             }
@@ -1223,11 +1224,11 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
     let mut res = Vec::new();
 
     // Ensure safe_epoch <= max_committed_epoch
-    if version.visible_table_safe_epoch() > version.max_committed_epoch {
+    if version.visible_table_safe_epoch() > version.visible_table_committed_epoch() {
         res.push(format!(
             "VERSION: safe_epoch {} > max_committed_epoch {}",
             version.visible_table_safe_epoch(),
-            version.max_committed_epoch
+            version.visible_table_committed_epoch()
         ));
     }
 

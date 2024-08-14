@@ -149,8 +149,13 @@ impl PinnedVersion {
         }
     }
 
+    #[cfg(any(test, feature = "test"))]
     pub fn max_committed_epoch(&self) -> u64 {
-        self.version.max_committed_epoch
+        self.version.max_committed_epoch()
+    }
+
+    pub fn visible_table_committed_epoch(&self) -> u64 {
+        self.version.visible_table_committed_epoch()
     }
 
     /// ret value can't be used as `HummockVersion`. it must be modified with delta

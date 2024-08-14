@@ -454,6 +454,10 @@ fn encode_field<D: MaybeData>(
         DataType::Int256 => {
             return no_match_err();
         }
+        DataType::Map(_) => {
+            // TODO:
+            return no_match_err();
+        }
     };
 
     D::handle_union(value, opt_idx)
