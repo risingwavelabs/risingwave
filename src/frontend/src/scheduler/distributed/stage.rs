@@ -380,30 +380,57 @@ impl StageRunner {
                 ));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
-            let chunk_size = (source_info.split_info().unwrap().len() as f32
+            // If there is no file in source, the `chunk_size` is set to 1.
+            let chunk_size = ((source_info.split_info().unwrap().len() as f32
                 / self.stage.parallelism.unwrap() as f32)
-                .ceil() as usize;
-            for (id, split) in source_info
-                .split_info()
-                .unwrap()
-                .chunks(chunk_size)
-                .enumerate()
-            {
+                .ceil() as usize)
+                .max(1);
+            if source_info.split_info().unwrap().is_empty() {
+                // No file in source, schedule an empty task.
+                const EMPTY_TASK_ID: u64 = 0;
                 let task_id = PbTaskId {
                     query_id: self.stage.query_id.id.clone(),
                     stage_id: self.stage.id,
-                    task_id: id as u64,
+                    task_id: EMPTY_TASK_ID,
                 };
-                let plan_fragment = self
-                    .create_plan_fragment(id as u64, Some(PartitionInfo::Source(split.to_vec())));
-                let worker =
-                    self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
+                let plan_fragment =
+                    self.create_plan_fragment(EMPTY_TASK_ID, Some(PartitionInfo::Source(vec![])));
+                let worker = self.choose_worker(
+                    &plan_fragment,
+                    EMPTY_TASK_ID as u32,
+                    self.stage.dml_table_id,
+                )?;
                 futures.push(self.schedule_task(
                     task_id,
                     plan_fragment,
                     worker,
                     expr_context.clone(),
                 ));
+            } else {
+                for (id, split) in source_info
+                    .split_info()
+                    .unwrap()
+                    .chunks(chunk_size)
+                    .enumerate()
+                {
+                    let task_id = PbTaskId {
+                        query_id: self.stage.query_id.id.clone(),
+                        stage_id: self.stage.id,
+                        task_id: id as u64,
+                    };
+                    let plan_fragment = self.create_plan_fragment(
+                        id as u64,
+                        Some(PartitionInfo::Source(split.to_vec())),
+                    );
+                    let worker =
+                        self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
+                    futures.push(self.schedule_task(
+                        task_id,
+                        plan_fragment,
+                        worker,
+                        expr_context.clone(),
+                    ));
+                }
             }
         } else if let Some(file_scan_info) = self.stage.file_scan_info.as_ref() {
             let chunk_size = (file_scan_info.file_location.len() as f32

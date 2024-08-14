@@ -154,7 +154,7 @@ thiserror-ext = { workspace = true }
 tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "f834f2deeb9e2fb08afaf73865f330cf31a3876a", default-features = false, features = [
     "chrono",
     "sql-browser-tokio",
-    "vendored-openssl",
+    "rustls",
     "rust_decimal",
     "bigdecimal",
     "tds73",

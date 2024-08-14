@@ -3092,6 +3092,8 @@ impl Parser<'_> {
                 }
             } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(true)? {
                 AlterTableOperation::SetSourceRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? {
+                AlterTableOperation::SetBackfillRateLimit { rate_limit }
             } else {
                 return self.expected("SCHEMA/PARALLELISM/SOURCE_RATE_LIMIT after SET");
             }
@@ -3632,8 +3634,7 @@ impl Parser<'_> {
         .parse_next(self)
     }
 
-    /// Parse a SQL datatype (in the context of a CREATE TABLE statement for example) and convert
-    /// into an array of that datatype if needed
+    /// Parse a SQL datatype (in the context of a CREATE TABLE statement for example)
     pub fn parse_data_type(&mut self) -> PResult<DataType> {
         parser_v2::data_type(self)
     }
