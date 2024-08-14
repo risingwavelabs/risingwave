@@ -43,6 +43,7 @@ const SYS_FUNCTION_WITHOUT_ARGS: &[&str] = &[
     "user",
     "current_user",
     "current_role",
+    "current_catalog",
     "current_schema",
     "current_timestamp",
 ];

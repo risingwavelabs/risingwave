@@ -129,6 +129,15 @@ impl Binder {
             )
         }
 
+        // `CURRENT_DATABASE` is the name of the database you are currently connected to.
+        // `CURRENT_CATALOG` is a synonym for `CURRENT_DATABASE`.
+        fn current_database() -> Handle {
+            guard_by_len(
+                0,
+                raw(|binder, _inputs| Ok(ExprImpl::literal_varchar(binder.db_name.clone()))),
+            )
+        }
+
         // XXX: can we unify this with FUNC_SIG_MAP?
         // For raw_call here, it seems unnecessary to declare it again here.
         // For some functions, we have validation logic here. Is it still useful now?
@@ -410,9 +419,8 @@ impl Binder {
                         Ok(ExprImpl::literal_varchar(v))
                     })),
                 ),
-                ("current_database", guard_by_len(0, raw(|binder, _inputs| {
-                    Ok(ExprImpl::literal_varchar(binder.db_name.clone()))
-                }))),
+                ("current_catalog", current_database()),
+                ("current_database", current_database()),
                 ("current_schema", guard_by_len(0, raw(|binder, _inputs| {
                     return Ok(binder
                         .first_valid_schema()
