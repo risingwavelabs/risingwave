@@ -91,7 +91,10 @@ impl SplitReader for KinesisSplitReader {
         if !matches!(start_position, KinesisOffset::Timestamp(_))
             && properties.timestamp_offset.is_some()
         {
-            bail!("scan.startup.mode need to be set to 'timestamp' if you want to start with a specific timestamp");
+            // cannot bail! here because all new split readers will fail to start if user set 'scan.startup.mode' to 'timestamp'
+            tracing::warn!("scan.startup.mode need to be set to 'timestamp' if you want to start with a specific timestamp, starting shard {} from the beginning",
+                split.id()
+            );
         }
 
         let stream_name = properties.common.stream_name.clone();
@@ -336,40 +339,6 @@ mod tests {
     use super::*;
     use crate::connector_common::KinesisCommon;
     use crate::source::SourceContext;
-
-    #[tokio::test]
-    async fn test_reject_redundant_seq_props() {
-        let properties = KinesisProperties {
-            common: KinesisCommon {
-                assume_role_arn: None,
-                credentials_access_key: None,
-                credentials_secret_access_key: None,
-                stream_name: "kinesis_debug".to_string(),
-                stream_region: "cn-northwest-1".to_string(),
-                endpoint: None,
-                session_token: None,
-                assume_role_external_id: None,
-            },
-
-            scan_startup_mode: None,
-            timestamp_offset: Some(123456789098765432),
-
-            unknown_fields: Default::default(),
-        };
-        let client = KinesisSplitReader::new(
-            properties,
-            vec![KinesisSplit {
-                shard_id: "shardId-000000000001".to_string().into(),
-                start_position: KinesisOffset::Earliest,
-                end_position: KinesisOffset::None,
-            }],
-            Default::default(),
-            SourceContext::dummy().into(),
-            None,
-        )
-        .await;
-        assert!(client.is_err());
-    }
 
     #[tokio::test]
     #[ignore]
