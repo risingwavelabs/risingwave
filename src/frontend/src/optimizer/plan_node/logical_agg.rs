@@ -76,12 +76,8 @@ impl LogicalAgg {
         let mut core = self.core.clone();
 
         // ====== Handle approx percentile aggs
-        let (
-            needs_row_merge,
-            non_approx_percentile_col_mapping,
-            approx_percentile_col_mapping,
-            approx_percentile,
-        ) = self.prepare_approx_percentile(&mut core, stream_input.clone())?;
+        let (non_approx_percentile_col_mapping, approx_percentile_col_mapping, approx_percentile) =
+            self.prepare_approx_percentile(&mut core, stream_input.clone())?;
 
         if core.agg_calls.is_empty() {
             if let Some(approx_percentile) = approx_percentile {
@@ -107,7 +103,6 @@ impl LogicalAgg {
 
         // ====== Merge approx percentile and normal aggs
         Self::add_row_merge_if_needed(
-            needs_row_merge,
             approx_percentile,
             global_agg.into(),
             approx_percentile_col_mapping,
@@ -125,12 +120,8 @@ impl LogicalAgg {
     ) -> Result<PlanRef> {
         let mut core = self.core.clone();
 
-        let (
-            needs_row_merge,
-            non_approx_percentile_col_mapping,
-            approx_percentile_col_mapping,
-            approx_percentile,
-        ) = self.prepare_approx_percentile(&mut core, stream_input.clone())?;
+        let (non_approx_percentile_col_mapping, approx_percentile_col_mapping, approx_percentile) =
+            self.prepare_approx_percentile(&mut core, stream_input.clone())?;
 
         if core.agg_calls.is_empty() {
             if let Some(approx_percentile) = approx_percentile {
@@ -201,7 +192,6 @@ impl LogicalAgg {
             global_agg.into()
         };
         Self::add_row_merge_if_needed(
-            needs_row_merge,
             approx_percentile,
             global_agg,
             approx_percentile_col_mapping,
@@ -306,7 +296,7 @@ impl LogicalAgg {
         &self,
         core: &mut Agg<PlanRef>,
         stream_input: PlanRef,
-    ) -> Result<(bool, ColIndexMapping, ColIndexMapping, Option<PlanRef>)> {
+    ) -> Result<(ColIndexMapping, ColIndexMapping, Option<PlanRef>)> {
         let SeparatedAggInfo { normal, approx } = self.separate_normal_and_special_agg();
 
         let AggInfo {
@@ -321,6 +311,8 @@ impl LogicalAgg {
             bail_not_implemented!("two-phase approx percentile agg with group key, please use single phase agg for approx_percentile with group key");
         }
 
+        // Either we have approx percentile aggs and non_approx percentile aggs,
+        // or we have at least 2 approx percentile aggs.
         let needs_row_merge = (!non_approx_percentile_agg_calls.is_empty()
             && !approx_percentile_agg_calls.is_empty())
             || approx_percentile_agg_calls.len() >= 2;
@@ -335,7 +327,6 @@ impl LogicalAgg {
         let approx_percentile =
             self.build_approx_percentile_aggs(core.input.clone(), &approx_percentile_agg_calls)?;
         Ok((
-            needs_row_merge,
             non_approx_percentile_col_mapping,
             approx_percentile_col_mapping,
             approx_percentile,
@@ -344,24 +335,19 @@ impl LogicalAgg {
 
     /// Add `RowMerge` if needed
     fn add_row_merge_if_needed(
-        needs_row_merge: bool,
         approx_percentile: Option<PlanRef>,
         global_agg: PlanRef,
         approx_percentile_col_mapping: ColIndexMapping,
         non_approx_percentile_col_mapping: ColIndexMapping,
     ) -> Result<PlanRef> {
         if let Some(approx_percentile) = approx_percentile {
-            if needs_row_merge {
-                let row_merge = StreamRowMerge::new(
-                    approx_percentile,
-                    global_agg,
-                    approx_percentile_col_mapping,
-                    non_approx_percentile_col_mapping,
-                )?;
-                Ok(row_merge.into())
-            } else {
-                bail!("row_merge not needed, but approx_percentile and normal agg are present");
-            }
+            let row_merge = StreamRowMerge::new(
+                approx_percentile,
+                global_agg,
+                approx_percentile_col_mapping,
+                non_approx_percentile_col_mapping,
+            )?;
+            Ok(row_merge.into())
         } else {
             Ok(global_agg)
         }
