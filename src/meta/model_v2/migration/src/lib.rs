@@ -43,7 +43,6 @@ impl MigratorTrait for Migrator {
             Box::new(m20240701_060504_hummock_time_travel::Migration),
             Box::new(m20240702_080451_system_param_value::Migration),
             Box::new(m20240702_084927_unnecessary_fk::Migration),
-            Box::new(m20240701_060504_hummock_time_travel::Migration),
             Box::new(m20240726_063833_auto_schema_change::Migration),
             Box::new(m20240806_143329_add_rate_limit_to_source_catalog::Migration),
         ]
