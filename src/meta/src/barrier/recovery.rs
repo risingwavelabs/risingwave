@@ -167,7 +167,7 @@ impl GlobalBarrierManagerContext {
         let mgr = self.metadata_manager.as_v2_ref();
         let mviews = mgr
             .catalog_controller
-            .list_background_creating_mviews()
+            .list_background_creating_mviews(false)
             .await?;
 
         let mut mview_map = HashMap::new();
