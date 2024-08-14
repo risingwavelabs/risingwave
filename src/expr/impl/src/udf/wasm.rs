@@ -279,5 +279,6 @@ fn datatype_name(ty: &DataType) -> String {
                 .map(|(name, ty)| format!("{}:{}", name, datatype_name(ty)))
                 .join(",")
         ),
+        DataType::Map(_m) => todo!("map in wasm udf"),
     }
 }

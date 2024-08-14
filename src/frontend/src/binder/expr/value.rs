@@ -212,7 +212,7 @@ impl Binder {
             .map(|e| self.bind_expr_inner(e))
             .collect::<Result<Vec<ExprImpl>>>()?;
         let data_type =
-            DataType::new_struct(exprs.iter().map(|e| e.return_type()).collect_vec(), vec![]);
+            DataType::new_unnamed_struct(exprs.iter().map(|e| e.return_type()).collect_vec());
         let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Row, exprs, data_type).into();
         Ok(expr)
     }

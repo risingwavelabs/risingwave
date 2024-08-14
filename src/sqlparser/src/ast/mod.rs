@@ -2477,52 +2477,26 @@ impl fmt::Display for FunctionArg {
     }
 }
 
-/// A function call
+/// A list of function arguments, including additional modifiers like `DISTINCT` or `ORDER BY`.
+/// This basically holds all the information between the `(` and `)` in a function call.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Function {
-    /// Whether the function is prefixed with `aggregate:`
-    pub scalar_as_agg: bool,
-    pub name: ObjectName,
-    pub args: Vec<FunctionArg>,
-    /// whether the last argument is variadic, e.g. `foo(a, b, variadic c)`
-    pub variadic: bool,
-    pub over: Option<WindowSpec>,
-    // aggregate functions may specify eg `COUNT(DISTINCT x)`
+pub struct FunctionArgList {
+    /// Aggregate function calls may have a `DISTINCT`, e.g. `count(DISTINCT x)`.
     pub distinct: bool,
-    // aggregate functions may contain order_by_clause
+    pub args: Vec<FunctionArg>,
+    /// Whether the last argument is variadic, e.g. `foo(a, b, VARIADIC c)`.
+    pub variadic: bool,
+    /// Aggregate function calls may have an `ORDER BY`, e.g. `array_agg(x ORDER BY y)`.
     pub order_by: Vec<OrderByExpr>,
-    pub filter: Option<Box<Expr>>,
-    pub within_group: Option<Box<OrderByExpr>>,
 }
 
-impl Function {
-    pub fn no_arg(name: ObjectName) -> Self {
-        Self {
-            scalar_as_agg: false,
-            name,
-            args: vec![],
-            variadic: false,
-            over: None,
-            distinct: false,
-            order_by: vec![],
-            filter: None,
-            within_group: None,
-        }
-    }
-}
-
-impl fmt::Display for Function {
+impl fmt::Display for FunctionArgList {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.scalar_as_agg {
-            write!(f, "aggregate:")?;
+        write!(f, "(")?;
+        if self.distinct {
+            write!(f, "DISTINCT ")?;
         }
-        write!(
-            f,
-            "{}({}",
-            self.name,
-            if self.distinct { "DISTINCT " } else { "" },
-        )?;
         if self.variadic {
             for arg in &self.args[0..self.args.len() - 1] {
                 write!(f, "{}, ", arg)?;
@@ -2535,6 +2509,71 @@ impl fmt::Display for Function {
             write!(f, " ORDER BY {}", display_comma_separated(&self.order_by))?;
         }
         write!(f, ")")?;
+        Ok(())
+    }
+}
+
+impl FunctionArgList {
+    pub fn empty() -> Self {
+        Self {
+            distinct: false,
+            args: vec![],
+            variadic: false,
+            order_by: vec![],
+        }
+    }
+
+    pub fn args_only(args: Vec<FunctionArg>) -> Self {
+        Self {
+            distinct: false,
+            args,
+            variadic: false,
+            order_by: vec![],
+        }
+    }
+
+    pub fn for_agg(distinct: bool, args: Vec<FunctionArg>, order_by: Vec<OrderByExpr>) -> Self {
+        Self {
+            distinct,
+            args,
+            variadic: false,
+            order_by,
+        }
+    }
+}
+
+/// A function call
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Function {
+    /// Whether the function is prefixed with `aggregate:`
+    pub scalar_as_agg: bool,
+    pub name: ObjectName,
+    pub arg_list: FunctionArgList,
+    pub over: Option<WindowSpec>,
+    pub filter: Option<Box<Expr>>,
+    pub within_group: Option<Box<OrderByExpr>>,
+}
+
+impl Function {
+    pub fn no_arg(name: ObjectName) -> Self {
+        Self {
+            scalar_as_agg: false,
+            name,
+            arg_list: FunctionArgList::empty(),
+            over: None,
+            filter: None,
+            within_group: None,
+        }
+    }
+}
+
+impl fmt::Display for Function {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.scalar_as_agg {
+            write!(f, "AGGREGATE:")?;
+        }
+        write!(f, "{}{}", self.name, self.arg_list)?;
         if let Some(o) = &self.over {
             write!(f, " OVER ({})", o)?;
         }

@@ -114,12 +114,9 @@ impl From<&PbSource> for SourceCatalog {
         let owner = prost.owner;
         let watermark_descs = prost.get_watermark_descs().clone();
 
-        let associated_table_id = prost
-            .optional_associated_table_id
-            .clone()
-            .map(|id| match id {
-                OptionalAssociatedTableId::AssociatedTableId(id) => id,
-            });
+        let associated_table_id = prost.optional_associated_table_id.map(|id| match id {
+            OptionalAssociatedTableId::AssociatedTableId(id) => id,
+        });
         let version = prost.version;
 
         let connection_id = prost.connection_id;

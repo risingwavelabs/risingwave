@@ -1249,7 +1249,7 @@ impl SystemConfig {
         macro_rules! fields {
             ($({ $field:ident, $($rest:tt)* },)*) => {
                 SystemParams {
-                    $($field: self.$field,)*
+                    $($field: self.$field.map(Into::into),)*
                     ..Default::default() // deprecated fields
                 }
             };
@@ -2386,12 +2386,14 @@ pub struct CompactionConfig {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_license::LicenseKey;
+
     use super::*;
 
     fn default_config_for_docs() -> RwConfig {
         let mut config = RwConfig::default();
-        // Set `license_key` to empty to avoid showing the test-only license key in the docs.
-        config.system.license_key = Some("".to_owned());
+        // Set `license_key` to empty in the docs to avoid any confusion.
+        config.system.license_key = Some(LicenseKey::empty());
         config
     }
 

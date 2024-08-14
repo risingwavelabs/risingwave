@@ -43,14 +43,16 @@ fn trigger_delta_log_stats(metrics: &MetaMetrics, total_number: usize) {
 fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion) {
     metrics
         .max_committed_epoch
-        .set(current_version.max_committed_epoch as i64);
+        .set(current_version.visible_table_committed_epoch() as i64);
     metrics
         .version_size
         .set(current_version.estimated_encode_len() as i64);
     metrics
         .safe_epoch
         .set(current_version.visible_table_safe_epoch() as i64);
-    metrics.current_version_id.set(current_version.id as i64);
+    metrics
+        .current_version_id
+        .set(current_version.id.to_u64() as i64);
 }
 
 pub(super) struct HummockVersionTransaction<'a> {
@@ -127,7 +129,7 @@ impl<'a> HummockVersionTransaction<'a> {
         )>,
     ) -> HummockVersionDelta {
         let mut new_version_delta = self.new_delta();
-        new_version_delta.max_committed_epoch = max_committed_epoch;
+        new_version_delta.set_max_committed_epoch(max_committed_epoch);
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
 

@@ -746,7 +746,7 @@ impl<'a> TableScanIoEstimator<'a> {
                 .sum::<usize>()
     }
 
-    pub fn estimate_data_type_size(data_type: &DataType) -> usize {
+    fn estimate_data_type_size(data_type: &DataType) -> usize {
         use std::mem::size_of;
 
         match data_type {
@@ -769,6 +769,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Jsonb => 20,
             DataType::Struct { .. } => 20,
             DataType::List { .. } => 20,
+            DataType::Map(_) => 20,
         }
     }
 

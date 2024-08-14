@@ -477,8 +477,8 @@ profile:
         parallelism: 8
       - use: frontend
       - use: compactor
-      - use: prometheus
-      - use: grafana
+      # - use: prometheus
+      # - use: grafana
       # Do not use kafka here, we will spawn it separately,
       # so we don't have to re-generate data each time.
       # RW will still be ale to talk to it.
