@@ -249,7 +249,7 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
                 &[DataType::Float64],
             ),
         };
-        tracing::debug!("get_output: {:#?}", output_chunk, );
+        tracing::debug!("get_output: {:#?}", output_chunk,);
         self.output_changed = false;
         output_chunk
     }
