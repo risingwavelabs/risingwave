@@ -292,6 +292,9 @@ impl LogicalAgg {
     }
 
     /// Prepares metadata and the `approx_percentile` plan, if there's one present.
+    /// It may modify `core.agg_calls` to separate normal agg and approx percentile agg,
+    /// and `core.input` to share the input via `StreamShare`,
+    /// to both approx percentile agg and normal agg.
     fn prepare_approx_percentile(
         &self,
         core: &mut Agg<PlanRef>,
