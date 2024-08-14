@@ -221,7 +221,7 @@ impl CatalogManagerCore {
             .or_else(|| {
                 if self
                     .database
-                    .in_progress_creation_streaming_job
+                    .in_progress_creating_streaming_job
                     .contains_key(&job.id())
                 {
                     Some(false)
@@ -253,7 +253,7 @@ impl CatalogManagerCore {
         }
         // Clear in progress creation streaming job. Note that background job is not tracked here, so that
         // it won't affect background jobs.
-        self.database.in_progress_creation_streaming_job.clear();
+        self.database.in_progress_creating_streaming_job.clear();
     }
 }
 
@@ -1435,7 +1435,7 @@ impl CatalogManager {
         );
         database_core.in_progress_creation_tracker.remove(&key);
         database_core
-            .in_progress_creation_streaming_job
+            .in_progress_creating_streaming_job
             .remove(&table.id);
 
         table.stream_job_status = PbStreamJobStatus::Created.into();
@@ -3373,7 +3373,7 @@ impl CatalogManager {
             .in_progress_creation_tracker
             .remove(&mview_key);
         database_core
-            .in_progress_creation_streaming_job
+            .in_progress_creating_streaming_job
             .remove(&mview.id);
 
         sources.insert(source.id, source.clone());
@@ -3508,7 +3508,7 @@ impl CatalogManager {
 
         database_core.in_progress_creation_tracker.remove(&key);
         database_core
-            .in_progress_creation_streaming_job
+            .in_progress_creating_streaming_job
             .remove(&table.id);
 
         index.stream_job_status = PbStreamJobStatus::Created.into();
@@ -3594,7 +3594,7 @@ impl CatalogManager {
 
         database_core.in_progress_creation_tracker.remove(&key);
         database_core
-            .in_progress_creation_streaming_job
+            .in_progress_creating_streaming_job
             .remove(&sink.id);
 
         sink.stream_job_status = PbStreamJobStatus::Created.into();
@@ -3713,7 +3713,7 @@ impl CatalogManager {
 
         database_core.in_progress_creation_tracker.remove(&key);
         database_core
-            .in_progress_creation_streaming_job
+            .in_progress_creating_streaming_job
             .remove(&subscription.id);
 
         subscription.subscription_state = PbSubscriptionState::Created.into();
