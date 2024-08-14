@@ -32,6 +32,7 @@ mod create;
 mod create_view;
 mod delete;
 mod expr;
+pub mod fetch_cursor;
 mod for_system;
 mod insert;
 mod query;
@@ -259,8 +260,8 @@ impl UdfContext {
     }
 }
 
-/// `ParameterTypes` is used to record the types of the parameters during binding. It works
-/// following the rules:
+/// `ParameterTypes` is used to record the types of the parameters during binding prepared stataments.
+/// It works by following the rules:
 /// 1. At the beginning, it contains the user specified parameters type.
 /// 2. When the binder encounters a parameter, it will record it as unknown(call `record_new_param`)
 ///    if it didn't exist in `ParameterTypes`.
@@ -789,30 +790,32 @@ mod tests {
                                                     },
                                                 ],
                                             ),
-                                            args: [
-                                                Unnamed(
-                                                    Expr(
-                                                        Value(
-                                                            Number(
-                                                                "0.5",
+                                            arg_list: FunctionArgList {
+                                                distinct: false,
+                                                args: [
+                                                    Unnamed(
+                                                        Expr(
+                                                            Value(
+                                                                Number(
+                                                                    "0.5",
+                                                                ),
                                                             ),
                                                         ),
                                                     ),
-                                                ),
-                                                Unnamed(
-                                                    Expr(
-                                                        Value(
-                                                            Number(
-                                                                "0.01",
+                                                    Unnamed(
+                                                        Expr(
+                                                            Value(
+                                                                Number(
+                                                                    "0.01",
+                                                                ),
                                                             ),
                                                         ),
                                                     ),
-                                                ),
-                                            ],
-                                            variadic: false,
+                                                ],
+                                                variadic: false,
+                                                order_by: [],
+                                            },
                                             over: None,
-                                            distinct: false,
-                                            order_by: [],
                                             filter: None,
                                             within_group: Some(
                                                 OrderByExpr {

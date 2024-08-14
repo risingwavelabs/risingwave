@@ -18,6 +18,7 @@ use anyhow::Context;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::WorkerNode;
@@ -281,7 +282,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_version_deltas(&self) -> Result<Vec<HummockVersionDelta>> {
         // FIXME #8612: there can be lots of version deltas, so better to fetch them by pages and refactor `SysRowSeqScanExecutor` to yield multiple chunks.
-        self.0.list_version_deltas(0, u32::MAX, u64::MAX).await
+        self.0
+            .list_version_deltas(HummockVersionId::new(0), u32::MAX, u64::MAX)
+            .await
     }
 
     async fn list_branched_objects(&self) -> Result<Vec<BranchedObject>> {

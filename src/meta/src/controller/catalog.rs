@@ -643,7 +643,6 @@ impl CatalogController {
     }
 
     /// `clean_dirty_creating_jobs` cleans up creating jobs that are creating in Foreground mode or in Initial status.
-    /// FIXME(kwannoel): Notify deleted objects to the frontend.
     pub async fn clean_dirty_creating_jobs(&self) -> MetaResult<ReleaseContext> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -682,6 +681,25 @@ impl CatalogController {
         self.log_cleaned_dirty_jobs(&dirty_objs, &txn).await?;
 
         let dirty_job_ids = dirty_objs.iter().map(|obj| obj.oid).collect::<Vec<_>>();
+
+        // Filter out dummy objs for replacement.
+        // todo: we'd better introduce a new dummy object type for replacement.
+        let all_dirty_table_ids = dirty_objs
+            .iter()
+            .filter(|obj| obj.obj_type == ObjectType::Table)
+            .map(|obj| obj.oid)
+            .collect_vec();
+        let dirty_table_ids: HashSet<ObjectId> = Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .filter(table::Column::TableId.is_in(all_dirty_table_ids))
+            .into_tuple::<ObjectId>()
+            .all(&txn)
+            .await?
+            .into_iter()
+            .collect();
+        dirty_objs
+            .retain(|obj| obj.obj_type != ObjectType::Table || dirty_table_ids.contains(&obj.oid));
 
         let associated_source_ids: Vec<SourceId> = Table::find()
             .select_only()

@@ -245,7 +245,7 @@ impl MetaClient {
                 .add_worker_node(AddWorkerNodeRequest {
                     worker_type: worker_type as i32,
                     host: Some(addr.to_protobuf()),
-                    property: Some(property.clone()),
+                    property: Some(property),
                     resource: Some(risingwave_pb::common::worker_node::Resource {
                         rw_version: RW_VERSION.to_string(),
                         total_memory_bytes: system_memory_available_bytes() as _,
@@ -1062,12 +1062,12 @@ impl MetaClient {
 
     pub async fn list_version_deltas(
         &self,
-        start_id: u64,
+        start_id: HummockVersionId,
         num_limit: u32,
         committed_epoch_limit: HummockEpoch,
     ) -> Result<Vec<HummockVersionDelta>> {
         let req = ListVersionDeltasRequest {
-            start_id,
+            start_id: start_id.to_u64(),
             num_limit,
             committed_epoch_limit,
         };
@@ -1089,7 +1089,7 @@ impl MetaClient {
         compaction_groups: Vec<CompactionGroupId>,
     ) -> Result<()> {
         let req = TriggerCompactionDeterministicRequest {
-            version_id,
+            version_id: version_id.to_u64(),
             compaction_groups,
         };
         self.inner.trigger_compaction_deterministic(req).await?;
@@ -1417,7 +1417,7 @@ impl HummockMetaClient for MetaClient {
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
         let req = UnpinVersionBeforeRequest {
             context_id: self.worker_id(),
-            unpin_version_before,
+            unpin_version_before: unpin_version_before.to_u64(),
         };
         self.inner.unpin_version_before(req).await?;
         Ok(())

@@ -740,9 +740,9 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             version_delta
                 .into_iter()
                 .map(|vd| hummock_version_delta::ActiveModel {
-                    id: Set(vd.id as _),
-                    prev_id: Set(vd.prev_id as _),
-                    max_committed_epoch: Set(vd.max_committed_epoch as _),
+                    id: Set(vd.id.to_u64() as _),
+                    prev_id: Set(vd.prev_id.to_u64() as _),
+                    max_committed_epoch: Set(vd.visible_table_committed_epoch() as _),
                     safe_epoch: Set(vd.visible_table_safe_epoch() as _),
                     trivial_move: Set(vd.trivial_move),
                     full_version_delta: Set((&vd.to_protobuf()).into()),

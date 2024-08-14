@@ -938,7 +938,7 @@ mod tests {
                     .add_worker(
                         PbWorkerType::ComputeNode,
                         host.clone(),
-                        property.clone(),
+                        property,
                         PbResource::default(),
                     )
                     .await?,
@@ -970,7 +970,7 @@ mod tests {
         );
 
         // re-register existing worker node with larger parallelism and change its serving mode.
-        let mut new_property = property.clone();
+        let mut new_property = property;
         new_property.worker_node_parallelism = (parallelism_num * 2) as _;
         new_property.is_serving = false;
         cluster_ctl
@@ -1025,7 +1025,7 @@ mod tests {
             .add_worker(
                 PbWorkerType::ComputeNode,
                 host.clone(),
-                property.clone(),
+                property,
                 PbResource::default(),
             )
             .await?;

@@ -412,6 +412,26 @@ pub struct PostgresConfig {
     pub persist_data: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct SqlServerConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub port: u16,
+    pub address: String,
+
+    pub user: String,
+    pub password: String,
+    pub database: String,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
 /// All service configuration
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServiceConfig {
@@ -434,6 +454,7 @@ pub enum ServiceConfig {
     RedPanda(RedPandaConfig),
     MySql(MySqlConfig),
     Postgres(PostgresConfig),
+    SqlServer(SqlServerConfig),
 }
 
 impl ServiceConfig {
@@ -457,6 +478,7 @@ impl ServiceConfig {
             Self::Opendal(c) => &c.id,
             Self::MySql(c) => &c.id,
             Self::Postgres(c) => &c.id,
+            Self::SqlServer(c) => &c.id,
             Self::SchemaRegistry(c) => &c.id,
         }
     }
@@ -482,6 +504,7 @@ impl ServiceConfig {
             Self::Opendal(_) => None,
             Self::MySql(c) => Some(c.port),
             Self::Postgres(c) => Some(c.port),
+            Self::SqlServer(c) => Some(c.port),
             Self::SchemaRegistry(c) => Some(c.port),
         }
     }
@@ -506,6 +529,7 @@ impl ServiceConfig {
             Self::Opendal(_c) => false,
             Self::MySql(c) => c.user_managed,
             Self::Postgres(c) => c.user_managed,
+            Self::SqlServer(c) => c.user_managed,
             Self::SchemaRegistry(c) => c.user_managed,
         }
     }

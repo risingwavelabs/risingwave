@@ -135,6 +135,8 @@ message Source {
 
   // Per-source catalog version, used by schema change.
   uint64 version = 100;
+
+  optional uint32 rate_limit = 101;
 }
 
 enum SinkType {

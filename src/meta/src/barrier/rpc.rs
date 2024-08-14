@@ -25,6 +25,7 @@ use futures::{pin_mut, FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::tracing::TracingContext;
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::stream_plan::{Barrier, BarrierMutation};
 use risingwave_pb::stream_service::{
@@ -45,9 +46,8 @@ use uuid::Uuid;
 
 use super::command::CommandContext;
 use super::GlobalBarrierManagerContext;
-use crate::barrier::info::InflightActorInfo;
-use crate::manager::{InflightFragmentInfo, MetaSrvEnv, WorkerId};
-use crate::model::FragmentId;
+use crate::barrier::info::InflightGraphInfo;
+use crate::manager::{MetaSrvEnv, WorkerId};
 use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
@@ -105,11 +105,11 @@ impl ControlStreamManager {
             warn!(id = node.id, host = ?node.host, "node already exists");
             return;
         }
-        let prev_epoch = self
+        let version_id = self
             .context
             .hummock_manager
-            .latest_snapshot()
-            .committed_epoch;
+            .on_current_version(|version| version.id)
+            .await;
         let node_id = node.id;
         let node_host = node.host.clone().unwrap();
         let mut backoff = ExponentialBackoff::from_millis(100)
@@ -119,7 +119,7 @@ impl ControlStreamManager {
         for i in 1..=MAX_RETRY {
             match self
                 .context
-                .new_control_stream_node(node.clone(), prev_epoch)
+                .new_control_stream_node(node.clone(), version_id)
                 .await
             {
                 Ok((stream_node, response_stream)) => {
@@ -143,13 +143,13 @@ impl ControlStreamManager {
 
     pub(super) async fn reset(
         &mut self,
-        prev_epoch: u64,
+        version_id: HummockVersionId,
         nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
         let nodes = try_join_all(nodes.iter().map(|(worker_id, node)| async {
             let node = self
                 .context
-                .new_control_stream_node(node.clone(), prev_epoch)
+                .new_control_stream_node(node.clone(), version_id)
                 .await?;
             Result::<_, MetaError>::Ok((*worker_id, node))
         }))
@@ -249,31 +249,40 @@ impl ControlStreamManager {
     pub(super) fn inject_barrier(
         &mut self,
         command_context: &CommandContext,
-        pre_applied_fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
-        applied_fragment_infos: Option<&HashMap<FragmentId, InflightFragmentInfo>>,
+        pre_applied_graph_info: &InflightGraphInfo,
+        applied_graph_info: Option<&InflightGraphInfo>,
     ) -> MetaResult<HashSet<WorkerId>> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
             "inject_barrier_err"
         ));
         let mutation = command_context.to_mutation();
-        let info = command_context.info.clone();
         let mut node_need_collect = HashSet::new();
 
-        info.node_map
-            .iter()
-            .map(|(node_id, worker_node)| {
+        for worker_id in pre_applied_graph_info.worker_ids().chain(
+            applied_graph_info
+                .into_iter()
+                .flat_map(|info| info.worker_ids()),
+        ) {
+            if !self.nodes.contains_key(&worker_id) {
+                return Err(anyhow!("unconnected worker node {}", worker_id).into());
+            }
+        }
+
+        self.nodes
+            .iter_mut()
+            .map(|(node_id, node)| {
                 let actor_ids_to_send: Vec<_> =
-                    InflightActorInfo::actor_ids_to_send(pre_applied_fragment_infos, *node_id)
-                        .collect();
-                let actor_ids_to_collect: Vec<_> =
-                    InflightActorInfo::actor_ids_to_collect(pre_applied_fragment_infos, *node_id)
-                        .collect();
+                    pre_applied_graph_info.actor_ids_to_send(*node_id).collect();
+                let actor_ids_to_collect: Vec<_> = pre_applied_graph_info
+                    .actor_ids_to_collect(*node_id)
+                    .collect();
                 if actor_ids_to_collect.is_empty() {
                     // No need to send or collect barrier for this node.
                     assert!(actor_ids_to_send.is_empty());
                 }
-                let table_ids_to_sync = if let Some(fragment_infos) = applied_fragment_infos {
-                    InflightActorInfo::existing_table_ids(fragment_infos)
+                let table_ids_to_sync = if let Some(graph_info) = applied_graph_info {
+                    graph_info
+                        .existing_table_ids()
                         .map(|table_id| table_id.table_id)
                         .collect()
                 } else {
@@ -281,15 +290,6 @@ impl ControlStreamManager {
                 };
 
                 {
-                    let Some(node) = self.nodes.get_mut(node_id) else {
-                        if actor_ids_to_collect.is_empty() {
-                            // Worker node get disconnected but has no actor to collect. Simply skip it.
-                            return Ok(());
-                        }
-                        return Err(
-                            anyhow!("unconnected worker node: {:?}", worker_node.host).into()
-                        );
-                    };
                     let mutation = mutation.clone();
                     let barrier = Barrier {
                         epoch: Some(risingwave_pb::data::Epoch {
@@ -354,7 +354,7 @@ impl GlobalBarrierManagerContext {
     async fn new_control_stream_node(
         &self,
         node: WorkerNode,
-        prev_epoch: u64,
+        initial_version_id: HummockVersionId,
     ) -> MetaResult<(
         ControlStreamNode,
         BoxStream<'static, risingwave_rpc_client::error::Result<StreamingControlStreamResponse>>,
@@ -364,7 +364,7 @@ impl GlobalBarrierManagerContext {
             .stream_client_pool()
             .get(&node)
             .await?
-            .start_streaming_control(prev_epoch)
+            .start_streaming_control(initial_version_id)
             .await?;
         Ok((
             ControlStreamNode {

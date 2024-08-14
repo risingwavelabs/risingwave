@@ -273,6 +273,7 @@ enum ThrottleTarget {
   SOURCE = 1;
   MV = 2;
   TABLE_WITH_SOURCE = 3;
+  CDC_TABLE = 4;
 }
 
 message ApplyThrottleRequest {

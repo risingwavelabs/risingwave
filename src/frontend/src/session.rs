@@ -1369,13 +1369,13 @@ impl Session for SessionImpl {
         self.id
     }
 
-    fn parse(
+    async fn parse(
         self: Arc<Self>,
         statement: Option<Statement>,
         params_types: Vec<Option<DataType>>,
     ) -> std::result::Result<PrepareStatement, BoxedError> {
         Ok(if let Some(statement) = statement {
-            handle_parse(self, statement, params_types)?
+            handle_parse(self, statement, params_types).await?
         } else {
             PrepareStatement::Empty
         })
@@ -1508,7 +1508,8 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }
-        | Statement::Update { .. } => Ok(bound
+        | Statement::Update { .. }
+        | Statement::FetchCursor { .. } => Ok(bound
             .unwrap()
             .output_fields()
             .iter()

@@ -17,6 +17,7 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::LocalApproxPercentileNode;
 
 use crate::expr::{ExprRewriter, ExprVisitor, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -43,11 +44,12 @@ pub struct StreamLocalApproxPercentile {
 impl StreamLocalApproxPercentile {
     pub fn new(input: PlanRef, approx_percentile_agg_call: &PlanAggCall) -> Self {
         let schema = Schema::new(vec![
-            Field::with_name(DataType::Int64, "bucket_id"),
-            Field::with_name(DataType::Int64, "count"),
+            Field::with_name(DataType::Int16, "sign"),
+            Field::with_name(DataType::Int32, "bucket_id"),
+            Field::with_name(DataType::Int32, "count"),
         ]);
         // FIXME(kwannoel): How does watermark work with FixedBitSet
-        let watermark_columns = FixedBitSet::with_capacity(2);
+        let watermark_columns = FixedBitSet::with_capacity(3);
         let base = PlanBase::new_stream(
             input.ctx(),
             schema,
@@ -108,7 +110,15 @@ impl_plan_tree_node_for_unary! {StreamLocalApproxPercentile}
 
 impl StreamNode for StreamLocalApproxPercentile {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        todo!()
+        let relative_error = self.relative_error.get_data().as_ref().unwrap();
+        let relative_error = relative_error.as_float64().into_inner();
+        let base = (1.0 + relative_error) / (1.0 - relative_error);
+        let percentile_index = self.percentile_col.index() as u32;
+        let body = LocalApproxPercentileNode {
+            base,
+            percentile_index,
+        };
+        PbNodeBody::LocalApproxPercentile(body)
     }
 }
 

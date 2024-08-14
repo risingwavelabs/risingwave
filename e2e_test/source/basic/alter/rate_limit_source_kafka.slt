@@ -31,6 +31,7 @@ create source kafka_source (v1 int) with (
   topic = 'kafka_source',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest',
+  source_rate_limit = 0,
 ) FORMAT PLAIN ENCODE JSON
 
 statement ok
@@ -43,8 +44,9 @@ sleep 3s
 
 ############## Create MV on source
 
+# This should be ignored.
 statement ok
-SET SOURCE_RATE_LIMIT=0;
+SET SOURCE_RATE_LIMIT=1000;
 
 statement ok
 create materialized view rl_mv1 as select count(*) from kafka_source;
@@ -54,9 +56,6 @@ create materialized view rl_mv2 as select count(*) from kafka_source;
 
 statement ok
 create materialized view rl_mv3 as select count(*) from kafka_source;
-
-statement ok
-SET SOURCE_RATE_LIMIT=default;
 
 ############## MVs should have 0 records, since source has (rate_limit = 0)
 

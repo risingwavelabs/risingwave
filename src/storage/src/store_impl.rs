@@ -592,10 +592,6 @@ pub mod verify {
             self.actual.seal_epoch(epoch, is_checkpoint)
         }
 
-        fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_ {
-            self.actual.clear_shared_buffer(prev_epoch)
-        }
-
         async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
             let expected = if let Some(expected) = &self.expected {
                 Some(expected.new_local(option.clone()).await)
@@ -1174,8 +1170,6 @@ pub mod boxed_state_store {
 
         fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
 
-        async fn clear_shared_buffer(&self, prev_epoch: u64);
-
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore;
 
         fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
@@ -1197,10 +1191,6 @@ pub mod boxed_state_store {
 
         fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
             self.seal_epoch(epoch, is_checkpoint);
-        }
-
-        async fn clear_shared_buffer(&self, prev_epoch: u64) {
-            self.clear_shared_buffer(prev_epoch).await
         }
 
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore {
@@ -1291,10 +1281,6 @@ pub mod boxed_state_store {
             table_ids: HashSet<TableId>,
         ) -> impl Future<Output = StorageResult<SyncResult>> + Send + 'static {
             self.deref().sync(epoch, table_ids)
-        }
-
-        fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_ {
-            self.deref().clear_shared_buffer(prev_epoch)
         }
 
         fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
