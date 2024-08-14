@@ -208,7 +208,7 @@ impl Expression for ConstantLookupExpression {
     }
 }
 
-#[build_function("constant_lookup(...) -> any", type_infer = "panic")]
+#[build_function("constant_lookup(...) -> any", type_infer = "unreachable")]
 fn build_constant_lookup_expr(
     return_type: DataType,
     children: Vec<BoxedExpression>,
@@ -249,7 +249,7 @@ fn build_constant_lookup_expr(
     )))
 }
 
-#[build_function("case(...) -> any", type_infer = "panic")]
+#[build_function("case(...) -> any", type_infer = "unreachable")]
 fn build_case_expr(
     return_type: DataType,
     children: Vec<BoxedExpression>,
