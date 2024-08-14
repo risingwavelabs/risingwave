@@ -75,9 +75,9 @@ use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEn
 use crate::error::ConnectorError;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
-use crate::sink::file_sink::fs::FsSink;
-// use crate::sink::file_sink::gcs::GcsSink;
-use crate::sink::file_sink::s3::S3Sink;
+// use crate::sink::file_sink::fs::FsSink;
+use crate::sink::file_sink::gcs::GcsSink;
+// use crate::sink::file_sink::s3::S3Sink;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
 const BOUNDED_CHANNEL_SIZE: usize = 16;
@@ -103,9 +103,9 @@ macro_rules! for_all_sinks {
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
-                { S3, $crate::sink::file_sink::opendal_sink::FileSink<S3Sink> },
-                // { Gcs, $crate::sink::file_sink::opendal_sink::FileSink<GcsSink>  },
-                { Fs, $crate::sink::file_sink::opendal_sink::FileSink<FsSink>  },
+                // { S3, $crate::sink::file_sink::opendal_sink::FileSink<S3Sink> },
+                { Gcs, $crate::sink::file_sink::opendal_sink::FileSink<GcsSink>  },
+                // { Fs, $crate::sink::file_sink::opendal_sink::FileSink<FsSink>  },
                 { Snowflake, $crate::sink::snowflake::SnowflakeSink },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
