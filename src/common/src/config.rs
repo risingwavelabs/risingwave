@@ -863,9 +863,26 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::flush_buffer_threshold_mb")]
     pub flush_buffer_threshold_mb: Option<usize>,
 
+    /// Recovery mode.
+    ///
+    /// Options: "none", "quiet", "strict"
+    #[serde(default = "default::file_cache::recover_mode")]
+    pub recover_mode: String,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
+}
+
+impl FileCacheConfig {
+    pub fn recover_mode(&self) -> foyer::RecoverMode {
+        match self.recover_mode.as_str() {
+            "none" => foyer::RecoverMode::None,
+            "quiet" => foyer::RecoverMode::Quiet,
+            "strict" => foyer::RecoverMode::Strict,
+            _ => foyer::RecoverMode::None,
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
@@ -1711,6 +1728,10 @@ pub mod default {
 
         pub fn flush_buffer_threshold_mb() -> Option<usize> {
             None
+        }
+
+        pub fn recover_mode() -> String {
+            "None".to_string()
         }
     }
 
