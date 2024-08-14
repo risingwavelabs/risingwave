@@ -11,7 +11,7 @@ system ok
 mysql -e "
   DROP DATABASE IF EXISTS testdb2;
   CREATE DATABASE testdb2;
-  USE testdb1;
+  USE testdb2;
   CREATE TABLE orders (
       order_id INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
       order_date DATETIME NOT NULL,
