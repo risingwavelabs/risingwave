@@ -149,16 +149,13 @@ impl HummockManager {
     /// Should not be called inside [`HummockManager`], because it requests locks internally.
     ///
     /// Note: this method can hurt performance because it will clone a large object.
+    #[cfg(any(test, feature = "test"))]
     pub async fn get_current_version(&self) -> HummockVersion {
-        self.versioning.read().await.current_version.clone()
+        self.on_current_version(|version| version.clone()).await
     }
 
-    pub async fn get_current_max_committed_epoch(&self) -> HummockEpoch {
-        self.versioning
-            .read()
-            .await
-            .current_version
-            .max_committed_epoch
+    pub async fn on_current_version<T>(&self, mut f: impl FnMut(&HummockVersion) -> T) -> T {
+        f(&self.versioning.read().await.current_version)
     }
 
     /// Gets the mapping from table id to compaction group id
@@ -181,7 +178,7 @@ impl HummockManager {
             .hummock_version_deltas
             .range(start_id..)
             .map(|(_id, delta)| delta)
-            .filter(|delta| delta.max_committed_epoch <= committed_epoch_limit)
+            .filter(|delta| delta.visible_table_committed_epoch() <= committed_epoch_limit)
             .take(num_limit as _)
             .cloned()
             .collect();

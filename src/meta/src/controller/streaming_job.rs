@@ -1354,6 +1354,10 @@ impl CatalogController {
                 || (*fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0)
             {
                 visit_stream_node(stream_node, |node| match node {
+                    PbNodeBody::StreamCdcScan(node) => {
+                        node.rate_limit = rate_limit;
+                        found = true;
+                    }
                     PbNodeBody::StreamScan(node) => {
                         node.rate_limit = rate_limit;
                         found = true;

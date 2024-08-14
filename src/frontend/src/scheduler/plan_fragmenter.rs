@@ -732,13 +732,19 @@ impl StageGraph {
 
             // For batch reading file source, the number of files involved is typically large.
             // In order to avoid generating a task for each file, the parallelism of tasks is limited here.
-            // todo(wcy-fdu): Currently it will be divided into half of schedule_unit_count groups, and this will be changed to configurable later.
+            // The minimum `task_parallelism` is 1. Additionally, `task_parallelism`
+            // must be greater than the number of files to read. Therefore, we first take the
+            // minimum of the number of files and (self.batch_parallelism / 2). If the number of
+            // files is 0, we set task_parallelism to 1.
+
             let task_parallelism = match &stage.source_info {
                 Some(SourceScanInfo::Incomplete(source_fetch_info)) => {
                     match source_fetch_info.connector {
-                        ConnectorProperties::Gcs(_) | ConnectorProperties::OpendalS3(_) => {
-                            (self.batch_parallelism / 2) as u32
-                        }
+                        ConnectorProperties::Gcs(_) | ConnectorProperties::OpendalS3(_) => (min(
+                            complete_source_info.split_info().unwrap().len() as u32,
+                            (self.batch_parallelism / 2) as u32,
+                        ))
+                        .max(1),
                         _ => complete_source_info.split_info().unwrap().len() as u32,
                     }
                 }

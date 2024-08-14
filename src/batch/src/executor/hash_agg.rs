@@ -20,7 +20,6 @@ use bytes::Bytes;
 use futures_async_stream::try_stream;
 use hashbrown::hash_map::Entry;
 use itertools::Itertools;
-use prost::Message;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
@@ -35,6 +34,7 @@ use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 use risingwave_pb::data::DataChunk as PbDataChunk;
+use risingwave_pb::Message;
 
 use crate::error::{BatchError, Result};
 use crate::executor::aggregation::build as build_agg;

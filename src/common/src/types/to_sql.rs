@@ -46,6 +46,7 @@ impl ToSql for ScalarImpl {
             ScalarImpl::Int256(_) | ScalarImpl::Struct(_) | ScalarImpl::List(_) => {
                 bail_not_implemented!("the postgres encoding for {ty} is unsupported")
             }
+            ScalarImpl::Map(_) => todo!(),
         }
     }
 
