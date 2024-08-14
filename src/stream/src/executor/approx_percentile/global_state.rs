@@ -67,6 +67,7 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         // Refill row_count
         let row_count_state = self.get_row_count_state().await?;
         let row_count = Self::decode_row_count(&row_count_state)?;
+        tracing::debug!(?row_count, "recovered row_count");
 
         // Refill cache
         self.refill_cache().await?;
@@ -172,6 +173,7 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
 
         // Updates
         self.row_count = self.row_count.checked_add(delta as i64).unwrap();
+        tracing::debug!("updated row_count: {}", self.row_count);
 
         let pk = row.project(&[0, 1]);
         let old_row = self.bucket_state_table.get_row(pk).await?;
@@ -226,10 +228,8 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
             tracing::debug!("last_output: {:#?}", last_output);
             last_output.clone().flatten()
         } else {
-            let new_output = self
-                .cache
-                .get_output(self.row_count, self.quantile, self.base);
-            new_output
+            self.cache
+                .get_output(self.row_count, self.quantile, self.base)
         };
         self.last_output = Some(new_output.clone());
         let output_chunk = match last_output {
@@ -274,7 +274,6 @@ impl BucketTableCache {
         }
     }
 
-    /// TODO(kwannoel): Track if we updated the input, if we didn't, we can return the last output.
     pub fn get_output(&self, row_count: i64, quantile: f64, base: f64) -> Datum {
         let quantile_count = (row_count as f64 * quantile).floor() as i64;
         let mut acc_count = 0;
