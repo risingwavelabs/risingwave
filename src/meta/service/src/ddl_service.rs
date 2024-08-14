@@ -966,6 +966,7 @@ impl DdlService for DdlServiceImpl {
             );
             for table in tables {
                 // send a request to the frontend to get the ReplaceTablePlan
+                // will retry with exponential backoff if the request fails
                 let resp = client
                     .get_table_replace_plan(GetTableReplacePlanRequest {
                         database_id: table.database_id,
@@ -973,8 +974,8 @@ impl DdlService for DdlServiceImpl {
                         table_name: table.name,
                         table_change: Some(table_change.clone()),
                     })
-                    .await
-                    .map_err(MetaError::from)?;
+                    .await?
+                    .into_inner();
 
                 if let Some(plan) = resp.replace_plan {
                     plan.table

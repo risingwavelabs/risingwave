@@ -66,7 +66,7 @@ mod tracing;
 pub use compactor_client::{CompactorClient, GrpcCompactorProxyClient};
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
 pub use connector_client::{ConnectorClient, SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
-pub use frontend_client::{FrontendClient, FrontendClientPool, FrontendClientPoolRef};
+pub use frontend_client::{FrontendClientPool, FrontendClientPoolRef};
 pub use hummock_meta_client::{CompactionEventItem, HummockMetaClient};
 pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
 use rw_futures_util::await_future_with_monitor_error_stream;
@@ -205,23 +205,6 @@ macro_rules! meta_rpc_client_method_impl {
                         Err($crate::error::RpcError::from_meta_status(e))
                     }
                 }
-            }
-        )*
-    }
-}
-
-#[macro_export]
-macro_rules! frontend_rpc_client_method_impl {
-    ($( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
-        $(
-            pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
-                Ok(self
-                    .$client
-                    .to_owned()
-                    .$fn_name(request)
-                    .await
-                    .map_err($crate::error::RpcError::from_frontend_status)?
-                    .into_inner())
             }
         )*
     }
