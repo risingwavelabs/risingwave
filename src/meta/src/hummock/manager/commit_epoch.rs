@@ -377,7 +377,7 @@ impl HummockManager {
             committed_epoch: epoch,
             current_epoch: epoch,
         };
-        let prev_snapshot = self.latest_snapshot.swap(snapshot.into());
+        let prev_snapshot = self.latest_snapshot.swap(snapshot.clone().into());
         assert!(prev_snapshot.committed_epoch < epoch);
         assert!(prev_snapshot.current_epoch < epoch);
 

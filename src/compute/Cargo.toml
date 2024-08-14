@@ -23,8 +23,7 @@ either = "1"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-http = "1"
-hyper = "1"
+hyper = "0.14" # required by tonic
 itertools = { workspace = true }
 maplit = "1.0.2"
 pprof = { version = "0.13", features = ["flamegraph"] }
@@ -55,7 +54,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tokio-stream = { workspace = true }
+tokio-stream = "0.1"
 tonic = { workspace = true }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"

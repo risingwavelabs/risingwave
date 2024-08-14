@@ -393,7 +393,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 self.plan.root.as_ref().unwrap(),
                 &self.task_id,
                 self.context.clone(),
-                self.epoch,
+                self.epoch.clone(),
                 self.shutdown_rx.clone(),
             )
             .build(),

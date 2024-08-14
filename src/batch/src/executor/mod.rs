@@ -174,7 +174,7 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
             plan_node,
             self.task_id,
             self.context.clone(),
-            self.epoch,
+            self.epoch.clone(),
             self.shutdown_rx.clone(),
         )
     }
@@ -188,7 +188,7 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
     }
 
     pub fn epoch(&self) -> BatchQueryEpoch {
-        self.epoch
+        self.epoch.clone()
     }
 }
 

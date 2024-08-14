@@ -134,7 +134,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
                     ..Default::default()
                 }),
             }),
-            epoch: Some(self.epoch),
+            epoch: Some(self.epoch.clone()),
             tracing_context: TracingContext::from_current_span().to_protobuf(),
         };
 
@@ -237,7 +237,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
             &plan_node,
             &task_id,
             self.context.clone(),
-            self.epoch,
+            self.epoch.clone(),
             self.shutdown_rx.clone(),
         );
 

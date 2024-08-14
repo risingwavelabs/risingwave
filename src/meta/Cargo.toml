@@ -36,7 +36,7 @@ flate2 = "1"
 function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
-http = "1"
+hyper = "0.14" # required by tonic
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 maplit = "1.0.2"
@@ -81,7 +81,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
   "signal",
 ] }
 tokio-retry = "0.3"
-tokio-stream = { workspace = true }
+tokio-stream = { version = "0.1", features = ["net"] }
 tonic = { workspace = true }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"

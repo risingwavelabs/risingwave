@@ -266,6 +266,7 @@ services:
       SCHEMA_REGISTRY_HOST_NAME: schemaregistry
       SCHEMA_REGISTRY_LISTENERS: http://schemaregistry:8082
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: message_queue:29092
+      SCHEMA_REGISTRY_DEBUG: 'true'
 
   pulsar-server:
     container_name: pulsar-server

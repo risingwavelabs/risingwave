@@ -121,7 +121,7 @@ impl PinnedSnapshot {
 
 impl Drop for PinnedSnapshot {
     fn drop(&mut self) {
-        let _ = self.unpin_sender.send(Operation::Unpin(self.value));
+        let _ = self.unpin_sender.send(Operation::Unpin(self.value.clone()));
     }
 }
 
@@ -202,7 +202,9 @@ impl HummockSnapshotManager {
                 false
             } else {
                 // First tell the worker that a new snapshot is going to be pinned.
-                self.worker_sender.send(Operation::Pin(snapshot)).unwrap();
+                self.worker_sender
+                    .send(Operation::Pin(snapshot.clone()))
+                    .unwrap();
                 // Then set the latest snapshot.
                 *old_snapshot = Arc::new(PinnedSnapshot {
                     value: snapshot,

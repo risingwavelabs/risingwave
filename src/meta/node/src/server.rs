@@ -772,7 +772,7 @@ pub async fn start_service_as_election_leader(
         risingwave_pb::meta::event_log::Event::MetaNodeStart(event),
     ]);
 
-    let server_builder = tonic::transport::Server::builder()
+    let server = tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
         .layer(TracingExtractLayer::new())
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
@@ -794,19 +794,17 @@ pub async fn start_service_as_election_leader(
         .add_service(ServingServiceServer::new(serving_srv))
         .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
-        .add_service(EventLogServiceServer::new(event_log_srv));
-    #[cfg(not(madsim))] // `otlp-embedded` does not use madsim-patched tonic
-    let server_builder = server_builder.add_service(TraceServiceServer::new(trace_srv));
-
-    let server = server_builder.monitored_serve_with_shutdown(
-        address_info.listen_addr,
-        "grpc-meta-leader-service",
-        TcpConfig {
-            tcp_nodelay: true,
-            keepalive_duration: None,
-        },
-        shutdown.clone().cancelled_owned(),
-    );
+        .add_service(EventLogServiceServer::new(event_log_srv))
+        .add_service(TraceServiceServer::new(trace_srv))
+        .monitored_serve_with_shutdown(
+            address_info.listen_addr,
+            "grpc-meta-leader-service",
+            TcpConfig {
+                tcp_nodelay: true,
+                keepalive_duration: None,
+            },
+            shutdown.clone().cancelled_owned(),
+        );
     started::set();
     let _server_handle = tokio::spawn(server);
 

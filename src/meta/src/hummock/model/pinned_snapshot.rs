@@ -28,7 +28,7 @@ impl MetadataModel for HummockPinnedSnapshot {
     }
 
     fn to_protobuf(&self) -> Self::PbType {
-        *self
+        self.clone()
     }
 
     fn from_protobuf(prost: Self::PbType) -> Self {
