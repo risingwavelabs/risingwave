@@ -214,3 +214,6 @@ drop table from_kafka_raw cascade;
 
 statement ok
 drop table into_kafka cascade;
+
+system ok
+rpk topic delete test-rw-sink-upsert-protobuf
