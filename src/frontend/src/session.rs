@@ -604,7 +604,6 @@ impl AuthContext {
         }
     }
 }
-
 pub struct SessionImpl {
     env: FrontendEnv,
     auth_context: Arc<AuthContext>,
@@ -666,6 +665,7 @@ impl SessionImpl {
         peer_addr: AddressRef,
         session_config: SessionConfig,
     ) -> Self {
+        let frontend_metrics = env.frontend_metrics.clone();
         Self {
             env,
             auth_context,
@@ -678,7 +678,7 @@ impl SessionImpl {
             notices: Default::default(),
             exec_context: Mutex::new(None),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(CursorManager::default()),
+            cursor_manager: Arc::new(CursorManager::new(frontend_metrics.cursor_metrics.clone())),
         }
     }
 
@@ -1272,7 +1272,15 @@ impl SessionManagerImpl {
     fn delete_session(&self, session_id: &SessionId) {
         let active_sessions = {
             let mut write_guard = self.env.sessions_map.write();
-            write_guard.remove(session_id);
+            let session = write_guard.remove(session_id);
+            tokio::spawn(async move {
+                if let Some(session) = session {
+                    session
+                        .cursor_manager
+                        .remove_all_subscription_cursor_metrics()
+                        .await;
+                }
+            });
             write_guard.len()
         };
         self.env
