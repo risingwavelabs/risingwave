@@ -18,8 +18,8 @@ use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, FunctionCall, UserDefinedFunction};
 use risingwave_sqlparser::ast::{
     Array, CreateSink, CreateSinkStatement, CreateSourceStatement, CreateSubscriptionStatement,
-    Distinct, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, Query, SelectItem,
-    SetExpr, Statement, TableAlias, TableFactor, TableWithJoins,
+    Distinct, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident, ObjectName,
+    Query, SelectItem, SetExpr, Statement, TableAlias, TableFactor, TableWithJoins,
 };
 use risingwave_sqlparser::parser::Parser;
 
@@ -264,14 +264,18 @@ impl QueryRewriter<'_> {
         }
     }
 
-    /// Visit function and update all references.
-    fn visit_function(&self, function: &mut Function) {
-        for arg in &mut function.args {
+    fn visit_function_arg_list(&self, arg_list: &mut FunctionArgList) {
+        for arg in &mut arg_list.args {
             self.visit_function_arg(arg);
         }
-        for expr in &mut function.order_by {
+        for expr in &mut arg_list.order_by {
             self.visit_expr(&mut expr.expr)
         }
+    }
+
+    /// Visit function and update all references.
+    fn visit_function(&self, function: &mut Function) {
+        self.visit_function_arg_list(&mut function.arg_list);
         if let Some(over) = &mut function.over {
             for expr in &mut over.partition_by {
                 self.visit_expr(expr);

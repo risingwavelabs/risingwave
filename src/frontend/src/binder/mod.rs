@@ -790,30 +790,32 @@ mod tests {
                                                     },
                                                 ],
                                             ),
-                                            args: [
-                                                Unnamed(
-                                                    Expr(
-                                                        Value(
-                                                            Number(
-                                                                "0.5",
+                                            arg_list: FunctionArgList {
+                                                distinct: false,
+                                                args: [
+                                                    Unnamed(
+                                                        Expr(
+                                                            Value(
+                                                                Number(
+                                                                    "0.5",
+                                                                ),
                                                             ),
                                                         ),
                                                     ),
-                                                ),
-                                                Unnamed(
-                                                    Expr(
-                                                        Value(
-                                                            Number(
-                                                                "0.01",
+                                                    Unnamed(
+                                                        Expr(
+                                                            Value(
+                                                                Number(
+                                                                    "0.01",
+                                                                ),
                                                             ),
                                                         ),
                                                     ),
-                                                ),
-                                            ],
-                                            variadic: false,
+                                                ],
+                                                variadic: false,
+                                                order_by: [],
+                                            },
                                             over: None,
-                                            distinct: false,
-                                            order_by: [],
                                             filter: None,
                                             within_group: Some(
                                                 OrderByExpr {
