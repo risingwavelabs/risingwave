@@ -145,6 +145,36 @@ impl FragmentManager {
         })
     }
 
+    pub async fn new_v2(env: MetaSrvEnv, all_streaming_jobs: HashSet<u32>) -> MetaResult<Self> {
+        let mut table_fragments = vec![];
+        for job_id in all_streaming_jobs {
+            if let Some(table_fragment) =
+                TableFragments::select(env.meta_store().as_kv(), &job_id).await?
+            {
+                // compress and rewrite.
+                table_fragment.insert(env.meta_store().as_kv()).await?;
+                table_fragments.push(table_fragment);
+            }
+        }
+
+        // `expr_context` of `StreamActor` is introduced in 1.6.0.
+        // To ensure compatibility, we fill it for table fragments that were created with older versions.
+        let table_fragments = table_fragments
+            .into_iter()
+            .map(|tf| (tf.table_id(), tf.fill_expr_context()))
+            .collect();
+
+        let table_revision = TableRevision::get(env.meta_store().as_kv()).await?;
+
+        Ok(Self {
+            env,
+            core: RwLock::new(FragmentManagerCore {
+                table_fragments,
+                table_revision,
+            }),
+        })
+    }
+
     pub async fn get_fragment_read_guard(&self) -> RwLockReadGuard<'_, FragmentManagerCore> {
         self.core.read().await
     }
