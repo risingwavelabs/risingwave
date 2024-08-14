@@ -18,7 +18,10 @@ use risingwave_pb::telemetry::{
     TelemetryNodeType as PbTelemetryNodeType,
 };
 
-use crate::telemetry::{Cpu, Memory, Os, SystemData, TelemetryNodeType, TelemetryReportBase};
+use crate::telemetry::{
+    get_telemetry_risingwave_cloud_uuid, Cpu, Memory, Os, SystemData, TelemetryNodeType,
+    TelemetryReportBase,
+};
 
 pub trait TelemetryToProtobuf {
     fn to_pb_bytes(self) -> Vec<u8>;
@@ -27,7 +30,11 @@ pub trait TelemetryToProtobuf {
 impl From<TelemetryReportBase> for PbTelemetryReportBase {
     fn from(val: TelemetryReportBase) -> Self {
         PbTelemetryReportBase {
-            tracking_id: val.tracking_id,
+            tracking_id: if let Some(id) = get_telemetry_risingwave_cloud_uuid() {
+                id
+            } else {
+                val.tracking_id
+            },
             session_id: val.session_id,
             system_data: Some(val.system_data.into()),
             up_time: val.up_time,
