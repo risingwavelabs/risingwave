@@ -1015,6 +1015,10 @@ pub struct StreamingDeveloperConfig {
     /// If not specified, the value of `server.connection_pool_size` will be used.
     #[serde(default = "default::developer::stream_exchange_connection_pool_size")]
     pub exchange_connection_pool_size: Option<u16>,
+
+    /// A flag to allow disabling the auto schema change handling
+    #[serde(default = "default::developer::stream_enable_auto_schema_change")]
+    pub enable_auto_schema_change: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1884,6 +1888,10 @@ pub mod default {
 
         pub fn enable_actor_tokio_metrics() -> bool {
             false
+        }
+
+        pub fn stream_enable_auto_schema_change() -> bool {
+            true
         }
     }
 

@@ -21,6 +21,7 @@ use await_tree::InstrumentAwait;
 use futures::future::join_all;
 use hytra::TrAdder;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::epoch::EpochPair;
@@ -59,6 +60,8 @@ pub struct ActorContext {
 
     // Meta client. currently used for auto schema change. `None` for test only
     pub meta_client: Option<MetaClient>,
+
+    pub streaming_config: Arc<StreamingConfig>,
 }
 
 pub type ActorContextRef = Arc<ActorContext>;
@@ -77,6 +80,7 @@ impl ActorContext {
             initial_dispatch_num: 1,
             related_subscriptions: HashMap::new(),
             meta_client: None,
+            streaming_config: Arc::new(StreamingConfig::default()),
         })
     }
 
@@ -87,6 +91,7 @@ impl ActorContext {
         initial_dispatch_num: usize,
         related_subscriptions: HashMap<TableId, HashSet<u32>>,
         meta_client: Option<MetaClient>,
+        streaming_config: Arc<StreamingConfig>,
     ) -> ActorContextRef {
         Arc::new(Self {
             id: stream_actor.actor_id,
@@ -99,6 +104,7 @@ impl ActorContext {
             initial_dispatch_num,
             related_subscriptions,
             meta_client,
+            streaming_config,
         })
     }
 
