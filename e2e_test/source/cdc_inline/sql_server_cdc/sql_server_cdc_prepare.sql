@@ -70,3 +70,13 @@ INSERT INTO sqlserver_all_data_types VALUES (1, 'False', 0, 0, 0, 0, 0, 0, 0, ''
 INSERT INTO sqlserver_all_data_types VALUES (2, 'True', 255, -32768, -2147483648, -9223372036854775808, -10.0, -9999.999999, -10000.0, 'aa', 0xff, '1990-01-01', '13:59:59.123', '2000-01-01 11:00:00.123', '1990-01-01 00:00:01.123');
 
 INSERT INTO sqlserver_all_data_types VALUES (3, 'True', 127, 32767, 2147483647, 9223372036854775807, -10.0, 9999.999999, 10000.0, 'zzzz', 0xffffffff, '2999-12-31', '23:59:59.999', '2099-12-31 23:59:59.999', '2999-12-31 23:59:59.999')
+
+-- Table without enabling CDC
+CREATE TABLE orders_without_cdc (
+  order_id INT PRIMARY KEY,
+  order_date BIGINT,
+  customer_name NVARCHAR(200),
+  price DECIMAL,
+  product_id INT,
+  order_status SMALLINT
+);

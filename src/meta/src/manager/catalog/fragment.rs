@@ -1079,6 +1079,11 @@ impl FragmentManager {
                 for actor in &mut fragment.actors {
                     if let Some(node) = actor.nodes.as_mut() {
                         visit_stream_node(node, |node_body| match node_body {
+                            // rate limit for cdc backfill
+                            NodeBody::StreamCdcScan(ref mut node) => {
+                                node.rate_limit = rate_limit;
+                                actor_to_apply.push(actor.actor_id);
+                            }
                             NodeBody::StreamScan(ref mut node) => {
                                 node.rate_limit = rate_limit;
                                 actor_to_apply.push(actor.actor_id);

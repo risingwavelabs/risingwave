@@ -1214,12 +1214,23 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let source = Source::find_by_id(source_id)
+        {
+            let active_source = source::ActiveModel {
+                source_id: Set(source_id),
+                rate_limit: Set(rate_limit.map(|v| v as i32)),
+                ..Default::default()
+            };
+            active_source.update(&txn).await?;
+        }
+
+        let (source, obj) = Source::find_by_id(source_id)
+            .find_also_related(Object)
             .one(&txn)
             .await?
             .ok_or_else(|| {
                 MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
             })?;
+
         let streaming_job_ids: Vec<ObjectId> =
             if let Some(table_id) = source.optional_associated_table_id {
                 vec![table_id]
@@ -1295,6 +1306,19 @@ impl CatalogController {
 
         txn.commit().await?;
 
+        let relation_info = PbRelationInfo::Source(ObjectModel(source, obj.unwrap()).into());
+        let relation = PbRelation {
+            relation_info: Some(relation_info),
+        };
+        let _version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::RelationGroup(PbRelationGroup {
+                    relations: vec![relation],
+                }),
+            )
+            .await;
+
         Ok(fragment_actors)
     }
 
@@ -1330,6 +1354,10 @@ impl CatalogController {
                 || (*fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0)
             {
                 visit_stream_node(stream_node, |node| match node {
+                    PbNodeBody::StreamCdcScan(node) => {
+                        node.rate_limit = rate_limit;
+                        found = true;
+                    }
                     PbNodeBody::StreamScan(node) => {
                         node.rate_limit = rate_limit;
                         found = true;

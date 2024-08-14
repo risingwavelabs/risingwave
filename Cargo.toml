@@ -121,7 +121,7 @@ aws-smithy-types = { version = "1", default-features = false, features = [
 aws-endpoint = "0.60"
 aws-types = "1"
 axum = "=0.7.4" # TODO: 0.7.5+ does not work with current toolchain
-etcd-client = { package = "madsim-etcd-client", version = "0.4" }
+etcd-client = { package = "madsim-etcd-client", version = "0.6" }
 futures-async-stream = "0.2.9"
 hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "0.4.1", features = [
@@ -129,11 +129,12 @@ rdkafka = { package = "madsim-rdkafka", version = "0.4.1", features = [
 ] }
 hashbrown = { version = "0.14", features = ["ahash", "inline-more", "nightly"] }
 criterion = { version = "0.5", features = ["async_futures"] }
-tonic = { package = "madsim-tonic", version = "0.4.1" }
-tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
-otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "492c244e0be91feb659c0cd48a624bbd96045a33" }
-prost = { version = "0.12" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "07d53893d7788b4e41fc11efad8a6be828405c31", features = [
+tonic = { package = "madsim-tonic", version = "0.5.1" }
+tonic-build = { package = "madsim-tonic-build", version = "0.5" }
+otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "e6cd165b9bc85783b42c106e99186b86b73e3507" }
+prost = { version = "0.13" }
+prost-build = { version = "0.13" }
+icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "1860eb315183a5f3f72b4097c1e40d49407f8373", features = [
     "prometheus",
 ] }
 arrow-array-iceberg = { package = "arrow-array", version = "52" }
@@ -179,6 +180,7 @@ tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git"
     "profiling",
     "stats",
 ], rev = "64a2d9" }
+# TODO(http-bump): bump to use tonic 0.12 once minitrace-opentelemetry is updated
 opentelemetry = "0.23"
 opentelemetry-otlp = "0.16"
 opentelemetry_sdk = { version = "0.23", default-features = false }
@@ -194,6 +196,7 @@ sea-orm = { version = "0.12.14", features = [
     "runtime-tokio-native-tls",
 ] }
 sqlx = "0.7"
+tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055", features = ["net", "fs"] }
 tokio-util = "0.7"
 tracing-opentelemetry = "0.24"
 rand = { version = "0.8", features = ["small_rng"] }
@@ -334,7 +337,9 @@ opt-level = 2
 # Patch third-party crates for deterministic simulation.
 quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "948bdc3" }
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
-tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e" }
+# Don't patch `tokio-stream`, but only use the madsim version for **direct** dependencies.
+# Imagine an unpatched dependency depends on the original `tokio` and the patched `tokio-stream`.
+# tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }

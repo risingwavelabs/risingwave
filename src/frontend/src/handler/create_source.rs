@@ -86,7 +86,9 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
-use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options};
+use crate::utils::{
+    resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options, OverwriteOptions,
+};
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions, WithOptionsSecResolved};
 
 /// Map a JSON schema to a relational schema
@@ -1441,6 +1443,7 @@ pub async fn bind_create_source_or_table_with_connector(
     col_id_gen: &mut ColumnIdGenerator,
     // `true` for "create source", `false` for "create table with connector"
     is_create_source: bool,
+    source_rate_limit: Option<u32>,
 ) -> Result<(SourceCatalog, DatabaseId, SchemaId)> {
     let session = &handler_args.session;
     let db_name: &str = session.database();
@@ -1581,15 +1584,17 @@ pub async fn bind_create_source_or_table_with_connector(
         version: INITIAL_SOURCE_VERSION_ID,
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
+        rate_limit: source_rate_limit,
     };
     Ok((source, database_id, schema_id))
 }
 
 pub async fn handle_create_source(
-    handler_args: HandlerArgs,
+    mut handler_args: HandlerArgs,
     stmt: CreateSourceStatement,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
+    let overwrite_options = OverwriteOptions::new(&mut handler_args);
 
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         stmt.source_name.clone(),
@@ -1638,6 +1643,7 @@ pub async fn handle_create_source(
         stmt.include_column_options,
         &mut col_id_gen,
         true,
+        overwrite_options.source_rate_limit,
     )
     .await?;
 

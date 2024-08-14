@@ -30,6 +30,7 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::hummock::compact_task::{self};
 use risingwave_pb::hummock::HummockSnapshot;
 use sea_orm::TransactionTrait;
+use tracing::warn;
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
@@ -269,19 +270,28 @@ impl HummockManager {
 
         // TODO: remove the sanity check when supporting partial checkpoint
         assert_eq!(1, table_committed_epoch.len());
-        assert_eq!(
-            table_committed_epoch.iter().next().expect("non-empty"),
-            (
-                &epoch,
-                &version
-                    .latest_version()
-                    .state_table_info
-                    .info()
-                    .keys()
-                    .cloned()
-                    .collect()
-            )
-        );
+        {
+            let (table_committed_epoch, committed_table_ids) =
+                table_committed_epoch.iter().next().expect("non-empty");
+            assert_eq!(*table_committed_epoch, epoch);
+            let table_ids: HashSet<_> = version
+                .latest_version()
+                .state_table_info
+                .info()
+                .keys()
+                .cloned()
+                .collect();
+            assert!(table_ids.is_subset(committed_table_ids), "hummock table ids {table_ids:?} not a subset of table ids to commit{committed_table_ids:?}");
+            if cfg!(debug_assertions) {
+                assert_eq!(&table_ids, committed_table_ids);
+            } else if table_ids != *committed_table_ids {
+                let extra_table_ids = committed_table_ids - &table_ids;
+                warn!(
+                    ?extra_table_ids,
+                    "ignore extra table ids that are not previously registered"
+                );
+            }
+        }
 
         // Apply stats changes.
         let mut version_stats = HummockVersionStatsTransaction::new(
@@ -367,7 +377,7 @@ impl HummockManager {
             committed_epoch: epoch,
             current_epoch: epoch,
         };
-        let prev_snapshot = self.latest_snapshot.swap(snapshot.clone().into());
+        let prev_snapshot = self.latest_snapshot.swap(snapshot.into());
         assert!(prev_snapshot.committed_epoch < epoch);
         assert!(prev_snapshot.current_epoch < epoch);
 
