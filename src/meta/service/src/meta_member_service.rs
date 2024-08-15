@@ -65,8 +65,8 @@ impl MetaMemberService for MetaMemberServiceImpl {
         &self,
         _request: Request<IsServingLeaderRequest>,
     ) -> Result<Response<IsServingLeaderResponse>, Status> {
-        let is_leader = self.is_serving_leader && self.election_client.is_leader();
-
-        Ok(Response::new(IsServingLeaderResponse { is_leader }))
+        Ok(Response::new(IsServingLeaderResponse {
+            is_leader: self.is_serving_leader,
+        }))
     }
 }
