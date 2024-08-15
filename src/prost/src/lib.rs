@@ -20,6 +20,7 @@
 use std::str::FromStr;
 
 pub use prost::Message;
+use plan_common::AdditionalColumn;
 use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
@@ -303,7 +304,7 @@ impl stream_plan::StreamNode {
 }
 
 impl catalog::StreamSourceInfo {
-    /// Refer to [`Self::cdc_source_job`] for details.
+    /// er to [`Self::cdc_source_job`] for details.
     pub fn is_shared(&self) -> bool {
         self.cdc_source_job
     }
@@ -329,21 +330,104 @@ impl std::fmt::Debug for meta::SystemParams {
     }
 }
 
+// More compact formats for debugging
+
+impl std::fmt::Debug for data::DataType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let data::DataType {
+            precision,
+            scale,
+            interval_type,
+            field_type,
+            field_names,
+            type_name,
+        } = self;
+
+        let type_name = data::data_type::TypeName::try_from(*type_name)
+            .map(|t| t.as_str_name())
+            .unwrap_or("Unknown");
+
+        let mut s = f.debug_struct(type_name);
+        if self.precision != 0 {
+            s.field("precision", precision);
+        }
+        if self.scale != 0 {
+            s.field("scale", scale);
+        }
+        if self.interval_type != 0 {
+            s.field("interval_type", interval_type);
+        }
+        if !self.field_type.is_empty() {
+            s.field("field_type", field_type);
+        }
+        if !self.field_names.is_empty() {
+            s.field("field_names", field_names);
+        }
+        s.finish()
+    }
+}
+
+impl std::fmt::Debug for plan_common::column_desc::GeneratedOrDefaultColumn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::GeneratedColumn(arg0) => f.debug_tuple("GeneratedColumn").field(arg0).finish(),
+            Self::DefaultColumn(arg0) => f.debug_tuple("DefaultColumn").field(arg0).finish(),
+        }
+    }
+}
+
+impl std::fmt::Debug for plan_common::ColumnDesc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // destruct here to avoid missing new fields in the future.
+        let plan_common::ColumnDesc {
+            column_type,
+            column_id,
+            name,
+            field_descs,
+            type_name,
+            description,
+            additional_column_type,
+            additional_column,
+            generated_or_default_column,
+            version,
+        } = self;
+
+        let mut s = f.debug_struct("ColumnDesc");
+        if let Some(column_type) = column_type {
+            s.field("column_type", column_type);
+        } else {
+            s.field("column_type", &"Unknown");
+        }
+        s.field("column_id", column_id).field("name", name);
+        if !self.field_descs.is_empty() {
+            s.field("field_descs", field_descs);
+        }
+        if !self.type_name.is_empty() {
+            s.field("type_name", type_name);
+        }
+        if let Some(description) = description {
+            s.field("description", description);
+        }
+        if self.additional_column_type != 0 {
+            s.field("additional_column_type", additional_column_type);
+        }
+        s.field("version", version);
+        if let Some(AdditionalColumn { column_type }) = additional_column {
+            // AdditionalColumn { None } means a normal column
+            if let Some(column_type) = column_type {
+                s.field("additional_column", &column_type);
+            }
+        }
+        if let Some(generated_or_default_column) = generated_or_default_column {
+            s.field("generated_or_default_column", &generated_or_default_column);
+        }
+        s.finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::data::{data_type, DataType};
-    use crate::plan_common::Field;
-
-    #[test]
-    fn test_getter() {
-        let mut data_type: DataType = DataType::default();
-        data_type.is_nullable = true;
-        let field = Field {
-            data_type: Some(data_type),
-            name: "".to_string(),
-        };
-        assert!(field.get_data_type().unwrap().is_nullable);
-    }
 
     #[test]
     fn test_enum_getter() {
@@ -360,15 +444,5 @@ mod tests {
         let mut data_type: DataType = DataType::default();
         data_type.type_name = data_type::TypeName::TypeUnspecified as i32;
         assert!(data_type.get_type_name().is_err());
-    }
-
-    #[test]
-    fn test_primitive_getter() {
-        let data_type: DataType = DataType::default();
-        let new_data_type = DataType {
-            is_nullable: data_type.get_is_nullable(),
-            ..Default::default()
-        };
-        assert!(!new_data_type.is_nullable);
     }
 }

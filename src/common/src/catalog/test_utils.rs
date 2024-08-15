@@ -49,7 +49,6 @@ impl ColumnDescTestExt for ColumnDesc {
         Self {
             column_type: Some(DataType {
                 type_name: TypeName::Struct as i32,
-                is_nullable: true,
                 field_type,
                 field_names: fields.iter().map(|f| f.name.clone()).collect_vec(),
                 ..Default::default()
