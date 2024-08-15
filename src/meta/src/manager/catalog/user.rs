@@ -234,7 +234,7 @@ mod tests {
             .grant_privilege(
                 &[test_sub_user_id],
                 &[make_privilege(
-                    object.clone(),
+                    object,
                     &[Action::Select, Action::Update, Action::Delete],
                     true,
                 )],
@@ -249,7 +249,7 @@ mod tests {
             .grant_privilege(
                 &[test_user_id],
                 &[make_privilege(
-                    object.clone(),
+                    object,
                     &[Action::Select, Action::Insert],
                     false,
                 )],
@@ -258,7 +258,7 @@ mod tests {
             .await?;
         let user = catalog_manager.get_user(test_user_id).await?;
         assert_eq!(user.grant_privileges.len(), 1);
-        assert_eq!(user.grant_privileges[0].object, Some(object.clone()));
+        assert_eq!(user.grant_privileges[0].object, Some(object));
         assert_eq!(user.grant_privileges[0].action_with_opts.len(), 2);
         assert!(user.grant_privileges[0]
             .action_with_opts
@@ -269,7 +269,7 @@ mod tests {
             .grant_privilege(
                 &[test_sub_user_id],
                 &[make_privilege(
-                    object.clone(),
+                    object,
                     &[Action::Select, Action::Insert],
                     true,
                 )],
@@ -284,7 +284,7 @@ mod tests {
             .grant_privilege(
                 &[test_user_id],
                 &[make_privilege(
-                    object.clone(),
+                    object,
                     &[Action::Select, Action::Insert],
                     true,
                 )],
@@ -293,7 +293,7 @@ mod tests {
             .await?;
         let user = catalog_manager.get_user(test_user_id).await?;
         assert_eq!(user.grant_privileges.len(), 1);
-        assert_eq!(user.grant_privileges[0].object, Some(object.clone()));
+        assert_eq!(user.grant_privileges[0].object, Some(object));
         assert_eq!(user.grant_privileges[0].action_with_opts.len(), 2);
         assert!(user.grant_privileges[0]
             .action_with_opts
@@ -304,7 +304,7 @@ mod tests {
             .grant_privilege(
                 &[test_sub_user_id],
                 &[make_privilege(
-                    object.clone(),
+                    object,
                     &[Action::Select, Action::Insert],
                     true,
                 )],
@@ -319,7 +319,7 @@ mod tests {
             .grant_privilege(
                 &[test_user_id],
                 &[make_privilege(
-                    object.clone(),
+                    object,
                     &[Action::Select, Action::Update, Action::Delete],
                     true,
                 )],
@@ -328,7 +328,7 @@ mod tests {
             .await?;
         let user = catalog_manager.get_user(test_user_id).await?;
         assert_eq!(user.grant_privileges.len(), 1);
-        assert_eq!(user.grant_privileges[0].object, Some(object.clone()));
+        assert_eq!(user.grant_privileges[0].object, Some(object));
         assert_eq!(user.grant_privileges[0].action_with_opts.len(), 4);
         assert!(user.grant_privileges[0]
             .action_with_opts
@@ -339,7 +339,7 @@ mod tests {
         let res = catalog_manager
             .revoke_privilege(
                 &[test_user_id],
-                &[make_privilege(object.clone(), &[Action::Connect], false)],
+                &[make_privilege(object, &[Action::Connect], false)],
                 0,
                 test_sub_user_id,
                 true,
@@ -355,11 +355,7 @@ mod tests {
         let res = catalog_manager
             .revoke_privilege(
                 &[test_user_id],
-                &[make_privilege(
-                    other_object.clone(),
-                    &[Action::Connect],
-                    false,
-                )],
+                &[make_privilege(other_object, &[Action::Connect], false)],
                 0,
                 test_sub_user_id,
                 true,
@@ -376,7 +372,7 @@ mod tests {
             .revoke_privilege(
                 &[test_user_id],
                 &[make_privilege(
-                    object.clone(),
+                    object,
                     &[
                         Action::Select,
                         Action::Insert,
@@ -401,7 +397,7 @@ mod tests {
             .revoke_privilege(
                 &[test_user_id],
                 &[make_privilege(
-                    object.clone(),
+                    object,
                     &[
                         Action::Select,
                         Action::Insert,
@@ -429,7 +425,7 @@ mod tests {
             .revoke_privilege(
                 &[test_user_id],
                 &[make_privilege(
-                    object.clone(),
+                    object,
                     &[Action::Select, Action::Insert, Action::Delete],
                     false,
                 )],

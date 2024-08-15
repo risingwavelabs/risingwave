@@ -735,7 +735,7 @@ impl DdlService for DdlServiceImpl {
         _request: Request<GetDdlProgressRequest>,
     ) -> Result<Response<GetDdlProgressResponse>, Status> {
         Ok(Response::new(GetDdlProgressResponse {
-            ddl_progress: self.ddl_controller.get_ddl_progress().await,
+            ddl_progress: self.ddl_controller.get_ddl_progress().await?,
         }))
     }
 
@@ -907,7 +907,7 @@ impl DdlService for DdlServiceImpl {
         let req = request.into_inner();
 
         let table_id = req.get_table_id();
-        let parallelism = req.get_parallelism()?.clone();
+        let parallelism = *req.get_parallelism()?;
         let deferred = req.get_deferred();
 
         self.ddl_controller

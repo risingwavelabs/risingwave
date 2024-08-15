@@ -40,7 +40,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-tokio-stream = { version = "0.1", features = ["net"] }
+tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
 

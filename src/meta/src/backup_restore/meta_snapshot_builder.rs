@@ -21,7 +21,7 @@ use risingwave_backup::meta_snapshot_v1::{ClusterMetadata, MetaSnapshotV1};
 use risingwave_backup::MetaSnapshotId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::catalog::{
-    Connection, Database, Function, Index, Schema, Sink, Source, Subscription, Table, View,
+    Connection, Database, Function, Index, Schema, Secret, Sink, Source, Subscription, Table, View,
 };
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::SystemParams;
@@ -124,6 +124,7 @@ impl<S: MetaStore> MetaSnapshotV1Builder<S> {
             .ok_or_else(|| anyhow!("cluster id not found in meta store"))?
             .into();
         let subscription = Subscription::list_at_snapshot::<S>(&meta_store_snapshot).await?;
+        let secret = Secret::list_at_snapshot::<S>(&meta_store_snapshot).await?;
 
         self.snapshot.metadata = ClusterMetadata {
             default_cf,
@@ -144,6 +145,7 @@ impl<S: MetaStore> MetaSnapshotV1Builder<S> {
             system_param,
             cluster_id,
             subscription,
+            secret,
         };
         Ok(())
     }
@@ -172,6 +174,7 @@ mod tests {
     use risingwave_backup::meta_snapshot_v1::MetaSnapshotV1;
     use risingwave_common::system_param::system_params_for_test;
     use risingwave_hummock_sdk::version::HummockVersion;
+    use risingwave_hummock_sdk::HummockVersionId;
     use risingwave_pb::hummock::HummockVersionStats;
 
     use crate::backup_restore::meta_snapshot_builder;
@@ -188,13 +191,13 @@ mod tests {
 
         let mut builder = MetaSnapshotBuilder::new(meta_store.clone());
         let mut hummock_version = HummockVersion::default();
-        hummock_version.id = 1;
+        hummock_version.id = HummockVersionId::new(1);
         let get_ckpt_builder = |v: &HummockVersion| {
             let v_ = v.clone();
             async move { v_ }
         };
         let hummock_version_stats = HummockVersionStats {
-            hummock_version_id: hummock_version.id,
+            hummock_version_id: hummock_version.id.to_u64(),
             ..Default::default()
         };
         hummock_version_stats.insert(&meta_store).await.unwrap();
@@ -248,7 +251,7 @@ mod tests {
             snapshot.metadata.default_cf.values().cloned().collect_vec(),
             vec![vec![100]]
         );
-        assert_eq!(snapshot.metadata.hummock_version.id, 1);
+        assert_eq!(snapshot.metadata.hummock_version.id.to_u64(), 1);
         assert_eq!(snapshot.metadata.version_stats.hummock_version_id, 1);
     }
 }

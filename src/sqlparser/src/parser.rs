@@ -815,16 +815,14 @@ impl Parser<'_> {
     /// Parse a function call.
     pub fn parse_function(&mut self) -> PResult<Expr> {
         // [aggregate:]
-        let aggregate = if self.parse_keyword(Keyword::AGGREGATE) {
+        let scalar_as_agg = if self.parse_keyword(Keyword::AGGREGATE) {
             self.expect_token(&Token::Colon)?;
             true
         } else {
             false
         };
         let name = self.parse_object_name()?;
-        self.expect_token(&Token::LParen)?;
-        let distinct = self.parse_all_or_distinct()?;
-        let (args, order_by, variadic) = self.parse_optional_args()?;
+        let arg_list = self.parse_argument_list()?;
         let over = if self.parse_keyword(Keyword::OVER) {
             // TODO: support window names (`OVER mywin`) in place of inline specification
             self.expect_token(&Token::LParen)?;
@@ -877,13 +875,10 @@ impl Parser<'_> {
         };
 
         Ok(Expr::Function(Function {
-            aggregate,
+            scalar_as_agg,
             name,
-            args,
-            variadic,
+            arg_list,
             over,
-            distinct,
-            order_by,
             filter,
             within_group,
         }))
@@ -3092,6 +3087,8 @@ impl Parser<'_> {
                 }
             } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(true)? {
                 AlterTableOperation::SetSourceRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? {
+                AlterTableOperation::SetBackfillRateLimit { rate_limit }
             } else {
                 return self.expected("SCHEMA/PARALLELISM/SOURCE_RATE_LIMIT after SET");
             }
@@ -3632,8 +3629,7 @@ impl Parser<'_> {
         .parse_next(self)
     }
 
-    /// Parse a SQL datatype (in the context of a CREATE TABLE statement for example) and convert
-    /// into an array of that datatype if needed
+    /// Parse a SQL datatype (in the context of a CREATE TABLE statement for example)
     pub fn parse_data_type(&mut self) -> PResult<DataType> {
         parser_v2::data_type(self)
     }
@@ -4114,10 +4110,15 @@ impl Parser<'_> {
                 break;
             }
             self.next_token(); // skip past the set operator
+
+            let all = self.parse_keyword(Keyword::ALL);
+            let corresponding = self.parse_corresponding()?;
+
             expr = SetExpr::SetOperation {
                 left: Box::new(expr),
                 op: op.unwrap(),
-                all: self.parse_keyword(Keyword::ALL),
+                corresponding,
+                all,
                 right: Box::new(self.parse_query_body(next_precedence)?),
             };
         }
@@ -4132,6 +4133,20 @@ impl Parser<'_> {
             Token::Word(w) if w.keyword == Keyword::INTERSECT => Some(SetOperator::Intersect),
             _ => None,
         }
+    }
+
+    fn parse_corresponding(&mut self) -> PResult<Corresponding> {
+        let corresponding = if self.parse_keyword(Keyword::CORRESPONDING) {
+            let column_list = if self.parse_keyword(Keyword::BY) {
+                Some(self.parse_parenthesized_column_list(IsOptional::Mandatory)?)
+            } else {
+                None
+            };
+            Corresponding::with_column_list(column_list)
+        } else {
+            Corresponding::none()
+        };
+        Ok(corresponding)
     }
 
     /// Parse a restricted `SELECT` statement (no CTEs / `UNION` / `ORDER BY`),
@@ -4645,17 +4660,24 @@ impl Parser<'_> {
             }
         } else {
             let name = self.parse_object_name()?;
-            // Postgres,table-valued functions:
-            if self.consume_token(&Token::LParen) {
-                // ignore VARIADIC here
-                let (args, order_by, _variadic) = self.parse_optional_args()?;
-                // Table-valued functions do not support ORDER BY, should return error if it appears
-                if !order_by.is_empty() {
-                    parser_err!("Table-valued functions do not support ORDER BY clauses");
-                }
-                let with_ordinality = self.parse_keywords(&[Keyword::WITH, Keyword::ORDINALITY]);
+            if self.peek_token() == Token::LParen {
+                // table-valued function
 
+                let arg_list = self.parse_argument_list()?;
+                if arg_list.distinct {
+                    parser_err!("DISTINCT is not supported in table-valued function calls");
+                }
+                if !arg_list.order_by.is_empty() {
+                    parser_err!("ORDER BY is not supported in table-valued function calls");
+                }
+                if arg_list.ignore_nulls {
+                    parser_err!("IGNORE NULLS is not supported in table-valued function calls");
+                }
+
+                let args = arg_list.args;
+                let with_ordinality = self.parse_keywords(&[Keyword::WITH, Keyword::ORDINALITY]);
                 let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
+
                 Ok(TableFactor::TableFunction {
                     name,
                     alias,
@@ -4938,17 +4960,19 @@ impl Parser<'_> {
         Ok((variadic, arg))
     }
 
-    pub fn parse_optional_args(&mut self) -> PResult<(Vec<FunctionArg>, Vec<OrderByExpr>, bool)> {
+    pub fn parse_argument_list(&mut self) -> PResult<FunctionArgList> {
+        self.expect_token(&Token::LParen)?;
         if self.consume_token(&Token::RParen) {
-            Ok((vec![], vec![], false))
+            Ok(FunctionArgList::empty())
         } else {
+            let distinct = self.parse_all_or_distinct()?;
             let args = self.parse_comma_separated(Parser::parse_function_args)?;
             if args
                 .iter()
                 .take(args.len() - 1)
                 .any(|(variadic, _)| *variadic)
             {
-                parser_err!("VARIADIC argument must be last");
+                parser_err!("VARIADIC argument must be the last");
             }
             let variadic = args.last().map(|(variadic, _)| *variadic).unwrap_or(false);
             let args = args.into_iter().map(|(_, arg)| arg).collect();
@@ -4958,8 +4982,19 @@ impl Parser<'_> {
             } else {
                 vec![]
             };
+
+            let ignore_nulls = self.parse_keywords(&[Keyword::IGNORE, Keyword::NULLS]);
+
+            let arg_list = FunctionArgList {
+                distinct,
+                args,
+                variadic,
+                order_by,
+                ignore_nulls,
+            };
+
             self.expect_token(&Token::RParen)?;
-            Ok((args, order_by, variadic))
+            Ok(arg_list)
         }
     }
 

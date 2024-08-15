@@ -413,9 +413,11 @@ impl FrontendEnv {
 
         // Clean up the spill directory.
         #[cfg(not(madsim))]
-        SpillOp::clean_spill_directory()
-            .await
-            .map_err(|err| anyhow!(err))?;
+        if config.batch.enable_spill {
+            SpillOp::clean_spill_directory()
+                .await
+                .map_err(|err| anyhow!(err))?;
+        }
 
         let total_memory_bytes = resource_util::memory::system_memory_available_bytes();
         let heap_profiler =
@@ -1307,13 +1309,13 @@ impl Session for SessionImpl {
         self.id
     }
 
-    fn parse(
+    async fn parse(
         self: Arc<Self>,
         statement: Option<Statement>,
         params_types: Vec<Option<DataType>>,
     ) -> std::result::Result<PrepareStatement, BoxedError> {
         Ok(if let Some(statement) = statement {
-            handle_parse(self, statement, params_types)?
+            handle_parse(self, statement, params_types).await?
         } else {
             PrepareStatement::Empty
         })
@@ -1446,7 +1448,8 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }
-        | Statement::Update { .. } => Ok(bound
+        | Statement::Update { .. }
+        | Statement::FetchCursor { .. } => Ok(bound
             .unwrap()
             .output_fields()
             .iter()

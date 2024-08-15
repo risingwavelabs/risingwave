@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::fmt::Formatter;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
@@ -25,6 +25,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::catalog::{CreateType, Table};
+use risingwave_pb::common::PbWorkerNode;
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
@@ -33,20 +34,18 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, BarrierMutation, CombinedMutation, CreateSubscriptionMutation, Dispatcher,
-    Dispatchers, DropSubscriptionMutation, PauseMutation, ResumeMutation,
-    SourceChangeSplitMutation, StopMutation, StreamActor, ThrottleMutation, UpdateMutation,
+    AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers,
+    DropSubscriptionsMutation, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
+    StopMutation, StreamActor, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use thiserror_ext::AsReport;
 use tracing::warn;
 
-use super::info::{
-    CommandActorChanges, CommandFragmentChanges, CommandNewFragmentInfo, InflightActorInfo,
-};
+use super::info::CommandFragmentChanges;
 use super::trace::TracedEpoch;
-use crate::barrier::GlobalBarrierManagerContext;
-use crate::manager::{DdlType, MetadataManager, StreamingJob, WorkerId};
+use crate::barrier::{GlobalBarrierManagerContext, InflightSubscriptionInfo};
+use crate::manager::{DdlType, InflightFragmentInfo, MetadataManager, StreamingJob, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
 use crate::MetaResult;
@@ -75,7 +74,8 @@ pub struct Reschedule {
     /// The downstream fragments of this fragment.
     pub downstream_fragment_ids: Vec<FragmentId>,
 
-    /// Reassigned splits for source actors
+    /// Reassigned splits for source actors.
+    /// It becomes the `actor_splits` in [`UpdateMutation`].
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
     /// Whether this fragment is injectable. The injectable means whether the fragment contains
@@ -106,11 +106,11 @@ pub struct ReplaceTablePlan {
 }
 
 impl ReplaceTablePlan {
-    fn actor_changes(&self) -> CommandActorChanges {
+    fn fragment_changes(&self) -> HashMap<FragmentId, CommandFragmentChanges> {
         let mut fragment_changes = HashMap::new();
         for fragment in self.new_table_fragments.fragments.values() {
-            let fragment_change = CommandFragmentChanges::NewFragment(CommandNewFragmentInfo {
-                new_actors: fragment
+            let fragment_change = CommandFragmentChanges::NewFragment(InflightFragmentInfo {
+                actors: fragment
                     .actors
                     .iter()
                     .map(|actor| {
@@ -124,7 +124,7 @@ impl ReplaceTablePlan {
                         )
                     })
                     .collect(),
-                table_ids: fragment
+                state_table_ids: fragment
                     .state_table_ids
                     .iter()
                     .map(|table_id| TableId::new(*table_id))
@@ -140,7 +140,7 @@ impl ReplaceTablePlan {
                 .insert(fragment.fragment_id, CommandFragmentChanges::RemoveFragment)
                 .is_none());
         }
-        CommandActorChanges { fragment_changes }
+        fragment_changes
     }
 }
 
@@ -159,12 +159,12 @@ pub struct CreateStreamingJobCommandInfo {
 }
 
 impl CreateStreamingJobCommandInfo {
-    fn new_fragment_info(&self) -> impl Iterator<Item = (FragmentId, CommandNewFragmentInfo)> + '_ {
+    fn new_fragment_info(&self) -> impl Iterator<Item = (FragmentId, InflightFragmentInfo)> + '_ {
         self.table_fragments.fragments.values().map(|fragment| {
             (
                 fragment.fragment_id,
-                CommandNewFragmentInfo {
-                    new_actors: fragment
+                InflightFragmentInfo {
+                    actors: fragment
                         .actors
                         .iter()
                         .map(|actor| {
@@ -178,7 +178,7 @@ impl CreateStreamingJobCommandInfo {
                             )
                         })
                         .collect(),
-                    table_ids: fragment
+                    state_table_ids: fragment
                         .state_table_ids
                         .iter()
                         .map(|table_id| TableId::new(*table_id))
@@ -279,7 +279,7 @@ pub enum Command {
         retention_second: u64,
     },
 
-    /// `DropSubscription` command generates a `DropSubscriptionMutation` to notify
+    /// `DropSubscription` command generates a `DropSubscriptionsMutation` to notify
     /// materialize executor to stop storing old value when there is no
     /// subscription depending on it.
     DropSubscription {
@@ -301,7 +301,7 @@ impl Command {
         Self::Resume(reason)
     }
 
-    pub fn actor_changes(&self) -> Option<CommandActorChanges> {
+    pub(crate) fn fragment_changes(&self) -> Option<HashMap<FragmentId, CommandFragmentChanges>> {
         match self {
             Command::Plain(_) => None,
             Command::Pause(_) => None,
@@ -309,40 +309,39 @@ impl Command {
             Command::DropStreamingJobs {
                 unregistered_fragment_ids,
                 ..
-            } => Some(CommandActorChanges {
-                fragment_changes: unregistered_fragment_ids
+            } => Some(
+                unregistered_fragment_ids
                     .iter()
                     .map(|fragment_id| (*fragment_id, CommandFragmentChanges::RemoveFragment))
                     .collect(),
-            }),
+            ),
             Command::CreateStreamingJob {
                 info,
                 replace_table,
             } => {
-                let fragment_changes = info
+                let mut changes: HashMap<_, _> = info
                     .new_fragment_info()
                     .map(|(fragment_id, info)| {
                         (fragment_id, CommandFragmentChanges::NewFragment(info))
                     })
                     .collect();
-                let mut changes = CommandActorChanges { fragment_changes };
 
                 if let Some(plan) = replace_table {
-                    let extra_change = plan.actor_changes();
+                    let extra_change = plan.fragment_changes();
                     changes.extend(extra_change);
                 }
 
                 Some(changes)
             }
-            Command::CancelStreamingJob(table_fragments) => Some(CommandActorChanges {
-                fragment_changes: table_fragments
+            Command::CancelStreamingJob(table_fragments) => Some(
+                table_fragments
                     .fragments
                     .values()
                     .map(|fragment| (fragment.fragment_id, CommandFragmentChanges::RemoveFragment))
                     .collect(),
-            }),
-            Command::RescheduleFragment { reschedules, .. } => Some(CommandActorChanges {
-                fragment_changes: reschedules
+            ),
+            Command::RescheduleFragment { reschedules, .. } => Some(
+                reschedules
                     .iter()
                     .map(|(fragment_id, reschedule)| {
                         (
@@ -360,8 +359,8 @@ impl Command {
                         )
                     })
                     .collect(),
-            }),
-            Command::ReplaceTable(plan) => Some(plan.actor_changes()),
+            ),
+            Command::ReplaceTable(plan) => Some(plan.fragment_changes()),
             Command::SourceSplitAssignment(_) => None,
             Command::Throttle(_) => None,
             Command::CreateSubscription { .. } => None,
@@ -406,10 +405,6 @@ impl BarrierKind {
         matches!(self, BarrierKind::Checkpoint(_))
     }
 
-    pub fn is_initial(&self) -> bool {
-        matches!(self, BarrierKind::Initial)
-    }
-
     pub fn as_str_name(&self) -> &'static str {
         match self {
             BarrierKind::Initial => "Initial",
@@ -423,7 +418,9 @@ impl BarrierKind {
 /// [`Command`].
 pub struct CommandContext {
     /// Resolved info in this barrier loop.
-    pub info: Arc<InflightActorInfo>,
+    pub node_map: HashMap<WorkerId, PbWorkerNode>,
+    pub subscription_info: InflightSubscriptionInfo,
+    pub table_ids_to_commit: HashSet<TableId>,
 
     pub prev_epoch: TracedEpoch,
     pub curr_epoch: TracedEpoch,
@@ -444,10 +441,23 @@ pub struct CommandContext {
     pub _span: tracing::Span,
 }
 
+impl std::fmt::Debug for CommandContext {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CommandContext")
+            .field("prev_epoch", &self.prev_epoch.value().0)
+            .field("curr_epoch", &self.curr_epoch.value().0)
+            .field("kind", &self.kind)
+            .field("command", &self.command)
+            .finish()
+    }
+}
+
 impl CommandContext {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
-        info: InflightActorInfo,
+        node_map: HashMap<WorkerId, PbWorkerNode>,
+        subscription_info: InflightSubscriptionInfo,
+        table_ids_to_commit: HashSet<TableId>,
         prev_epoch: TracedEpoch,
         curr_epoch: TracedEpoch,
         current_paused_reason: Option<PausedReason>,
@@ -457,7 +467,9 @@ impl CommandContext {
         span: tracing::Span,
     ) -> Self {
         Self {
-            info: Arc::new(info),
+            node_map,
+            subscription_info,
+            table_ids_to_commit,
             prev_epoch,
             curr_epoch,
             current_paused_reason,
@@ -555,6 +567,7 @@ impl CommandContext {
                         actor_splits,
                         // If the cluster is already paused, the new actors should be paused too.
                         pause: self.current_paused_reason.is_some(),
+                        subscriptions_to_add: Default::default(),
                     }));
 
                     if let Some(ReplaceTablePlan {
@@ -749,16 +762,24 @@ impl CommandContext {
                     upstream_mv_table_id,
                     subscription_id,
                     ..
-                } => Some(Mutation::CreateSubscription(CreateSubscriptionMutation {
-                    upstream_mv_table_id: upstream_mv_table_id.table_id,
-                    subscription_id: *subscription_id,
+                } => Some(Mutation::Add(AddMutation {
+                    actor_dispatchers: Default::default(),
+                    added_actors: vec![],
+                    actor_splits: Default::default(),
+                    pause: false,
+                    subscriptions_to_add: vec![SubscriptionUpstreamInfo {
+                        upstream_mv_table_id: upstream_mv_table_id.table_id,
+                        subscriber_id: *subscription_id,
+                    }],
                 })),
                 Command::DropSubscription {
                     upstream_mv_table_id,
                     subscription_id,
-                } => Some(Mutation::DropSubscription(DropSubscriptionMutation {
-                    upstream_mv_table_id: upstream_mv_table_id.table_id,
-                    subscription_id: *subscription_id,
+                } => Some(Mutation::DropSubscriptions(DropSubscriptionsMutation {
+                    info: vec![SubscriptionUpstreamInfo {
+                        subscriber_id: *subscription_id,
+                        upstream_mv_table_id: upstream_mv_table_id.table_id,
+                    }],
                 })),
             };
 
@@ -823,23 +844,26 @@ impl CommandContext {
             _ => self.current_paused_reason,
         }
     }
+}
 
+impl Command {
     /// For `CancelStreamingJob`, returns the table id of the target table.
     pub fn table_to_cancel(&self) -> Option<TableId> {
-        match &self.command {
+        match self {
             Command::CancelStreamingJob(table_fragments) => Some(table_fragments.table_id()),
             _ => None,
         }
     }
+}
 
+impl CommandContext {
     /// Clean up actors in CNs if needed, used by drop, cancel and reschedule commands.
     async fn clean_up(&self, actors: Vec<ActorId>) -> MetaResult<()> {
         self.barrier_manager_context
             .stream_rpc_manager
             .drop_actors(
-                &self.info.node_map,
-                self.info
-                    .node_map
+                &self.node_map,
+                self.node_map
                     .keys()
                     .map(|worker_id| (*worker_id, actors.clone())),
             )
@@ -847,7 +871,7 @@ impl CommandContext {
     }
 
     pub async fn wait_epoch_commit(&self, epoch: HummockEpoch) -> MetaResult<()> {
-        let futures = self.info.node_map.values().map(|worker_node| async {
+        let futures = self.node_map.values().map(|worker_node| async {
             let client = self
                 .barrier_manager_context
                 .env

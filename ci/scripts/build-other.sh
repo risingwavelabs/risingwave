@@ -5,9 +5,9 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
-
 echo "--- Build Rust UDF"
 cd e2e_test/udf/wasm
+rustup target add wasm32-wasi
 cargo build --release
 cd ../../..
 

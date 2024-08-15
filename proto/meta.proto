@@ -273,6 +273,7 @@ enum ThrottleTarget {
   SOURCE = 1;
   MV = 2;
   TABLE_WITH_SOURCE = 3;
+  CDC_TABLE = 4;
 }
 
 message ApplyThrottleRequest {
@@ -584,6 +585,7 @@ message GetServerlessStreamingJobsStatusResponse {
   repeated Status streaming_job_statuses = 1;
 }
 
+// This is used by `risectl`
 service ScaleService {
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
@@ -630,6 +632,7 @@ message SystemParams {
   optional bool enable_tracing = 15;
   optional bool use_new_object_prefix_strategy = 16;
   optional string license_key = 17;
+  optional uint64 time_travel_retention_ms = 18;
 }
 
 message GetSystemParamsRequest {}

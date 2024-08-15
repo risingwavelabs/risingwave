@@ -75,7 +75,7 @@ start_standalone() {
 }
 
 stop_standalone() {
-  pkill standalone
+  killall --wait standalone
 }
 
 wait_standalone() {
@@ -101,7 +101,6 @@ wait_standalone() {
 
 restart_standalone() {
   stop_standalone
-  sleep 5
   start_standalone "$PREFIX_LOG"/standalone-restarted.log &
   wait_standalone
 }

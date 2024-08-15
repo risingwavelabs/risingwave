@@ -14,18 +14,101 @@
 
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::row::Row;
-use risingwave_common::types::ToOwnedDatum;
+use risingwave_common::types::{
+    DataType, ListRef, MapRef, MapType, MapValue, ScalarRefImpl, ToOwnedDatum,
+};
 use risingwave_expr::expr::Context;
-use risingwave_expr::function;
+use risingwave_expr::{function, ExprError};
 
-#[function("array(...) -> anyarray", type_infer = "panic")]
+use super::array_positions::array_position;
+
+#[function("array(...) -> anyarray", type_infer = "unreachable")]
 fn array(row: impl Row, ctx: &Context) -> ListValue {
     ListValue::from_datum_iter(ctx.return_type.as_list(), row.iter())
 }
 
-#[function("row(...) -> struct", type_infer = "panic")]
+#[function("row(...) -> struct", type_infer = "unreachable")]
 fn row_(row: impl Row) -> StructValue {
     StructValue::new(row.iter().map(|d| d.to_owned_datum()).collect())
+}
+
+fn map_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
+    let map = MapType::try_from_kv(args[0].as_list().clone(), args[1].as_list().clone())?;
+    Ok(map.into())
+}
+
+/// # Example
+///
+/// ```slt
+/// query T
+/// select map_from_entries(null::int[], array[1,2,3]);
+/// ----
+/// NULL
+///
+/// query T
+/// select map_from_entries(array['a','b','c'], array[1,2,3]);
+/// ----
+/// {"a":1,"b":2,"c":3}
+/// ```
+#[function(
+    "map_from_entries(anyarray, anyarray) -> anymap",
+    type_infer = "map_type_infer"
+)]
+fn map(key: ListRef<'_>, value: ListRef<'_>) -> Result<MapValue, ExprError> {
+    MapValue::try_from_kv(key.to_owned(), value.to_owned()).map_err(ExprError::Custom)
+}
+
+/// # Example
+///
+/// ```slt
+/// query T
+/// select map_access(map_from_entries(array[1,2,3], array[100,200,300]), 3);
+/// ----
+/// 300
+///
+/// query T
+/// select map_access(map_from_entries(array[1,2,3], array[100,200,300]), '3');
+/// ----
+/// 300
+///
+/// query error
+/// select map_access(map_from_entries(array[1,2,3], array[100,200,300]), 1.0);
+/// ----
+/// db error: ERROR: Failed to run the query
+///
+/// Caused by these errors (recent errors listed first):
+///   1: Failed to bind expression: map_access(map_from_entries(ARRAY[1, 2, 3], ARRAY[100, 200, 300]), 1.0)
+///   2: Bind error: Cannot access numeric in map(integer,integer)
+///
+///
+/// query T
+/// select map_access(map_from_entries(array['a','b','c'], array[1,2,3]), 'a');
+/// ----
+/// 1
+///
+/// query T
+/// select map_access(map_from_entries(array['a','b','c'], array[1,2,3]), 'd');
+/// ----
+/// NULL
+///
+/// query T
+/// select map_access(map_from_entries(array['a','b','c'], array[1,2,3]), null);
+/// ----
+/// NULL
+/// ```
+#[function("map_access(anymap, any) -> any")]
+fn map_access<'a>(
+    map: MapRef<'a>,
+    key: ScalarRefImpl<'_>,
+) -> Result<Option<ScalarRefImpl<'a>>, ExprError> {
+    // FIXME: DatumRef in return value is not support by the macro yet.
+
+    let (keys, values) = map.into_kv();
+    let idx = array_position(keys, Some(key))?;
+    match idx {
+        Some(idx) => Ok(values.get((idx - 1) as usize).unwrap()),
+        None => Ok(None),
+    }
 }
 
 #[cfg(test)]

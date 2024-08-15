@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, PG_CATALOG_SCHEMA_NAME};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, MapType};
 use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_common::{bail_no_function, bail_not_implemented, not_implemented};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
@@ -23,7 +23,7 @@ use risingwave_sqlparser::ast::{
     ObjectName, Query, StructField, TrimWhereField, UnaryOperator,
 };
 
-use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
+use crate::binder::expr::function::is_sys_function_without_args;
 use crate::binder::Binder;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
@@ -72,10 +72,7 @@ impl Binder {
             Expr::Row(exprs) => self.bind_row(exprs),
             // input ref
             Expr::Identifier(ident) => {
-                if SYS_FUNCTION_WITHOUT_ARGS
-                    .iter()
-                    .any(|e| ident.real_value().as_str() == *e && ident.quote_style().is_none())
-                {
+                if is_sys_function_without_args(&ident) {
                     // Rewrite a system variable to a function call, e.g. `SELECT current_schema;`
                     // will be rewritten to `SELECT current_schema();`.
                     // NOTE: Here we don't 100% follow the behavior of Postgres, as it doesn't
@@ -1002,6 +999,11 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 .collect::<Result<Vec<_>>>()?,
             types.iter().map(|f| f.name.real_value()).collect_vec(),
         ),
+        AstDataType::Map(kv) => {
+            let key = bind_data_type(&kv.0)?;
+            let value = bind_data_type(&kv.1)?;
+            DataType::Map(MapType::try_from_kv(key, value)?)
+        }
         AstDataType::Custom(qualified_type_name) => {
             let idents = qualified_type_name
                 .0

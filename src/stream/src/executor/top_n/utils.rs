@@ -23,7 +23,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::ColumnOrder;
 
-use super::CacheKey;
+use super::top_n_cache::CacheKey;
 use crate::executor::prelude::*;
 
 pub trait TopNExecutorBase: Send + 'static {

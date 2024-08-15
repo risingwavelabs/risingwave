@@ -40,7 +40,6 @@ env_scripts = [
   is_external_udf_enabled = get_env ENABLE_EXTERNAL_UDF
   is_wasm_udf_enabled = get_env ENABLE_WASM_UDF
   is_js_udf_enabled = get_env ENABLE_JS_UDF
-  is_deno_udf_enabled = get_env ENABLE_DENO_UDF
   is_python_udf_enabled = get_env ENABLE_PYTHON_UDF
 
   if ${is_sanitizer_enabled}
@@ -77,11 +76,6 @@ env_scripts = [
   if ${is_js_udf_enabled}
     flags = get_env RISINGWAVE_FEATURE_FLAGS
     set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features js-udf"
-  end
-
-  if ${is_deno_udf_enabled}
-    flags = get_env RISINGWAVE_FEATURE_FLAGS
-    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features deno-udf"
   end
 
   if ${is_python_udf_enabled}
@@ -375,7 +369,7 @@ ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "$
 
 [tasks.post-build-risingwave]
 category = "RiseDev - Build"
-description = "Copy RisngWave binaries to bin"
+description = "Copy RisingWave binaries to bin"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
 dependencies = [
     "link-all-in-one-binaries",

@@ -81,7 +81,9 @@ async fn test_delta_join() -> Result<()> {
                 .assert_result_eq(result);
 
             #[allow(unused_assignments)]
-            test_times += 1;
+            {
+                test_times += 1;
+            }
         };
     }
 
