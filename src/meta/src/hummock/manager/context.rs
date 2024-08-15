@@ -235,6 +235,7 @@ impl HummockManager {
             .into());
         }
 
+        // sanity check on monotonically increasing table committed epoch
         for table_id in tables_to_commit {
             if let Some(info) = current_version.state_table_info.info().get(table_id) {
                 if committed_epoch <= info.committed_epoch {
