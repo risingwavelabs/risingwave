@@ -580,7 +580,7 @@ impl HummockVersion {
                 })
                 .filter(|(_, delta)| !delta.is_empty())
                 .collect::<HashMap<_, _>>();
-            if is_commit_epoch {
+            if !is_commit_epoch {
                 assert!(
                     intra_level_delta.is_empty(),
                     "{:#?}\
