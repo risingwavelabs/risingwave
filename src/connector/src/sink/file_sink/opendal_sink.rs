@@ -70,7 +70,7 @@ pub struct FileSink<S: OpendalSinkBackend> {
 /// - `new_operator`: Creates a new operator using the provided backend properties.
 /// - `get_path`: Returns the path of the sink file specified by the user's create sink statement.
 pub trait OpendalSinkBackend: Send + Sync + 'static + Clone + PartialEq {
-    type Properties: Send + Sync + Clone + WithOptions;
+    type Properties: Send + Sync + Clone;
     const SINK_NAME: &'static str;
 
     fn from_btreemap(hash_map: BTreeMap<String, String>) -> Result<Self::Properties>;
