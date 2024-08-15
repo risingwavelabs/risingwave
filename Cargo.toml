@@ -195,7 +195,7 @@ sea-orm = { version = "0.12.14", features = [
     "sqlx-sqlite",
     "runtime-tokio-native-tls",
 ] }
-sqlx = { version = "0.7", default-features = false, features = ["bigdecimal", "chrono", "json", "mysql", "postgres", "runtime-tokio-native-tls", "rust_decimal", "sqlite", "time", "uuid"] }
+sqlx = { version = "0.7.3", default-features = false, features = ["bigdecimal", "chrono", "json", "mysql", "postgres", "runtime-tokio-native-tls", "rust_decimal", "sqlite", "time", "uuid"] }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055", features = ["net", "fs"] }
 tokio-util = "0.7"
 tracing-opentelemetry = "0.24"
