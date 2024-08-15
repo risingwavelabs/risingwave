@@ -25,7 +25,6 @@ use risingwave_pb::meta::{
     ListAllNodesResponse, UpdateWorkerNodeSchedulabilityRequest,
     UpdateWorkerNodeSchedulabilityResponse,
 };
-use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 use crate::MetaError;
@@ -66,7 +65,6 @@ impl ClusterService for ClusterServiceImpl {
         let cluster_id = self.metadata_manager.cluster_id().to_string();
 
         Ok(Response::new(AddWorkerNodeResponse {
-            status: None,
             node_id: Some(worker_id),
             cluster_id,
         }))
