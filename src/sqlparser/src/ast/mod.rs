@@ -2489,6 +2489,8 @@ pub struct FunctionArgList {
     pub variadic: bool,
     /// Aggregate function calls may have an `ORDER BY`, e.g. `array_agg(x ORDER BY y)`.
     pub order_by: Vec<OrderByExpr>,
+    /// Window function calls may have an `IGNORE NULLS`, e.g. `first_value(x IGNORE NULLS)`.
+    pub ignore_nulls: bool,
 }
 
 impl fmt::Display for FunctionArgList {
@@ -2508,6 +2510,9 @@ impl fmt::Display for FunctionArgList {
         if !self.order_by.is_empty() {
             write!(f, " ORDER BY {}", display_comma_separated(&self.order_by))?;
         }
+        if self.ignore_nulls {
+            write!(f, " IGNORE NULLS")?;
+        }
         write!(f, ")")?;
         Ok(())
     }
@@ -2520,6 +2525,7 @@ impl FunctionArgList {
             args: vec![],
             variadic: false,
             order_by: vec![],
+            ignore_nulls: false,
         }
     }
 
@@ -2529,6 +2535,7 @@ impl FunctionArgList {
             args,
             variadic: false,
             order_by: vec![],
+            ignore_nulls: false,
         }
     }
 
@@ -2538,6 +2545,7 @@ impl FunctionArgList {
             args,
             variadic: false,
             order_by,
+            ignore_nulls: false,
         }
     }
 }
