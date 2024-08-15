@@ -169,6 +169,7 @@ recover_concurrency = 8
 insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "none"
+recover_mode = "None"
 
 [storage.meta_file_cache]
 dir = ""
@@ -180,6 +181,7 @@ recover_concurrency = 8
 insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "none"
+recover_mode = "None"
 
 [storage.cache_refill]
 data_refill_levels = []

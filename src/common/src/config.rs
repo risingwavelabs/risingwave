@@ -24,7 +24,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
-use foyer::{LfuConfig, LruConfig, S3FifoConfig};
+use foyer::{LfuConfig, LruConfig, RecoverMode, S3FifoConfig};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -859,6 +859,18 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::flush_buffer_threshold_mb")]
     pub flush_buffer_threshold_mb: Option<usize>,
 
+    /// Recover mode.
+    ///
+    /// Options:
+    ///
+    /// - "None": Do not recover disk cache.
+    /// - "Quiet": Recover disk cache and skip errors.
+    /// - "Strict": Recover disk cache and panic on errors.
+    ///
+    /// More details, see [`RecoverMode::None`], [`RecoverMode::Quiet`] and [`RecoverMode::Strict`],
+    #[serde(default = "default::file_cache::recover_mode")]
+    pub recover_mode: RecoverMode,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -1667,6 +1679,8 @@ pub mod default {
     }
 
     pub mod file_cache {
+        use foyer::RecoverMode;
+
         pub fn dir() -> String {
             "".to_string()
         }
@@ -1705,6 +1719,10 @@ pub mod default {
 
         pub fn flush_buffer_threshold_mb() -> Option<usize> {
             None
+        }
+
+        pub fn recover_mode() -> RecoverMode {
+            RecoverMode::None
         }
     }
 
