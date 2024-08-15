@@ -349,7 +349,7 @@ pub async fn start_service_as_election_follower(
 ) {
     tracing::info!("starting follower services");
 
-    let meta_member_srv = MetaMemberServiceImpl::new(election_client);
+    let meta_member_srv = MetaMemberServiceImpl::new(election_client, false);
 
     let health_srv = HealthServiceImpl::new();
 
@@ -467,7 +467,7 @@ pub async fn start_service_as_election_leader(
     .unwrap();
     let object_store_media_type = hummock_manager.object_store_media_type();
 
-    let meta_member_srv = MetaMemberServiceImpl::new(election_client.clone());
+    let meta_member_srv = MetaMemberServiceImpl::new(election_client.clone(), true);
 
     let prometheus_client = opts.prometheus_endpoint.as_ref().map(|x| {
         use std::str::FromStr;

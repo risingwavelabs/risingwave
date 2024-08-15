@@ -16,17 +16,23 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::meta_member_service_server::MetaMemberService;
-use risingwave_pb::meta::{MembersRequest, MembersResponse, MetaMember};
+use risingwave_pb::meta::{
+    IsServingLeaderRequest, IsServingLeaderResponse, MembersRequest, MembersResponse, MetaMember,
+};
 use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
 pub struct MetaMemberServiceImpl {
     election_client: ElectionClientRef,
+    is_serving_leader: bool,
 }
 
 impl MetaMemberServiceImpl {
-    pub fn new(election_client: ElectionClientRef) -> Self {
-        MetaMemberServiceImpl { election_client }
+    pub fn new(election_client: ElectionClientRef, is_serving_leader: bool) -> Self {
+        MetaMemberServiceImpl {
+            election_client,
+            is_serving_leader,
+        }
     }
 }
 
@@ -53,5 +59,14 @@ impl MetaMemberService for MetaMemberServiceImpl {
         }
 
         Ok(Response::new(MembersResponse { members }))
+    }
+
+    async fn is_serving_leader(
+        &self,
+        _request: Request<IsServingLeaderRequest>,
+    ) -> Result<Response<IsServingLeaderResponse>, Status> {
+        let is_leader = self.is_serving_leader && self.election_client.is_leader();
+
+        Ok(Response::new(IsServingLeaderResponse { is_leader }))
     }
 }

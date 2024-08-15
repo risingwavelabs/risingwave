@@ -1622,21 +1622,10 @@ struct GrpcMetaClientCore {
     cloud_client: CloudServiceClient<Channel>,
     sink_coordinate_client: SinkCoordinationRpcClient,
     event_log_client: EventLogServiceClient<Channel>,
-
-    /// Whether we are sure that we're connecting to the leader.
-    is_leader: bool,
 }
 
 impl GrpcMetaClientCore {
-    pub(crate) fn new_leader(channel: Channel) -> Self {
-        Self::new_inner(channel, true)
-    }
-
-    pub(crate) fn new_initial(channel: Channel) -> Self {
-        Self::new_inner(channel, false)
-    }
-
-    fn new_inner(channel: Channel, is_leader: bool) -> Self {
+    pub(crate) fn new(channel: Channel) -> Self {
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let meta_member_client = MetaMemberClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
@@ -1679,7 +1668,6 @@ impl GrpcMetaClientCore {
             cloud_client,
             sink_coordinate_client,
             event_log_client,
-            is_leader,
         }
     }
 }
@@ -1800,7 +1788,7 @@ impl MetaMemberManagement {
                 .await?;
 
                 let mut core = self.core_ref.write().await;
-                *core = GrpcMetaClientCore::new_leader(channel);
+                *core = GrpcMetaClientCore::new(channel);
                 self.current_leader = Some(discovered_leader);
             }
         } else {
@@ -1881,6 +1869,7 @@ impl GrpcMetaClient {
         Ok(())
     }
 
+    #[allow(dead_code)]
     async fn force_refresh_leader(&self) -> Result<()> {
         let (sender, receiver) = oneshot::channel();
 
@@ -1908,7 +1897,7 @@ impl GrpcMetaClient {
         // but it's not guaranteed to be the leader service which we can make further progress on.
         let client = GrpcMetaClient {
             member_monitor_event_sender: force_refresh_sender,
-            core: Arc::new(RwLock::new(GrpcMetaClientCore::new_initial(channel))),
+            core: Arc::new(RwLock::new(GrpcMetaClientCore::new(channel))),
         };
 
         let meta_member_client = client.core.read().await.meta_member_client.clone();
@@ -1929,9 +1918,21 @@ impl GrpcMetaClient {
 
         // Refresh the member list until we find and connect to the leader.
         let mut interval = tokio::time::interval(Duration::from_secs(1));
-        while !client.core.read().await.is_leader {
+        loop {
             interval.tick().await;
-            client.force_refresh_leader().await?;
+
+            let is_serving_leader = client
+                .is_serving_leader(IsServingLeaderRequest::default())
+                .await
+                .map(|res| res.is_leader);
+
+            match is_serving_leader {
+                Ok(true) => break,
+                Ok(false) => tracing::warn!("meta node is still serving as follower, retrying..."),
+                Err(err) => {
+                    tracing::warn!(error = %err.as_report(), "failed to check leader status, retrying...")
+                }
+            }
         }
 
         Ok(client)
@@ -2015,6 +2016,7 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ cluster_client, get_cluster_recovery_status, GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse }
+            ,{ meta_member_client, is_serving_leader, IsServingLeaderRequest, IsServingLeaderResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, pause, PauseRequest, PauseResponse }

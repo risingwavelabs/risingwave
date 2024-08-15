@@ -601,8 +601,15 @@ message MembersResponse {
   repeated MetaMember members = 1;
 }
 
+message IsServingLeaderRequest {}
+
+message IsServingLeaderResponse {
+  bool is_leader = 1;
+}
+
 service MetaMemberService {
   rpc Members(MembersRequest) returns (MembersResponse);
+  rpc IsServingLeader(IsServingLeaderRequest) returns (IsServingLeaderResponse);
 }
 
 // The schema for persisted system parameters.
