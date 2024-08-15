@@ -564,7 +564,33 @@ impl HummockVersion {
         );
 
         if self.visible_table_committed_epoch() < version_delta.visible_table_committed_epoch() {
-            assert!(is_commit_epoch, "{:#?} {:#?}", version_clone, version_delta);
+            let intra_level_delta = version_delta
+                .group_deltas
+                .iter()
+                .map(|(group_id, group_delta)| {
+                    (
+                        *group_id,
+                        group_delta
+                            .group_deltas
+                            .iter()
+                            .filter(|delta| matches!(delta, GroupDelta::IntraLevel(_)))
+                            .map(|delta| format!("{:?}", delta))
+                            .collect_vec(),
+                    )
+                })
+                .filter(|(_, delta)| !delta.is_empty())
+                .collect::<HashMap<_, _>>();
+            if is_commit_epoch {
+                assert!(
+                    intra_level_delta.is_empty(),
+                    "{:#?}\
+                 {:#?}\
+                  {:#?}",
+                    version_clone,
+                    version_delta,
+                    intra_level_delta
+                )
+            }
         }
 
         // apply to `levels`, which is different compaction groups
