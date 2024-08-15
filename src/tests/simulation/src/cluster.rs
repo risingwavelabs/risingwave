@@ -419,6 +419,9 @@ impl Cluster {
             Uuid::new_v4()
         );
 
+        // FIXME(kwannoel): we should use this, otherwise when meta stops,
+        // the sqlite db probably gets
+        // dropped too.
         // let sqlite_path = format!(
         //     "sqlite::file:memdb{}?mode=memory&cache=shared",
         //     Uuid::new_v4()

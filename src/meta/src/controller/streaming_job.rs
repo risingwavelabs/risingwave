@@ -368,6 +368,10 @@ impl CatalogController {
             Table::insert(table_model).exec(&txn).await?;
         }
         txn.commit().await?;
+        tracing::trace!(
+            "internal tables created {:?}",
+            internal_tables.iter().map(|t| t.id).collect_vec()
+        );
         let _version = self
             .notify_frontend(
                 Operation::Add,
@@ -770,6 +774,13 @@ impl CatalogController {
             .filter(table::Column::BelongsToJobId.eq(job_id))
             .all(&txn)
             .await?;
+        tracing::info!(
+            "updating internal objs for finish_streaming_job: {:?}",
+            internal_table_objs
+                .iter()
+                .map(|o| o.0.table_id)
+                .collect_vec()
+        );
         let mut relations = internal_table_objs
             .iter()
             .map(|(table, obj)| PbRelation {
