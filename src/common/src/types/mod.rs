@@ -331,7 +331,6 @@ impl DataType {
     pub fn to_protobuf(&self) -> PbDataType {
         let mut pb = PbDataType {
             type_name: self.prost_type_name() as i32,
-            is_nullable: true,
             ..Default::default()
         };
         match self {
