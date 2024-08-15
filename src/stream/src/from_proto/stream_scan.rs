@@ -170,6 +170,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     params.env.config().developer.chunk_size,
                     node.rate_limit.map(|x| x as _),
                     barrier_rx,
+                    params.executor_stats.clone(),
                 )
                 .boxed()
             }

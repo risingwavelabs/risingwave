@@ -15,12 +15,23 @@
 use std::collections::Bound::{Excluded, Unbounded};
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::mem::take;
+use std::time::Instant;
 
+use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
+use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::debug;
 
 use crate::manager::WorkerId;
+use crate::rpc::metrics::MetaMetrics;
+
+#[derive(Debug)]
+pub(super) enum CreatingStreamingJobBarrierType {
+    Snapshot,
+    LogStore,
+    Upstream,
+}
 
 #[derive(Debug)]
 struct CreatingStreamingJobEpochState {
@@ -29,6 +40,8 @@ struct CreatingStreamingJobEpochState {
     resps: Vec<BarrierCompleteResponse>,
     upstream_epoch_to_notify: Option<u64>,
     is_checkpoint: bool,
+    enqueue_time: Instant,
+    barrier_type: CreatingStreamingJobBarrierType,
 }
 
 #[derive(Debug)]
@@ -41,11 +54,20 @@ pub(super) struct CreatingStreamingJobBarrierControl {
     max_attached_epoch: Option<u64>,
     // newer epoch at the front. should all be checkpoint barrier
     pending_barriers_to_complete: VecDeque<CreatingStreamingJobEpochState>,
-    completing_barrier: Option<CreatingStreamingJobEpochState>,
+    completing_barrier: Option<(CreatingStreamingJobEpochState, HistogramTimer)>,
+
+    // metrics
+    consuming_snapshot_barrier_latency: LabelGuardedHistogram<2>,
+    consuming_log_store_barrier_latency: LabelGuardedHistogram<2>,
+    consuming_upstream_barrier_latency: LabelGuardedHistogram<2>,
+
+    wait_commit_latency: LabelGuardedHistogram<1>,
+    inflight_barrier_num: LabelGuardedIntGauge<1>,
 }
 
 impl CreatingStreamingJobBarrierControl {
-    pub(super) fn new(table_id: TableId) -> Self {
+    pub(super) fn new(table_id: TableId, metrics: &MetaMetrics) -> Self {
+        let table_id_str = format!("{}", table_id.table_id);
         Self {
             table_id,
             inflight_barrier_queue: Default::default(),
@@ -54,6 +76,22 @@ impl CreatingStreamingJobBarrierControl {
             max_attached_epoch: None,
             pending_barriers_to_complete: Default::default(),
             completing_barrier: None,
+
+            consuming_snapshot_barrier_latency: metrics
+                .snapshot_backfill_barrier_latency
+                .with_guarded_label_values(&[&table_id_str, "consuming_snapshot"]),
+            consuming_log_store_barrier_latency: metrics
+                .snapshot_backfill_barrier_latency
+                .with_guarded_label_values(&[&table_id_str, "consuming_log_store"]),
+            consuming_upstream_barrier_latency: metrics
+                .snapshot_backfill_barrier_latency
+                .with_guarded_label_values(&[&table_id_str, "consuming_upstream"]),
+            wait_commit_latency: metrics
+                .snapshot_backfill_wait_commit_latency
+                .with_guarded_label_values(&[&table_id_str]),
+            inflight_barrier_num: metrics
+                .snapshot_backfill_inflight_barrier_num
+                .with_guarded_label_values(&[&table_id_str]),
         }
     }
 
@@ -89,6 +127,7 @@ impl CreatingStreamingJobBarrierControl {
         epoch: u64,
         node_to_collect: HashSet<WorkerId>,
         is_checkpoint: bool,
+        barrier_type: CreatingStreamingJobBarrierType,
     ) {
         debug!(
             epoch,
@@ -112,12 +151,16 @@ impl CreatingStreamingJobBarrierControl {
             resps: vec![],
             upstream_epoch_to_notify: None,
             is_checkpoint,
+            enqueue_time: Instant::now(),
+            barrier_type,
         };
         if epoch_state.node_to_collect.is_empty() && self.inflight_barrier_queue.is_empty() {
             self.add_collected(epoch_state);
         } else {
             self.inflight_barrier_queue.insert(epoch, epoch_state);
         }
+        self.inflight_barrier_num
+            .set(self.inflight_barrier_queue.len() as _);
     }
 
     pub(super) fn unattached_epochs(&self) -> impl Iterator<Item = (u64, bool)> + '_ {
@@ -180,6 +223,9 @@ impl CreatingStreamingJobBarrierControl {
             let (_, state) = self.inflight_barrier_queue.pop_first().expect("non-empty");
             self.add_collected(state);
         }
+
+        self.inflight_barrier_num
+            .set(self.inflight_barrier_queue.len() as _);
     }
 
     #[expect(clippy::type_complexity)]
@@ -207,7 +253,7 @@ impl CreatingStreamingJobBarrierControl {
             }
 
             let resps = take(&mut epoch_state.resps);
-            self.completing_barrier = Some(epoch_state);
+            self.completing_barrier = Some((epoch_state, self.wait_commit_latency.start_timer()));
             return (upstream_epochs_to_notify, Some((epoch, resps, is_first)));
         }
         (upstream_epochs_to_notify, None)
@@ -217,7 +263,9 @@ impl CreatingStreamingJobBarrierControl {
     ///
     /// Return the upstream epoch to be notified when there is any.
     pub(super) fn ack_completed(&mut self, completed_epoch: u64) -> Option<u64> {
-        let epoch_state = self.completing_barrier.take().expect("should exist");
+        let (epoch_state, wait_commit_timer) =
+            self.completing_barrier.take().expect("should exist");
+        wait_commit_timer.observe_duration();
         assert_eq!(epoch_state.epoch, completed_epoch);
         epoch_state.upstream_epoch_to_notify
     }
@@ -231,6 +279,13 @@ impl CreatingStreamingJobBarrierControl {
             assert!(epoch_state.epoch > max_collected_epoch);
         }
         self.max_collected_epoch = Some(epoch_state.epoch);
+        let barrier_latency = epoch_state.enqueue_time.elapsed().as_secs_f64();
+        let barrier_latency_metrics = match &epoch_state.barrier_type {
+            CreatingStreamingJobBarrierType::Snapshot => &self.consuming_snapshot_barrier_latency,
+            CreatingStreamingJobBarrierType::LogStore => &self.consuming_log_store_barrier_latency,
+            CreatingStreamingJobBarrierType::Upstream => &self.consuming_upstream_barrier_latency,
+        };
+        barrier_latency_metrics.observe(barrier_latency);
         self.pending_barriers_to_complete.push_front(epoch_state);
     }
 }

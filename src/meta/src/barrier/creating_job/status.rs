@@ -81,12 +81,17 @@ impl CreatingStreamingJobStatus {
         }
     }
 
-    /// return Some(vec[(`curr_epoch`, `prev_epoch`, `barrier_kind`)]) of barriers to newly inject
+    /// return
+    /// - Some(vec[(`curr_epoch`, `prev_epoch`, `barrier_kind`)]) of barriers to newly inject
+    /// - Some(`graph_info`) when the status should transit to `ConsumingLogStore`
+    #[expect(clippy::type_complexity)]
     pub(super) fn may_inject_fake_barrier(
         &mut self,
-        upstream_epoch: u64,
         is_checkpoint: bool,
-    ) -> Option<Vec<(TracedEpoch, TracedEpoch, BarrierKind)>> {
+    ) -> Option<(
+        Vec<(TracedEpoch, TracedEpoch, BarrierKind)>,
+        Option<InflightGraphInfo>,
+    )> {
         if let CreatingStreamingJobStatus::ConsumingSnapshot {
             prev_epoch_fake_physical_time,
             pending_commands,
@@ -117,11 +122,7 @@ impl CreatingStreamingJobStatus {
                 .collect();
 
                 let graph_info = take(graph_info);
-                *self = CreatingStreamingJobStatus::ConsumingLogStore {
-                    graph_info,
-                    start_consume_log_store_epoch: upstream_epoch,
-                };
-                Some(barriers_to_inject)
+                Some((barriers_to_inject, Some(graph_info)))
             } else {
                 let prev_epoch =
                     TracedEpoch::new(Epoch::from_physical_time(*prev_epoch_fake_physical_time));
@@ -134,7 +135,7 @@ impl CreatingStreamingJobStatus {
                 } else {
                     BarrierKind::Barrier
                 };
-                Some(vec![(curr_epoch, prev_epoch, kind)])
+                Some((vec![(curr_epoch, prev_epoch, kind)], None))
             }
         } else {
             None

@@ -15,6 +15,7 @@
 use std::collections::VecDeque;
 use std::future::{pending, Future};
 use std::mem::replace;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use futures::future::Either;
@@ -22,6 +23,7 @@ use futures::{pin_mut, Stream, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::TableId;
+use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -33,6 +35,7 @@ use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::backfill::utils::{create_builder, mapping_chunk};
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::prelude::{try_stream, StreamExt};
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BackfillExecutor, Barrier, BoxedMessageStream, Execute,
@@ -56,6 +59,9 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
     rate_limit: Option<usize>,
 
     barrier_rx: UnboundedReceiver<Barrier>,
+
+    actor_ctx: ActorContextRef,
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl<S: StateStore> SnapshotBackfillExecutor<S> {
@@ -64,11 +70,12 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         upstream_table: StorageTable<S>,
         upstream: Executor,
         output_indices: Vec<usize>,
-        _actor_ctx: ActorContextRef,
+        actor_ctx: ActorContextRef,
         progress: CreateMviewProgress,
         chunk_size: usize,
         rate_limit: Option<usize>,
         barrier_rx: UnboundedReceiver<Barrier>,
+        metrics: Arc<StreamingMetrics>,
     ) -> Self {
         if let Some(rate_limit) = rate_limit {
             debug!(
@@ -84,6 +91,8 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
             chunk_size,
             rate_limit,
             barrier_rx,
+            actor_ctx,
+            metrics,
         }
     }
 
@@ -120,10 +129,19 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     }
                 };
 
+                let table_id_str = format!("{}", self.upstream_table.table_id().table_id);
+                let actor_id_str = format!("{}", self.actor_ctx.id);
+
+                let consume_upstream_row_count = self
+                    .metrics
+                    .snapshot_backfill_consume_row_count
+                    .with_guarded_label_values(&[&table_id_str, &actor_id_str, "consume_upstream"]);
+
                 let mut upstream_buffer = UpstreamBuffer::new(
                     &mut upstream,
                     upstream_table_id,
                     snapshot_backfill_table_fragment_id,
+                    consume_upstream_row_count,
                 );
 
                 let first_barrier_epoch = first_barrier.epoch;
@@ -146,6 +164,14 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                 // Phase 1: consume upstream snapshot
                 {
                     {
+                        let consuming_snapshot_row_count = self
+                            .metrics
+                            .snapshot_backfill_consume_row_count
+                            .with_guarded_label_values(&[
+                                &table_id_str,
+                                &actor_id_str,
+                                "consuming_snapshot",
+                            ]);
                         let snapshot_stream = make_consume_snapshot_stream(
                             &self.upstream_table,
                             first_barrier_epoch.prev,
@@ -165,6 +191,9 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                         )
                         .await?
                         {
+                            if let Message::Chunk(chunk) = &message {
+                                consuming_snapshot_row_count.inc_by(chunk.cardinality() as _);
+                            }
                             yield message;
                         }
                     }
@@ -175,6 +204,23 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                 }
 
                 let mut barrier_epoch = first_barrier_epoch;
+
+                let initial_pending_barrier = upstream_buffer.barrier.len();
+                info!(
+                    ?barrier_epoch,
+                    table_id = self.upstream_table.table_id().table_id,
+                    initial_pending_barrier,
+                    "start consuming log store"
+                );
+
+                let consuming_log_store_row_count = self
+                    .metrics
+                    .snapshot_backfill_consume_row_count
+                    .with_guarded_label_values(&[
+                        &table_id_str,
+                        &actor_id_str,
+                        "consuming_log_store",
+                    ]);
 
                 // Phase 2: consume upstream log store
                 while let Some(barrier) = upstream_buffer.take_buffered_barrier().await? {
@@ -200,6 +246,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             size = chunk.cardinality(),
                             "consume change log yield chunk",
                         );
+                        consuming_log_store_row_count.inc_by(chunk.cardinality() as _);
                         yield Message::Chunk(chunk);
                     }
 
@@ -207,8 +254,17 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
 
                     yield Message::Barrier(barrier);
                 }
+
+                info!(
+                    ?barrier_epoch,
+                    table_id = self.upstream_table.table_id().table_id,
+                    "finish consuming log store"
+                );
             } else {
-                debug!("skip backfill");
+                info!(
+                    table_id = self.upstream_table.table_id().table_id,
+                    "skip backfill"
+                );
                 let first_recv_barrier = receive_next_barrier(&mut self.barrier_rx).await?;
                 assert_eq!(first_barrier.epoch, first_recv_barrier.epoch);
                 yield Message::Barrier(first_barrier);
@@ -285,6 +341,7 @@ struct UpstreamBuffer<'a> {
     upstream: &'a mut BoxedMessageStream,
     // newer barrier at the front
     barrier: VecDeque<Barrier>,
+    consume_upstream_row_count: LabelGuardedIntCounter<3>,
     is_finished: bool,
     upstream_table_id: TableId,
     current_subscriber_id: u32,
@@ -295,10 +352,12 @@ impl<'a> UpstreamBuffer<'a> {
         upstream: &'a mut BoxedMessageStream,
         upstream_table_id: TableId,
         current_subscriber_id: u32,
+        consume_upstream_row_count: LabelGuardedIntCounter<3>,
     ) -> Self {
         Self {
             upstream,
             barrier: Default::default(),
+            consume_upstream_row_count,
             is_finished: false,
             upstream_table_id,
             current_subscriber_id,
@@ -327,9 +386,16 @@ impl<'a> UpstreamBuffer<'a> {
                 .try_next()
                 .await?
                 .ok_or_else(|| anyhow!("end of upstream"))?;
-            if let Message::Barrier(barrier) = msg {
-                self.is_finished = self.is_finish_barrier(&barrier);
-                break Ok(barrier);
+            match msg {
+                Message::Chunk(chunk) => {
+                    self.consume_upstream_row_count
+                        .inc_by(chunk.cardinality() as _);
+                }
+                Message::Barrier(barrier) => {
+                    self.is_finished = self.is_finish_barrier(&barrier);
+                    break Ok(barrier);
+                }
+                Message::Watermark(_) => {}
             }
         }
     }
@@ -410,6 +476,12 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     let mut barrier_epoch = first_recv_barrier.epoch;
     yield Message::Barrier(first_recv_barrier);
 
+    info!(
+        table_id = upstream_table.table_id().table_id,
+        ?barrier_epoch,
+        "start consuming snapshot"
+    );
+
     // start consume upstream snapshot
     let snapshot_row_stream = BackfillExecutor::snapshot_read(
         upstream_table,
@@ -477,7 +549,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     let barrier_to_report_finish = receive_next_barrier(barrier_rx).await?;
     assert_eq!(barrier_to_report_finish.epoch.prev, barrier_epoch.curr);
     barrier_epoch = barrier_to_report_finish.epoch;
-    debug!(?barrier_epoch, count, "report finish");
+    info!(?barrier_epoch, count, "report finish");
     progress.finish(barrier_epoch, count as _);
     yield Message::Barrier(barrier_to_report_finish);
 
@@ -491,4 +563,5 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
             break;
         }
     }
+    info!(?barrier_epoch, "finish consuming snapshot");
 }

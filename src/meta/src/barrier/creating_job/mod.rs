@@ -21,6 +21,8 @@ use std::mem::take;
 use std::sync::Arc;
 use std::time::Duration;
 
+use prometheus::HistogramTimer;
+use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
@@ -29,7 +31,9 @@ use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{debug, info};
 
 use crate::barrier::command::CommandContext;
-use crate::barrier::creating_job::barrier_control::CreatingStreamingJobBarrierControl;
+use crate::barrier::creating_job::barrier_control::{
+    CreatingStreamingJobBarrierControl, CreatingStreamingJobBarrierType,
+};
 use crate::barrier::creating_job::status::CreatingStreamingJobStatus;
 use crate::barrier::info::InflightGraphInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
@@ -37,6 +41,7 @@ use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::{Command, CreateStreamingJobCommandInfo, SnapshotBackfillInfo};
 use crate::manager::WorkerId;
 use crate::model::ActorId;
+use crate::rpc::metrics::MetaMetrics;
 use crate::MetaResult;
 
 #[derive(Debug)]
@@ -47,6 +52,9 @@ pub(super) struct CreatingStreamingJobControl {
 
     barrier_control: CreatingStreamingJobBarrierControl,
     status: CreatingStreamingJobStatus,
+
+    upstream_lag: LabelGuardedIntGauge<1>,
+    upstream_wait_progress_latency: LabelGuardedHistogram<1>,
 }
 
 impl CreatingStreamingJobControl {
@@ -55,6 +63,7 @@ impl CreatingStreamingJobControl {
         snapshot_backfill_info: SnapshotBackfillInfo,
         backfill_epoch: u64,
         version_stat: &HummockVersionStats,
+        metrics: &MetaMetrics,
     ) -> Self {
         info!(
             table_id = info.table_fragments.table_id().table_id,
@@ -78,11 +87,12 @@ impl CreatingStreamingJobControl {
         }
 
         let table_id = info.table_fragments.table_id();
+        let table_id_str = format!("{}", table_id.table_id);
 
         Self {
             info,
             snapshot_backfill_info,
-            barrier_control: CreatingStreamingJobBarrierControl::new(table_id),
+            barrier_control: CreatingStreamingJobBarrierControl::new(table_id, metrics),
             backfill_epoch,
             status: CreatingStreamingJobStatus::ConsumingSnapshot {
                 prev_epoch_fake_physical_time: 0,
@@ -94,7 +104,17 @@ impl CreatingStreamingJobControl {
                 pending_non_checkpoint_barriers: vec![],
                 snapshot_backfill_actors,
             },
+            upstream_lag: metrics
+                .snapshot_backfill_lag
+                .with_guarded_label_values(&[&table_id_str]),
+            upstream_wait_progress_latency: metrics
+                .snapshot_backfill_upstream_wait_progress_latency
+                .with_guarded_label_values(&[&table_id_str]),
         }
+    }
+
+    pub(super) fn start_wait_progress_timer(&self) -> HistogramTimer {
+        self.upstream_wait_progress_latency.start_timer()
     }
 
     pub(super) fn is_wait_on_worker(&self, worker_id: WorkerId) -> bool {
@@ -218,10 +238,19 @@ impl CreatingStreamingJobControl {
         upstream_prev_epoch: u64,
         is_checkpoint: bool,
     ) -> MetaResult<()> {
-        if let Some(barriers_to_inject) = self
-            .status
-            .may_inject_fake_barrier(upstream_prev_epoch, is_checkpoint)
+        if let Some((barriers_to_inject, graph_info)) =
+            self.status.may_inject_fake_barrier(is_checkpoint)
         {
+            if let Some(graph_info) = graph_info {
+                info!(
+                    table_id = self.info.table_fragments.table_id().table_id,
+                    upstream_prev_epoch, "start consuming log store"
+                );
+                self.status = CreatingStreamingJobStatus::ConsumingLogStore {
+                    graph_info,
+                    start_consume_log_store_epoch: upstream_prev_epoch,
+                };
+            }
             let graph_info = self
                 .status
                 .active_graph_info()
@@ -241,6 +270,7 @@ impl CreatingStreamingJobControl {
                     prev_epoch.value().0,
                     node_to_collect,
                     kind.is_checkpoint(),
+                    CreatingStreamingJobBarrierType::Snapshot,
                 );
             }
         }
@@ -261,6 +291,19 @@ impl CreatingStreamingJobControl {
         } else {
             false
         };
+        let progress_epoch =
+            if let Some(max_collected_epoch) = self.barrier_control.max_collected_epoch() {
+                max(max_collected_epoch, self.backfill_epoch)
+            } else {
+                self.backfill_epoch
+            };
+        self.upstream_lag.set(
+            command_ctx
+                .prev_epoch
+                .value()
+                .0
+                .saturating_sub(progress_epoch) as _,
+        );
         let graph_to_finish = match &mut self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot {
                 pending_commands, ..
@@ -291,10 +334,15 @@ impl CreatingStreamingJobControl {
                     command_ctx.prev_epoch.value().0,
                     node_to_collect,
                     command_ctx.kind.is_checkpoint(),
+                    CreatingStreamingJobBarrierType::LogStore,
                 );
                 let prev_epoch = command_ctx.prev_epoch.value().0;
                 if start_consume_upstream {
                     let graph_info = take(graph_info);
+                    info!(
+                        table_id = self.info.table_fragments.table_id().table_id,
+                        prev_epoch, "start consuming upstream"
+                    );
                     self.status = CreatingStreamingJobStatus::ConsumingUpstream {
                         start_consume_upstream_epoch: prev_epoch,
                         graph_info,
@@ -333,9 +381,10 @@ impl CreatingStreamingJobControl {
                     prev_epoch,
                     node_to_collect,
                     command_ctx.kind.is_checkpoint(),
+                    CreatingStreamingJobBarrierType::Upstream,
                 );
                 let graph_info = if should_finish {
-                    debug!(prev_epoch, table_id = ?self.info.table_fragments.table_id(), "mark as finishing");
+                    info!(prev_epoch, table_id = ?self.info.table_fragments.table_id(), "mark as finishing");
                     self.barrier_control
                         .attach_upstream_epoch(prev_epoch, prev_epoch);
                     let graph_info = take(graph_info);
