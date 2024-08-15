@@ -1703,7 +1703,7 @@ impl MetaMemberManagement {
             .unwrap()
     }
 
-    async fn refresh_members(&mut self) -> Result<()> {
+    async fn refresh_members(&mut self, force: bool) -> Result<()> {
         let leader_addr = match self.members.as_mut() {
             Either::Left(client) => {
                 let resp = client
@@ -1773,7 +1773,7 @@ impl MetaMemberManagement {
         if let Some(leader) = leader_addr {
             let discovered_leader = Self::host_address_to_uri(leader.address.unwrap());
 
-            if self.current_leader.as_ref() != Some(&discovered_leader) {
+            if force || self.current_leader.as_ref() != Some(&discovered_leader) {
                 tracing::info!("new meta leader {} discovered", discovered_leader);
 
                 let retry_strategy = GrpcMetaClient::retry_strategy_to_bound(
@@ -1854,7 +1854,7 @@ impl GrpcMetaClient {
                     result_sender
                 };
 
-                let tick_result = member_management.refresh_members().await;
+                let tick_result = member_management.refresh_members(event.is_some()).await;
                 if let Err(e) = tick_result.as_ref() {
                     tracing::warn!(error = %e.as_report(),  "refresh meta member client failed");
                 }
