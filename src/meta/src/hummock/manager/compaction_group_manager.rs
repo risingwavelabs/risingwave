@@ -787,6 +787,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::MaxL0CompactLevelCount(c) => {
                 target.max_l0_compact_level_count = Some(*c);
             }
+            MutableConfig::SstAllowedTrivialMoveMinSize(c) => {
+                target.sst_allowed_trivial_move_min_size = Some(*c);
+            }
         }
     }
 }
