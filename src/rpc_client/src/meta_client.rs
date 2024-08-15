@@ -1622,10 +1622,21 @@ struct GrpcMetaClientCore {
     cloud_client: CloudServiceClient<Channel>,
     sink_coordinate_client: SinkCoordinationRpcClient,
     event_log_client: EventLogServiceClient<Channel>,
+
+    /// Whether we are sure that we're connecting to the leader.
+    is_leader: bool,
 }
 
 impl GrpcMetaClientCore {
-    pub(crate) fn new(channel: Channel) -> Self {
+    pub(crate) fn new_leader(channel: Channel) -> Self {
+        Self::new_inner(channel, true)
+    }
+
+    pub(crate) fn new_initial(channel: Channel) -> Self {
+        Self::new_inner(channel, false)
+    }
+
+    fn new_inner(channel: Channel, is_leader: bool) -> Self {
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let meta_member_client = MetaMemberClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
@@ -1668,6 +1679,7 @@ impl GrpcMetaClientCore {
             cloud_client,
             sink_coordinate_client,
             event_log_client,
+            is_leader,
         }
     }
 }
@@ -1690,7 +1702,7 @@ struct MetaMemberGroup {
 struct MetaMemberManagement {
     core_ref: Arc<RwLock<GrpcMetaClientCore>>,
     members: Either<MetaMemberClient, MetaMemberGroup>,
-    current_leader: http::Uri,
+    current_leader: Option<http::Uri>,
     meta_config: MetaConfig,
 }
 
@@ -1701,11 +1713,6 @@ impl MetaMemberManagement {
         format!("http://{}:{}", addr.host, addr.port)
             .parse()
             .unwrap()
-    }
-
-    async fn recreate_core(&self, channel: Channel) {
-        let mut core = self.core_ref.write().await;
-        *core = GrpcMetaClientCore::new(channel);
     }
 
     async fn refresh_members(&mut self) -> Result<()> {
@@ -1778,7 +1785,7 @@ impl MetaMemberManagement {
         if let Some(leader) = leader_addr {
             let discovered_leader = Self::host_address_to_uri(leader.address.unwrap());
 
-            if discovered_leader != self.current_leader {
+            if self.current_leader.as_ref() != Some(&discovered_leader) {
                 tracing::info!("new meta leader {} discovered", discovered_leader);
 
                 let retry_strategy = GrpcMetaClient::retry_strategy_to_bound(
@@ -1792,9 +1799,12 @@ impl MetaMemberManagement {
                 })
                 .await?;
 
-                self.recreate_core(channel).await;
-                self.current_leader = discovered_leader;
+                let mut core = self.core_ref.write().await;
+                *core = GrpcMetaClientCore::new_leader(channel);
+                self.current_leader = Some(discovered_leader);
             }
+        } else {
+            tracing::warn!("no meta leader found");
         }
 
         Ok(())
@@ -1813,20 +1823,18 @@ impl GrpcMetaClient {
 
     fn start_meta_member_monitor(
         &self,
-        init_leader_addr: http::Uri,
         members: Either<MetaMemberClient, MetaMemberGroup>,
         force_refresh_receiver: Receiver<Sender<Result<()>>>,
         meta_config: MetaConfig,
     ) -> Result<()> {
         let core_ref: Arc<RwLock<GrpcMetaClientCore>> = self.core.clone();
-        let current_leader = init_leader_addr;
 
         let enable_period_tick = matches!(members, Either::Right(_));
 
         let member_management = MetaMemberManagement {
             core_ref,
             members,
-            current_leader,
+            current_leader: None,
             meta_config,
         };
 
@@ -1884,7 +1892,9 @@ impl GrpcMetaClient {
         receiver.await.map_err(|e| anyhow!(e))?
     }
 
-    /// Connect to the meta server from `addrs`.
+    /// Connect to the meta server based on given strategy.
+    ///
+    /// Only returns when successfully connected to a meta **leader** server.
     pub async fn new(strategy: &MetaAddressStrategy, config: MetaConfig) -> Result<Self> {
         let (channel, addr) = match strategy {
             MetaAddressStrategy::LoadBalance(addr) => {
@@ -1893,9 +1903,12 @@ impl GrpcMetaClient {
             MetaAddressStrategy::List(addrs) => Self::try_build_rpc_channel(addrs.clone()).await,
         }?;
         let (force_refresh_sender, force_refresh_receiver) = mpsc::channel(1);
+
+        // Note: so far we are only sure we can connect to a meta node through this `addr` and `channel`,
+        // but it's not guaranteed to be the leader service which we can make further progress on.
         let client = GrpcMetaClient {
             member_monitor_event_sender: force_refresh_sender,
-            core: Arc::new(RwLock::new(GrpcMetaClientCore::new(channel))),
+            core: Arc::new(RwLock::new(GrpcMetaClientCore::new_initial(channel))),
         };
 
         let meta_member_client = client.core.read().await.meta_member_client.clone();
@@ -1912,9 +1925,14 @@ impl GrpcMetaClient {
             }
         };
 
-        client.start_meta_member_monitor(addr, members, force_refresh_receiver, config)?;
+        client.start_meta_member_monitor(members, force_refresh_receiver, config)?;
 
-        client.force_refresh_leader().await?;
+        // Refresh the member list until we find and connect to the leader.
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        while !client.core.read().await.is_leader {
+            interval.tick().await;
+            client.force_refresh_leader().await?;
+        }
 
         Ok(client)
     }
