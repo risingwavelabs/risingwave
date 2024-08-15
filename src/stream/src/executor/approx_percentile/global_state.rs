@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::Bound;
+use std::collections::{BTreeMap, Bound};
 use std::mem;
 
 use risingwave_common::array::Op;
 use risingwave_common::bail;
-use risingwave_common::row::{Row, RowExt};
+use risingwave_common::row::Row;
 use risingwave_common::types::{Datum, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
@@ -148,14 +147,14 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
 
 // Update
 impl<S: StateStore> GlobalApproxPercentileState<S> {
-    pub async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
+    pub fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
         for (_op, row) in chunk.rows() {
-            self.apply_row(row).await?;
+            self.apply_row(row)?;
         }
         Ok(())
     }
 
-    pub async fn apply_row(&mut self, row: impl Row) -> StreamExecutorResult<()> {
+    pub fn apply_row(&mut self, row: impl Row) -> StreamExecutorResult<()> {
         // Decoding
         let sign_datum = row.datum_at(0);
         let sign = sign_datum.unwrap().into_int16();
@@ -176,30 +175,64 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         self.row_count = self.row_count.checked_add(delta as i64).unwrap();
         tracing::debug!("updated row_count: {}", self.row_count);
 
-        let pk = row.project(&[0, 1]);
-        let old_row = self.bucket_state_table.get_row(pk).await?;
-        let old_bucket_row_count: i64 = if let Some(row) = old_row.as_ref() {
-            row.datum_at(2).unwrap().into_int64()
-        } else {
-            0
+        let (is_new_entry, old_count, new_count) = match sign {
+            -1 => {
+                let count_entry = self.cache.neg_buckets.get(&bucket_id).copied();
+                let old_count = count_entry.unwrap_or(0);
+                let new_count = old_count.checked_add(delta as i64).unwrap();
+                let is_new_entry = count_entry.is_none();
+                if new_count != 0 {
+                    self.cache.neg_buckets.insert(bucket_id, new_count);
+                } else {
+                    self.cache.neg_buckets.remove(&bucket_id);
+                }
+                (is_new_entry, old_count, new_count)
+            }
+            0 => {
+                let old_count = self.cache.zeros;
+                let new_count = old_count.checked_add(delta as i64).unwrap();
+                let is_new_entry = old_count == 0;
+                if new_count != 0 {
+                    self.cache.zeros = new_count;
+                }
+                (is_new_entry, old_count, new_count)
+            }
+            1 => {
+                let count_entry = self.cache.pos_buckets.get(&bucket_id).copied();
+                let old_count = count_entry.unwrap_or(0);
+                let new_count = old_count.checked_add(delta as i64).unwrap();
+                let is_new_entry = count_entry.is_none();
+                if new_count != 0 {
+                    self.cache.pos_buckets.insert(bucket_id, new_count);
+                } else {
+                    self.cache.pos_buckets.remove(&bucket_id);
+                }
+                (is_new_entry, old_count, new_count)
+            }
+            _ => bail!("Invalid sign: {}", sign),
         };
 
-        let new_value = old_bucket_row_count.checked_add(delta as i64).unwrap();
-        if new_value == 0 {
+        let old_row = &[
+            sign_datum.clone(),
+            bucket_id_datum.clone(),
+            Datum::from(ScalarImpl::Int64(old_count)),
+        ];
+        if new_count == 0 && !is_new_entry {
             self.bucket_state_table.delete(old_row);
-        } else {
-            let new_value_datum = Datum::from(ScalarImpl::Int64(new_value));
-            let new_row = &[sign_datum, bucket_id_datum, new_value_datum];
-
-            if old_row.is_none() {
+        } else if new_count > 0 {
+            let new_row = &[
+                sign_datum,
+                bucket_id_datum,
+                Datum::from(ScalarImpl::Int64(new_count)),
+            ];
+            if is_new_entry {
                 self.bucket_state_table.insert(new_row);
             } else {
                 self.bucket_state_table.update(old_row, new_row);
             }
+        } else {
+            bail!("invalid state, new_count = 0 and is_new_entry is true")
         }
-
-        // Update cache
-        self.cache.update(sign, bucket_id, new_value);
 
         Ok(())
     }
@@ -259,19 +292,21 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
 type Count = i64;
 type BucketId = i32;
 
+type BucketMap = BTreeMap<BucketId, Count>;
+
 /// Keeps the entire bucket state table contents in-memory.
 struct BucketTableCache {
-    neg_buckets: EstimatedBTreeMap<BucketId, Count>,
-    zeros: Count,
-    pos_buckets: EstimatedBTreeMap<BucketId, Count>,
+    neg_buckets: BucketMap,
+    zeros: Count, // If Count is 0, it means this bucket has not be inserted into before.
+    pos_buckets: BucketMap,
 }
 
 impl BucketTableCache {
     pub fn new() -> Self {
         Self {
-            neg_buckets: EstimatedBTreeMap::new(),
+            neg_buckets: BucketMap::new(),
             zeros: 0,
-            pos_buckets: EstimatedBTreeMap::new(),
+            pos_buckets: BucketMap::new(),
         }
     }
 
@@ -291,7 +326,7 @@ impl BucketTableCache {
         if acc_count > quantile_count {
             return Datum::from(ScalarImpl::Float64(0.0.into()));
         }
-        for (bucket_id, count) in self.pos_buckets.iter() {
+        for (bucket_id, count) in &self.pos_buckets {
             acc_count += count;
             if acc_count > quantile_count {
                 // approx value = 2 * y^i / (y + 1)
@@ -301,30 +336,5 @@ impl BucketTableCache {
             }
         }
         Datum::None
-    }
-
-    pub fn update(&mut self, sign: i16, bucket_id: i32, new_value: i64) {
-        match sign {
-            -1 => {
-                if new_value == 0 {
-                    self.neg_buckets.remove(&bucket_id);
-                } else {
-                    self.neg_buckets.insert(bucket_id, new_value);
-                }
-            }
-            0 => {
-                self.zeros = new_value;
-            }
-            1 => {
-                if new_value == 0 {
-                    self.pos_buckets.remove(&bucket_id);
-                } else {
-                    self.pos_buckets.insert(bucket_id, new_value);
-                }
-            }
-            _ => {
-                panic!("Invalid sign: {}", sign);
-            }
-        }
     }
 }

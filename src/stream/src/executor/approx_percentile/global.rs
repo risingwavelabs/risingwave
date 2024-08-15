@@ -61,7 +61,7 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
         for message in input_stream {
             match message? {
                 Message::Chunk(chunk) => {
-                    state.apply_chunk(chunk).await?;
+                    state.apply_chunk(chunk)?;
                 }
                 Message::Barrier(barrier) => {
                     let output = state.get_output();
