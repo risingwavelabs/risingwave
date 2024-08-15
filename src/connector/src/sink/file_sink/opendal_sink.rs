@@ -32,6 +32,8 @@ use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam, SinkWriter,
 };
+use crate::source::TryFromBTreeMap;
+use crate::with_options::WithOptions;
 
 /// The `FileSink` struct represents a file sink that uses the `OpendalSinkBackend` trait for its backend implementation.
 ///
@@ -70,7 +72,7 @@ pub struct FileSink<S: OpendalSinkBackend> {
 /// - `new_operator`: Creates a new operator using the provided backend properties.
 /// - `get_path`: Returns the path of the sink file specified by the user's create sink statement.
 pub trait OpendalSinkBackend: Send + Sync + 'static + Clone + PartialEq {
-    type Properties: Send + Sync + Clone;
+    type Properties: TryFromBTreeMap + Send + Sync + Clone + WithOptions;
     const SINK_NAME: &'static str;
 
     fn from_btreemap(hash_map: BTreeMap<String, String>) -> Result<Self::Properties>;

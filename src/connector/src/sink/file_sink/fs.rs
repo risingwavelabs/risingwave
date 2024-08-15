@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::anyhow;
 use opendal::layers::{LoggingLayer, RetryLayer};
@@ -23,6 +23,7 @@ use with_options::WithOptions;
 
 use crate::sink::file_sink::opendal_sink::{FileSink, OpendalSinkBackend};
 use crate::sink::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
+use crate::source::UnknownFields;
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct FsCommon {
@@ -38,6 +39,15 @@ pub struct FsConfig {
     pub common: FsCommon,
 
     pub r#type: String, // accept "append-only"
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
+}
+
+impl UnknownFields for FsConfig {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
 }
 
 pub const FS_SINK: &str = "fs";
