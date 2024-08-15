@@ -556,10 +556,17 @@ impl HummockVersion {
     pub fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
         assert_eq!(self.id, version_delta.prev_id);
 
-        let (changed_table_info, is_commit_epoch) = self.state_table_info.apply_delta(
+        let (changed_table_info, mut is_commit_epoch) = self.state_table_info.apply_delta(
             &version_delta.state_table_info_delta,
             &version_delta.removed_table_ids,
         );
+
+        if !is_commit_epoch
+            && self.visible_table_committed_epoch() < version_delta.visible_table_committed_epoch()
+        {
+            is_commit_epoch = true;
+            warn!("max committed epoch bumped but no table committed epoch is changed");
+        }
 
         // apply to `levels`, which is different compaction groups
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
