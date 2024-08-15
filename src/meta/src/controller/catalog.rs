@@ -3010,24 +3010,23 @@ impl CatalogControllerInner {
         let table_objs = Table::find()
             .find_also_related(Object)
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+            //.filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
             .all(&self.db)
             .await?;
-
-        let created_streaming_job_ids: Vec<ObjectId> = StreamingJob::find()
-            .select_only()
-            .column(streaming_job::Column::JobId)
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
-            .into_tuple()
-            .all(&self.db)
-            .await?;
+        // let created_streaming_job_ids: Vec<ObjectId> = StreamingJob::find()
+        //     .select_only()
+        //     .column(streaming_job::Column::JobId)
+        //     .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+        //     .into_tuple()
+        //     .all(&self.db)
+        //     .await?;
 
         let internal_table_objs = Table::find()
             .find_also_related(Object)
             .filter(
                 table::Column::TableType
                     .eq(TableType::Internal)
-                    .and(table::Column::BelongsToJobId.is_in(created_streaming_job_ids)),
+                    // .and(table::Column::BelongsToJobId.is_in(created_streaming_job_ids)),
             )
             .all(&self.db)
             .await?;
@@ -3047,7 +3046,7 @@ impl CatalogControllerInner {
             .filter(
                 streaming_job::Column::JobStatus
                     .is_null()
-                    .or(streaming_job::Column::JobStatus.eq(JobStatus::Created)),
+                    // .or(streaming_job::Column::JobStatus.eq(JobStatus::Created)),
             )
             .all(&self.db)
             .await?;
@@ -3101,7 +3100,7 @@ impl CatalogControllerInner {
         let index_objs = Index::find()
             .find_also_related(Object)
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+            // .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
             .all(&self.db)
             .await?;
 
