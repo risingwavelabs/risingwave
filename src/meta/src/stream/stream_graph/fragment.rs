@@ -36,7 +36,7 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, FragmentTypeFlag, StreamActor,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamScanNode, StreamScanType,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode, StreamScanType,
 };
 
 use crate::barrier::SnapshotBackfillInfo;
@@ -206,30 +206,26 @@ impl BuildingFragment {
         table_columns
     }
 
-    pub fn has_shuffled_backfill(&self) -> bool {
+    pub fn has_arrangement_backfill(&self) -> bool {
+        fn has_arrangement_backfill_node(stream_node: &StreamNode) -> bool {
+            let is_backfill = if let Some(node) = &stream_node.node_body
+                && let Some(node) = node.as_stream_scan()
+            {
+                node.stream_scan_type == StreamScanType::ArrangementBackfill as i32
+            } else {
+                false
+            };
+            is_backfill
+                || stream_node
+                    .get_input()
+                    .iter()
+                    .any(has_arrangement_backfill_node)
+        }
         let stream_node = match self.inner.node.as_ref() {
             Some(node) => node,
             _ => return false,
         };
-        let mut has_shuffled_backfill = false;
-        let has_shuffled_backfill_mut_ref = &mut has_shuffled_backfill;
-        visit_stream_node_cont(stream_node, |node| {
-            let is_shuffled_backfill = if let Some(node) = &node.node_body
-                && let Some(node) = node.as_stream_scan()
-            {
-                node.stream_scan_type == StreamScanType::ArrangementBackfill as i32
-                    || node.stream_scan_type == StreamScanType::SnapshotBackfill as i32
-            } else {
-                false
-            };
-            if is_shuffled_backfill {
-                *has_shuffled_backfill_mut_ref = true;
-                false
-            } else {
-                true
-            }
-        });
-        has_shuffled_backfill
+        has_arrangement_backfill_node(stream_node)
     }
 }
 
@@ -730,7 +726,7 @@ impl CompleteStreamFragmentGraph {
         }) = upstream_ctx
         {
             for (&id, fragment) in &mut graph.fragments {
-                let uses_shuffled_backfill = fragment.has_shuffled_backfill();
+                let uses_arrangement_backfill = fragment.has_arrangement_backfill();
                 for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
                     let (up_fragment_id, edge) = match ddl_type {
                         DdlType::Table(TableJobType::SharedCdcSource) => {
@@ -805,7 +801,7 @@ impl CompleteStreamFragmentGraph {
                                     (dist_key_indices, output_indices)
                                 };
                                 let dispatch_strategy = mv_on_mv_dispatch_strategy(
-                                    uses_shuffled_backfill,
+                                    uses_arrangement_backfill,
                                     dist_key_indices,
                                     output_indices,
                                 );
@@ -947,11 +943,11 @@ impl CompleteStreamFragmentGraph {
 }
 
 fn mv_on_mv_dispatch_strategy(
-    uses_shuffled_backfill: bool,
+    uses_arrangement_backfill: bool,
     dist_key_indices: Vec<u32>,
     output_indices: Vec<u32>,
 ) -> DispatchStrategy {
-    if uses_shuffled_backfill {
+    if uses_arrangement_backfill {
         if !dist_key_indices.is_empty() {
             DispatchStrategy {
                 r#type: DispatcherType::Hash as _,

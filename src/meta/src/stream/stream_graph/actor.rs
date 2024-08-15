@@ -176,14 +176,13 @@ impl ActorBuilder {
                 }];
 
                 let upstream_actor_id = upstreams.actors.as_global_ids();
-                let is_shuffled_backfill = stream_scan.stream_scan_type
-                    == StreamScanType::ArrangementBackfill as i32
-                    || stream_scan.stream_scan_type == StreamScanType::SnapshotBackfill as i32;
-                if !is_shuffled_backfill {
+                let is_arrangement_backfill =
+                    stream_scan.stream_scan_type == StreamScanType::ArrangementBackfill as i32;
+                if !is_arrangement_backfill {
                     assert_eq!(upstream_actor_id.len(), 1);
                 }
 
-                let upstream_dispatcher_type = if is_shuffled_backfill {
+                let upstream_dispatcher_type = if is_arrangement_backfill {
                     // FIXME(kwannoel): Should the upstream dispatcher type depends on the upstream distribution?
                     // If singleton, use `Simple` dispatcher, otherwise use `Hash` dispatcher.
                     DispatcherType::Hash as _
