@@ -11395,6 +11395,7 @@ dependencies = [
  "enum-as-inner 0.6.0",
  "expect-test",
  "fail",
+ "flate2",
  "function_name",
  "futures",
  "hex",
