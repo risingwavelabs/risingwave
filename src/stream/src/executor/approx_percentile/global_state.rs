@@ -67,6 +67,7 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         // Refill row_count
         let row_count_state = self.get_row_count_state().await?;
         let row_count = Self::decode_row_count(&row_count_state)?;
+        self.row_count = row_count;
         tracing::debug!(?row_count, "recovered row_count");
 
         // Refill cache
