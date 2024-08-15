@@ -554,12 +554,18 @@ impl HummockVersion {
     }
 
     pub fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
+        // TODO: should remove it
+        let version_clone = self.clone();
         assert_eq!(self.id, version_delta.prev_id);
 
         let (changed_table_info, is_commit_epoch) = self.state_table_info.apply_delta(
             &version_delta.state_table_info_delta,
             &version_delta.removed_table_ids,
         );
+
+        if self.visible_table_committed_epoch() < version_delta.visible_table_committed_epoch() {
+            assert!(is_commit_epoch, "{:#?} {:#?}", version_clone, version_delta);
+        }
 
         // apply to `levels`, which is different compaction groups
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
