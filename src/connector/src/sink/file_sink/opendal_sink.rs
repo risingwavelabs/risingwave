@@ -50,7 +50,7 @@ pub struct FileSink<S: OpendalSinkBackend> {
     /// The description of the sink's format.
     pub(crate) format_desc: SinkFormatDesc,
     pub(crate) engine_type: EngineType,
-    pub(crate) marker: PhantomData<S>,
+    pub(crate) _marker: PhantomData<S>,
 }
 
 /// The `OpendalSinkBackend` trait unifies the behavior of various sink backends
@@ -144,7 +144,7 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
                 .format_desc
                 .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
             engine_type,
-            marker: PhantomData,
+            _marker: PhantomData,
         })
     }
 }
