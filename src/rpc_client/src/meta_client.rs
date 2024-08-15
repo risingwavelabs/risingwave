@@ -220,7 +220,29 @@ impl MetaClient {
     }
 
     /// Register the current node to the cluster and set the corresponding worker id.
+    ///
+    /// Retry if there's connection issue with the meta node. Exit the process if the registration fails.
     pub async fn register_new(
+        addr_strategy: MetaAddressStrategy,
+        worker_type: WorkerType,
+        addr: &HostAddr,
+        property: Property,
+        meta_config: &MetaConfig,
+    ) -> Result<(Self, SystemParamsReader)> {
+        let ret =
+            Self::register_new_inner(addr_strategy, worker_type, addr, property, meta_config).await;
+
+        match ret {
+            Ok(ret) => Ok(ret),
+            Err(err) => {
+                tracing::error!(error = %err.as_report(), "failed to register worker, exiting...");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    /// Register the current node to the cluster and set the corresponding worker id.
+    async fn register_new_inner(
         addr_strategy: MetaAddressStrategy,
         worker_type: WorkerType,
         addr: &HostAddr,
@@ -238,37 +260,46 @@ impl MetaClient {
         if property.is_unschedulable {
             tracing::warn!("worker {:?} registered as unschedulable", addr.clone());
         }
-        let init_result: Result<_> = tokio_retry::Retry::spawn(retry_strategy, || async {
-            let grpc_meta_client = GrpcMetaClient::new(&addr_strategy, meta_config.clone()).await?;
 
-            let add_worker_resp = grpc_meta_client
-                .add_worker_node(AddWorkerNodeRequest {
-                    worker_type: worker_type as i32,
-                    host: Some(addr.to_protobuf()),
-                    property: Some(property),
-                    resource: Some(risingwave_pb::common::worker_node::Resource {
-                        rw_version: RW_VERSION.to_string(),
-                        total_memory_bytes: system_memory_available_bytes() as _,
-                        total_cpu_cores: total_cpu_available() as _,
-                    }),
-                })
-                .await?;
-            if let Some(status) = &add_worker_resp.status
-                && status.code() == risingwave_pb::common::status::Code::UnknownWorker
-            {
-                tracing::error!("invalid worker: {}", status.message);
-                std::process::exit(1);
-            }
-
-            let system_params_resp = grpc_meta_client
-                .get_system_params(GetSystemParamsRequest {})
-                .await?;
-
-            Ok((add_worker_resp, system_params_resp, grpc_meta_client))
+        let grpc_meta_client = tokio_retry::Retry::spawn(retry_strategy, || {
+            GrpcMetaClient::new(&addr_strategy, meta_config.clone())
         })
-        .await;
+        .await?;
 
-        let (add_worker_resp, system_params_resp, grpc_meta_client) = init_result?;
+        let add_worker_resp = grpc_meta_client
+            .add_worker_node(AddWorkerNodeRequest {
+                worker_type: worker_type as i32,
+                host: Some(addr.to_protobuf()),
+                property: Some(property),
+                resource: Some(risingwave_pb::common::worker_node::Resource {
+                    rw_version: RW_VERSION.to_string(),
+                    total_memory_bytes: system_memory_available_bytes() as _,
+                    total_cpu_cores: total_cpu_available() as _,
+                }),
+            })
+            .await
+            .context("failed to add worker node")?;
+
+        // if let Err(e) = &result {
+        //     let message = e.to_report_string();
+        //     if message.contains("CPU core limit") {
+        //         tracing::error!(error = message, "CPU core limit exceeded");
+        //         std::process::exit(1);
+        //     }
+        // }
+
+        // if let Some(status) = &add_worker_resp.status
+        //     && status.code() == risingwave_pb::common::status::Code::UnknownWorker
+        // {
+        //     tracing::error!("invalid worker: {}", status.message);
+        //     std::process::exit(1);
+        // }
+
+        let system_params_resp = grpc_meta_client
+            .get_system_params(GetSystemParamsRequest {})
+            .await
+            .context("failed to get initial system params")?;
+
         let worker_id = add_worker_resp
             .node_id
             .expect("AddWorkerNodeResponse::node_id is empty");
