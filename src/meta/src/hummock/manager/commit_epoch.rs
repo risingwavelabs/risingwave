@@ -165,7 +165,7 @@ impl HummockManager {
         for s in &mut sstables {
             add_prost_table_stats_map(
                 &mut table_stats_change,
-                &to_prost_table_stats_map(std::mem::take(&mut s.table_stats)),
+                &to_prost_table_stats_map(s.table_stats.clone()),
             );
         }
 
@@ -464,8 +464,31 @@ impl HummockManager {
         let mut commit_sstables: BTreeMap<u64, Vec<SstableInfo>> = BTreeMap::new();
 
         for (mut sst, group_table_ids) in sst_to_cg_vec {
-            for (group_id, _match_ids) in group_table_ids {
-                let branch_sst = split_sst(&mut sst.sst_info, &mut new_sst_id);
+            let sst_size_from_stats = sst
+                .table_stats
+                .values()
+                .map(|stat| stat.total_key_size as u64 + stat.total_value_size as u64)
+                .sum::<u64>();
+            for (group_id, match_ids) in group_table_ids {
+                let match_table_ids_size: u64 = match_ids
+                    .iter()
+                    .map(|id| {
+                        let stat = sst.table_stats.get(id).unwrap();
+                        stat.total_key_size as u64 + stat.total_value_size as u64
+                    })
+                    .sum();
+
+                let origin_sst_size = sst.sst_info.file_size;
+                // Since the block encode may trigger a compress, the sst size may not necessarily match the stats, so a proportional calculation is used to determine the estimated size of the new sst.
+                let new_sst_size = (match_table_ids_size as f64 / sst_size_from_stats as f64
+                    * origin_sst_size as f64) as u64;
+
+                let branch_sst = split_sst(
+                    &mut sst.sst_info,
+                    &mut new_sst_id,
+                    origin_sst_size - new_sst_size,
+                    new_sst_size,
+                );
                 commit_sstables
                     .entry(group_id)
                     .or_default()

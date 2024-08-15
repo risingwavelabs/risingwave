@@ -1006,7 +1006,12 @@ fn split_sst_info_for_level(
             .cloned()
             .collect_vec();
         if !removed_table_ids.is_empty() {
-            let branch_sst = split_sst(sst_info, new_sst_id);
+            let branch_sst = split_sst(
+                sst_info,
+                new_sst_id,
+                sst_info.file_size / 2,
+                sst_info.file_size / 2,
+            );
             insert_table_infos.push(branch_sst);
         }
     }
@@ -1320,10 +1325,19 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
     res
 }
 
-pub fn split_sst(sst_info: &mut SstableInfo, new_sst_id: &mut u64) -> SstableInfo {
+pub fn split_sst(
+    sst_info: &mut SstableInfo,
+    new_sst_id: &mut u64,
+    old_sst_size: u64,
+    new_sst_size: u64,
+) -> SstableInfo {
     let mut branch_table_info = sst_info.clone();
     branch_table_info.sst_id = *new_sst_id;
+    branch_table_info.file_size = new_sst_size;
+
     sst_info.sst_id = *new_sst_id + 1;
+    sst_info.file_size = old_sst_size;
+
     *new_sst_id += 1;
 
     branch_table_info
