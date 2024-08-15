@@ -91,8 +91,8 @@ impl OpendalSinkBackend for GcsSink {
 
     const SINK_NAME: &'static str = GCS_SINK;
 
-    fn from_btreemap(hash_map: BTreeMap<String, String>) -> Result<Self::Properties> {
-        let config = serde_json::from_value::<GcsConfig>(serde_json::to_value(hash_map).unwrap())
+    fn from_btreemap(btree_map: BTreeMap<String, String>) -> Result<Self::Properties> {
+        let config = serde_json::from_value::<GcsConfig>(serde_json::to_value(btree_map).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
             return Err(SinkError::Config(anyhow!(
@@ -109,8 +109,8 @@ impl OpendalSinkBackend for GcsSink {
         FileSink::<GcsSink>::new_gcs_sink(properties)
     }
 
-    fn get_path(properties: &Self::Properties) -> String {
-        (*properties.common.path).to_string()
+    fn get_path(properties: Self::Properties) -> String {
+        properties.common.path
     }
 
     fn get_engine_type() -> super::opendal_sink::EngineType {
