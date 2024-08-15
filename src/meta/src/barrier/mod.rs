@@ -688,7 +688,7 @@ impl GlobalBarrierManager {
                                             r#type: node.r#type,
                                             host: node.host.clone(),
                                             parallelism: node.parallelism,
-                                            property: node.property.clone(),
+                                            property: node.property,
                                             resource: node.resource.clone(),
                                             ..Default::default()
                                         },
@@ -1236,7 +1236,7 @@ impl GlobalBarrierManagerContext {
             MetadataManager::V2(mgr) => {
                 let mviews = mgr
                     .catalog_controller
-                    .list_background_creating_mviews()
+                    .list_background_creating_mviews(true)
                     .await
                     .unwrap();
                 for mview in mviews {

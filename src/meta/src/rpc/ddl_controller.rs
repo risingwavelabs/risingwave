@@ -2312,7 +2312,7 @@ impl DdlController {
                 MetadataManager::V2(mgr) => {
                     if mgr
                         .catalog_controller
-                        .list_background_creating_mviews()
+                        .list_background_creating_mviews(true)
                         .await?
                         .is_empty()
                     {

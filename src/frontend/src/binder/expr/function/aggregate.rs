@@ -53,7 +53,7 @@ impl Binder {
     ) -> Result<ExprImpl> {
         self.ensure_aggregate_allowed()?;
 
-        let distinct = f.distinct;
+        let distinct = f.arg_list.distinct;
         let filter_expr = f.filter.clone();
 
         let (direct_args, args, order_by) = if matches!(kind, agg_kinds::ordered_set!()) {
@@ -105,14 +105,14 @@ impl Binder {
 
         assert!(matches!(kind, agg_kinds::ordered_set!()));
 
-        if !f.order_by.is_empty() {
+        if !f.arg_list.order_by.is_empty() {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                 "ORDER BY is not allowed for ordered-set aggregation `{}`",
                 kind
             ))
             .into());
         }
-        if f.distinct {
+        if f.arg_list.distinct {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                 "DISTINCT is not allowed for ordered-set aggregation `{}`",
                 kind
@@ -128,6 +128,7 @@ impl Binder {
         })?;
 
         let mut direct_args: Vec<_> = f
+            .arg_list
             .args
             .into_iter()
             .map(|arg| self.bind_function_arg(arg))
@@ -207,19 +208,21 @@ impl Binder {
         }
 
         let args: Vec<_> = f
+            .arg_list
             .args
             .iter()
             .map(|arg| self.bind_function_arg(arg.clone()))
             .flatten_ok()
             .try_collect()?;
         let order_by = OrderBy::new(
-            f.order_by
+            f.arg_list
+                .order_by
                 .into_iter()
                 .map(|e| self.bind_order_by_expr(e))
                 .try_collect()?,
         );
 
-        if f.distinct {
+        if f.arg_list.distinct {
             if matches!(
                 kind,
                 AggKind::Builtin(PbAggKind::ApproxCountDistinct)

@@ -268,6 +268,10 @@ mod scalar {
         pub fn into_inner(self) -> ListRef<'a> {
             self.0
         }
+
+        pub fn into_kv(self) -> (ListRef<'a>, ListRef<'a>) {
+            self.0.as_map_kv()
+        }
     }
 
     impl Scalar for MapValue {
@@ -406,10 +410,7 @@ impl MapValue {
         datatype: &MapType,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
-        let list = ListValue::memcmp_deserialize(
-            &DataType::Struct(datatype.clone().into_struct()),
-            deserializer,
-        )?;
+        let list = ListValue::memcmp_deserialize(&datatype.clone().into_struct(), deserializer)?;
         Ok(Self::from_list_entries(list))
     }
 }
