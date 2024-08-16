@@ -29,10 +29,9 @@ use crate::optimizer::plan_node::utils::{childless_record, Distill};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanBase, PlanTreeNodeBinary, Stream, StreamNode,
 };
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
-use crate::optimizer::property::FunctionalDependencySet;
-
 
 /// `StreamRowMerge` is used for merging two streams with the same stream key and distribution.
 /// It will buffer the outputs from its input streams until we receive a barrier.
@@ -59,10 +58,8 @@ impl StreamRowMerge {
         assert_eq!(lhs_mapping.target_size(), rhs_mapping.target_size());
         assert_eq!(lhs_input.distribution(), rhs_input.distribution());
         assert_eq!(lhs_input.stream_key(), rhs_input.stream_key());
-        let functional_dependency = FunctionalDependencySet::with_key(
-            lhs_mapping.target_size(),
-            &[],
-        );
+        let functional_dependency =
+            FunctionalDependencySet::with_key(lhs_mapping.target_size(), &[]);
         let mut schema_fields = Vec::with_capacity(lhs_mapping.target_size());
         let o2i_lhs = lhs_mapping
             .inverse()
