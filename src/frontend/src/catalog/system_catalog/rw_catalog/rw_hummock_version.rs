@@ -225,3 +225,27 @@ async fn read_hummock_snapshot_groups(
         })
         .collect())
 }
+
+#[derive(Fields)]
+struct RwHummockTableChangeLog {
+    #[primary_key]
+    table_id: i32,
+    change_log: JsonbVal,
+}
+
+#[system_catalog(table, "rw_catalog.rw_hummock_table_change_log")]
+async fn read_hummock_table_change_log(
+    reader: &SysCatalogReaderImpl,
+) -> Result<
+    Vec<crate::catalog::system_catalog::rw_catalog::rw_hummock_version::RwHummockTableChangeLog>,
+> {
+    let version = reader.meta_client.get_hummock_current_version().await?;
+    Ok(version
+        .table_change_log
+        .iter()
+        .map(|(table_id, change_log)| RwHummockTableChangeLog {
+            table_id: table_id.table_id as i32,
+            change_log: json!(change_log.to_protobuf()).into(),
+        })
+        .collect())
+}
