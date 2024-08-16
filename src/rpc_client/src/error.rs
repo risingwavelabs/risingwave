@@ -84,7 +84,10 @@ impl RpcError {
     pub fn is_connection_error(&self) -> bool {
         match self {
             RpcError::TransportError(_) => true,
-            RpcError::GrpcStatus(status) => status.inner().code() == tonic::Code::Unavailable,
+            RpcError::GrpcStatus(status) => matches!(
+                status.inner().code(),
+                tonic::Code::Unavailable | tonic::Code::Unimplemented
+            ),
             RpcError::MetaAddressParse(_) => false,
             RpcError::Internal(anyhow) => anyhow
                 .downcast_ref::<Self>()
