@@ -154,7 +154,7 @@ impl StreamMaterialize {
             CreateType::Foreground,
         )?;
 
-        table.cdc_table_name = cdc_table_name;
+        table.cdc_table_id = cdc_table_name;
 
         Ok(Self::new(input, table))
     }
@@ -282,7 +282,7 @@ impl StreamMaterialize {
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             retention_seconds: retention_seconds.map(|i| i.into()),
-            cdc_table_name: None,
+            cdc_table_id: None,
         })
     }
 

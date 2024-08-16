@@ -565,17 +565,18 @@ impl MetadataManager {
         }
     }
 
-    pub async fn get_table_catalog_by_cdc_table_name(
+    pub async fn get_table_catalog_by_cdc_table_id(
         &self,
-        name: String,
+        cdc_table_id: String,
     ) -> MetaResult<Vec<PbTable>> {
         match &self {
-            MetadataManager::V1(mgr) => {
-                Ok(mgr.catalog_manager.get_table_by_cdc_table_name(name).await)
-            }
+            MetadataManager::V1(mgr) => Ok(mgr
+                .catalog_manager
+                .get_table_by_cdc_table_id(cdc_table_id)
+                .await),
             MetadataManager::V2(mgr) => {
                 mgr.catalog_controller
-                    .get_table_by_cdc_table_name(name)
+                    .get_table_by_cdc_table_id(cdc_table_id)
                     .await
             }
         }

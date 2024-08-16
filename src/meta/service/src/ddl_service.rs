@@ -953,11 +953,11 @@ impl DdlService for DdlServiceImpl {
         };
 
         for table_change in schema_change.table_changes {
-            let cdc_table_name = table_change.cdc_table_name.clone();
+            let cdc_table_id = table_change.cdc_table_id.clone();
             // get the table catalog corresponding to the cdc table
             let tables: Vec<Table> = self
                 .metadata_manager
-                .get_table_catalog_by_cdc_table_name(cdc_table_name)
+                .get_table_catalog_by_cdc_table_id(cdc_table_id)
                 .await?;
 
             tracing::info!(

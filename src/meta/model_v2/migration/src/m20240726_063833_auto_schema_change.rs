@@ -10,7 +10,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Table::Table)
-                    .add_column(ColumnDef::new(Table::CdcTableName).string())
+                    .add_column(ColumnDef::new(Table::CdcTableId).string())
                     .to_owned(),
             )
             .await?;
@@ -30,7 +30,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Table::Table)
-                    .drop_column(Table::CdcTableName)
+                    .drop_column(Table::CdcTableId)
                     .to_owned(),
             )
             .await?;
@@ -49,7 +49,7 @@ impl MigrationTrait for Migration {
 #[derive(DeriveIden)]
 enum Table {
     Table,
-    CdcTableName,
+    CdcTableId,
 }
 
 #[derive(DeriveIden)]

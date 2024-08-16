@@ -4119,12 +4119,12 @@ impl CatalogManager {
             .get_table_name_and_type_mapping()
     }
 
-    pub async fn get_table_by_cdc_table_name(&self, cdc_table_name: String) -> Vec<Table> {
+    pub async fn get_table_by_cdc_table_id(&self, cdc_table_id: String) -> Vec<Table> {
         self.core
             .lock()
             .await
             .database
-            .get_table_by_cdc_table_name(cdc_table_name)
+            .get_table_by_cdc_table_id(cdc_table_id)
     }
 
     /// `list_stream_job_ids` returns all running and creating stream job ids, this is for recovery

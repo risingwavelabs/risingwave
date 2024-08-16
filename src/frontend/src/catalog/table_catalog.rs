@@ -169,7 +169,7 @@ pub struct TableCatalog {
 
     pub initialized_at_cluster_version: Option<String>,
 
-    pub cdc_table_name: Option<String>,
+    pub cdc_table_id: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -427,7 +427,7 @@ impl TableCatalog {
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             retention_seconds: self.retention_seconds,
-            cdc_table_name: self.cdc_table_name.clone(),
+            cdc_table_id: self.cdc_table_id.clone(),
         }
     }
 
@@ -601,7 +601,7 @@ impl From<PbTable> for TableCatalog {
                 .into_iter()
                 .map(TableId::from)
                 .collect_vec(),
-            cdc_table_name: tb.cdc_table_name,
+            cdc_table_id: tb.cdc_table_id,
         }
     }
 }
@@ -754,7 +754,7 @@ mod tests {
                 initialized_at_cluster_version: None,
                 dependent_relations: vec![],
                 version_column_index: None,
-                cdc_table_name: None,
+                cdc_table_id: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

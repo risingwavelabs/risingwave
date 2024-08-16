@@ -454,7 +454,7 @@ message TableSchemaChange {
   }
 
   TableChangeType change_type = 1;
-  string cdc_table_name = 2;
+  string cdc_table_id = 2;
   repeated plan_common.ColumnCatalog columns = 3;
 }
 

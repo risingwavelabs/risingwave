@@ -65,7 +65,7 @@ impl From<&str> for TableChangeType {
 
 #[derive(Debug)]
 pub struct TableSchemaChange {
-    pub(crate) cdc_table_name: String,
+    pub(crate) cdc_table_id: String,
     pub(crate) columns: Vec<ColumnCatalog>,
     pub(crate) change_type: TableChangeType,
 }
@@ -87,7 +87,7 @@ impl SchemaChangeEnvelope {
                     .collect();
                 PbTableSchemaChange {
                     change_type: table_change.change_type.to_proto() as _,
-                    cdc_table_name: table_change.cdc_table_name.clone(),
+                    cdc_table_id: table_change.cdc_table_id.clone(),
                     columns,
                 }
             })
@@ -99,7 +99,7 @@ impl SchemaChangeEnvelope {
     pub fn table_names(&self) -> Vec<String> {
         self.table_changes
             .iter()
-            .map(|table_change| table_change.cdc_table_name.clone())
+            .map(|table_change| table_change.cdc_table_id.clone())
             .collect()
     }
 }
