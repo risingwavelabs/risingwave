@@ -2108,11 +2108,13 @@ async fn test_gc_stats() {
         hummock_manager.create_version_checkpoint(0).await.unwrap(),
         0
     );
+
     assert_eq_gc_stats(0, 0, 6, 3, 2, 4);
     hummock_manager
         .unpin_version_before(context_id, HummockVersionId::MAX)
         .await
         .unwrap();
+
     assert_eq_gc_stats(0, 0, 6, 3, 2, 4);
     assert_eq!(
         hummock_manager.create_version_checkpoint(0).await.unwrap(),

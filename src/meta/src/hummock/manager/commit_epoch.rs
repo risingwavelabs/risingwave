@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
@@ -160,6 +160,7 @@ impl HummockManager {
         let state_table_info = &version.latest_version().state_table_info;
 
         let mut table_compaction_group_mapping = state_table_info.build_table_compaction_group_id();
+        let group_members_table_ids = state_table_info.build_compaction_group_member_tables();
 
         // Add new table
         let (new_table_ids, new_compaction_group, compaction_group_manager_txn) =
@@ -222,7 +223,11 @@ impl HummockManager {
             };
 
         let commit_sstables = self
-            .correct_commit_ssts(sstables, &table_compaction_group_mapping)
+            .correct_commit_ssts(
+                sstables,
+                &table_compaction_group_mapping,
+                &group_members_table_ids,
+            )
             .await?;
 
         let modified_compaction_groups: Vec<_> = commit_sstables.keys().cloned().collect();
@@ -379,6 +384,7 @@ impl HummockManager {
         &self,
         sstables: Vec<LocalSstableInfo>,
         table_compaction_group_mapping: &HashMap<TableId, CompactionGroupId>,
+        group_members_table_ids: &HashMap<CompactionGroupId, BTreeSet<TableId>>,
     ) -> Result<BTreeMap<CompactionGroupId, Vec<SstableInfo>>> {
         let mut new_sst_id_number = 0;
         let mut sst_to_cg_vec = Vec::with_capacity(sstables.len());
@@ -419,18 +425,33 @@ impl HummockManager {
                 .map(|stat| stat.total_key_size as u64 + stat.total_value_size as u64)
                 .sum::<u64>();
             for (group_id, match_ids) in group_table_ids {
-                let match_table_ids_size: u64 = match_ids
+                let group_members_table_ids = group_members_table_ids.get(&group_id).unwrap();
+                if match_ids
                     .iter()
-                    .map(|id| {
-                        let stat = sst.table_stats.get(id).unwrap();
-                        stat.total_key_size as u64 + stat.total_value_size as u64
-                    })
-                    .sum();
+                    .all(|id| group_members_table_ids.contains(&TableId::new(*id)))
+                {
+                    commit_sstables
+                        .entry(group_id)
+                        .or_default()
+                        .push(sst.sst_info.clone());
+                    continue;
+                }
 
                 let origin_sst_size = sst.sst_info.file_size;
-                // Since the block encode may trigger a compress, the sst size may not necessarily match the stats, so a proportional calculation is used to determine the estimated size of the new sst.
-                let new_sst_size = (match_table_ids_size as f64 / sst_size_from_stats as f64
-                    * origin_sst_size as f64) as u64;
+                let new_sst_size = if !sst.table_stats.is_empty() {
+                    let match_table_ids_size: u64 = match_ids
+                        .iter()
+                        .map(|id| {
+                            let stat = sst.table_stats.get(id).unwrap();
+                            stat.total_key_size as u64 + stat.total_value_size as u64
+                        })
+                        .sum();
+                    // Since the block encode may trigger a compress, the sst size may not necessarily match the stats, so a proportional calculation is used to determine the estimated size of the new sst.
+                    (match_table_ids_size as f64 / sst_size_from_stats as f64
+                        * origin_sst_size as f64) as u64
+                } else {
+                    origin_sst_size / 2
+                };
 
                 let branch_sst = split_sst(
                     &mut sst.sst_info,
