@@ -553,7 +553,7 @@ mod tests {
             incoming_sinks: vec![],
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
-            cdc_table_name: None,
+            cdc_table_id: None,
         }
     }
 

@@ -691,7 +691,7 @@ mod tests {
             created_at_cluster_version: None,
             initialized_at_cluster_version: None,
             version_column_index: None,
-            cdc_table_name: None,
+            cdc_table_id: None,
         }
         .into();
 
