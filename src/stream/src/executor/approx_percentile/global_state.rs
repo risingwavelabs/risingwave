@@ -84,28 +84,12 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
     }
 
     async fn refill_cache(&mut self) -> StreamExecutorResult<()> {
-        let neg_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (
-            Bound::Unbounded,
-            Bound::Excluded([Datum::from(ScalarImpl::Int16(0))].to_owned_row()),
-        );
-        let non_neg_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (
-            Bound::Included([Datum::from(ScalarImpl::Int16(0))].to_owned_row()),
-            Bound::Unbounded,
-        );
+        let bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (Bound::Unbounded, Bound::Unbounded);
         #[for_await]
         for keyed_row in self
             .bucket_state_table
-            .rev_iter_with_prefix(&[Datum::None; 0], &neg_bounds, PrefetchOptions::default())
+            .iter_with_prefix(&[Datum::None; 0], &bounds, PrefetchOptions::default())
             .await?
-            .chain(
-                self.bucket_state_table
-                    .iter_with_prefix(
-                        &[Datum::None; 0],
-                        &non_neg_bounds,
-                        PrefetchOptions::default(),
-                    )
-                    .await?,
-            )
         {
             let row = keyed_row?.into_owned_row();
             let sign = row.datum_at(0).unwrap().into_int16();
@@ -148,7 +132,11 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
 // Update
 impl<S: StateStore> GlobalApproxPercentileState<S> {
     pub fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
+        // Op is ignored here, because we only check the `delta` column inside the row.
+        // The sign of the `delta` column will tell us if we need to decrease or increase the
+        // count of the bucket.
         for (_op, row) in chunk.rows() {
+            debug_assert_eq!(_op, Op::Insert);
             self.apply_row(row)?;
         }
         Ok(())
