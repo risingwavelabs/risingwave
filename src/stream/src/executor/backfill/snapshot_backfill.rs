@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use futures::future::Either;
-use futures::{pin_mut, Stream, TryFutureExt, TryStreamExt};
+use futures::{pin_mut, Stream, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::TableId;
@@ -146,21 +146,6 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
 
                 let first_barrier_epoch = first_barrier.epoch;
 
-                async fn with_consuming_upstream<'a, 'b, T>(
-                    future: impl Future<Output = StreamExecutorResult<T>>,
-                    upstream_buffer: &'a mut UpstreamBuffer<'b>,
-                ) -> StreamExecutorResult<T> {
-                    select! {
-                        biased;
-                        e = upstream_buffer.consume_upstream() => {
-                            Err(e)
-                        }
-                        result = future => {
-                            result
-                        }
-                    }
-                }
-
                 // Phase 1: consume upstream snapshot
                 {
                     {
@@ -185,11 +170,8 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
 
                         pin_mut!(snapshot_stream);
 
-                        while let Some(message) = with_consuming_upstream(
-                            snapshot_stream.try_next(),
-                            &mut upstream_buffer,
-                        )
-                        .await?
+                        while let Some(message) =
+                            upstream_buffer.run_future(snapshot_stream.try_next()).await?
                         {
                             if let Message::Chunk(chunk) = &message {
                                 consuming_snapshot_row_count.inc_by(chunk.cardinality() as _);
@@ -233,20 +215,18 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     // use `with_consuming_upstream` to poll upstream concurrently so that we won't have back-pressure
                     // on the upstream. Otherwise, in `batch_iter_log_with_pk_bounds`, we may wait upstream epoch to be committed,
                     // and the back-pressure may cause the upstream unable to consume the barrier and then cause deadlock.
-                    let stream = with_consuming_upstream(
-                        self.upstream_table
-                            .batch_iter_log_with_pk_bounds(barrier_epoch.prev, barrier_epoch.prev)
-                            .map_err(Into::into),
-                        &mut upstream_buffer,
-                    )
-                    .await?;
+                    let stream =
+                        upstream_buffer
+                            .run_future(self.upstream_table.batch_iter_log_with_pk_bounds(
+                                barrier_epoch.prev,
+                                barrier_epoch.prev,
+                            ))
+                            .await?;
                     let data_types = self.upstream_table.schema().data_types();
                     let builder = create_builder(None, self.chunk_size, data_types);
                     let stream = read_change_log(stream, builder);
                     pin_mut!(stream);
-                    while let Some(chunk) =
-                        with_consuming_upstream(stream.try_next(), &mut upstream_buffer).await?
-                    {
+                    while let Some(chunk) = upstream_buffer.run_future(stream.try_next()).await? {
                         debug!(
                             ?barrier_epoch,
                             size = chunk.cardinality(),
@@ -370,7 +350,7 @@ impl<'a> UpstreamBuffer<'a> {
         }
     }
 
-    async fn consume_upstream(&mut self) -> StreamExecutorError {
+    async fn concurrently_consume_upstream(&mut self) -> StreamExecutorError {
         while !self.is_finished {
             let result = self.consume_until_next_barrier().await;
             let barrier = match result {
@@ -435,6 +415,24 @@ impl<'a> UpstreamBuffer<'a> {
             is_finished
         } else {
             false
+        }
+    }
+
+    /// Run a future while concurrently polling the upstream so that the upstream
+    /// won't be back-pressured.
+    async fn run_future<T, E: Into<StreamExecutorError>>(
+        &mut self,
+        future: impl Future<Output = Result<T, E>>,
+    ) -> StreamExecutorResult<T> {
+        select! {
+            biased;
+            e = self.concurrently_consume_upstream() => {
+                Err(e)
+            }
+            // this arm won't be starved, because the first arm is always pending unless returning with error
+            result = future => {
+                result.map_err(Into::into)
+            }
         }
     }
 }
