@@ -40,6 +40,7 @@ use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 use crate::executor::source::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
 use crate::executor::UpdateMutation;
+use crate::task::CreateMviewProgress;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub enum BackfillState {
@@ -88,6 +89,8 @@ pub struct SourceBackfillExecutorInner<S: StateStore> {
 
     /// Rate limit in rows/s.
     rate_limit_rps: Option<u32>,
+
+    progress: CreateMviewProgress,
 }
 
 /// Local variables used in the backfill stage.
@@ -238,6 +241,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         system_params: SystemParamsReaderRef,
         backfill_state_store: BackfillStateTableHandler<S>,
         rate_limit_rps: Option<u32>,
+        progress: CreateMviewProgress,
     ) -> Self {
         let source_split_change_count = metrics
             .source_split_change_count
@@ -247,6 +251,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 &actor_ctx.id.to_string(),
                 &actor_ctx.fragment_id.to_string(),
             ]);
+
         Self {
             actor_ctx,
             info,
@@ -256,6 +261,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             source_split_change_count,
             system_params,
             rate_limit_rps,
+            progress,
         }
     }
 
@@ -544,6 +550,13 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     );
                                 }
 
+                                // TODO: use a specialized progress for source?
+                                // self.progress.update(
+                                //     barrier.epoch,
+                                //     snapshot_read_epoch,
+                                //     total_snapshot_processed_rows,
+                                // );
+
                                 self.backfill_state_store
                                     .set_states(backfill_stage.states.clone())
                                     .await?;
@@ -627,6 +640,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             }
         }
 
+        let mut first_barrier_after_finish = true;
         let mut splits: HashSet<SplitId> = backfill_stage.states.keys().cloned().collect();
         // Make sure `Finished` state is persisted.
         self.backfill_state_store

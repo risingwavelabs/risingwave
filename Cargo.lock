@@ -11210,6 +11210,7 @@ dependencies = [
  "comfy-table",
  "crepe",
  "easy-ext",
+ "educe",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
