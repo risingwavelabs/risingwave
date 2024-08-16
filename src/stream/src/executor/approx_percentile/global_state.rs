@@ -18,7 +18,7 @@ use std::mem;
 use risingwave_common::array::{ListValue, Op};
 use risingwave_common::bail;
 use risingwave_common::row::Row;
-use risingwave_common::types::{Datum, F64, ToOwnedDatum};
+use risingwave_common::types::{Datum, ToOwnedDatum, F64};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;

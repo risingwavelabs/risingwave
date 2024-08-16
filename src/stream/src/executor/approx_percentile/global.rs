@@ -31,8 +31,12 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
         bucket_state_table: StateTable<S>,
         count_state_table: StateTable<S>,
     ) -> Self {
-        let global_state =
-            GlobalApproxPercentileState::new(quantiles, base, bucket_state_table, count_state_table);
+        let global_state = GlobalApproxPercentileState::new(
+            quantiles,
+            base,
+            bucket_state_table,
+            count_state_table,
+        );
         Self {
             _ctx,
             input,

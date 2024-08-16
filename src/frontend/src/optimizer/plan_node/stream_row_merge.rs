@@ -58,7 +58,10 @@ impl StreamRowMerge {
         assert_eq!(lhs_mapping.target_size(), rhs_mapping.target_size());
         assert_eq!(lhs_input.distribution(), rhs_input.distribution());
         assert_eq!(lhs_input.stream_key(), rhs_input.stream_key());
-        let functional_dependency = FunctionalDependencySet::with_key(lhs_input.schema().len() + rhs_input.schema().len(), &[]);
+        let functional_dependency = FunctionalDependencySet::with_key(
+            lhs_input.schema().len() + rhs_input.schema().len(),
+            &[],
+        );
         let mut schema_fields = Vec::with_capacity(lhs_mapping.target_size());
         let o2i_lhs = lhs_mapping
             .inverse()

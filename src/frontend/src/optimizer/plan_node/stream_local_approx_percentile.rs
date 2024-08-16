@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;

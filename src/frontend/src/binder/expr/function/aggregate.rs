@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::types::{DataType, Datum, DatumRef};
+use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
 use risingwave_sqlparser::ast::{Function, FunctionArgExpr};
 

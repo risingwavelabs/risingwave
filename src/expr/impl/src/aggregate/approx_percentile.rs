@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use std::collections::BTreeMap;
 use std::mem::size_of;
 use std::ops::Range;
 
 use bytes::{Buf, Bytes};
+use itertools::Itertools;
 use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::row::Row;
@@ -32,8 +32,7 @@ use risingwave_expr::{build_aggregate, Result};
 /// in an internal table, if it changes.
 #[build_aggregate("approx_percentile(float8) -> float8[]", state = "bytea")]
 fn build(agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
-    let quantiles_scalar = agg.direct_args[0]
-        .literal();
+    let quantiles_scalar = agg.direct_args[0].literal();
     let Some(quantiles_scalar) = quantiles_scalar else {
         bail!("quantile cannot be NULL")
     };
@@ -163,8 +162,11 @@ impl AggregateFunction for ApproxPercentile {
     // TODO(kwannoel): Instead of iterating over all buckets, we can maintain the
     // approximate quantile buckets on the fly.
     async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
-
-        async fn get_result_for_quantile(this: &ApproxPercentile, state: &State, quantile: f64) -> Result<Option<F64>> {
+        async fn get_result_for_quantile(
+            this: &ApproxPercentile,
+            state: &State,
+            quantile: f64,
+        ) -> Result<Option<F64>> {
             let quantile_count = (state.count as f64 * quantile).floor() as u64;
             let mut acc_count = 0;
             for (bucket_id, count) in state.neg_buckets.iter().rev() {
@@ -187,13 +189,13 @@ impl AggregateFunction for ApproxPercentile {
                     return Ok(Some(approx_percentile.into()));
                 }
             }
-            return Ok(None);
+            Ok(None)
         }
 
         let state = state.downcast_ref::<State>();
         let mut results = Vec::with_capacity(self.quantiles.len());
         for quantile in &self.quantiles {
-            let result = get_result_for_quantile(&self, state, *quantile).await?;
+            let result = get_result_for_quantile(self, state, *quantile).await?;
             results.push(result);
         }
         let scalar = ScalarImpl::List(ListValue::from_iter(results));
