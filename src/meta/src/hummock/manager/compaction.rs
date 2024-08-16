@@ -1359,6 +1359,11 @@ impl HummockManager {
 
             if task_status == TaskStatus::Success {
                 success_groups.push(compact_task.compaction_group_id);
+            } else {
+                tracing::error!(
+                    "DEBUG Reported compaction task {} ",
+                    compact_task_to_string(&compact_task),
+                );
             }
         }
         drop(versioning_guard);
