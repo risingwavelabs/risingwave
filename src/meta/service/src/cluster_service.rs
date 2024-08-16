@@ -25,7 +25,6 @@ use risingwave_pb::meta::{
     ListAllNodesResponse, UpdateWorkerNodeSchedulabilityRequest,
     UpdateWorkerNodeSchedulabilityResponse,
 };
-use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 use crate::MetaError;
