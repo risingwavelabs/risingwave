@@ -653,7 +653,8 @@ impl ScaleController {
                         dispatcher,
                         upstream_actor_id,
                         vnode_bitmap,
-                        mview_definition: "todo".to_string(),
+                        // todo, we need to fill this part
+                        mview_definition: "".to_string(),
                         expr_context: expr_contexts
                             .get(&actor_id)
                             .cloned()
@@ -666,7 +667,7 @@ impl ScaleController {
 
                 fragment_to_table.insert(fragment_id as _, TableId::from(job_id as u32));
 
-                let related_job = related_jobs.get(&job_id).expect("todo");
+                let related_job = related_jobs.get(&job_id).expect("job not found");
 
                 fragment_state.insert(
                     fragment_id,
@@ -2262,8 +2263,6 @@ impl ScaleController {
         }
 
         target_plan.retain(|_, plan| !plan.worker_actor_diff.is_empty());
-
-        println!("target plan {:#?}", target_plan);
 
         Ok(target_plan)
     }
