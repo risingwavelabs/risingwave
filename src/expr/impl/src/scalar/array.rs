@@ -48,7 +48,7 @@ fn map_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
 /// query T
 /// select map_from_entries(array['a','b','c'], array[1,2,3]);
 /// ----
-/// {"a":1,"b":2,"c":3}
+/// {a:1,b:2,c:3}
 /// ```
 #[function(
     "map_from_entries(anyarray, anyarray) -> anymap",
