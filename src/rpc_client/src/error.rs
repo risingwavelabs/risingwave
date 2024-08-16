@@ -77,3 +77,18 @@ macro_rules! impl_from_status {
 }
 
 impl_from_status!(stream, batch, meta, compute, compactor, connector);
+
+impl RpcError {
+    /// Returns `true` if the error is a connection error. Typically used to determine if
+    /// the error is transient and can be retried.
+    pub fn is_connection_error(&self) -> bool {
+        match self {
+            RpcError::TransportError(_) => true,
+            RpcError::GrpcStatus(status) => status.inner().code() == tonic::Code::Unavailable,
+            RpcError::MetaAddressParse(_) => false,
+            RpcError::Internal(anyhow) => anyhow
+                .downcast_ref::<Self>()
+                .map_or(false, Self::is_connection_error),
+        }
+    }
+}

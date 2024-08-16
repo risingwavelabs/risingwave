@@ -238,34 +238,33 @@ impl MetaClient {
         if property.is_unschedulable {
             tracing::warn!("worker {:?} registered as unschedulable", addr.clone());
         }
-        let init_result: Result<_> = tokio_retry::Retry::spawn(retry_strategy, || async {
-            let grpc_meta_client = GrpcMetaClient::new(&addr_strategy, meta_config.clone()).await?;
+        let init_result: Result<_> = tokio_retry::RetryIf::spawn(
+            retry_strategy,
+            || async {
+                let grpc_meta_client =
+                    GrpcMetaClient::new(&addr_strategy, meta_config.clone()).await?;
 
-            let add_worker_resp = grpc_meta_client
-                .add_worker_node(AddWorkerNodeRequest {
-                    worker_type: worker_type as i32,
-                    host: Some(addr.to_protobuf()),
-                    property: Some(property),
-                    resource: Some(risingwave_pb::common::worker_node::Resource {
-                        rw_version: RW_VERSION.to_string(),
-                        total_memory_bytes: system_memory_available_bytes() as _,
-                        total_cpu_cores: total_cpu_available() as _,
-                    }),
-                })
-                .await?;
-            if let Some(status) = &add_worker_resp.status
-                && status.code() == risingwave_pb::common::status::Code::UnknownWorker
-            {
-                tracing::error!("invalid worker: {}", status.message);
-                std::process::exit(1);
-            }
+                let add_worker_resp = grpc_meta_client
+                    .add_worker_node(AddWorkerNodeRequest {
+                        worker_type: worker_type as i32,
+                        host: Some(addr.to_protobuf()),
+                        property: Some(property),
+                        resource: Some(risingwave_pb::common::worker_node::Resource {
+                            rw_version: RW_VERSION.to_string(),
+                            total_memory_bytes: system_memory_available_bytes() as _,
+                            total_cpu_cores: total_cpu_available() as _,
+                        }),
+                    })
+                    .await?;
 
-            let system_params_resp = grpc_meta_client
-                .get_system_params(GetSystemParamsRequest {})
-                .await?;
+                let system_params_resp = grpc_meta_client
+                    .get_system_params(GetSystemParamsRequest {})
+                    .await?;
 
-            Ok((add_worker_resp, system_params_resp, grpc_meta_client))
-        })
+                Ok((add_worker_resp, system_params_resp, grpc_meta_client))
+            },
+            RpcError::is_connection_error,
+        )
         .await;
 
         let (add_worker_resp, system_params_resp, grpc_meta_client) = init_result?;
