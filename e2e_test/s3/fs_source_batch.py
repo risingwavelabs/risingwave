@@ -136,7 +136,7 @@ def test_empty_source(config, prefix, fmt):
         sex int,
         mark int,
     ) WITH (
-        connector = 's3_v2',
+        connector = 's3',
         match_pattern = '{prefix}*.{fmt}',
         s3.region_name = '{config['S3_REGION']}',
         s3.bucket_name = '{config['S3_BUCKET']}',
