@@ -403,7 +403,7 @@ impl PlanRoot {
 
         let plan = plan.optimize_by_rules(&OptimizationStage::new(
             "Iceberg count star",
-            vec![AggCountForIcebergRule::create()],
+            vec![BatchAggCountForIcebergRule::create()],
             ApplyOrder::TopDown,
         ));
 
@@ -452,7 +452,7 @@ impl PlanRoot {
 
         let plan = plan.optimize_by_rules(&OptimizationStage::new(
             "Iceberg count star",
-            vec![AggCountForIcebergRule::create()],
+            vec![BatchAggCountForIcebergRule::create()],
             ApplyOrder::TopDown,
         ));
 

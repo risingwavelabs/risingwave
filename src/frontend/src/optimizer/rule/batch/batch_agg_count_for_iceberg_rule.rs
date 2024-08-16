@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
 use crate::optimizer::plan_node::{BatchIcebergCountStarScan, PlanAggCall};
-use crate::optimizer::PlanRef;
+use crate::optimizer::{BoxedRule, PlanRef, Rule};
 
-pub struct AggCountForIcebergRule {}
-impl Rule for AggCountForIcebergRule {
+pub struct BatchAggCountForIcebergRule {}
+impl Rule for BatchAggCountForIcebergRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg = plan.as_batch_simple_agg()?;
         if agg.core.group_key.is_empty()
@@ -33,8 +32,8 @@ impl Rule for AggCountForIcebergRule {
     }
 }
 
-impl AggCountForIcebergRule {
+impl BatchAggCountForIcebergRule {
     pub fn create() -> BoxedRule {
-        Box::new(AggCountForIcebergRule {})
+        Box::new(BatchAggCountForIcebergRule {})
     }
 }
