@@ -87,6 +87,7 @@ impl RpcError {
             RpcError::GrpcStatus(status) => matches!(
                 status.inner().code(),
                 tonic::Code::Unavailable // server not started
+                 | tonic::Code::Unknown // could be transport error
                  | tonic::Code::Unimplemented // meta leader service not started
             ),
             RpcError::MetaAddressParse(_) => false,
