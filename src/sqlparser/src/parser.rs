@@ -1554,7 +1554,7 @@ impl Parser<'_> {
                     }
                     _ => {
                         // [N]
-                        Expr::ArrayIndex {
+                        Expr::Index {
                             obj: Box::new(expr),
                             index,
                         }

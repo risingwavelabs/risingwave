@@ -102,7 +102,7 @@ impl Binder {
             Expr::BinaryOp { left, op, right } => self.bind_binary_op(*left, op, *right),
             Expr::Nested(expr) => self.bind_expr_inner(*expr),
             Expr::Array(Array { elem: exprs, .. }) => self.bind_array(exprs),
-            Expr::ArrayIndex { obj, index } => self.bind_array_index(*obj, *index),
+            Expr::Index { obj, index } => self.bind_index(*obj, *index),
             Expr::ArrayRangeIndex { obj, start, end } => {
                 self.bind_array_range_index(*obj, start, end)
             }

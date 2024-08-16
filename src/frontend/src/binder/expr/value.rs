@@ -152,13 +152,19 @@ impl Binder {
         Ok(expr)
     }
 
-    pub(super) fn bind_array_index(&mut self, obj: Expr, index: Expr) -> Result<ExprImpl> {
+    pub(super) fn bind_index(&mut self, obj: Expr, index: Expr) -> Result<ExprImpl> {
         let obj = self.bind_expr_inner(obj)?;
         match obj.return_type() {
             DataType::List(return_type) => Ok(FunctionCall::new_unchecked(
                 ExprType::ArrayAccess,
                 vec![obj, self.bind_expr_inner(index)?],
                 *return_type,
+            )
+            .into()),
+            DataType::Map(m) => Ok(FunctionCall::new_unchecked(
+                ExprType::MapAccess,
+                vec![obj, self.bind_expr_inner(index)?],
+                m.value().clone(),
             )
             .into()),
             data_type => Err(ErrorCode::BindError(format!(

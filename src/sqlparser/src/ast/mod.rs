@@ -503,7 +503,7 @@ pub enum Expr {
     /// An array constructing subquery `ARRAY(SELECT 2 UNION SELECT 3)`
     ArraySubquery(Box<Query>),
     /// A subscript expression `arr[1]`
-    ArrayIndex {
+    Index {
         obj: Box<Expr>,
         index: Box<Expr>,
     },
@@ -797,7 +797,7 @@ impl fmt::Display for Expr {
                     .as_slice()
                     .join(", ")
             ),
-            Expr::ArrayIndex { obj, index } => {
+            Expr::Index { obj, index } => {
                 write!(f, "{}[{}]", obj, index)?;
                 Ok(())
             }
@@ -3349,13 +3349,13 @@ mod tests {
 
     #[test]
     fn test_array_index_display() {
-        let array_index = Expr::ArrayIndex {
+        let array_index = Expr::Index {
             obj: Box::new(Expr::Identifier(Ident::new_unchecked("v1"))),
             index: Box::new(Expr::Value(Value::Number("1".into()))),
         };
         assert_eq!("v1[1]", format!("{}", array_index));
 
-        let array_index2 = Expr::ArrayIndex {
+        let array_index2 = Expr::Index {
             obj: Box::new(array_index),
             index: Box::new(Expr::Value(Value::Number("1".into()))),
         };
