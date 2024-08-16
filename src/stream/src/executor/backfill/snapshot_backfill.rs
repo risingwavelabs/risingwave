@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use futures::future::Either;
-use futures::{pin_mut, Stream, TryStreamExt};
+use futures::{pin_mut, Stream, TryFutureExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::TableId;
@@ -230,10 +230,16 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     barrier_epoch = barrier.epoch;
 
                     debug!(?barrier_epoch, kind = ?barrier.kind, "before consume change log");
-                    let stream = self
-                        .upstream_table
-                        .batch_iter_log_with_pk_bounds(barrier_epoch.prev, barrier_epoch.prev)
-                        .await?;
+                    // use `with_consuming_upstream` to poll upstream concurrently so that we won't have back-pressure
+                    // on the upstream. Otherwise, in `batch_iter_log_with_pk_bounds`, we may wait upstream epoch to be committed,
+                    // and the back-pressure may cause the upstream unable to consume the barrier and then cause deadlock.
+                    let stream = with_consuming_upstream(
+                        self.upstream_table
+                            .batch_iter_log_with_pk_bounds(barrier_epoch.prev, barrier_epoch.prev)
+                            .map_err(Into::into),
+                        &mut upstream_buffer,
+                    )
+                    .await?;
                     let data_types = self.upstream_table.schema().data_types();
                     let builder = create_builder(None, self.chunk_size, data_types);
                     let stream = read_change_log(stream, builder);
