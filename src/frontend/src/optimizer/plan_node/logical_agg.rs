@@ -716,25 +716,7 @@ impl LogicalAggBuilder {
             }
             AggKind::Builtin(PbAggKind::ApproxPercentile) => {
                 if agg_call.order_by.sort_exprs[0].order_type == OrderType::descending() {
-                    // Rewrite DESC into 1.0-percentile for approx_percentile.
-                    let prev_percentile = agg_call.direct_args[0].clone();
-                    let new_percentile = 1.0
-                        - prev_percentile
-                            .get_data()
-                            .as_ref()
-                            .unwrap()
-                            .as_float64()
-                            .into_inner();
-                    let new_percentile = Some(ScalarImpl::Float64(new_percentile.into()));
-                    let new_percentile = Literal::new(new_percentile, DataType::Float64);
-                    let new_direct_args = vec![new_percentile, agg_call.direct_args[1].clone()];
-
-                    let new_agg_call = AggCall {
-                        order_by: OrderBy::any(),
-                        direct_args: new_direct_args,
-                        ..agg_call
-                    };
-                    Ok(push_agg_call(new_agg_call)?.into())
+                    bail!("ApproxPercentile does not support descending order");
                 } else {
                     let new_agg_call = AggCall {
                         order_by: OrderBy::any(),

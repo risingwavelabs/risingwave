@@ -43,7 +43,7 @@ impl ExecutorBuilder for GlobalApproxPercentileExecutorBuilder {
         let exec = GlobalApproxPercentileExecutor::new(
             params.actor_context,
             input,
-            node.quantile,
+            node.quantiles.clone(),
             node.base,
             params.env.config().developer.chunk_size,
             bucket_state_table,

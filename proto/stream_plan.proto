@@ -799,7 +799,7 @@ message LocalApproxPercentileNode {
 
 message GlobalApproxPercentileNode {
   double base = 1;
-  double quantile = 2;
+  repeated double quantiles = 2;
   catalog.Table bucket_state_table = 3;
   catalog.Table count_state_table = 4;
 }

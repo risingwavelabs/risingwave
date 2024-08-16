@@ -161,7 +161,7 @@ impl Binder {
                 [percentile, relative_error],
                 [_percentile_col],
             ) => {
-                decimal_to_float64(percentile, &kind)?;
+                percentile.cast_implicit_mut(DataType::List(Box::new(DataType::Float64)))?;
                 decimal_to_float64(relative_error, &kind)?;
             }
             _ => {

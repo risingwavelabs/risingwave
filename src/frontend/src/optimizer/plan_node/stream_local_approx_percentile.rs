@@ -27,6 +27,7 @@ use crate::optimizer::plan_node::utils::{childless_record, watermark_pretty, Dis
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanAggCall, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
 };
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
@@ -36,7 +37,6 @@ use crate::PlanRef;
 pub struct StreamLocalApproxPercentile {
     pub base: PlanBase<Stream>,
     input: PlanRef,
-    quantile: Literal,
     relative_error: Literal,
     percentile_col: InputRef,
 }
@@ -50,11 +50,13 @@ impl StreamLocalApproxPercentile {
         ]);
         // FIXME(kwannoel): How does watermark work with FixedBitSet
         let watermark_columns = FixedBitSet::with_capacity(3);
+        // FIXME(kwannoel):
+        let functional_dependency = FunctionalDependencySet::with_key(3, &[]);
         let base = PlanBase::new_stream(
             input.ctx(),
             schema,
             input.stream_key().map(|k| k.to_vec()),
-            input.functional_dependency().clone(),
+            functional_dependency,
             input.distribution().clone(),
             input.append_only(),
             input.emit_on_window_close(),
@@ -64,7 +66,6 @@ impl StreamLocalApproxPercentile {
         Self {
             base,
             input,
-            quantile: approx_percentile_agg_call.direct_args[0].clone(),
             relative_error: approx_percentile_agg_call.direct_args[1].clone(),
             percentile_col: approx_percentile_agg_call.inputs[0].clone(),
         }
@@ -81,7 +82,6 @@ impl Distill for StreamLocalApproxPercentile {
                 input_schema: self.input.schema(),
             }),
         ));
-        out.push(("quantile", Pretty::debug(&self.quantile)));
         out.push(("relative_error", Pretty::debug(&self.relative_error)));
         if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
             out.push(("output_watermarks", ow));
@@ -99,7 +99,6 @@ impl PlanTreeNodeUnary for StreamLocalApproxPercentile {
         Self {
             base: self.base.clone(),
             input,
-            quantile: self.quantile.clone(),
             relative_error: self.relative_error.clone(),
             percentile_col: self.percentile_col.clone(),
         }
