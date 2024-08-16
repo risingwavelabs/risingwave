@@ -157,4 +157,5 @@ builder_field! {
     level0_sub_level_compact_level_count: u32,
     level0_overlapping_sub_level_compact_level_count: u32,
     tombstone_reclaim_ratio: u32,
+    sst_allowed_trivial_move_min_size: Option<u64>,
 }

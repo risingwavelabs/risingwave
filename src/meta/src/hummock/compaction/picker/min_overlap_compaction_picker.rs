@@ -171,7 +171,7 @@ impl CompactionPicker for MinOverlappingPicker {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct SubLevelSstables {
     pub total_file_size: u64,
     pub total_file_count: usize,
@@ -441,12 +441,27 @@ impl NonOverlapSubLevelPicker {
 
         // For unexpected task the number of levels is as small as possible
         unexpected.sort_by(|a, b| {
-            a.sstable_infos
-                .len()
-                .cmp(&b.sstable_infos.len())
-                .then_with(|| a.total_file_count.cmp(&b.total_file_count))
-                .then_with(|| a.total_file_size.cmp(&b.total_file_size))
+            let a_select_count_offset =
+                (a.sstable_infos.len() as i64 - self.max_expected_level_count as i64).abs();
+            let b_select_count_offset =
+                (b.sstable_infos.len() as i64 - self.max_expected_level_count as i64).abs();
+
+            let a_file_count_offset =
+                (a.total_file_count as i64 - self.max_file_count as i64).abs();
+            let b_file_count_offset =
+                (b.total_file_count as i64 - self.max_file_count as i64).abs();
+
+            let a_file_size_offset =
+                (a.total_file_size as i64 - self.max_compaction_bytes as i64).abs();
+            let b_file_size_offset =
+                (b.total_file_size as i64 - self.max_compaction_bytes as i64).abs();
+
+            a_select_count_offset
+                .cmp(&b_select_count_offset)
+                .then_with(|| a_file_count_offset.cmp(&b_file_count_offset))
+                .then_with(|| a_file_size_offset.cmp(&b_file_size_offset))
         });
+
         expected.extend(unexpected);
 
         expected
