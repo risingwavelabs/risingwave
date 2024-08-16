@@ -34,7 +34,7 @@ else
   RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe-with-monitoring'
   MINIO_RATE_LIMIT_CLUSTER_PROFILE='ci-3cn-1fe-with-monitoring-and-minio-rate-limit'
 fi
-export RUST_LOG="risingwave_stream=debug,risingwave_batch=info,risingwave_storage=debug,risingwave_meta=debug" \
+export RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 
 run_sql_file() {
   psql -h localhost -p 4566 -d dev -U root -f "$@"
@@ -300,10 +300,10 @@ test_snapshot_backfill() {
 
 main() {
   set -euo pipefail
-#  test_snapshot_and_upstream_read
-#  test_backfill_tombstone
-#  test_replication_with_column_pruning
-#  test_sink_backfill_recovery
+  test_snapshot_and_upstream_read
+  test_backfill_tombstone
+  test_replication_with_column_pruning
+  test_sink_backfill_recovery
   test_snapshot_backfill
 
   # Only if profile is "ci-release", run it.
