@@ -28,7 +28,7 @@ use crate::optimizer::plan_node::utils::{childless_record, Distill, TableCatalog
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanAggCall, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
 };
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
@@ -45,15 +45,16 @@ pub struct StreamGlobalApproxPercentile {
 impl StreamGlobalApproxPercentile {
     pub fn new(input: PlanRef, approx_percentile_agg_call: &PlanAggCall) -> Self {
         let schema = Schema::new(vec![Field::with_name(
-            DataType::Float64,
+            DataType::List(DataType::Float64.into()),
             "approx_percentile",
         )]);
         let watermark_columns = FixedBitSet::with_capacity(1);
+        let functional_dependency = FunctionalDependencySet::with_key(1, &[]);
         let base = PlanBase::new_stream(
             input.ctx(),
             schema,
             Some(vec![]),
-            input.functional_dependency().clone(),
+            functional_dependency,
             Distribution::Single,
             input.append_only(),
             input.emit_on_window_close(),
@@ -101,8 +102,12 @@ impl StreamNode for StreamGlobalApproxPercentile {
         let relative_error = self.relative_error.get_data().as_ref().unwrap();
         let relative_error = relative_error.as_float64().into_inner();
         let base = (1.0 + relative_error) / (1.0 - relative_error);
-        let quantile = self.quantile.get_data().as_ref().unwrap();
-        let quantile = quantile.as_float64().into_inner();
+        let quantiles_scalar = self.quantile.get_data().as_ref().unwrap();
+        let quantiles: Vec<f64> = quantiles_scalar
+            .as_list()
+            .iter()
+            .map(|d| d.expect("literal value").into_float64().into())
+            .collect();
 
         // setup table: bucket_id->count
         let mut bucket_table_builder = TableCatalogBuilder::default();
@@ -118,7 +123,7 @@ impl StreamNode for StreamGlobalApproxPercentile {
 
         let body = GlobalApproxPercentileNode {
             base,
-            quantile,
+            quantiles,
             bucket_state_table: Some(
                 bucket_table_builder
                     .build(vec![], 0)

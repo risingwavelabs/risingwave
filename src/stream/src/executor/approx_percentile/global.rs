@@ -18,9 +18,6 @@ use crate::executor::prelude::*;
 pub struct GlobalApproxPercentileExecutor<S: StateStore> {
     _ctx: ActorContextRef,
     pub input: Executor,
-    pub quantile: f64,
-    pub base: f64,
-    pub chunk_size: usize,
     pub state: GlobalApproxPercentileState<S>,
 }
 
@@ -28,20 +25,17 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
     pub fn new(
         _ctx: ActorContextRef,
         input: Executor,
-        quantile: f64,
+        quantiles: Vec<f64>,
         base: f64,
-        chunk_size: usize,
+        _chunk_size: usize,
         bucket_state_table: StateTable<S>,
         count_state_table: StateTable<S>,
     ) -> Self {
         let global_state =
-            GlobalApproxPercentileState::new(quantile, base, bucket_state_table, count_state_table);
+            GlobalApproxPercentileState::new(quantiles, base, bucket_state_table, count_state_table);
         Self {
             _ctx,
             input,
-            quantile,
-            base,
-            chunk_size,
             state: global_state,
         }
     }

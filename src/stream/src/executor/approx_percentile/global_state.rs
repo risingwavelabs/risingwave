@@ -15,10 +15,10 @@
 use std::collections::{BTreeMap, Bound};
 use std::mem;
 
-use risingwave_common::array::Op;
+use risingwave_common::array::{ListValue, Op};
 use risingwave_common::bail;
 use risingwave_common::row::Row;
-use risingwave_common::types::{Datum, ToOwnedDatum};
+use risingwave_common::types::{Datum, F64, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
@@ -28,7 +28,7 @@ use crate::executor::StreamExecutorResult;
 
 /// The global approx percentile state.
 pub struct GlobalApproxPercentileState<S: StateStore> {
-    quantile: f64,
+    quantiles: Vec<f64>,
     base: f64,
     row_count: i64,
     bucket_state_table: StateTable<S>,
@@ -41,13 +41,13 @@ pub struct GlobalApproxPercentileState<S: StateStore> {
 // Initialization
 impl<S: StateStore> GlobalApproxPercentileState<S> {
     pub fn new(
-        quantile: f64,
+        quantiles: Vec<f64>,
         base: f64,
         bucket_state_table: StateTable<S>,
         count_state_table: StateTable<S>,
     ) -> Self {
         Self {
-            quantile,
+            quantiles,
             base,
             row_count: 0,
             bucket_state_table,
@@ -76,7 +76,7 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         let last_output = if row_count_state.is_none() {
             None
         } else {
-            Some(self.cache.get_output(row_count, self.quantile, self.base))
+            Some(self.cache.get_output(row_count, &self.quantiles, self.base))
         };
         tracing::debug!(?last_output, "recovered last_output");
         self.last_output = last_output;
@@ -126,6 +126,10 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         } else {
             Ok(0)
         }
+    }
+
+    fn output_type() -> DataType {
+        DataType::List(DataType::Float64.into())
     }
 }
 
@@ -251,24 +255,24 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
             last_output.clone().flatten()
         } else {
             self.cache
-                .get_output(self.row_count, self.quantile, self.base)
+                .get_output(self.row_count, &self.quantiles, self.base)
         };
         self.last_output = Some(new_output.clone());
         let output_chunk = match last_output {
-            None => StreamChunk::from_rows(&[(Op::Insert, &[new_output])], &[DataType::Float64]),
+            None => StreamChunk::from_rows(&[(Op::Insert, &[new_output])], &[Self::output_type()]),
             Some(last_output) if !self.output_changed => StreamChunk::from_rows(
                 &[
                     (Op::UpdateDelete, &[last_output.clone()]),
                     (Op::UpdateInsert, &[last_output]),
                 ],
-                &[DataType::Float64],
+                &[Self::output_type()],
             ),
             Some(last_output) => StreamChunk::from_rows(
                 &[
                     (Op::UpdateDelete, &[last_output.clone()]),
                     (Op::UpdateInsert, &[new_output.clone()]),
                 ],
-                &[DataType::Float64],
+                &[Self::output_type()],
             ),
         };
         tracing::debug!("get_output: {:#?}", output_chunk,);
@@ -298,7 +302,16 @@ impl BucketTableCache {
         }
     }
 
-    pub fn get_output(&self, row_count: i64, quantile: f64, base: f64) -> Datum {
+    pub fn get_output(&self, row_count: i64, quantiles: &[f64], base: f64) -> Datum {
+        let mut results = Vec::with_capacity(quantiles.len());
+        for quantile in quantiles {
+            let result = self.get_output_for_quantile(row_count, *quantile, base);
+            results.push(result);
+        }
+        ScalarImpl::List(ListValue::from_iter(results)).into()
+    }
+
+    pub fn get_output_for_quantile(&self, row_count: i64, quantile: f64, base: f64) -> Option<F64> {
         let quantile_count = (row_count as f64 * quantile).floor() as i64;
         let mut acc_count = 0;
         for (bucket_id, count) in self.neg_buckets.iter().rev() {
@@ -306,23 +319,21 @@ impl BucketTableCache {
             if acc_count > quantile_count {
                 // approx value = -2 * y^i / (y + 1)
                 let approx_percentile = -2.0 * base.powi(*bucket_id) / (base + 1.0);
-                let approx_percentile = ScalarImpl::Float64(approx_percentile.into());
-                return Datum::from(approx_percentile);
+                return Some(approx_percentile.into());
             }
         }
         acc_count += self.zeros;
         if acc_count > quantile_count {
-            return Datum::from(ScalarImpl::Float64(0.0.into()));
+            return Some(0.0.into());
         }
         for (bucket_id, count) in &self.pos_buckets {
             acc_count += count;
             if acc_count > quantile_count {
                 // approx value = 2 * y^i / (y + 1)
                 let approx_percentile = 2.0 * base.powi(*bucket_id) / (base + 1.0);
-                let approx_percentile = ScalarImpl::Float64(approx_percentile.into());
-                return Datum::from(approx_percentile);
+                return Some(approx_percentile.into());
             }
         }
-        Datum::None
+        None
     }
 }
