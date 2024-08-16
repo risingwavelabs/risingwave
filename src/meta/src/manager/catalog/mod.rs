@@ -26,6 +26,7 @@ use anyhow::{anyhow, Context};
 pub use database::*;
 pub use fragment::*;
 use itertools::Itertools;
+use regex::Regex;
 use risingwave_common::catalog::{
     valid_table_name, TableId as StreamingJobId, TableOption, DEFAULT_DATABASE_NAME,
     DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
@@ -268,6 +269,7 @@ impl CatalogManager {
         self.init_database().await?;
         self.source_backward_compat_check().await?;
         self.table_sink_catalog_update().await?;
+        self.table_catalog_cdc_table_id_update().await?;
         Ok(())
     }
 
@@ -355,6 +357,54 @@ impl CatalogManager {
 
         Ok(())
     }
+
+    // Fill in the `cdc_table_id` that wasn't written in the previous version for the table.
+    async fn table_catalog_cdc_table_id_update(&self) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let sources = BTreeMapTransaction::new(&mut core.database.sources);
+        let mut tables = BTreeMapTransaction::new(&mut core.database.tables);
+        let legacy_tables = tables
+            .tree_ref()
+            .iter()
+            .filter(|(_, table)| {
+                if let Some(rel_id) = table.dependent_relations.first()
+                    && sources.contains_key(rel_id)
+                    && table.cdc_table_id.is_none()
+                {
+                    true
+                } else {
+                    false
+                }
+            })
+            .map(|(_, table)| table.clone())
+            .collect_vec();
+        for mut table in legacy_tables {
+            let source_id = table.dependent_relations[0];
+            match extract_cdc_table_name(&table.definition) {
+                None => {
+                    tracing::warn!(
+                        table_id = table.id,
+                        "failed to extract cdc table name from table definition: {}",
+                        table.definition
+                    )
+                }
+                Some(cdc_table_name) => {
+                    table.cdc_table_id = Some(format!("{}_{}", source_id, cdc_table_name));
+                }
+            }
+            tables.insert(table.id, table);
+        }
+        commit_meta!(self, tables)?;
+        Ok(())
+    }
+}
+
+fn extract_cdc_table_name(sql_statement: &str) -> Option<&str> {
+    let re = Regex::new(r#"TABLE\s+'([^']+)'"#).unwrap();
+    if let Some(captures) = re.captures(sql_statement) {
+        return captures.get(1).map(|m| m.as_str());
+    }
+    None
 }
 
 // Database catalog related methods
@@ -4886,5 +4936,18 @@ impl CatalogManager {
             )
             .await;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::manager::catalog::extract_cdc_table_name;
+
+    #[test]
+    fn test_extract_cdc_table_name() {
+        let ddl1 = "CREATE TABLE t1 () FROM pg_source TABLE 'public.t1'";
+        let ddl2 = "CREATE TABLE t2 (v1 int) FROM pg_source TABLE 'mydb.t2'";
+        assert_eq!(extract_cdc_table_name(ddl1), Some("public.t1"));
+        assert_eq!(extract_cdc_table_name(ddl2), Some("mydb.t2"));
     }
 }
