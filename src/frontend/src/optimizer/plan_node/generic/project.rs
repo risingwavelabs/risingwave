@@ -324,7 +324,7 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
 
         self.exprs.iter().any(|expr| {
             // When there's a jsonb access in the `Project`, it's very likely that the query is
-            // extracing some fields from a jsonb payload column. In this case, a change from the
+            // extracting some fields from a jsonb payload column. In this case, a change from the
             // input jsonb payload may not change the output of the `Project`.
             let mut visitor = HasJsonbAccess { has: false };
             visitor.visit_expr(expr);
