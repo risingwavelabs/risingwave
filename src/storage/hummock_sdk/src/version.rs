@@ -54,15 +54,7 @@ impl HummockVersionStateTableInfo {
         }
     }
 
-    pub fn build_compaction_group_member_tables(
-        &self,
-    ) -> HashMap<CompactionGroupId, BTreeSet<TableId>> {
-        HummockVersionStateTableInfo::build_compaction_group_member_tables_impl(
-            &self.state_table_info,
-        )
-    }
-
-    fn build_compaction_group_member_tables_impl(
+    fn build_compaction_group_member_tables(
         state_table_info: &HashMap<TableId, PbStateTableInfo>,
     ) -> HashMap<CompactionGroupId, BTreeSet<TableId>> {
         let mut ret: HashMap<_, BTreeSet<_>> = HashMap::new();
@@ -88,7 +80,7 @@ impl HummockVersionStateTableInfo {
             .map(|(table_id, info)| (TableId::new(*table_id), *info))
             .collect();
         let compaction_group_member_tables =
-            Self::build_compaction_group_member_tables_impl(&state_table_info);
+            Self::build_compaction_group_member_tables(&state_table_info);
         Self {
             state_table_info,
             compaction_group_member_tables,
@@ -192,7 +184,7 @@ impl HummockVersionStateTableInfo {
         }
         debug_assert_eq!(
             self.compaction_group_member_tables,
-            Self::build_compaction_group_member_tables_impl(&self.state_table_info)
+            Self::build_compaction_group_member_tables(&self.state_table_info)
         );
         (changed_table, has_bumped_committed_epoch)
     }

@@ -158,9 +158,7 @@ impl HummockManager {
         );
 
         let state_table_info = &version.latest_version().state_table_info;
-
         let mut table_compaction_group_mapping = state_table_info.build_table_compaction_group_id();
-        let group_members_table_ids = state_table_info.build_compaction_group_member_tables();
 
         // Add new table
         let (new_table_ids, new_compaction_group, compaction_group_manager_txn) =
@@ -221,6 +219,17 @@ impl HummockManager {
                 }
                 NewTableFragmentInfo::None => (HashMap::new(), None, None),
             };
+
+        let mut group_members_table_ids: HashMap<u64, BTreeSet<TableId>> = HashMap::new();
+        {
+            // expand group_members_table_ids
+            for (table_id, group_id) in &table_compaction_group_mapping {
+                group_members_table_ids
+                    .entry(*group_id)
+                    .or_default()
+                    .insert(*table_id);
+            }
+        }
 
         let commit_sstables = self
             .correct_commit_ssts(
