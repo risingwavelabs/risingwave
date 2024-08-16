@@ -1588,6 +1588,23 @@ impl DdlController {
             })
             .collect();
 
+        let snapshot_backfill_info = fragment_graph.collect_snapshot_backfill_info()?;
+        if snapshot_backfill_info.is_some() {
+            if stream_job.create_type() == CreateType::Background {
+                return Err(anyhow!("snapshot_backfill must be used as Foreground mode").into());
+            }
+            match stream_job {
+                StreamingJob::MaterializedView(_)
+                | StreamingJob::Sink(_, _)
+                | StreamingJob::Index(_, _) => {}
+                StreamingJob::Table(_, _, _) | StreamingJob::Source(_) => {
+                    return Err(
+                        anyhow!("snapshot_backfill not enabled for table and source").into(),
+                    );
+                }
+            }
+        }
+
         let complete_graph = CompleteStreamFragmentGraph::with_upstreams(
             fragment_graph,
             upstream_root_fragments,
@@ -1635,6 +1652,12 @@ impl DdlController {
 
         let replace_table_job_info = match affected_table_replace_info {
             Some((streaming_job, fragment_graph)) => {
+                if snapshot_backfill_info.is_some() {
+                    return Err(anyhow!(
+                        "snapshot backfill should not have replace table info: {streaming_job:?}"
+                    )
+                    .into());
+                }
                 let StreamingJob::Sink(s, target_table) = &mut stream_job else {
                     bail!("additional replace table event only occurs when sinking into table");
                 };
@@ -1698,6 +1721,7 @@ impl DdlController {
             streaming_job: stream_job,
             replace_table_job_info,
             option: CreateStreamingJobOption {},
+            snapshot_backfill_info,
         };
 
         // 4. Mark tables as creating, including internal tables and the table of the stream job.
@@ -2312,7 +2336,7 @@ impl DdlController {
                 MetadataManager::V2(mgr) => {
                     if mgr
                         .catalog_controller
-                        .list_background_creating_mviews()
+                        .list_background_creating_mviews(true)
                         .await?
                         .is_empty()
                     {
