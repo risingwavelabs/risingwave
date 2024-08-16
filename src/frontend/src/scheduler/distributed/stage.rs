@@ -1028,6 +1028,7 @@ impl StageRunner {
             }
             PlanNodeType::BatchSource
             | PlanNodeType::BatchKafkaScan
+            | PlanNodeType::BatchIcebergCountStarScan
             | PlanNodeType::BatchIcebergScan => {
                 let node_body = execution_plan_node.node.clone();
                 let NodeBody::Source(mut source_node) = node_body else {

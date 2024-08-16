@@ -13,14 +13,12 @@
 // limitations under the License.
 
 use std::mem;
-use std::sync::Arc;
 
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use iceberg::scan::FileScanTask;
 use iceberg::spec::TableMetadata;
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::array::I64Array;
 use risingwave_common::catalog::Schema;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 
@@ -36,8 +34,6 @@ pub struct IcebergScanExecutor {
     batch_size: usize,
     schema: Schema,
     identity: String,
-    is_iceberg_count: bool,
-    record_counts: Vec<u64>,
 }
 
 impl Executor for IcebergScanExecutor {
@@ -63,8 +59,6 @@ impl IcebergScanExecutor {
         batch_size: usize,
         schema: Schema,
         identity: String,
-        is_iceberg_count: bool,
-        record_counts: Vec<u64>,
     ) -> Self {
         Self {
             iceberg_config,
@@ -74,23 +68,12 @@ impl IcebergScanExecutor {
             batch_size,
             schema,
             identity,
-            is_iceberg_count,
-            record_counts,
         }
     }
 
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(mut self: Box<Self>) {
-        println!("is_iceberg_count: {}", self.is_iceberg_count);
-        if self.is_iceberg_count{
-            let record_count = mem::take(&mut self.record_counts).into_iter().sum::<u64>() as i64;
-            println!("record_count: {}", record_count);
-            let chunk = DataChunk::new(vec![
-                Arc::new(I64Array::from_iter([record_count]).into()),
-            ], 1);
-            yield chunk;
-        }else{
-            let table = self
+        let table = self
             .iceberg_config
             .load_table_v2_with_metadata(self.table_meta)
             .await?;
@@ -122,7 +105,6 @@ impl IcebergScanExecutor {
             let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
             debug_assert_eq!(chunk.data_types(), data_types);
             yield chunk;
-        }
         }
     }
 }

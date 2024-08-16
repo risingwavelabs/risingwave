@@ -64,8 +64,9 @@ pub async fn handle_query(
         let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
         gen_batch_plan_fragmenter(&session, plan_result)?
     };
-    Ok(execute(session, plan_fragmenter_result, formats).await.unwrap())
-
+    Ok(execute(session, plan_fragmenter_result, formats)
+        .await
+        .unwrap())
 }
 
 pub fn handle_parse(

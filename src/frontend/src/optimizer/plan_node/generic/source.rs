@@ -64,21 +64,15 @@ pub struct Source {
     pub ctx: OptimizerContextRef,
 
     pub as_of: Option<AsOf>,
-
-    pub is_iceberg_count: bool,
 }
 
 impl GenericPlanNode for Source {
     fn schema(&self) -> Schema {
-        let fields = if self.is_iceberg_count{
-            vec![Field::with_name(DataType::Int64, "count".to_string())]
-        }else{
-            self
+        let fields = self
             .column_catalog
             .iter()
             .map(|c| (&c.column_desc).into())
-            .collect()
-        };
+            .collect();
         Schema { fields }
     }
 

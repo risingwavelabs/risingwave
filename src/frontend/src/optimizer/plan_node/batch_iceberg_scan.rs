@@ -16,6 +16,7 @@ use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::source_node::IcebergSourceType;
 use risingwave_pb::batch_plan::SourceNode;
 use risingwave_sqlparser::ast::AsOf;
 
@@ -59,12 +60,9 @@ impl BatchIcebergScan {
         let base = PlanBase::new_batch_with_core(
             &core,
             self.base.distribution().clone(),
-           self.base.order().clone(),
+            self.base.order().clone(),
         );
-        Self {
-            base,
-            core,
-        }
+        Self { base, core }
     }
 
     pub fn clone_with_dist(&self) -> Self {
@@ -123,7 +121,7 @@ impl ToBatchPb for BatchIcebergScan {
             with_properties,
             split: vec![],
             secret_refs,
-            is_iceberg_count: self.core.is_iceberg_count,
+            iceberg_source_type: IcebergSourceType::Scan.into(),
         })
     }
 }

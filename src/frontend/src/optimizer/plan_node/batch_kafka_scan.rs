@@ -18,6 +18,7 @@ use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::source_node::IcebergSourceType;
 use risingwave_pb::batch_plan::SourceNode;
 
 use super::batch::prelude::*;
@@ -133,7 +134,7 @@ impl ToBatchPb for BatchKafkaScan {
             with_properties,
             split: vec![],
             secret_refs,
-            is_iceberg_count: self.core.is_iceberg_count,
+            iceberg_source_type: IcebergSourceType::IcebergTypeUnspecified.into(),
         })
     }
 }

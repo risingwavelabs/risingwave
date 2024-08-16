@@ -13,18 +13,21 @@
 // limitations under the License.
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::{plan_node::{BatchIcebergScan, LogicalIcebergScan, PlanAggCall}, PlanRef};
+use crate::optimizer::plan_node::{BatchIcebergCountStarScan, PlanAggCall};
+use crate::optimizer::PlanRef;
 
 pub struct AggCountForIcebergRule {}
 impl Rule for AggCountForIcebergRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg = plan.as_batch_simple_agg()?;
-        if agg.core.group_key.is_empty() && agg.agg_calls().len() == 1 && agg.agg_calls()[0].eq(&PlanAggCall::count_star()){
+        if agg.core.group_key.is_empty()
+            && agg.agg_calls().len() == 1
+            && agg.agg_calls()[0].eq(&PlanAggCall::count_star())
+        {
             let batch_iceberg = agg.core.input.as_batch_iceberg_scan()?;
-            let mut source = batch_iceberg.core.clone();
-            source.is_iceberg_count = true;
-            println!("plan213321{:?}",source);
-            return Some(batch_iceberg.clone_with_core(source).into())
+            return Some(
+                BatchIcebergCountStarScan::new_with_batch_iceberg_scan(batch_iceberg).into(),
+            );
         }
         None
     }

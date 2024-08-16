@@ -556,6 +556,7 @@ impl LocalQueryExecution {
             }
             PlanNodeType::BatchSource
             | PlanNodeType::BatchKafkaScan
+            | PlanNodeType::BatchIcebergCountStarScan
             | PlanNodeType::BatchIcebergScan => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {

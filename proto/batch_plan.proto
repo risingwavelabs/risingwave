@@ -58,13 +58,18 @@ message ScanRange {
 }
 
 message SourceNode {
+  enum IcebergSourceType{
+    ICEBERG_TYPE_UNSPECIFIED = 0;
+    SCAN = 1;
+    COUNT_STAR = 2;
+  }
   uint32 source_id = 1;
   repeated plan_common.ColumnCatalog columns = 2;
   map<string, string> with_properties = 3;
   repeated bytes split = 4;
   catalog.StreamSourceInfo info = 5;
   map<string, secret.SecretRef> secret_refs = 6;
-  bool is_iceberg_count = 7;
+  IcebergSourceType iceberg_source_type = 7;
 }
 
 message FileScanNode {

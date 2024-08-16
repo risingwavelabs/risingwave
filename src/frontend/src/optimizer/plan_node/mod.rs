@@ -918,6 +918,7 @@ mod stream_values;
 mod stream_watermark_filter;
 
 mod batch_file_scan;
+mod batch_iceberg_count_star_scan;
 mod batch_iceberg_scan;
 mod batch_kafka_scan;
 mod derive;
@@ -938,6 +939,7 @@ pub use batch_group_topn::BatchGroupTopN;
 pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
 pub use batch_hop_window::BatchHopWindow;
+pub use batch_iceberg_count_star_scan::BatchIcebergCountStarScan;
 pub use batch_iceberg_scan::BatchIcebergScan;
 pub use batch_insert::BatchInsert;
 pub use batch_kafka_scan::BatchKafkaScan;
@@ -1121,6 +1123,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, MaxOneRow }
             , { Batch, KafkaScan }
             , { Batch, IcebergScan }
+            , { Batch, IcebergCountStarScan }
             , { Batch, FileScan }
             , { Stream, Project }
             , { Stream, Filter }
@@ -1241,6 +1244,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, MaxOneRow }
             , { Batch, KafkaScan }
             , { Batch, IcebergScan }
+            , { Batch, IcebergCountStarScan }
             , { Batch, FileScan }
         }
     };

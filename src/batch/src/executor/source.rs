@@ -29,7 +29,9 @@ use risingwave_connector::source::{
 };
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::source_node::IcebergSourceType;
 
+use super::iceberg_count_star_scan::IcebergCountStarExecutor;
 use super::Executor;
 use crate::error::{BatchError, Result};
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder, IcebergScanExecutor};
@@ -109,17 +111,23 @@ impl BoxedExecutorBuilder for SourceExecutor {
             assert_eq!(split_list.len(), 1);
             if let SplitImpl::Iceberg(split) = &split_list[0] {
                 let split: IcebergSplit = split.clone();
-                Ok(Box::new(IcebergScanExecutor::new(
-                    iceberg_properties.to_iceberg_config(),
-                    Some(split.snapshot_id),
-                    split.table_meta.deserialize(),
-                    split.files.into_iter().map(|x| x.deserialize()).collect(),
-                    source.context.get_config().developer.chunk_size,
-                    schema,
-                    source.plan_node().get_identity().clone(),
-                    source_node.is_iceberg_count,
-                    split.record_counts,
-                )))
+                match IcebergSourceType::try_from(source_node.iceberg_source_type).unwrap() {
+                    IcebergSourceType::Scan => Ok(Box::new(IcebergScanExecutor::new(
+                        iceberg_properties.to_iceberg_config(),
+                        Some(split.snapshot_id),
+                        split.table_meta.deserialize(),
+                        split.files.into_iter().map(|x| x.deserialize()).collect(),
+                        source.context.get_config().developer.chunk_size,
+                        schema,
+                        source.plan_node().get_identity().clone(),
+                    ))),
+                    IcebergSourceType::IcebergTypeUnspecified => unreachable!(),
+                    IcebergSourceType::CountStar => Ok(Box::new(IcebergCountStarExecutor::new(
+                        schema,
+                        source.plan_node().get_identity().clone(),
+                        split.record_counts,
+                    ))),
+                }
             } else {
                 unreachable!()
             }
