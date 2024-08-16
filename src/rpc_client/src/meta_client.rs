@@ -1731,38 +1731,40 @@ impl MetaMemberManagement {
                 let mut fetched_members = None;
 
                 for (addr, client) in &mut member_group.members {
-                    let client: Result<MetaMemberClient> = try {
-                        match client {
+                    let members: Result<_> = try {
+                        let mut client = match client {
                             Some(cached_client) => cached_client.to_owned(),
                             None => {
                                 let endpoint = GrpcMetaClient::addr_to_endpoint(addr.clone());
-                                let channel = GrpcMetaClient::connect_to_endpoint(endpoint).await?;
+                                let channel = GrpcMetaClient::connect_to_endpoint(endpoint)
+                                    .await
+                                    .context("failed to create client")?;
                                 let new_client: MetaMemberClient =
                                     MetaMemberServiceClient::new(channel);
                                 *client = Some(new_client.clone());
 
                                 new_client
                             }
-                        }
+                        };
+
+                        let resp = client
+                            .members(MembersRequest {})
+                            .await
+                            .context("failed to fetch members")?;
+
+                        resp.into_inner().members
                     };
-                    if let Err(err) = client {
-                        tracing::warn!(%addr, error = %err.as_report(), "failed to create client");
-                        continue;
-                    }
-                    match client.unwrap().members(MembersRequest {}).await {
-                        Err(err) => {
-                            tracing::warn!(%addr, error = %err.as_report(), "failed to fetch members");
-                            continue;
-                        }
-                        Ok(resp) => {
-                            fetched_members = Some(resp.into_inner().members);
-                            break;
-                        }
+
+                    let fetched = members.is_ok();
+                    fetched_members = Some(members);
+                    if fetched {
+                        break;
                     }
                 }
 
-                let members =
-                    fetched_members.ok_or_else(|| anyhow!("could not refresh members"))?;
+                let members = fetched_members
+                    .context("no member available in the list")?
+                    .context("could not refresh members")?;
 
                 // find new leader
                 let mut leader = None;
