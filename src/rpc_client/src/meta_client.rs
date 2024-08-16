@@ -255,11 +255,13 @@ impl MetaClient {
                             total_cpu_cores: total_cpu_available() as _,
                         }),
                     })
-                    .await?;
+                    .await
+                    .context("failed to add worker node")?;
 
                 let system_params_resp = grpc_meta_client
                     .get_system_params(GetSystemParamsRequest {})
-                    .await?;
+                    .await
+                    .context("failed to get initial system params")?;
 
                 Ok((add_worker_resp, system_params_resp, grpc_meta_client))
             },
