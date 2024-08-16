@@ -1640,9 +1640,9 @@ impl DdlController {
         // If the frontend does not specify the degree of parallelism and the default_parallelism is set to full, then set it to ADAPTIVE.
         // Otherwise, it defaults to FIXED based on deduction.
         let table_parallelism = match (specified_parallelism, &self.env.opts.default_parallelism) {
-            // If the parallelism is limited, the parallelism is set to FIXED.
             (None, DefaultParallelism::Full) if parallelism_limited => {
-                TableParallelism::Fixed(parallelism.get())
+                tracing::warn!("Parallelism limited to 256 in ADAPTIVE mode");
+                TableParallelism::Adaptive
             }
             (None, DefaultParallelism::Full) => TableParallelism::Adaptive,
             _ => TableParallelism::Fixed(parallelism.get()),

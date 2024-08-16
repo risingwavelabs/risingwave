@@ -2088,6 +2088,7 @@ impl ScaleController {
                         }
                         TableParallelism::Fixed(mut n) => {
                             if n > VirtualNode::COUNT {
+                                // This should be unreachable, but we still intercept it to prevent accidental modifications.
                                 tracing::warn!("parallelism {n} for table {table_id} is larger than VirtualNode::COUNT, force limit to VirtualNode::COUNT");
                                 n = VirtualNode::COUNT
                             }

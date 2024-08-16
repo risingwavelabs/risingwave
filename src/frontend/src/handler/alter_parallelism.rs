@@ -106,23 +106,24 @@ pub async fn handle_alter_parallelism(
 
     let mut builder = RwPgResponse::builder(stmt_type);
 
-    let parallelism = match &target_parallelism.parallelism {
-        Some(Parallelism::Adaptive(_)) | Some(Parallelism::Auto(_)) => Some(available_parallelism),
-        Some(Parallelism::Fixed(FixedParallelism { parallelism })) => Some(*parallelism),
-        _ => None,
+    match &target_parallelism.parallelism {
+        Some(Parallelism::Adaptive(_)) | Some(Parallelism::Auto(_)) => {
+            if available_parallelism > VirtualNode::COUNT as u32 {
+                builder = builder.notice(format!("Available parallelism exceeds the maximum parallelism limit, the actual parallelism will be limited to {}", VirtualNode::COUNT));
+            }
+        }
+        Some(Parallelism::Fixed(FixedParallelism { parallelism })) => {
+            if *parallelism > VirtualNode::COUNT as u32 {
+                builder = builder.notice(format!("Provided parallelism exceeds the maximum parallelism limit, resetting to FIXED({})", VirtualNode::COUNT));
+                target_parallelism = PbTableParallelism {
+                    parallelism: Some(PbParallelism::Fixed(FixedParallelism {
+                        parallelism: VirtualNode::COUNT as u32,
+                    })),
+                };
+            }
+        }
+        _ => {}
     };
-
-    if let Some(parallelism) = parallelism
-        && parallelism > VirtualNode::COUNT as u32
-    {
-        target_parallelism = PbTableParallelism {
-            parallelism: Some(PbParallelism::Fixed(FixedParallelism {
-                parallelism: VirtualNode::COUNT as u32,
-            })),
-        };
-
-        builder = builder.notice("Available or provided parallelism exceeds the maximum parallelism limit, resetting to FIXED(256).".to_string());
-    }
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer

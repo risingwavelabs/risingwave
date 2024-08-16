@@ -165,12 +165,18 @@ async fn test_parallelism_exceed_virtual_node_max_create() -> Result<()> {
     session
         .run("select parallelism from rw_streaming_parallelism where name = 't'")
         .await?
-        .assert_result_eq(format!("FIXED({})", vnode_max));
+        .assert_result_eq("ADAPTIVE");
+
+    session
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 't'")
+        .await?
+        .assert_result_eq(format!("{}", vnode_max));
+
     Ok(())
 }
 
 #[tokio::test]
-async fn test_parallelism_exceed_virtual_node_max_alter() -> Result<()> {
+async fn test_parallelism_exceed_virtual_node_max_alter_fixed() -> Result<()> {
     let vnode_max = VirtualNode::COUNT;
     let mut configuration = Configuration::for_scale();
     configuration.compute_nodes = 1;
@@ -191,5 +197,36 @@ async fn test_parallelism_exceed_virtual_node_max_alter() -> Result<()> {
         .run("select parallelism from rw_streaming_parallelism where name = 't'")
         .await?
         .assert_result_eq(format!("FIXED({})", vnode_max));
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_parallelism_exceed_virtual_node_max_alter_adaptive() -> Result<()> {
+    let vnode_max = VirtualNode::COUNT;
+    let mut configuration = Configuration::for_scale();
+    configuration.compute_nodes = 1;
+    configuration.compute_node_cores = vnode_max + 100;
+    let mut cluster = Cluster::start(configuration).await?;
+    let mut session = cluster.start_session();
+    session.run("set streaming_parallelism = 1").await?;
+    session.run("create table t(v int)").await?;
+    session
+        .run("select parallelism from rw_streaming_parallelism where name = 't'")
+        .await?
+        .assert_result_eq("FIXED(1)");
+
+    session
+        .run("alter table t set parallelism = adaptive")
+        .await?;
+    session
+        .run("select parallelism from rw_streaming_parallelism where name = 't'")
+        .await?
+        .assert_result_eq("ADAPTIVE");
+
+    session
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 't'")
+        .await?
+        .assert_result_eq(format!("{}", vnode_max));
+
     Ok(())
 }
