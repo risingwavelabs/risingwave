@@ -28,7 +28,7 @@ use risingwave_batch::error::BatchError;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
-use risingwave_common::catalog::TableDesc;
+use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{VirtualNode, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::util::scan_range::ScanRange;
@@ -269,6 +269,7 @@ impl Query {
 
 #[derive(Debug, Clone)]
 pub struct SourceFetchInfo {
+    pub schema: Schema,
     pub connector: ConnectorProperties,
     pub timebound: (Option<i64>, Option<i64>),
     pub as_of: Option<AsOf>,
@@ -358,7 +359,7 @@ impl SourceScanInfo {
                 };
 
                 let split_info = iceberg_enumerator
-                    .list_splits_batch(time_travel_info, batch_parallelism)
+                    .list_splits_batch(fetch_info.schema, time_travel_info, batch_parallelism)
                     .await?
                     .into_iter()
                     .map(SplitImpl::Iceberg)
@@ -731,13 +732,19 @@ impl StageGraph {
 
             // For batch reading file source, the number of files involved is typically large.
             // In order to avoid generating a task for each file, the parallelism of tasks is limited here.
-            // todo(wcy-fdu): Currently it will be divided into half of schedule_unit_count groups, and this will be changed to configurable later.
+            // The minimum `task_parallelism` is 1. Additionally, `task_parallelism`
+            // must be greater than the number of files to read. Therefore, we first take the
+            // minimum of the number of files and (self.batch_parallelism / 2). If the number of
+            // files is 0, we set task_parallelism to 1.
+
             let task_parallelism = match &stage.source_info {
                 Some(SourceScanInfo::Incomplete(source_fetch_info)) => {
                     match source_fetch_info.connector {
-                        ConnectorProperties::Gcs(_) | ConnectorProperties::OpendalS3(_) => {
-                            (self.batch_parallelism / 2) as u32
-                        }
+                        ConnectorProperties::Gcs(_) | ConnectorProperties::OpendalS3(_) => (min(
+                            complete_source_info.split_info().unwrap().len() as u32,
+                            (self.batch_parallelism / 2) as u32,
+                        ))
+                        .max(1),
                         _ => complete_source_info.split_info().unwrap().len() as u32,
                     }
                 }
@@ -1048,6 +1055,7 @@ impl BatchPlanFragmenter {
                     ConnectorProperties::extract(source_catalog.with_properties.clone(), false)?;
                 let timestamp_bound = batch_kafka_scan.kafka_timestamp_range_value();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
+                    schema: batch_kafka_scan.base.schema().clone(),
                     connector: property,
                     timebound: timestamp_bound,
                     as_of: None,
@@ -1061,6 +1069,7 @@ impl BatchPlanFragmenter {
                     ConnectorProperties::extract(source_catalog.with_properties.clone(), false)?;
                 let as_of = batch_iceberg_scan.as_of();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
+                    schema: batch_iceberg_scan.base.schema().clone(),
                     connector: property,
                     timebound: (None, None),
                     as_of,
@@ -1075,6 +1084,7 @@ impl BatchPlanFragmenter {
                     ConnectorProperties::extract(source_catalog.with_properties.clone(), false)?;
                 let as_of = source_node.as_of();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
+                    schema: source_node.base.schema().clone(),
                     connector: property,
                     timebound: (None, None),
                     as_of,

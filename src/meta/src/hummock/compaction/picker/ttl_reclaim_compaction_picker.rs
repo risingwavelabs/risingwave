@@ -355,7 +355,7 @@ mod test {
         assert_eq!(levels.len(), 4);
         let levels = Levels {
             levels,
-            l0: Some(l0),
+            l0,
             ..Default::default()
         };
         let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();

@@ -14,6 +14,7 @@
 
 pub mod mock_external_table;
 pub mod postgres;
+pub mod sql_server;
 
 #[cfg(not(madsim))]
 mod maybe_tls_connector;
@@ -42,6 +43,9 @@ use crate::source::cdc::external::mysql::{
 use crate::source::cdc::external::postgres::{
     PostgresExternalTable, PostgresExternalTableReader, PostgresOffset,
 };
+use crate::source::cdc::external::sql_server::{
+    SqlServerExternalTable, SqlServerExternalTableReader, SqlServerOffset,
+};
 use crate::source::cdc::CdcSourceType;
 use crate::WithPropertiesExt;
 
@@ -50,6 +54,7 @@ pub enum CdcTableType {
     Undefined,
     MySql,
     Postgres,
+    SqlServer,
     Citus,
 }
 
@@ -60,12 +65,24 @@ impl CdcTableType {
             "mysql-cdc" => Self::MySql,
             "postgres-cdc" => Self::Postgres,
             "citus-cdc" => Self::Citus,
+            "sqlserver-cdc" => Self::SqlServer,
             _ => Self::Undefined,
         }
     }
 
     pub fn can_backfill(&self) -> bool {
+        matches!(self, Self::MySql | Self::Postgres | Self::SqlServer)
+    }
+
+    pub fn enable_transaction_metadata(&self) -> bool {
+        // In Debezium, transactional metadata cause delay of the newest events, as the `END` message is never sent unless a new transaction starts.
+        // So we only allow transactional metadata for MySQL and Postgres.
+        // See more in https://debezium.io/documentation/reference/2.6/connectors/sqlserver.html#sqlserver-transaction-metadata
         matches!(self, Self::MySql | Self::Postgres)
+    }
+
+    pub fn shareable_only(&self) -> bool {
+        matches!(self, Self::SqlServer)
     }
 
     pub async fn create_table_reader(
@@ -80,6 +97,9 @@ impl CdcTableType {
             )),
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
                 PostgresExternalTableReader::new(config, schema, pk_indices).await?,
+            )),
+            Self::SqlServer => Ok(ExternalTableReaderImpl::SqlServer(
+                SqlServerExternalTableReader::new(config, schema, pk_indices).await?,
             )),
             _ => bail!("invalid external table type: {:?}", *self),
         }
@@ -110,6 +130,7 @@ impl SchemaTableName {
             CdcTableType::Postgres | CdcTableType::Citus => {
                 properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
             }
+            CdcTableType::SqlServer => properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default(),
             _ => {
                 unreachable!("invalid external table type: {:?}", table_type);
             }
@@ -126,6 +147,7 @@ impl SchemaTableName {
 pub enum CdcOffset {
     MySql(MySqlOffset),
     Postgres(PostgresOffset),
+    SqlServer(SqlServerOffset),
 }
 
 // Example debezium offset for Postgres:
@@ -169,6 +191,10 @@ pub struct DebeziumSourceOffset {
     #[serde(rename = "txId")]
     pub txid: Option<i64>,
     pub tx_usec: Option<u64>,
+
+    // sql server offset
+    pub commit_lsn: Option<String>,
+    pub change_lsn: Option<String>,
 }
 
 pub type CdcOffsetParseFunc = Box<dyn Fn(&str) -> ConnectorResult<CdcOffset> + Send>;
@@ -188,6 +214,7 @@ pub trait ExternalTableReader {
 pub enum ExternalTableReaderImpl {
     MySql(MySqlExternalTableReader),
     Postgres(PostgresExternalTableReader),
+    SqlServer(SqlServerExternalTableReader),
     Mock(MockExternalTableReader),
 }
 
@@ -259,6 +286,7 @@ impl ExternalTableReader for ExternalTableReaderImpl {
         match self {
             ExternalTableReaderImpl::MySql(mysql) => mysql.current_cdc_offset().await,
             ExternalTableReaderImpl::Postgres(postgres) => postgres.current_cdc_offset().await,
+            ExternalTableReaderImpl::SqlServer(sql_server) => sql_server.current_cdc_offset().await,
             ExternalTableReaderImpl::Mock(mock) => mock.current_cdc_offset().await,
         }
     }
@@ -281,6 +309,9 @@ impl ExternalTableReaderImpl {
             ExternalTableReaderImpl::Postgres(_) => {
                 PostgresExternalTableReader::get_cdc_offset_parser()
             }
+            ExternalTableReaderImpl::SqlServer(_) => {
+                SqlServerExternalTableReader::get_cdc_offset_parser()
+            }
             ExternalTableReaderImpl::Mock(_) => MockExternalTableReader::get_cdc_offset_parser(),
         }
     }
@@ -300,6 +331,9 @@ impl ExternalTableReaderImpl {
             ExternalTableReaderImpl::Postgres(postgres) => {
                 postgres.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
+            ExternalTableReaderImpl::SqlServer(sql_server) => {
+                sql_server.snapshot_read(table_name, start_pk, primary_keys, limit)
+            }
             ExternalTableReaderImpl::Mock(mock) => {
                 mock.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
@@ -317,6 +351,7 @@ impl ExternalTableReaderImpl {
 pub enum ExternalTableImpl {
     MySql(MySqlExternalTable),
     Postgres(PostgresExternalTable),
+    SqlServer(SqlServerExternalTable),
 }
 
 impl ExternalTableImpl {
@@ -329,6 +364,9 @@ impl ExternalTableImpl {
             CdcSourceType::Postgres => Ok(ExternalTableImpl::Postgres(
                 PostgresExternalTable::connect(config).await?,
             )),
+            CdcSourceType::SqlServer => Ok(ExternalTableImpl::SqlServer(
+                SqlServerExternalTable::connect(config).await?,
+            )),
             _ => Err(anyhow!("Unsupported cdc connector type: {}", config.connector).into()),
         }
     }
@@ -337,6 +375,7 @@ impl ExternalTableImpl {
         match self {
             ExternalTableImpl::MySql(mysql) => mysql.column_descs(),
             ExternalTableImpl::Postgres(postgres) => postgres.column_descs(),
+            ExternalTableImpl::SqlServer(sql_server) => sql_server.column_descs(),
         }
     }
 
@@ -344,6 +383,7 @@ impl ExternalTableImpl {
         match self {
             ExternalTableImpl::MySql(mysql) => mysql.pk_names(),
             ExternalTableImpl::Postgres(postgres) => postgres.pk_names(),
+            ExternalTableImpl::SqlServer(sql_server) => sql_server.pk_names(),
         }
     }
 }

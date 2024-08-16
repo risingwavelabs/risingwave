@@ -250,9 +250,9 @@ impl StreamTableScan {
         // The required columns from the table (both scan and upstream).
         let upstream_column_ids = match self.stream_scan_type {
             // For backfill, we additionally need the primary key columns.
-            StreamScanType::Backfill | StreamScanType::ArrangementBackfill => {
-                self.core.output_and_pk_column_ids()
-            }
+            StreamScanType::Backfill
+            | StreamScanType::ArrangementBackfill
+            | StreamScanType::SnapshotBackfill => self.core.output_and_pk_column_ids(),
             StreamScanType::Chain | StreamScanType::Rearrange | StreamScanType::UpstreamOnly => {
                 self.core.output_column_ids()
             }
@@ -320,7 +320,7 @@ impl StreamTableScan {
             table_desc: Some(self.core.table_desc.try_to_protobuf()?),
             state_table: Some(catalog),
             arrangement_table,
-            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+            rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
             ..Default::default()
         });
 

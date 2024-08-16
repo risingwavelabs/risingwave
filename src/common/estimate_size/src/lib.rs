@@ -14,6 +14,7 @@
 
 #![feature(allocator_api)]
 #![feature(btree_cursors)]
+#![feature(btree_extract_if)]
 
 pub mod collections;
 

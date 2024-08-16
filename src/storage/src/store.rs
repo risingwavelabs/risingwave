@@ -193,21 +193,24 @@ impl<T> ChangeLogValue<T> {
     }
 
     pub fn into_op_value_iter(self) -> impl Iterator<Item = (Op, T)> {
-        std::iter::from_coroutine(move || match self {
-            Self::Insert(row) => {
-                yield (Op::Insert, row);
-            }
-            Self::Delete(row) => {
-                yield (Op::Delete, row);
-            }
-            Self::Update {
-                old_value,
-                new_value,
-            } => {
-                yield (Op::UpdateDelete, old_value);
-                yield (Op::UpdateInsert, new_value);
-            }
-        })
+        std::iter::from_coroutine(
+            #[coroutine]
+            move || match self {
+                Self::Insert(row) => {
+                    yield (Op::Insert, row);
+                }
+                Self::Delete(row) => {
+                    yield (Op::Delete, row);
+                }
+                Self::Update {
+                    old_value,
+                    new_value,
+                } => {
+                    yield (Op::UpdateDelete, old_value);
+                    yield (Op::UpdateInsert, new_value);
+                }
+            },
+        )
     }
 }
 
@@ -361,10 +364,6 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
         MonitoredStateStore::new(self, storage_metrics)
     }
 
-    /// Clears contents in shared buffer.
-    /// This method should only be called when dropping all actors in the local compute node.
-    fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_;
-
     fn new_local(&self, option: NewLocalOptions) -> impl Future<Output = Self::Local> + Send + '_;
 
     /// Validates whether store can serve `epoch` at the moment.
@@ -403,6 +402,7 @@ pub trait LocalStateStore: StaticSendSync {
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_;
 
+    /// Get last persisted watermark for a given vnode.
     fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes>;
 
     /// Inserts a key-value entry associated with a given `epoch` into the state store.

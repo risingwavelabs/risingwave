@@ -12,14 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::types::{
     DataType, Datum, DatumCow, Scalar, ScalarImpl, ScalarRefImpl, Timestamptz, ToDatumRef,
 };
 use risingwave_connector_codec::decoder::AccessExt;
 use risingwave_pb::plan_common::additional_column::ColumnType;
+use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
+use crate::parser::debezium::schema_change::{SchemaChangeEnvelope, TableSchemaChange};
+use crate::parser::schema_change::TableChangeType;
 use crate::parser::TransactionControl;
+use crate::source::cdc::external::mysql::{mysql_type_to_rw_type, type_name_to_mysql_type};
 use crate::source::{ConnectorProperties, SourceColumnDesc};
 
 // Example of Debezium JSON value:
@@ -75,6 +81,8 @@ const OP: &str = "op";
 pub const TRANSACTION_STATUS: &str = "status";
 pub const TRANSACTION_ID: &str = "id";
 
+pub const TABLE_CHANGES: &str = "tableChanges";
+
 pub const DEBEZIUM_READ_OP: &str = "r";
 pub const DEBEZIUM_CREATE_OP: &str = "c";
 pub const DEBEZIUM_UPDATE_OP: &str = "u";
@@ -98,6 +106,7 @@ pub fn parse_transaction_meta(
         // The id field has different meanings for different databases:
         // PG: txID:LSN
         // MySQL: source_id:transaction_id (e.g. 3E11FA47-71CA-11E1-9E33-C80AA9429562:23)
+        // SQL Server: commit_lsn (e.g. 00000027:00000ac0:0002)
         match status {
             DEBEZIUM_TRANSACTION_STATUS_BEGIN => match *connector_props {
                 ConnectorProperties::PostgresCdc(_) => {
@@ -105,6 +114,9 @@ pub fn parse_transaction_meta(
                     return Ok(TransactionControl::Begin { id: tx_id.into() });
                 }
                 ConnectorProperties::MysqlCdc(_) => {
+                    return Ok(TransactionControl::Begin { id: id.into() })
+                }
+                ConnectorProperties::SqlServerCdc(_) => {
                     return Ok(TransactionControl::Begin { id: id.into() })
                 }
                 _ => {}
@@ -117,6 +129,9 @@ pub fn parse_transaction_meta(
                 ConnectorProperties::MysqlCdc(_) => {
                     return Ok(TransactionControl::Commit { id: id.into() })
                 }
+                ConnectorProperties::SqlServerCdc(_) => {
+                    return Ok(TransactionControl::Commit { id: id.into() })
+                }
                 _ => {}
             },
             _ => {}
@@ -127,6 +142,96 @@ pub fn parse_transaction_meta(
         name: "transaction status".into(),
         path: TRANSACTION_STATUS.into(),
     })
+}
+
+macro_rules! jsonb_access_field {
+    ($col:expr, $field:expr, $as_type:tt) => {
+        $crate::paste! {
+            $col.access_object_field($field).unwrap().[<as_ $as_type>]().unwrap()
+        }
+    };
+}
+
+pub fn parse_schema_change(
+    accessor: &impl Access,
+    connector_props: &ConnectorProperties,
+) -> AccessResult<SchemaChangeEnvelope> {
+    let mut schema_changes = vec![];
+
+    if let Some(ScalarRefImpl::List(table_changes)) = accessor
+        .access(&[TABLE_CHANGES], &DataType::List(Box::new(DataType::Jsonb)))?
+        .to_datum_ref()
+    {
+        for datum in table_changes.iter() {
+            let jsonb = match datum {
+                Some(ScalarRefImpl::Jsonb(jsonb)) => jsonb,
+                _ => unreachable!(""),
+            };
+
+            let id = jsonb_access_field!(jsonb, "id", string);
+            let ty = jsonb_access_field!(jsonb, "type", string);
+            let ddl_type: TableChangeType = ty.as_str().into();
+            if matches!(ddl_type, TableChangeType::Create | TableChangeType::Drop) {
+                tracing::debug!("skip table schema change for create/drop command");
+                continue;
+            }
+
+            let mut column_descs: Vec<ColumnDesc> = vec![];
+            if let Some(table) = jsonb.access_object_field("table")
+                && let Some(columns) = table.access_object_field("columns")
+            {
+                for col in columns.array_elements().unwrap() {
+                    let name = jsonb_access_field!(col, "name", string);
+                    let type_name = jsonb_access_field!(col, "typeName", string);
+
+                    let data_type = match *connector_props {
+                        ConnectorProperties::PostgresCdc(_) => {
+                            unimplemented!()
+                        }
+                        ConnectorProperties::MysqlCdc(_) => {
+                            let ty = type_name_to_mysql_type(type_name.as_str());
+                            match ty {
+                                Some(ty) => mysql_type_to_rw_type(&ty).map_err(|err| {
+                                    tracing::warn!(error=%err.as_report(), "unsupported mysql type in schema change message");
+                                    AccessError::UnsupportedType {
+                                        ty: type_name.clone(),
+                                    }
+                                })?,
+                                None => {
+                                    Err(AccessError::UnsupportedType { ty: type_name })?
+                                }
+                            }
+                        }
+                        _ => {
+                            unreachable!()
+                        }
+                    };
+
+                    column_descs.push(ColumnDesc::named(name, ColumnId::placeholder(), data_type));
+                }
+            }
+            schema_changes.push(TableSchemaChange {
+                cdc_table_name: id.replace('"', ""), // remove the double quotes
+                columns: column_descs
+                    .into_iter()
+                    .map(|column_desc| ColumnCatalog {
+                        column_desc,
+                        is_hidden: false,
+                    })
+                    .collect_vec(),
+                change_type: ty.as_str().into(),
+            });
+        }
+
+        Ok(SchemaChangeEnvelope {
+            table_changes: schema_changes,
+        })
+    } else {
+        Err(AccessError::Undefined {
+            name: "table schema change".into(),
+            path: TABLE_CHANGES.into(),
+        })
+    }
 }
 
 impl<A> DebeziumChangeEvent<A>

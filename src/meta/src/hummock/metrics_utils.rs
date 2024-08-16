@@ -224,42 +224,42 @@ pub fn trigger_sst_stat(
         let overlapping_sst_num = current_version
             .levels
             .get(&compaction_group_id)
-            .and_then(|level| {
-                level.l0.as_ref().map(|l0| {
-                    l0.sub_levels
-                        .iter()
-                        .filter(|sub_level| sub_level.level_type == LevelType::Overlapping)
-                        .count()
-                })
+            .map(|level| {
+                level
+                    .l0
+                    .sub_levels
+                    .iter()
+                    .filter(|sub_level| sub_level.level_type == LevelType::Overlapping)
+                    .count()
             })
             .unwrap_or(0);
 
         let non_overlap_sst_num = current_version
             .levels
             .get(&compaction_group_id)
-            .and_then(|level| {
-                level.l0.as_ref().map(|l0| {
-                    l0.sub_levels
-                        .iter()
-                        .filter(|sub_level| sub_level.level_type == LevelType::Nonoverlapping)
-                        .count()
-                })
+            .map(|level| {
+                level
+                    .l0
+                    .sub_levels
+                    .iter()
+                    .filter(|sub_level| sub_level.level_type == LevelType::Nonoverlapping)
+                    .count()
             })
             .unwrap_or(0);
 
         let partition_level_num = current_version
             .levels
             .get(&compaction_group_id)
-            .and_then(|level| {
-                level.l0.as_ref().map(|l0| {
-                    l0.sub_levels
-                        .iter()
-                        .filter(|sub_level| {
-                            sub_level.level_type == LevelType::Nonoverlapping
-                                && sub_level.vnode_partition_count > 0
-                        })
-                        .count()
-                })
+            .map(|level| {
+                level
+                    .l0
+                    .sub_levels
+                    .iter()
+                    .filter(|sub_level| {
+                        sub_level.level_type == LevelType::Nonoverlapping
+                            && sub_level.vnode_partition_count > 0
+                    })
+                    .count()
             })
             .unwrap_or(0);
         metrics
@@ -397,7 +397,7 @@ pub fn trigger_pin_unpin_version_state(
     } else {
         metrics
             .min_pinned_version_id
-            .set(HummockVersionId::MAX as _);
+            .set(HummockVersionId::MAX.to_u64() as _);
     }
 }
 

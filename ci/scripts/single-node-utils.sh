@@ -5,6 +5,8 @@ set -euo pipefail
 export RW_PREFIX=$PWD/.risingwave
 export PREFIX_BIN=./target/debug
 export PREFIX_LOG=$RW_PREFIX/log
+export PREFIX_CONFIG=$RW_PREFIX/config
+export RISEDEV=1 # as if we are running in RiseDev
 
 # You can fill up this section by consulting
 # .risingwave/log/risedev.log, after calling `risedev d full`.
@@ -13,16 +15,11 @@ start_single_node() {
   mkdir -p "$HOME/.risingwave/state_store"
   mkdir -p "$HOME/.risingwave/meta_store"
   mkdir -p .risingwave/config
-  cat <<EOF > .risingwave/config/risedev-env
-RW_META_ADDR="http://127.0.0.1:5690"
-RISEDEV_RW_FRONTEND_LISTEN_ADDRESS="127.0.0.1"
-RISEDEV_RW_FRONTEND_PORT="4566"
-EOF
   RUST_BACKTRACE=1 "$PREFIX_BIN"/risingwave >"$1" 2>&1
 }
 
 stop_single_node() {
-  pkill risingwave
+  killall --wait risingwave
   rm -rf "$HOME/.risingwave/state_store"
   rm -rf "$HOME/.risingwave/meta_store"
 }
@@ -50,7 +47,6 @@ wait_single_node() {
 
 restart_single_node() {
   stop_single_node
-  sleep 5
   start_single_node "$PREFIX_LOG"/single-node-restarted.log &
   wait_single_node
 }

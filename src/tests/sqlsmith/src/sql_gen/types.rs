@@ -53,6 +53,7 @@ pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
                 .collect(),
         ),
         DataType::List(ref typ) => AstDataType::Array(Box::new(data_type_to_ast_data_type(typ))),
+        DataType::Map(_) => todo!(),
     }
 }
 
@@ -185,6 +186,7 @@ pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSi
                         PbAggKind::PercentileCont,
                         PbAggKind::PercentileDisc,
                         PbAggKind::Mode,
+                        PbAggKind::ApproxPercentile, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
                         PbAggKind::JsonbObjectAgg, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
                         PbAggKind::StddevSamp, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
                         PbAggKind::VarSamp, // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293

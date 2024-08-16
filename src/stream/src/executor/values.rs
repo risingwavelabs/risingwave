@@ -121,7 +121,7 @@ impl ValuesExecutor {
 
         while let Some(barrier) = barrier_receiver.recv().await {
             if emit {
-                progress.finish(barrier.epoch.curr, 0);
+                progress.finish(barrier.epoch, 0);
             }
             yield Message::Barrier(barrier);
         }
@@ -207,6 +207,7 @@ mod tests {
                 added_actors: maplit::hashset! {actor_id},
                 splits: Default::default(),
                 pause: false,
+                subscriptions_to_add: vec![],
             }));
         tx.send(first_message).unwrap();
 

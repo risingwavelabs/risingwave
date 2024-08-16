@@ -401,7 +401,7 @@ pub async fn handle(
             declare_cursor::handle_declare_cursor(handler_args, stmt).await
         }
         Statement::FetchCursor { stmt } => {
-            fetch_cursor::handle_fetch_cursor(handler_args, stmt).await
+            fetch_cursor::handle_fetch_cursor(handler_args, stmt, &formats).await
         }
         Statement::CloseCursor { stmt } => {
             close_cursor::handle_close_cursor(handler_args, stmt).await
@@ -697,11 +697,23 @@ pub async fn handle(
         } => alter_table_with_sr::handle_refresh_schema(handler_args, name).await,
         Statement::AlterTable {
             name,
-            operation: AlterTableOperation::SetStreamingRateLimit { rate_limit },
+            operation: AlterTableOperation::SetSourceRateLimit { rate_limit },
         } => {
             alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                 handler_args,
                 PbThrottleTarget::TableWithSource,
+                name,
+                rate_limit,
+            )
+            .await
+        }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetBackfillRateLimit { rate_limit },
+        } => {
+            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                handler_args,
+                PbThrottleTarget::CdcTable,
                 name,
                 rate_limit,
             )
@@ -814,7 +826,7 @@ pub async fn handle(
         Statement::AlterView {
             materialized,
             name,
-            operation: AlterViewOperation::SetStreamingRateLimit { rate_limit },
+            operation: AlterViewOperation::SetBackfillRateLimit { rate_limit },
         } if materialized => {
             alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                 handler_args,
@@ -946,7 +958,7 @@ pub async fn handle(
         } => alter_source_with_sr::handler_refresh_schema(handler_args, name).await,
         Statement::AlterSource {
             name,
-            operation: AlterSourceOperation::SetStreamingRateLimit { rate_limit },
+            operation: AlterSourceOperation::SetSourceRateLimit { rate_limit },
         } => {
             alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                 handler_args,

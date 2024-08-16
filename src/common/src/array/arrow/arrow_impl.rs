@@ -42,6 +42,8 @@
 
 use std::fmt::Write;
 
+use arrow_array::cast::AsArray;
+use arrow_array_iceberg::array;
 use arrow_buffer::OffsetBuffer;
 use chrono::{DateTime, NaiveDateTime, NaiveTime};
 use itertools::Itertools;
@@ -113,6 +115,7 @@ pub trait ToArrow {
             ArrayImpl::Serial(array) => self.serial_to_arrow(array),
             ArrayImpl::List(array) => self.list_to_arrow(data_type, array),
             ArrayImpl::Struct(array) => self.struct_to_arrow(data_type, array),
+            ArrayImpl::Map(array) => self.map_to_arrow(data_type, array),
         }?;
         if arrow_array.data_type() != data_type {
             arrow_cast::cast(&arrow_array, data_type).map_err(ArrayError::to_arrow)
@@ -267,6 +270,33 @@ pub trait ToArrow {
         )))
     }
 
+    #[inline]
+    fn map_to_arrow(
+        &self,
+        data_type: &arrow_schema::DataType,
+        array: &MapArray,
+    ) -> Result<arrow_array::ArrayRef, ArrayError> {
+        let arrow_schema::DataType::Map(field, ordered) = data_type else {
+            return Err(ArrayError::to_arrow("Invalid map type"));
+        };
+        if *ordered {
+            return Err(ArrayError::to_arrow("Sorted map is not supported"));
+        }
+        let values = self
+            .struct_to_arrow(field.data_type(), array.as_struct())?
+            .as_struct()
+            .clone();
+        let offsets = OffsetBuffer::new(array.offsets().iter().map(|&o| o as i32).collect());
+        let nulls = (!array.null_bitmap().all()).then(|| array.null_bitmap().into());
+        Ok(Arc::new(arrow_array::MapArray::new(
+            field.clone(),
+            offsets,
+            values,
+            nulls,
+            *ordered,
+        )))
+    }
+
     /// Convert RisingWave data type to Arrow data type.
     ///
     /// This function returns a `Field` instead of `DataType` because some may be converted to
@@ -297,6 +327,7 @@ pub trait ToArrow {
             DataType::Jsonb => return Ok(self.jsonb_type_to_arrow(name)),
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
             DataType::List(datatype) => self.list_type_to_arrow(datatype)?,
+            DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,
         };
         Ok(arrow_schema::Field::new(name, data_type, true))
     }
@@ -413,6 +444,20 @@ pub trait ToArrow {
                 .try_collect::<_, _, ArrayError>()?,
         ))
     }
+
+    #[inline]
+    fn map_type_to_arrow(&self, map_type: &MapType) -> Result<arrow_schema::DataType, ArrayError> {
+        let sorted = false;
+        let list_type = map_type.clone().into_list();
+        Ok(arrow_schema::DataType::Map(
+            Arc::new(arrow_schema::Field::new(
+                "entries",
+                self.list_type_to_arrow(&list_type)?,
+                true,
+            )),
+            sorted,
+        ))
+    }
 }
 
 /// Defines how to convert Arrow arrays to RisingWave arrays.
@@ -522,6 +567,7 @@ pub trait FromArrow {
             Int16 => self.from_int16_array(array.as_any().downcast_ref().unwrap()),
             Int32 => self.from_int32_array(array.as_any().downcast_ref().unwrap()),
             Int64 => self.from_int64_array(array.as_any().downcast_ref().unwrap()),
+            Decimal128(_, _) => self.from_decimal128_array(array.as_any().downcast_ref().unwrap()),
             Decimal256(_, _) => self.from_int256_array(array.as_any().downcast_ref().unwrap()),
             Float32 => self.from_float32_array(array.as_any().downcast_ref().unwrap()),
             Float64 => self.from_float64_array(array.as_any().downcast_ref().unwrap()),
@@ -600,6 +646,13 @@ pub trait FromArrow {
         array: &arrow_array::Decimal256Array,
     ) -> Result<ArrayImpl, ArrayError> {
         Ok(ArrayImpl::Int256(array.into()))
+    }
+
+    fn from_decimal128_array(
+        &self,
+        array: &arrow_array::Decimal128Array,
+    ) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Decimal(array.try_into()?))
     }
 
     fn from_float32_array(
