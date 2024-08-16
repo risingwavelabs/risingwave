@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum, DatumRef};
 use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
 use risingwave_sqlparser::ast::{Function, FunctionArgExpr};
 
@@ -161,7 +161,7 @@ impl Binder {
                 [percentile, relative_error],
                 [_percentile_col],
             ) => {
-                decimal_to_float64(percentile, &kind)?;
+                percentile.cast_implicit_mut(DataType::List(Box::new(DataType::Float64)))?;
                 decimal_to_float64(relative_error, &kind)?;
             }
             _ => {
