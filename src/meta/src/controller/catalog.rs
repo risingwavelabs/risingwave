@@ -2871,12 +2871,12 @@ impl CatalogController {
 
     pub async fn get_table_by_cdc_table_id(
         &self,
-        cdc_table_name: String,
+        cdc_table_id: &String,
     ) -> MetaResult<Vec<PbTable>> {
         let inner = self.inner.read().await;
         let table_objs = Table::find()
             .find_also_related(Object)
-            .filter(table::Column::CdcTableId.eq(cdc_table_name))
+            .filter(table::Column::CdcTableId.eq(cdc_table_id))
             .all(&inner.db)
             .await?;
         Ok(table_objs

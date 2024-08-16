@@ -4119,7 +4119,7 @@ impl CatalogManager {
             .get_table_name_and_type_mapping()
     }
 
-    pub async fn get_table_by_cdc_table_id(&self, cdc_table_id: String) -> Vec<Table> {
+    pub async fn get_table_by_cdc_table_id(&self, cdc_table_id: &String) -> Vec<Table> {
         self.core
             .lock()
             .await

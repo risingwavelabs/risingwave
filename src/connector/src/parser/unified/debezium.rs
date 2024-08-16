@@ -16,6 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::types::{
     DataType, Datum, DatumCow, Scalar, ScalarImpl, ScalarRefImpl, Timestamptz, ToDatumRef,
+    ToOwnedDatum,
 };
 use risingwave_connector_codec::decoder::AccessExt;
 use risingwave_pb::plan_common::additional_column::ColumnType;
@@ -70,6 +71,8 @@ pub struct DebeziumChangeEvent<A> {
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
 
+const UPSTREAM_DDL: &str = "ddl";
+const CDC_SOURCE_NAME_PREFIX: &str = "RW_CDC_";
 const SOURCE: &str = "source";
 const SOURCE_TS_MS: &str = "ts_ms";
 const SOURCE_DB: &str = "db";
@@ -158,6 +161,23 @@ pub fn parse_schema_change(
 ) -> AccessResult<SchemaChangeEnvelope> {
     let mut schema_changes = vec![];
 
+    let upstream_ddl = accessor
+        .access(&[UPSTREAM_DDL], &DataType::Varchar)?
+        .to_owned_datum()
+        .unwrap()
+        .as_utf8()
+        .to_string();
+
+    let source_id = if let Some(ScalarRefImpl::Jsonb(source_field)) =
+        accessor.access(&[SOURCE], &DataType::Jsonb)?.to_datum_ref()
+    {
+        let name: String = jsonb_access_field!(source_field, "name", string);
+        let id = name.strip_prefix(CDC_SOURCE_NAME_PREFIX).unwrap_or("0");
+        id.parse::<u32>().unwrap_or_default()
+    } else {
+        0
+    };
+
     if let Some(ScalarRefImpl::List(table_changes)) = accessor
         .access(&[TABLE_CHANGES], &DataType::List(Box::new(DataType::Jsonb)))?
         .to_datum_ref()
@@ -210,8 +230,11 @@ pub fn parse_schema_change(
                     column_descs.push(ColumnDesc::named(name, ColumnId::placeholder(), data_type));
                 }
             }
+
+            // concatenate the source_id to the cdc_table_id
+            let cdc_table_id = format!("{}_{}", source_id, id.replace('"', ""));
             schema_changes.push(TableSchemaChange {
-                cdc_table_id: id.replace('"', ""), // remove the double quotes
+                cdc_table_id,
                 columns: column_descs
                     .into_iter()
                     .map(|column_desc| ColumnCatalog {
@@ -220,6 +243,7 @@ pub fn parse_schema_change(
                     })
                     .collect_vec(),
                 change_type: ty.as_str().into(),
+                upstream_ddl: upstream_ddl.clone(),
             });
         }
 

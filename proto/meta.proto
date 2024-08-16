@@ -735,6 +735,11 @@ message EventLog {
     common.HostAddress host_addr = 3;
     string panic_info = 4;
   }
+  message EventAutoSchemaChangeFail {
+    uint32 table_id = 1;
+    string cdc_table_id = 2;
+    string upstream_ddl = 3;
+  }
   // Event logs identifier, which should be populated by event log service.
   optional string unique_id = 1;
   // Processing time, which should be populated by event log service.
@@ -747,6 +752,7 @@ message EventLog {
     EventInjectBarrierFail inject_barrier_fail = 7;
     EventCollectBarrierFail collect_barrier_fail = 8;
     EventLog.EventWorkerNodePanic worker_node_panic = 9;
+    EventLog.EventAutoSchemaChangeFail auto_schema_change_fail = 10;
   }
 }
 

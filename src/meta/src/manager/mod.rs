@@ -30,6 +30,7 @@ mod system_param;
 pub use catalog::*;
 pub use cluster::{WorkerKey, *};
 pub use env::{MetaSrvEnv, *};
+pub use event_log::EventLogManagerRef;
 pub use id::*;
 pub use idle::*;
 pub use metadata::*;

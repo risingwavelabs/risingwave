@@ -834,6 +834,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         vec![],
     );
 
+    let cdc_table_id = format!("{}_{}", source.id, external_table_name);
     let materialize = plan_root.gen_table_plan(
         context,
         resolved_table_name,
@@ -848,7 +849,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         Some(col_id_gen.into_version()),
         true,
         None,
-        Some(external_table_name),
+        Some(cdc_table_id),
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
