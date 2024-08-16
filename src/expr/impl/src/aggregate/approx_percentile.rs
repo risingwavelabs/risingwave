@@ -162,7 +162,7 @@ impl AggregateFunction for ApproxPercentile {
     // TODO(kwannoel): Instead of iterating over all buckets, we can maintain the
     // approximate quantile buckets on the fly.
     async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
-        async fn get_result_for_quantile(
+        fn get_result_for_quantile(
             this: &ApproxPercentile,
             state: &State,
             quantile: f64,
@@ -195,7 +195,7 @@ impl AggregateFunction for ApproxPercentile {
         let state = state.downcast_ref::<State>();
         let mut results = Vec::with_capacity(self.quantiles.len());
         for quantile in &self.quantiles {
-            let result = get_result_for_quantile(self, state, *quantile).await?;
+            let result = get_result_for_quantile(self, state, *quantile)?;
             results.push(result);
         }
         let scalar = ScalarImpl::List(ListValue::from_iter(results));
