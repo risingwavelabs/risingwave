@@ -850,6 +850,12 @@ impl From<Bytes> for ScalarImpl {
     }
 }
 
+impl From<ListRef<'_>> for ScalarImpl {
+    fn from(list: ListRef<'_>) -> Self {
+        Self::List(list.to_owned_scalar())
+    }
+}
+
 impl ScalarImpl {
     /// Creates a scalar from pgwire "BINARY" format.
     ///

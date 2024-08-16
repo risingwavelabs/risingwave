@@ -96,7 +96,7 @@ fn map_from_entries(key: ListRef<'_>, value: ListRef<'_>) -> Result<MapValue, Ex
 /// ----
 /// NULL
 /// ```
-#[function("map_access(anymap, any) -> any")]
+#[function("map_access(anymap, any) -> any", type_infer = "unreachable")]
 fn map_access<'a>(
     map: MapRef<'a>,
     key: ScalarRefImpl<'_>,
@@ -109,6 +109,60 @@ fn map_access<'a>(
         Some(idx) => Ok(values.get((idx - 1) as usize).unwrap()),
         None => Ok(None),
     }
+}
+
+fn map_keys_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
+    Ok(DataType::List(args[0].as_map().key().clone().into()))
+}
+
+fn map_values_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
+    Ok(DataType::List(args[0].as_map().value().clone().into()))
+}
+
+fn map_entries_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
+    Ok(args[0].as_map().clone().into_list())
+}
+
+/// # Example
+///
+/// ```slt
+/// query I
+/// select map_keys(map{'a':1, 'b':2})
+/// ----
+/// {a,b}
+/// ```
+#[function("map_keys(anymap) -> anyarray", type_infer = "map_keys_type_infer")]
+fn map_keys(map: MapRef<'_>) -> ListRef<'_> {
+    map.into_kv().0
+}
+
+/// # Example
+///
+/// ```slt
+/// query I
+/// select map_values(map{'a':1, 'b':2})
+/// ----
+/// {1,2}
+/// ```
+#[function("map_values(anymap) -> anyarray", type_infer = "map_values_type_infer")]
+fn map_values(map: MapRef<'_>) -> ListRef<'_> {
+    map.into_kv().1
+}
+
+/// # Example
+///
+/// ```slt
+/// query I
+/// select map_entries(map{'a':1, 'b':2})
+/// ----
+/// {"(a,1)","(b,2)"}
+/// ```
+#[function(
+    "map_entries(anymap) -> anyarray",
+    type_infer = "map_entries_type_infer"
+)]
+fn map_entries(map: MapRef<'_>) -> ListRef<'_> {
+    map.into_inner()
 }
 
 #[cfg(test)]

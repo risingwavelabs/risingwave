@@ -402,6 +402,9 @@ impl Binder {
                 // map
                 ("map_from_entries", raw_call(ExprType::MapFromEntries)),
                 ("map_access",raw_call(ExprType::MapAccess)),
+                ("map_keys", raw_call(ExprType::MapKeys)),
+                ("map_values", raw_call(ExprType::MapValues)),
+                ("map_entries", raw_call(ExprType::MapEntries)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least
