@@ -167,23 +167,53 @@ impl Binder {
         Ok(expr)
     }
 
-    pub(super) fn bind_array_cast(&mut self, exprs: Vec<Expr>, ty: DataType) -> Result<ExprImpl> {
-        let inner_type = if let DataType::List(datatype) = &ty {
-            *datatype.clone()
-        } else {
-            return Err(ErrorCode::BindError(format!(
-                "cannot cast array to non-array type {}",
-                ty
-            ))
-            .into());
-        };
-
+    pub(super) fn bind_array_cast(
+        &mut self,
+        exprs: Vec<Expr>,
+        element_type: Box<DataType>,
+    ) -> Result<ExprImpl> {
         let exprs = exprs
             .into_iter()
-            .map(|e| self.bind_cast_inner(e, inner_type.clone()))
+            .map(|e| self.bind_cast_inner(e, *element_type.clone()))
             .collect::<Result<Vec<ExprImpl>>>()?;
 
-        let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Array, exprs, ty).into();
+        let expr: ExprImpl =
+            FunctionCall::new_unchecked(ExprType::Array, exprs, DataType::List(element_type))
+                .into();
+        Ok(expr)
+    }
+
+    pub(super) fn bind_map_cast(
+        &mut self,
+        entries: Vec<(Expr, Expr)>,
+        map_type: MapType,
+    ) -> Result<ExprImpl> {
+        let mut keys = Vec::with_capacity(entries.len());
+        let mut values = Vec::with_capacity(entries.len());
+        for (k, v) in entries {
+            keys.push(self.bind_cast_inner(k, map_type.key().clone())?);
+            values.push(self.bind_cast_inner(v, map_type.value().clone())?);
+        }
+
+        let keys: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::Array,
+            keys,
+            DataType::List(Box::new(map_type.key().clone())),
+        )
+        .into();
+        let values: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::Array,
+            values,
+            DataType::List(Box::new(map_type.value().clone())),
+        )
+        .into();
+
+        let expr: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::MapFromEntries,
+            vec![keys, values],
+            DataType::Map(map_type),
+        )
+        .into();
         Ok(expr)
     }
 

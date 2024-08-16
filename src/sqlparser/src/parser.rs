@@ -1153,6 +1153,9 @@ impl Parser<'_> {
     /// Parses a map expression `MAP {k1:v1, k2:v2, ..}`
     pub fn parse_map_expr(&mut self) -> PResult<Expr> {
         self.expect_token(&Token::LBrace)?;
+        if self.consume_token(&Token::RBrace) {
+            return Ok(Expr::Map { entries: vec![] });
+        }
         let entries = self.parse_comma_separated(|parser| {
             let key = parser.parse_expr()?;
             parser.expect_token(&Token::Colon)?;

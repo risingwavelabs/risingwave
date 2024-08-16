@@ -922,13 +922,16 @@ impl Binder {
     }
 
     pub fn bind_cast_inner(&mut self, expr: Expr, data_type: DataType) -> Result<ExprImpl> {
-        if let Expr::Array(Array { elem: ref expr, .. }) = expr
-            && matches!(&data_type, DataType::List { .. })
-        {
-            return self.bind_array_cast(expr.clone(), data_type);
+        match (expr, data_type) {
+            (Expr::Array(Array { elem: ref expr, .. }), DataType::List(element_type)) => {
+                self.bind_array_cast(expr.clone(), element_type)
+            }
+            (Expr::Map { entries }, DataType::Map(m)) => self.bind_map_cast(entries, m),
+            (expr, data_type) => {
+                let lhs = self.bind_expr_inner(expr)?;
+                lhs.cast_explicit(data_type).map_err(Into::into)
+            }
         }
-        let lhs = self.bind_expr_inner(expr)?;
-        lhs.cast_explicit(data_type).map_err(Into::into)
     }
 
     pub fn bind_collate(&mut self, expr: Expr, collation: ObjectName) -> Result<ExprImpl> {

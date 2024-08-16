@@ -146,3 +146,22 @@ Caused by these errors (recent errors listed first):
   1: Expr error
   2: error while evaluating expression `map_from_entries('{a,a}', '{1,2}')`
   3: map keys must be unique
+
+
+query error
+select MAP {};
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: MAP {}
+  2: Bind error: cannot determine type of empty map
+HINT:  Explicitly cast to the desired type, for example MAP{}::map(int,int).
+
+
+query ??
+select
+  MAP{}::MAP(VARCHAR,INT),
+  MAP{1:'a',2:'b'}::MAP(VARCHAR,VARCHAR)
+----
+{}	{1:a,2:b}
