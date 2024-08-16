@@ -146,8 +146,10 @@ impl ReplaceTablePlan {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(educe::Educe, Clone)]
+#[educe(Debug)]
 pub struct CreateStreamingJobCommandInfo {
+    #[educe(Debug(ignore))]
     pub table_fragments: TableFragments,
     /// Refer to the doc on [`MetadataManager::get_upstream_root_fragments`] for the meaning of "root".
     pub upstream_root_actors: HashMap<TableId, Vec<ActorId>>,
