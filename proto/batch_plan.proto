@@ -58,7 +58,7 @@ message ScanRange {
 }
 
 message SourceNode {
-  enum IcebergSourceType{
+  enum IcebergSourceType {
     ICEBERG_TYPE_UNSPECIFIED = 0;
     SCAN = 1;
     COUNT_STAR = 2;
