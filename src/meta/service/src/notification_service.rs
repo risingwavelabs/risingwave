@@ -346,13 +346,16 @@ impl NotificationServiceImpl {
 
     async fn hummock_subscribe(&self) -> MetaResult<MetaSnapshot> {
         let (tables, catalog_version) = self.get_tables_and_creating_tables_snapshot().await?;
-        let hummock_version = self.hummock_manager.get_current_version().await;
+        let hummock_version = self
+            .hummock_manager
+            .on_current_version(|version| version.into())
+            .await;
         let hummock_write_limits = self.hummock_manager.write_limits().await;
         let meta_backup_manifest_id = self.backup_manager.manifest().manifest_id;
 
         Ok(MetaSnapshot {
             tables,
-            hummock_version: Some(hummock_version.into()),
+            hummock_version: Some(hummock_version),
             version: Some(SnapshotVersion {
                 catalog_version,
                 ..Default::default()

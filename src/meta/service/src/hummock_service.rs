@@ -88,10 +88,13 @@ impl HummockManagerService for HummockServiceImpl {
         &self,
         _request: Request<GetCurrentVersionRequest>,
     ) -> Result<Response<GetCurrentVersionResponse>, Status> {
-        let current_version = self.hummock_manager.get_current_version().await;
+        let current_version = self
+            .hummock_manager
+            .on_current_version(|version| version.into())
+            .await;
         Ok(Response::new(GetCurrentVersionResponse {
             status: None,
-            current_version: Some(current_version.into()),
+            current_version: Some(current_version),
         }))
     }
 

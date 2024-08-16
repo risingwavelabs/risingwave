@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -31,7 +32,7 @@ use risingwave_pb::stream_plan::AddMutation;
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tracing::{debug, warn, Instrument};
+use tracing::{debug, info, warn, Instrument};
 
 use super::{CheckpointControl, TracedEpoch};
 use crate::barrier::command::CommandContext;
@@ -166,7 +167,7 @@ impl GlobalBarrierManagerContext {
         let mgr = self.metadata_manager.as_v2_ref();
         let mviews = mgr
             .catalog_controller
-            .list_background_creating_mviews()
+            .list_background_creating_mviews(false)
             .await?;
 
         let mut mview_map = HashMap::new();
@@ -228,14 +229,6 @@ impl GlobalBarrierManager {
     ///
     /// Returns the new state of the barrier manager after recovery.
     pub async fn recovery(&mut self, paused_reason: Option<PausedReason>, err: Option<MetaError>) {
-        let prev_epoch = TracedEpoch::new(
-            self.context
-                .hummock_manager
-                .latest_snapshot()
-                .committed_epoch
-                .into(),
-        );
-
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked("cluster is under recovering");
@@ -334,15 +327,36 @@ impl GlobalBarrierManager {
                         .await
                         .context("purge state table from hummock")?;
 
+                    let (prev_epoch, version_id) = self
+                        .context
+                        .hummock_manager
+                        .on_current_version(|version| {
+                            let max_committed_epoch = version.visible_table_committed_epoch();
+                            for (table_id, info) in version.state_table_info.info() {
+                                assert_eq!(
+                                    info.committed_epoch, max_committed_epoch,
+                                    "table {} with invisible epoch is not purged",
+                                    table_id
+                                );
+                            }
+                            (
+                                TracedEpoch::new(Epoch::from(max_committed_epoch)),
+                                version.id,
+                            )
+                        })
+                        .await;
+
                     let mut control_stream_manager =
                         ControlStreamManager::new(self.context.clone());
 
+                    let reset_start_time = Instant::now();
                     control_stream_manager
-                        .reset(prev_epoch.value().0, active_streaming_nodes.current())
+                        .reset(version_id, active_streaming_nodes.current())
                         .await
                         .inspect_err(|err| {
                             warn!(error = %err.as_report(), "reset compute nodes failed");
                         })?;
+                    info!(elapsed=?reset_start_time.elapsed(), "control stream reset");
 
                     self.context.sink_manager.reset().await;
 
@@ -387,7 +401,6 @@ impl GlobalBarrierManager {
                     let command_ctx = Arc::new(CommandContext::new(
                         active_streaming_nodes.current().clone(),
                         subscription_info.clone(),
-                        info.existing_table_ids().collect(),
                         prev_epoch.clone(),
                         new_epoch.clone(),
                         paused_reason,
@@ -397,8 +410,13 @@ impl GlobalBarrierManager {
                         tracing::Span::current(), // recovery span
                     ));
 
-                    let mut node_to_collect =
-                        control_stream_manager.inject_barrier(&command_ctx, &info, Some(&info))?;
+                    let mut node_to_collect = control_stream_manager.inject_command_ctx_barrier(
+                        &command_ctx,
+                        &info,
+                        Some(&info),
+                        HashMap::new(),
+                    )?;
+                    debug!(?node_to_collect, "inject initial barrier");
                     while !node_to_collect.is_empty() {
                         let (worker_id, result) = control_stream_manager
                             .next_complete_barrier_response()
@@ -407,6 +425,7 @@ impl GlobalBarrierManager {
                         assert_eq!(resp.epoch, command_ctx.prev_epoch.value().0);
                         assert!(node_to_collect.remove(&worker_id));
                     }
+                    debug!("collected initial barrier");
 
                     (
                         BarrierManagerState::new(

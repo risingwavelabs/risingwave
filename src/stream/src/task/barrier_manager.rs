@@ -53,7 +53,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
-use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
+use risingwave_hummock_sdk::{HummockVersionId, LocalSstableInfo, SyncResult};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::streaming_control_stream_request::{InitRequest, Request};
@@ -481,7 +481,7 @@ impl LocalBarrierWorker {
                         match actor_op {
                             LocalActorOperation::NewControlStream { handle, init_request  } => {
                                 self.control_stream_handle.reset_stream_with_err(Status::internal("control stream has been reset to a new one"));
-                                self.reset(init_request.prev_epoch).await;
+                                self.reset(HummockVersionId::new(init_request.version_id)).await;
                                 self.control_stream_handle = handle;
                                 self.control_stream_handle.send_response(StreamingControlStreamResponse {
                                     response: Some(streaming_control_stream_response::Response::Init(InitResponse {}))
@@ -546,6 +546,9 @@ impl LocalBarrierWorker {
                         .map(TableId::new)
                         .collect(),
                     PartialGraphId::new(req.partial_graph_id),
+                    req.actor_ids_to_pre_sync_barrier_mutation
+                        .into_iter()
+                        .collect(),
                 )?;
                 Ok(())
             }
@@ -736,6 +739,7 @@ impl LocalBarrierWorker {
         to_collect: HashSet<ActorId>,
         table_ids: HashSet<TableId>,
         partial_graph_id: PartialGraphId,
+        actor_ids_to_pre_sync_barrier: HashSet<ActorId>,
     ) -> StreamResult<()> {
         if !cfg!(test) {
             // The barrier might be outdated and been injected after recovery in some certain extreme
@@ -782,8 +786,13 @@ impl LocalBarrierWorker {
             }
         }
 
-        self.state
-            .transform_to_issued(barrier, to_collect, table_ids, partial_graph_id);
+        self.state.transform_to_issued(
+            barrier,
+            to_collect,
+            table_ids,
+            partial_graph_id,
+            actor_ids_to_pre_sync_barrier,
+        );
 
         for actor_id in to_send {
             match self.barrier_senders.get(&actor_id) {
@@ -1178,7 +1187,7 @@ pub(crate) mod barrier_test_utils {
                     response_tx,
                     UnboundedReceiverStream::new(request_rx).boxed(),
                 ),
-                init_request: InitRequest { prev_epoch: 0 },
+                init_request: InitRequest { version_id: 0 },
             });
 
             assert_matches!(
@@ -1215,6 +1224,7 @@ pub(crate) mod barrier_test_utils {
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),
                             table_ids_to_sync: vec![],
                             partial_graph_id: u32::MAX,
+                            actor_ids_to_pre_sync_barrier_mutation: vec![],
                         },
                     )),
                 }))
