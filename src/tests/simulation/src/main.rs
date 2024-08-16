@@ -63,6 +63,10 @@ pub struct Args {
     #[clap(short, long)]
     jobs: Option<usize>,
 
+    /// The probability of etcd request timeout.
+    #[clap(long, default_value = "0.0")]
+    etcd_timeout_rate: f32,
+
     /// Allow to kill all risingwave node.
     #[clap(long)]
     kill: bool,
@@ -126,6 +130,14 @@ pub struct Args {
 
     /// dir to store sqlite backend data of meta node
     #[clap(long)]
+    etcd_data: Option<PathBuf>,
+
+    /// Dump etcd data into toml file before exit.
+    #[clap(long)]
+    etcd_dump: Option<PathBuf>,
+
+    /// dir to store sqlite backend data of meta node
+    #[clap(long)]
     sqlite_data_dir: Option<PathBuf>,
 
     #[arg(short, long)]
@@ -136,7 +148,7 @@ pub struct Args {
     #[clap(long, default_value = "0.0")]
     background_ddl_rate: f64,
 
-    /// Use arrangement backfill by default
+    /// Use arrangement backfill
     #[clap(long, default_value = "false")]
     use_arrangement_backfill: bool,
 }
@@ -166,6 +178,8 @@ async fn main() {
         compactor_nodes: args.compactor_nodes,
         compute_node_cores: args.compute_node_cores,
         meta_nodes: args.meta_nodes,
+        etcd_timeout_rate: args.etcd_timeout_rate,
+        etcd_data_path: args.etcd_data,
         sqlite_data_dir: args.sqlite_data_dir,
         per_session_queries: if args.use_arrangement_backfill {
             vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".to_string()].into()
@@ -259,6 +273,18 @@ async fn main() {
             }
         })
         .await;
+
+    if let Some(path) = args.etcd_dump {
+        cluster
+            .run_on_client(async move {
+                let mut client = etcd_client::Client::connect(["192.168.10.1:2388"], None)
+                    .await
+                    .unwrap();
+                let dump = client.dump().await.unwrap();
+                std::fs::write(path, dump).unwrap();
+            })
+            .await;
+    }
 
     if args.e2e_extended_test {
         cluster
