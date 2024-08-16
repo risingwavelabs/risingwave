@@ -36,6 +36,7 @@ use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::RW_VERSION;
+use risingwave_error::bail;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
@@ -1938,7 +1939,7 @@ impl GrpcMetaClient {
             .map(|addr| (Self::addr_to_endpoint(addr.clone()), addr))
             .collect();
 
-        let endpoints = endpoints.clone();
+        let mut last_error = None;
 
         for (endpoint, addr) in endpoints {
             match Self::connect_to_endpoint(endpoint).await {
@@ -1951,14 +1952,19 @@ impl GrpcMetaClient {
                         error = %e.as_report(),
                         "Failed to connect to meta server {}, trying again",
                         addr,
-                    )
+                    );
+                    last_error = Some(e);
                 }
             }
         }
 
-        Err(RpcError::Internal(anyhow!(
-            "Failed to connect to meta server"
-        )))
+        if let Some(last_error) = last_error {
+            Err(anyhow::anyhow!(last_error)
+                .context("failed to connect to all meta servers")
+                .into())
+        } else {
+            bail!("no meta server address provided")
+        }
     }
 
     async fn connect_to_endpoint(endpoint: Endpoint) -> Result<Channel> {

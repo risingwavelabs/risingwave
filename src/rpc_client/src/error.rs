@@ -86,11 +86,12 @@ impl RpcError {
             RpcError::TransportError(_) => true,
             RpcError::GrpcStatus(status) => matches!(
                 status.inner().code(),
-                tonic::Code::Unavailable | tonic::Code::Unimplemented
+                tonic::Code::Unavailable // server not started
+                 | tonic::Code::Unimplemented // meta leader service not started
             ),
             RpcError::MetaAddressParse(_) => false,
             RpcError::Internal(anyhow) => anyhow
-                .downcast_ref::<Self>()
+                .downcast_ref::<Self>() // this skips all contexts attached to the error
                 .map_or(false, Self::is_connection_error),
         }
     }
