@@ -170,8 +170,9 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
 
                         pin_mut!(snapshot_stream);
 
-                        while let Some(message) =
-                            upstream_buffer.run_future(snapshot_stream.try_next()).await?
+                        while let Some(message) = upstream_buffer
+                            .run_future(snapshot_stream.try_next())
+                            .await?
                         {
                             if let Message::Chunk(chunk) = &message {
                                 consuming_snapshot_row_count.inc_by(chunk.cardinality() as _);
@@ -212,7 +213,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     barrier_epoch = barrier.epoch;
 
                     debug!(?barrier_epoch, kind = ?barrier.kind, "before consume change log");
-                    // use `with_consuming_upstream` to poll upstream concurrently so that we won't have back-pressure
+                    // use `upstream_buffer.run_future` to poll upstream concurrently so that we won't have back-pressure
                     // on the upstream. Otherwise, in `batch_iter_log_with_pk_bounds`, we may wait upstream epoch to be committed,
                     // and the back-pressure may cause the upstream unable to consume the barrier and then cause deadlock.
                     let stream =
