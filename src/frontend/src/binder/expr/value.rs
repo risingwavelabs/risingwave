@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::types::{DataType, DateTimeField, Decimal, Interval, ScalarImpl};
+use risingwave_common::types::{DataType, DateTimeField, Decimal, Interval, MapType, ScalarImpl};
 use risingwave_sqlparser::ast::{DateTimeField as AstDateTimeField, Expr, Value};
 use thiserror_ext::AsReport;
 
@@ -132,6 +132,41 @@ impl Binder {
         Ok(expr)
     }
 
+    pub(super) fn bind_map(&mut self, entries: Vec<(Expr, Expr)>) -> Result<ExprImpl> {
+        if entries.is_empty() {
+            return Err(ErrorCode::BindError("cannot determine type of empty map\nHINT:  Explicitly cast to the desired type, for example MAP{}::map(int,int).".into()).into());
+        }
+        let mut keys = Vec::with_capacity(entries.len());
+        let mut values = Vec::with_capacity(entries.len());
+        for (k, v) in entries {
+            keys.push(self.bind_expr_inner(k)?);
+            values.push(self.bind_expr_inner(v)?);
+        }
+        let key_type = align_types(keys.iter_mut())?;
+        let value_type = align_types(values.iter_mut())?;
+
+        let keys: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::Array,
+            keys,
+            DataType::List(Box::new(key_type.clone())),
+        )
+        .into();
+        let values: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::Array,
+            values,
+            DataType::List(Box::new(value_type.clone())),
+        )
+        .into();
+
+        let expr: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::MapFromEntries,
+            vec![keys, values],
+            DataType::Map(MapType::from_kv(key_type, value_type)),
+        )
+        .into();
+        Ok(expr)
+    }
+
     pub(super) fn bind_array_cast(&mut self, exprs: Vec<Expr>, ty: DataType) -> Result<ExprImpl> {
         let inner_type = if let DataType::List(datatype) = &ty {
             *datatype.clone()
@@ -168,7 +203,7 @@ impl Binder {
             )
             .into()),
             data_type => Err(ErrorCode::BindError(format!(
-                "array index applied to type {}, which is not a composite type",
+                "index operator applied to type {}, which is not a list or map",
                 data_type
             ))
             .into()),
@@ -204,7 +239,7 @@ impl Binder {
             )
             .into()),
             data_type => Err(ErrorCode::BindError(format!(
-                "array range index applied to type {}, which is not a composite type",
+                "array range index applied to type {}, which is not a list",
                 data_type
             ))
             .into()),

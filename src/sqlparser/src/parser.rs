@@ -608,6 +608,7 @@ impl Parser<'_> {
                     Ok(exists_node)
                 }
                 Keyword::ARRAY if self.peek_token() == Token::LBracket => self.parse_array_expr(),
+                Keyword::MAP if self.peek_token() == Token::LBrace => self.parse_map_expr(),
                 // `LEFT` and `RIGHT` are reserved as identifier but okay as function
                 Keyword::LEFT | Keyword::RIGHT => {
                     *self = checkpoint;
@@ -1147,6 +1148,19 @@ impl Parser<'_> {
         };
         self.expect_token(&Token::RBracket)?;
         Ok(exprs)
+    }
+
+    /// Parses a map expression `MAP {k1:v1, k2:v2, ..}`
+    pub fn parse_map_expr(&mut self) -> PResult<Expr> {
+        self.expect_token(&Token::LBrace)?;
+        let entries = self.parse_comma_separated(|parser| {
+            let key = parser.parse_expr()?;
+            parser.expect_token(&Token::Colon)?;
+            let value = parser.parse_expr()?;
+            Ok((key, value))
+        })?;
+        self.expect_token(&Token::RBrace)?;
+        Ok(Expr::Map { entries })
     }
 
     // This function parses date/time fields for interval qualifiers.

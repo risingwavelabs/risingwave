@@ -431,7 +431,7 @@ impl ToText for MapRef<'_> {
                 let key = key.to_text();
                 let value = value.to_text();
                 // TODO: consider quote like list and struct
-                f(&format_args!("\"{}\":{}", key, value))
+                f(&format_args!("{}:{}", key, value))
             })
         )
     }

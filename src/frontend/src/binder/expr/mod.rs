@@ -194,7 +194,19 @@ impl Binder {
             Expr::Parameter { index } => self.bind_parameter(index),
             Expr::Collate { expr, collation } => self.bind_collate(*expr, collation),
             Expr::ArraySubquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Array),
-            _ => bail_not_implemented!(issue = 112, "unsupported expression {:?}", expr),
+            Expr::Map { entries } => self.bind_map(entries),
+            Expr::IsJson {
+                unique_keys: true, ..
+            }
+            | Expr::SomeOp(_)
+            | Expr::AllOp(_)
+            | Expr::TryCast { .. }
+            | Expr::GroupingSets(_)
+            | Expr::Cube(_)
+            | Expr::Rollup(_)
+            | Expr::LambdaFunction { .. } => {
+                bail_not_implemented!(issue = 112, "unsupported expression {:?}", expr)
+            }
         }
     }
 

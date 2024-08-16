@@ -517,6 +517,9 @@ pub enum Expr {
         args: Vec<Ident>,
         body: Box<Expr>,
     },
+    Map {
+        entries: Vec<(Expr, Expr)>,
+    },
 }
 
 impl fmt::Display for Expr {
@@ -821,6 +824,16 @@ impl fmt::Display for Expr {
                     "|{}| {}",
                     args.iter().map(ToString::to_string).join(", "),
                     body
+                )
+            }
+            Expr::Map { entries } => {
+                write!(
+                    f,
+                    "MAP {{{}}}",
+                    entries
+                        .iter()
+                        .map(|(k, v)| format!("{}: {}", k, v))
+                        .join(", ")
                 )
             }
         }

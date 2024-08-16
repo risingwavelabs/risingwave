@@ -379,6 +379,12 @@ impl QueryRewriter<'_> {
                     self.visit_expr(expr);
                 }
             }
+            Expr::Map { entries } => {
+                for (key, value) in entries {
+                    self.visit_expr(key);
+                    self.visit_expr(value);
+                }
+            }
 
             Expr::LambdaFunction { body, args: _ } => self.visit_expr(body),
 
