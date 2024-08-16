@@ -4670,6 +4670,9 @@ impl Parser<'_> {
                 if !arg_list.order_by.is_empty() {
                     parser_err!("ORDER BY is not supported in table-valued function calls");
                 }
+                if arg_list.ignore_nulls {
+                    parser_err!("IGNORE NULLS is not supported in table-valued function calls");
+                }
 
                 let args = arg_list.args;
                 let with_ordinality = self.parse_keywords(&[Keyword::WITH, Keyword::ORDINALITY]);
@@ -4980,11 +4983,14 @@ impl Parser<'_> {
                 vec![]
             };
 
+            let ignore_nulls = self.parse_keywords(&[Keyword::IGNORE, Keyword::NULLS]);
+
             let arg_list = FunctionArgList {
                 distinct,
                 args,
                 variadic,
                 order_by,
+                ignore_nulls,
             };
 
             self.expect_token(&Token::RParen)?;

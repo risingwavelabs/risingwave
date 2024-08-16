@@ -669,6 +669,7 @@ impl StateStoreImpl {
                     .with_clean_region_threshold(
                         opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
                     )
+                    .with_recover_mode(opts.meta_file_cache_recover_mode)
                     .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
                     .with_compression(
                         opts.meta_file_cache_compression
@@ -722,6 +723,7 @@ impl StateStoreImpl {
                     .with_clean_region_threshold(
                         opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
                     )
+                    .with_recover_mode(opts.data_file_cache_recover_mode)
                     .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
                     .with_compression(
                         opts.data_file_cache_compression

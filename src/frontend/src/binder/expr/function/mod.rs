@@ -62,6 +62,10 @@ const SQL_UDF_MAX_CALLING_DEPTH: u32 = 16;
 
 impl Binder {
     pub(in crate::binder) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
+        if f.arg_list.ignore_nulls {
+            bail_not_implemented!("IGNORE NULLS is not supported yet");
+        }
+
         let function_name = match f.name.0.as_slice() {
             [name] => name.real_value(),
             [schema, name] => {

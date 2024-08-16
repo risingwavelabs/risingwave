@@ -726,6 +726,9 @@ def section_streaming(outer_panels):
                         panels.target(
                             f"{metric('in_flight_barrier_nums')}", "in_flight_barrier"
                         ),
+                        panels.target(
+                            f"{metric('meta_snapshot_backfill_inflight_barrier_num')}", "snapshot_backfill_in_flight_barrier {{table_id}}"
+                        ),
                     ],
                 ),
                 panels.timeseries_latency(
@@ -745,7 +748,14 @@ def section_streaming(outer_panels):
                             f"rate({metric('meta_barrier_duration_seconds_sum')}[$__rate_interval]) / rate({metric('meta_barrier_duration_seconds_count')}[$__rate_interval]) > 0",
                             "barrier_latency_avg",
                         ),
-                    ],
+                    ]
+                    + quantile(
+                          lambda quantile, legend: panels.target(
+                              f"histogram_quantile({quantile}, sum(rate({metric('meta_snapshot_backfill_barrier_duration_seconds_bucket')}[$__rate_interval])) by (le, table_id, barrier_type))",
+                              f"snapshot_backfill_barrier_latency_p{legend} table_id[{{{{table_id}}}}] {{{{barrier_type}}}}",
+                          ),
+                          [50, 90, 99, 999, "max"],
+                      ),
                 ),
                 panels.timeseries(
                     "Barrier pending time (secs)",
@@ -892,6 +902,11 @@ def section_streaming(outer_panels):
                             "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
                             % NODE_LABEL,
                         ),
+                        panels.target(
+                            f"rate({table_metric('stream_snapshot_backfill_consume_snapshot_row_count')}[$__rate_interval])",
+                            "table_id={{table_id}} actor={{actor_id}} {{stage}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
                     ],
                 ),
                 panels.timeseries_rowsps(
@@ -974,7 +989,19 @@ def section_streaming(outer_panels):
                             f"rate({metric('meta_barrier_wait_commit_duration_seconds_sum')}[$__rate_interval]) / rate({metric('meta_barrier_wait_commit_duration_seconds_count')}[$__rate_interval]) > 0",
                             "barrier_wait_commit_avg",
                         ),
-                    ],
+                    ] + quantile(
+                        lambda quantile, legend: panels.target(
+                            f"histogram_quantile({quantile}, sum(rate({metric('meta_snapshot_backfill_barrier_wait_commit_duration_seconds_bucket')}[$__rate_interval])) by (le, table_id))",
+                            f"snapshot_backfill_barrier_wait_commit_latency_p{legend} table_id[{{{{table_id}}}}]",
+                        ),
+                        [50, 90, 99, 999, "max"],
+                    ) + quantile(
+                         lambda quantile, legend: panels.target(
+                             f"histogram_quantile({quantile}, sum(rate({metric('meta_snapshot_backfill_upstream_wait_progress_latency_bucket')}[$__rate_interval])) by (le, table_id))",
+                             f"snapshot_backfill_upstream_wait_progress_latency_p{legend} table_id[{{{{table_id}}}}]",
+                         ),
+                         [50, 90, 99, 999, "max"],
+                     )
                 ),
                 panels.timeseries_ops(
                     "Earliest In-Flight Barrier Progress",
@@ -984,6 +1011,16 @@ def section_streaming(outer_panels):
                         panels.target(
                             f"rate({metric('stream_barrier_manager_progress')}[$__rate_interval])",
                             "{{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Snapshot Backfill Lag",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('meta_snapshot_backfill_upstream_lag')} / (2^16) / 1000",
+                            "lag @ {{table_id}}",
                         ),
                     ],
                 ),

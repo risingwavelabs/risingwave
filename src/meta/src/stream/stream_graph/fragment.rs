@@ -17,7 +17,7 @@ use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::sync::LazyLock;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
@@ -26,6 +26,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -35,9 +36,10 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, FragmentTypeFlag, StreamActor,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanType,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode, StreamScanType,
 };
 
+use crate::barrier::SnapshotBackfillInfo;
 use crate::manager::{DdlType, IdGenManagerImpl, MetaSrvEnv, StreamingJob, WorkerId};
 use crate::model::{ActorId, FragmentId};
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
@@ -507,6 +509,70 @@ impl StreamFragmentGraph {
         fragment_id: GlobalFragmentId,
     ) -> &HashMap<GlobalFragmentId, StreamFragmentEdge> {
         self.upstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
+    }
+
+    pub fn collect_snapshot_backfill_info(&self) -> MetaResult<Option<SnapshotBackfillInfo>> {
+        let mut prev_stream_scan: Option<(Option<SnapshotBackfillInfo>, StreamScanNode)> = None;
+        let mut result = Ok(());
+        for (node, fragment_type_mask) in self
+            .fragments
+            .values()
+            .map(|fragment| (fragment.node.as_ref().unwrap(), fragment.fragment_type_mask))
+        {
+            visit_stream_node_cont(node, |node| {
+                if let Some(NodeBody::StreamScan(stream_scan)) = node.node_body.as_ref() {
+                    let is_snapshot_backfill =
+                        stream_scan.stream_scan_type == StreamScanType::SnapshotBackfill as i32;
+                    if is_snapshot_backfill {
+                        assert!(
+                            (fragment_type_mask
+                                & (FragmentTypeFlag::SnapshotBackfillStreamScan as u32))
+                                > 0
+                        );
+                    }
+
+                    match &mut prev_stream_scan {
+                        Some((prev_snapshot_backfill_info, prev_stream_scan)) => {
+                            match (prev_snapshot_backfill_info, is_snapshot_backfill) {
+                                (Some(prev_snapshot_backfill_info), true) => {
+                                    prev_snapshot_backfill_info
+                                        .upstream_mv_table_ids
+                                        .insert(TableId::new(stream_scan.table_id));
+                                    true
+                                }
+                                (None, false) => true,
+                                (_, _) => {
+                                    result = Err(anyhow!("must be either all snapshot_backfill or no snapshot_backfill. Curr: {stream_scan:?} Prev: {prev_stream_scan:?}").into());
+                                    false
+                                }
+                            }
+                        }
+                        None => {
+                            prev_stream_scan = Some((
+                                if is_snapshot_backfill {
+                                    Some(SnapshotBackfillInfo {
+                                        upstream_mv_table_ids: HashSet::from_iter([TableId::new(
+                                            stream_scan.table_id,
+                                        )]),
+                                    })
+                                } else {
+                                    None
+                                },
+                                stream_scan.clone(),
+                            ));
+                            true
+                        }
+                    }
+                } else {
+                    true
+                }
+            })
+        }
+        result.map(|_| {
+            prev_stream_scan
+                .map(|(is_snapshot_backfill, _)| is_snapshot_backfill)
+                .unwrap_or(None)
+        })
     }
 }
 
