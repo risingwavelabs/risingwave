@@ -54,7 +54,7 @@ fn map_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
     "map_from_entries(anyarray, anyarray) -> anymap",
     type_infer = "map_type_infer"
 )]
-fn map(key: ListRef<'_>, value: ListRef<'_>) -> Result<MapValue, ExprError> {
+fn map_from_entries(key: ListRef<'_>, value: ListRef<'_>) -> Result<MapValue, ExprError> {
     MapValue::try_from_kv(key.to_owned(), value.to_owned()).map_err(ExprError::Custom)
 }
 
