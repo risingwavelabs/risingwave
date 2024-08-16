@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use std::collections::BTreeMap;
 use std::mem::size_of;
 use std::ops::Range;
 
 use bytes::{Buf, Bytes};
 use risingwave_common::array::*;
+use risingwave_common::bail;
 use risingwave_common::row::Row;
 use risingwave_common::types::*;
 use risingwave_common_estimate_size::EstimateSize;
@@ -28,23 +30,29 @@ use risingwave_expr::{build_aggregate, Result};
 /// For two phase agg, we still use `DDSketch`.
 /// Then we also need to store the `relative_error` of the sketch, so we can report it
 /// in an internal table, if it changes.
-#[build_aggregate("approx_percentile(float8) -> float8", state = "bytea")]
+#[build_aggregate("approx_percentile(float8) -> float8[]", state = "bytea")]
 fn build(agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
-    let quantile = agg.direct_args[0]
-        .literal()
-        .map(|x| (*x.as_float64()).into())
-        .unwrap();
+    let quantiles_scalar = agg.direct_args[0]
+        .literal();
+    let Some(quantiles_scalar) = quantiles_scalar else {
+        bail!("quantile cannot be NULL")
+    };
+    let quantiles: Vec<f64> = quantiles_scalar
+        .as_list()
+        .iter()
+        .map(|d| d.expect("literal value").into_float64().into())
+        .collect_vec();
     let relative_error: f64 = agg.direct_args[1]
         .literal()
         .map(|x| (*x.as_float64()).into())
         .unwrap();
     let base = (1.0 + relative_error) / (1.0 - relative_error);
-    Ok(Box::new(ApproxPercentile { quantile, base }))
+    Ok(Box::new(ApproxPercentile { quantiles, base }))
 }
 
 #[allow(dead_code)]
 pub struct ApproxPercentile {
-    quantile: f64,
+    quantiles: Vec<f64>,
     base: f64,
 }
 
@@ -123,7 +131,7 @@ impl ApproxPercentile {
 #[async_trait::async_trait]
 impl AggregateFunction for ApproxPercentile {
     fn return_type(&self) -> DataType {
-        DataType::Float64
+        DataType::List(Box::new(DataType::Float64))
     }
 
     fn create_state(&self) -> Result<AggregateState> {
@@ -153,34 +161,43 @@ impl AggregateFunction for ApproxPercentile {
     }
 
     // TODO(kwannoel): Instead of iterating over all buckets, we can maintain the
-    // approximate quantile bucket on the fly.
+    // approximate quantile buckets on the fly.
     async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
+
+        async fn get_result_for_quantile(this: &ApproxPercentile, state: &State, quantile: f64) -> Result<Option<F64>> {
+            let quantile_count = (state.count as f64 * quantile).floor() as u64;
+            let mut acc_count = 0;
+            for (bucket_id, count) in state.neg_buckets.iter().rev() {
+                acc_count += count;
+                if acc_count > quantile_count {
+                    // approx value = -2 * y^i / (y + 1)
+                    let approx_percentile = -2.0 * this.base.powi(*bucket_id) / (this.base + 1.0);
+                    return Ok(Some(approx_percentile.into()));
+                }
+            }
+            acc_count += state.zeros;
+            if acc_count > quantile_count {
+                return Ok(Some(0.0.into()));
+            }
+            for (bucket_id, count) in &state.pos_buckets {
+                acc_count += count;
+                if acc_count > quantile_count {
+                    // approx value = 2 * y^i / (y + 1)
+                    let approx_percentile = 2.0 * this.base.powi(*bucket_id) / (this.base + 1.0);
+                    return Ok(Some(approx_percentile.into()));
+                }
+            }
+            return Ok(None);
+        }
+
         let state = state.downcast_ref::<State>();
-        let quantile_count = (state.count as f64 * self.quantile).floor() as u64;
-        let mut acc_count = 0;
-        for (bucket_id, count) in state.neg_buckets.iter().rev() {
-            acc_count += count;
-            if acc_count > quantile_count {
-                // approx value = -2 * y^i / (y + 1)
-                let approx_percentile = -2.0 * self.base.powi(*bucket_id) / (self.base + 1.0);
-                let approx_percentile = ScalarImpl::Float64(approx_percentile.into());
-                return Ok(Datum::from(approx_percentile));
-            }
+        let mut results = Vec::with_capacity(self.quantiles.len());
+        for quantile in &self.quantiles {
+            let result = get_result_for_quantile(&self, state, *quantile).await?;
+            results.push(result);
         }
-        acc_count += state.zeros;
-        if acc_count > quantile_count {
-            return Ok(Datum::from(ScalarImpl::Float64(0.0.into())));
-        }
-        for (bucket_id, count) in &state.pos_buckets {
-            acc_count += count;
-            if acc_count > quantile_count {
-                // approx value = 2 * y^i / (y + 1)
-                let approx_percentile = 2.0 * self.base.powi(*bucket_id) / (self.base + 1.0);
-                let approx_percentile = ScalarImpl::Float64(approx_percentile.into());
-                return Ok(Datum::from(approx_percentile));
-            }
-        }
-        return Ok(None);
+        let scalar = ScalarImpl::List(ListValue::from_iter(results));
+        Ok(Datum::from(scalar))
     }
 
     fn encode_state(&self, state: &AggregateState) -> Result<Datum> {

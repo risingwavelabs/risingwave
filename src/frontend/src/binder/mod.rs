@@ -768,7 +768,7 @@ mod tests {
     #[tokio::test]
     async fn test_bind_approx_percentile() {
         let stmt = risingwave_sqlparser::parser::Parser::parse_sql(
-            "SELECT approx_percentile(0.5, 0.01) WITHIN GROUP (ORDER BY generate_series) FROM generate_series(1, 100)",
+            "SELECT approx_percentile('{0.5}', 0.01) WITHIN GROUP (ORDER BY generate_series) FROM generate_series(1, 100)",
         ).unwrap().into_iter().next().unwrap();
         let parse_expected = expect![[r#"
             Query(
@@ -796,8 +796,8 @@ mod tests {
                                                     Unnamed(
                                                         Expr(
                                                             Value(
-                                                                Number(
-                                                                    "0.5",
+                                                                SingleQuotedString(
+                                                                    "{0.5}",
                                                                 ),
                                                             ),
                                                         ),
@@ -900,7 +900,9 @@ mod tests {
                                         agg_kind: Builtin(
                                             ApproxPercentile,
                                         ),
-                                        return_type: Float64,
+                                        return_type: List(
+                                            Float64,
+                                        ),
                                         args: [
                                             FunctionCall(
                                                 FunctionCall {
@@ -940,14 +942,22 @@ mod tests {
                                         direct_args: [
                                             Literal {
                                                 data: Some(
-                                                    Float64(
-                                                        OrderedFloat(
-                                                            0.5,
-                                                        ),
+                                                    List(
+                                                        [
+                                                            Some(
+                                                                Float64(
+                                                                    OrderedFloat(
+                                                                        0.5,
+                                                                    ),
+                                                                ),
+                                                            ),
+                                                        ],
                                                     ),
                                                 ),
                                                 data_type: Some(
-                                                    Float64,
+                                                    List(
+                                                        Float64,
+                                                    ),
                                                 ),
                                             },
                                             Literal {
@@ -1015,7 +1025,7 @@ mod tests {
                             having: None,
                             schema: Schema {
                                 fields: [
-                                    approx_percentile:Float64,
+                                    approx_percentile:List(Float64),
                                 ],
                             },
                         },
