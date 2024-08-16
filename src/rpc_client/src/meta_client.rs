@@ -220,7 +220,28 @@ impl MetaClient {
     }
 
     /// Register the current node to the cluster and set the corresponding worker id.
+    ///
+    /// Retry if there's connection issue with the meta node. Exit the process if the registration fails.
     pub async fn register_new(
+        addr_strategy: MetaAddressStrategy,
+        worker_type: WorkerType,
+        addr: &HostAddr,
+        property: Property,
+        meta_config: &MetaConfig,
+    ) -> (Self, SystemParamsReader) {
+        let ret =
+            Self::register_new_inner(addr_strategy, worker_type, addr, property, meta_config).await;
+
+        match ret {
+            Ok(ret) => ret,
+            Err(err) => {
+                tracing::error!(error = %err.as_report(), "failed to register worker, exiting...");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    async fn register_new_inner(
         addr_strategy: MetaAddressStrategy,
         worker_type: WorkerType,
         addr: &HostAddr,
