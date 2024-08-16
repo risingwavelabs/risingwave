@@ -55,6 +55,18 @@ impl BatchIcebergScan {
         self.core.catalog.clone()
     }
 
+    pub fn clone_with_core(&self, core: generic::Source) -> Self {
+        let base = PlanBase::new_batch_with_core(
+            &core,
+            self.base.distribution().clone(),
+           self.base.order().clone(),
+        );
+        Self {
+            base,
+            core,
+        }
+    }
+
     pub fn clone_with_dist(&self) -> Self {
         let base = self
             .base

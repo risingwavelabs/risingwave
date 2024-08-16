@@ -203,6 +203,7 @@ impl IcebergSplitEnumerator {
         schema: Schema,
         time_traval_info: Option<IcebergTimeTravelInfo>,
         batch_parallelism: usize,
+        is_iceberg_count: bool,
     ) -> ConnectorResult<Vec<IcebergSplit>> {
         if batch_parallelism == 0 {
             bail!("Batch parallelism is 0. Cannot split the iceberg files.");
@@ -239,74 +240,97 @@ impl IcebergSplitEnumerator {
                 None => bail!("Cannot find the current snapshot id in the iceberg table."),
             },
         };
-        let mut files = vec![];
-        let mut record_counts = vec![];
-
-        let manifest_list: ManifestList = table.metadata().snapshot_by_id(snapshot_id)
+        let table_meta = TableMetadataJsonStr::serialize(table.metadata());
+        let splits = if is_iceberg_count {
+            let mut record_counts = vec![];
+            let manifest_list: ManifestList = table.metadata().snapshot_by_id(snapshot_id)
             .unwrap()
             .load_manifest_list(table.file_io(), table.metadata())
             .await
             .map_err(|e| anyhow!(e))?;
 
-        for entry in manifest_list.entries() {
-            let manifest = entry
-                .load_manifest(table.file_io())
-                .await
-                .map_err(|e| anyhow!(e))?;
-            let mut manifest_entries_stream =
-                futures::stream::iter(manifest.entries().iter().filter(|e| e.is_alive()));
+            for entry in manifest_list.entries() {
+                let manifest = entry
+                    .load_manifest(table.file_io())
+                    .await
+                    .map_err(|e| anyhow!(e))?;
+                let mut manifest_entries_stream =
+                    futures::stream::iter(manifest.entries().iter().filter(|e| e.is_alive()));
 
-            while let Some(manifest_entry) = manifest_entries_stream.next().await {
-                let file = manifest_entry.data_file();
-                record_counts.push(file.record_count());
+                while let Some(manifest_entry) = manifest_entries_stream.next().await {
+                    let file = manifest_entry.data_file();
+                    record_counts.push(file.record_count());
+                }
             }
-        }
+            let split_num = batch_parallelism;
+            println!("record_counts: {:?},{:?}", record_counts,split_num);
+            // evenly split the files into splits based on the parallelism.
+            let split_size = record_counts.len() / split_num;
+            let remaining = record_counts.len() % split_num;
+            let mut splits = vec![];
+            for i in 0..split_num {
+                let start = i * split_size;
+                let end = (i + 1) * split_size;
+                let split = IcebergSplit {
+                    split_id: i as i64,
+                    snapshot_id,
+                    table_meta: table_meta.clone(),
+                    files: vec![],
+                    record_counts: record_counts[start..end].to_vec(),
+                };
+                splits.push(split);
+            }
+            for i in 0..remaining {
+                splits[i]
+                    .record_counts
+                    .push(record_counts[split_num * split_size + i].clone());
+            }
+            splits
 
-        let scan = table
-            .scan()
-            .snapshot_id(snapshot_id)
-            .select(schema.names())
-            .build()
-            .map_err(|e| anyhow!(e))?;
+        }else{
+            let mut files = vec![];
+            let scan = table
+                .scan()
+                .snapshot_id(snapshot_id)
+                .select(schema.names())
+                .build()
+                .map_err(|e| anyhow!(e))?;
 
-        let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
+            let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
 
-        #[for_await]
-        for task in file_scan_stream {
-            let task = task.map_err(|e| anyhow!(e))?;
-            files.push(IcebergFileScanTaskJsonStr::serialize(&task));
-        }
+            #[for_await]
+            for task in file_scan_stream {
+                let task = task.map_err(|e| anyhow!(e))?;
+                files.push(IcebergFileScanTaskJsonStr::serialize(&task));
+            }
 
-        let table_meta = TableMetadataJsonStr::serialize(table.metadata());
-        if files.len() != record_counts.len() {
-            bail!("The number of files does not match the number of record count.");
-        }
-
-        let split_num = batch_parallelism;
-        // evenly split the files into splits based on the parallelism.
-        let split_size = files.len() / split_num;
-        let remaining = files.len() % split_num;
-        let mut splits = vec![];
-        for i in 0..split_num {
-            let start = i * split_size;
-            let end = (i + 1) * split_size;
-            let split = IcebergSplit {
-                split_id: i as i64,
-                snapshot_id,
-                table_meta: table_meta.clone(),
-                files: files[start..end].to_vec(),
-                record_counts: record_counts[start..end].to_vec(),
-            };
-            splits.push(split);
-        }
-        for i in 0..remaining {
-            splits[i]
-                .files
-                .push(files[split_num * split_size + i].clone());
-        }
+            let split_num = batch_parallelism;
+            // evenly split the files into splits based on the parallelism.
+            let split_size = files.len() / split_num;
+            let remaining = files.len() % split_num;
+            let mut splits = vec![];
+            for i in 0..split_num {
+                let start = i * split_size;
+                let end = (i + 1) * split_size;
+                let split = IcebergSplit {
+                    split_id: i as i64,
+                    snapshot_id,
+                    table_meta: table_meta.clone(),
+                    files: files[start..end].to_vec(),
+                    record_counts: vec![],
+                };
+                splits.push(split);
+            }
+            for i in 0..remaining {
+                splits[i]
+                    .files
+                    .push(files[split_num * split_size + i].clone());
+            }
+            splits
+        };
         Ok(splits
             .into_iter()
-            .filter(|split| !split.files.is_empty())
+            .filter(|split| !split.files.is_empty() | !split.record_counts.is_empty())
             .collect_vec())
     }
 }

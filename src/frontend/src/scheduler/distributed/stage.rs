@@ -380,6 +380,7 @@ impl StageRunner {
                 ));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
+            println!("source_info: {:?}", source_info);
             let chunk_size = (source_info.split_info().unwrap().len() as f32
                 / self.stage.parallelism.unwrap() as f32)
                 .ceil() as usize;

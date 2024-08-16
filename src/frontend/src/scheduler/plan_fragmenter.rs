@@ -274,6 +274,7 @@ pub struct SourceFetchInfo {
     pub connector: ConnectorProperties,
     pub timebound: (Option<i64>, Option<i64>),
     pub as_of: Option<AsOf>,
+    pub is_iceberg_count: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -360,7 +361,7 @@ impl SourceScanInfo {
                 };
 
                 let split_info = iceberg_enumerator
-                    .list_splits_batch(fetch_info.schema, time_travel_info, batch_parallelism)
+                    .list_splits_batch(fetch_info.schema, time_travel_info, batch_parallelism,fetch_info.is_iceberg_count)
                     .await?
                     .into_iter()
                     .map(SplitImpl::Iceberg)
@@ -1055,6 +1056,7 @@ impl BatchPlanFragmenter {
                     connector: property,
                     timebound: timestamp_bound,
                     as_of: None,
+                    is_iceberg_count: false,
                 })));
             }
         } else if let Some(batch_iceberg_scan) = node.as_batch_iceberg_scan() {
@@ -1069,6 +1071,7 @@ impl BatchPlanFragmenter {
                     connector: property,
                     timebound: (None, None),
                     as_of,
+                    is_iceberg_count: batch_iceberg_scan.core.is_iceberg_count,
                 })));
             }
         } else if let Some(source_node) = node.as_batch_source() {
@@ -1084,6 +1087,7 @@ impl BatchPlanFragmenter {
                     connector: property,
                     timebound: (None, None),
                     as_of,
+                    is_iceberg_count: false,
                 })));
             }
         }

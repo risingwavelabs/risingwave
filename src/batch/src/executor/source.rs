@@ -56,6 +56,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
         source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
+        println!("source_executor_builder");
         ensure!(inputs.is_empty(), "Source should not have input executor!");
         let source_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),

@@ -20,10 +20,11 @@ impl Rule for AggCountForIcebergRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg = plan.as_batch_simple_agg()?;
         if agg.core.group_key.is_empty() && agg.agg_calls().len() == 1 && agg.agg_calls()[0].eq(&PlanAggCall::count_star()){
-            let mut source = agg.core.input.as_batch_iceberg_scan()?.core.clone();
+            let batch_iceberg = agg.core.input.as_batch_iceberg_scan()?;
+            let mut source = batch_iceberg.core.clone();
             source.is_iceberg_count = true;
             println!("plan213321{:?}",source);
-            return Some(BatchIcebergScan::new(source).into())
+            return Some(batch_iceberg.clone_with_core(source).into())
         }
         None
     }
