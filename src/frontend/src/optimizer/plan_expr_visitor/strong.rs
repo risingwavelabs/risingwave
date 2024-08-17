@@ -296,6 +296,7 @@ impl Strong {
             | ExprType::MapKeys
             | ExprType::MapValues
             | ExprType::MapEntries
+            | ExprType::MapFromKeyValues
             | ExprType::Vnode
             | ExprType::TestPaidTier
             | ExprType::Proctime

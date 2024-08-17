@@ -159,7 +159,7 @@ impl Binder {
         .into();
 
         let expr: ExprImpl = FunctionCall::new_unchecked(
-            ExprType::MapFromEntries,
+            ExprType::MapFromKeyValues,
             vec![keys, values],
             DataType::Map(MapType::from_kv(key_type, value_type)),
         )
@@ -209,7 +209,7 @@ impl Binder {
         .into();
 
         let expr: ExprImpl = FunctionCall::new_unchecked(
-            ExprType::MapFromEntries,
+            ExprType::MapFromKeyValues,
             vec![keys, values],
             DataType::Map(map_type),
         )

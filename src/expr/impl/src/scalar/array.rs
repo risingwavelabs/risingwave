@@ -32,8 +32,14 @@ fn row_(row: impl Row) -> StructValue {
     StructValue::new(row.iter().map(|d| d.to_owned_datum()).collect())
 }
 
-fn map_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
-    let map = MapType::try_from_kv(args[0].as_list().clone(), args[1].as_list().clone())?;
+fn map_from_key_values_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
+    let map = MapType::try_from_kv(args[0].as_list().clone(), args[1].as_list().clone())
+        .map_err(ExprError::Custom)?;
+    Ok(map.into())
+}
+
+fn map_from_entries_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
+    let map = MapType::try_from_entries(args[0].as_list().clone()).map_err(ExprError::Custom)?;
     Ok(map.into())
 }
 
@@ -41,58 +47,66 @@ fn map_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
 ///
 /// ```slt
 /// query T
-/// select map_from_entries(null::int[], array[1,2,3]);
+/// select map_from_key_values(null::int[], array[1,2,3]);
 /// ----
 /// NULL
 ///
 /// query T
-/// select map_from_entries(array['a','b','c'], array[1,2,3]);
+/// select map_from_key_values(array['a','b','c'], array[1,2,3]);
 /// ----
 /// {a:1,b:2,c:3}
 /// ```
 #[function(
-    "map_from_entries(anyarray, anyarray) -> anymap",
-    type_infer = "map_type_infer"
+    "map_from_key_values(anyarray, anyarray) -> anymap",
+    type_infer = "map_from_key_values_type_infer"
 )]
-fn map_from_entries(key: ListRef<'_>, value: ListRef<'_>) -> Result<MapValue, ExprError> {
+fn map_from_key_values(key: ListRef<'_>, value: ListRef<'_>) -> Result<MapValue, ExprError> {
     MapValue::try_from_kv(key.to_owned(), value.to_owned()).map_err(ExprError::Custom)
+}
+
+#[function(
+    "map_from_entries(anyarray) -> anymap",
+    type_infer = "map_from_entries_type_infer"
+)]
+fn map_from_entries(entries: ListRef<'_>) -> Result<MapValue, ExprError> {
+    MapValue::try_from_entries(entries.to_owned()).map_err(ExprError::Custom)
 }
 
 /// # Example
 ///
 /// ```slt
 /// query T
-/// select map_access(map_from_entries(array[1,2,3], array[100,200,300]), 3);
+/// select map_access(map(array[1,2,3], array[100,200,300]), 3);
 /// ----
 /// 300
 ///
 /// query T
-/// select map_access(map_from_entries(array[1,2,3], array[100,200,300]), '3');
+/// select map_access(map(array[1,2,3], array[100,200,300]), '3');
 /// ----
 /// 300
 ///
 /// query error
-/// select map_access(map_from_entries(array[1,2,3], array[100,200,300]), 1.0);
+/// select map_access(map(array[1,2,3], array[100,200,300]), 1.0);
 /// ----
 /// db error: ERROR: Failed to run the query
 ///
 /// Caused by these errors (recent errors listed first):
-///   1: Failed to bind expression: map_access(map_from_entries(ARRAY[1, 2, 3], ARRAY[100, 200, 300]), 1.0)
-///   2: Bind error: Cannot access numeric in map(integer,integer)
+///   1: Failed to bind expression: map_access(map(ARRAY[1, 2, 3], ARRAY[100, 200, 300]), 1.0)
+///   2: Bind error: Cannot access numeric in map_from_key_values(integer,integer)
 ///
 ///
 /// query T
-/// select map_access(map_from_entries(array['a','b','c'], array[1,2,3]), 'a');
+/// select map_access(map(array['a','b','c'], array[1,2,3]), 'a');
 /// ----
 /// 1
 ///
 /// query T
-/// select map_access(map_from_entries(array['a','b','c'], array[1,2,3]), 'd');
+/// select map_access(map(array['a','b','c'], array[1,2,3]), 'd');
 /// ----
 /// NULL
 ///
 /// query T
-/// select map_access(map_from_entries(array['a','b','c'], array[1,2,3]), null);
+/// select map_access(map(array['a','b','c'], array[1,2,3]), null);
 /// ----
 /// NULL
 /// ```

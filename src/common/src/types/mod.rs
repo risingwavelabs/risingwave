@@ -252,7 +252,7 @@ impl From<&PbDataType> for DataType {
                 // Map is physically the same as a list.
                 // So the first (and only) item is the list element type.
                 let list_entries_type: DataType = (&proto.field_type[0]).into();
-                DataType::Map(MapType::from_list_entries(list_entries_type))
+                DataType::Map(MapType::from_entries(list_entries_type))
             }
             PbTypeName::Int256 => DataType::Int256,
         }

@@ -162,7 +162,7 @@ impl Array for MapArray {
 
     fn data_type(&self) -> DataType {
         let list_value_type = self.inner.values().data_type();
-        DataType::Map(MapType::from_list_entries(list_value_type))
+        DataType::Map(MapType::from_entries(list_value_type))
     }
 }
 
@@ -193,6 +193,8 @@ pub use scalar::{MapRef, MapValue};
 /// We only check the invariants in the constructors.
 /// After they are constructed, we assume the invariants holds.
 mod scalar {
+    use std::collections::HashSet;
+
     use super::*;
 
     /// Refer to [`MapArray`] for the invariants of a map value.
@@ -221,20 +223,33 @@ mod scalar {
 
         /// # Panics
         /// Panics if [map invariants](`super::MapArray`) are violated.
-        pub fn from_list_entries(list: ListValue) -> Self {
-            // validates list type is valid
-            _ = MapType::from_list_entries(list.data_type());
-            // TODO: validate the values is valid
-            MapValue(list)
+        pub fn from_entries(entries: ListValue) -> Self {
+            Self::try_from_entries(entries).unwrap()
         }
 
-        /// # Panics
-        /// Panics if [map invariants](`super::MapArray`) are violated.
+        /// Returns error if [map invariants](`super::MapArray`) are violated.
+        pub fn try_from_entries(entries: ListValue) -> Result<Self, String> {
+            // validates list type is valid
+            let _ = MapType::try_from_entries(entries.data_type())?;
+            let mut keys = HashSet::with_capacity(entries.len());
+            let struct_array = entries.into_array();
+            for key in struct_array.as_struct().field_at(0).iter() {
+                let Some(key) = key else {
+                    return Err("map keys must not be NULL".to_string());
+                };
+                if !keys.insert(key) {
+                    return Err("map keys must be unique".to_string());
+                }
+            }
+            Ok(MapValue(ListValue::new(struct_array)))
+        }
+
+        /// Returns error if [map invariants](`super::MapArray`) are violated.
         pub fn try_from_kv(key: ListValue, value: ListValue) -> Result<Self, String> {
             if key.len() != value.len() {
                 return Err("map keys and values have different length".to_string());
             }
-            let unique_keys = key.iter().unique().collect_vec();
+            let unique_keys: HashSet<_> = key.iter().unique().collect();
             if unique_keys.len() != key.len() {
                 return Err("map keys must be unique".to_string());
             }
@@ -411,7 +426,7 @@ impl MapValue {
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
         let list = ListValue::memcmp_deserialize(&datatype.clone().into_struct(), deserializer)?;
-        Ok(Self::from_list_entries(list))
+        Ok(Self::from_entries(list))
     }
 }
 
