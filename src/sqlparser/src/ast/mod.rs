@@ -502,7 +502,7 @@ pub enum Expr {
     Array(Array),
     /// An array constructing subquery `ARRAY(SELECT 2 UNION SELECT 3)`
     ArraySubquery(Box<Query>),
-    /// A subscript expression `arr[1]`
+    /// A subscript expression `arr[1]` or `map['a']`
     Index {
         obj: Box<Expr>,
         index: Box<Expr>,
