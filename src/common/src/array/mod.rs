@@ -68,7 +68,7 @@ pub use self::error::ArrayError;
 pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
 use crate::bitmap::Bitmap;
 use crate::types::*;
-use crate::{dispatch_array_builder_variants, dispatch_array_variants, for_all_array_variants};
+use crate::{dispatch_array_builder_variants, dispatch_array_variants, for_all_variants};
 pub type ArrayResult<T> = Result<T, ArrayError>;
 
 pub type I64Array = PrimitiveArray<i64>;
@@ -325,7 +325,7 @@ impl<A: Array> CompactableArray for A {
 
 /// Define `ArrayImpl` with macro.
 macro_rules! array_impl_enum {
-    ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+    ( $( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
         /// `ArrayImpl` embeds all possible array in `array` module.
         #[derive(Debug, Clone, EstimateSize)]
         pub enum ArrayImpl {
@@ -334,7 +334,7 @@ macro_rules! array_impl_enum {
     };
 }
 
-for_all_array_variants! { array_impl_enum }
+for_all_variants! { array_impl_enum }
 
 // We cannot put the From implementations in impl_convert,
 // because then we can't prove for all `T: PrimitiveArrayItemType`,
@@ -401,7 +401,7 @@ impl From<MapArray> for ArrayImpl {
 /// * `ArrayImpl -> Array` with `From` trait.
 /// * `ArrayBuilder -> ArrayBuilderImpl` with `From` trait.
 macro_rules! impl_convert {
-    ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+    ($( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
         $(
             paste! {
                 impl ArrayImpl {
@@ -455,11 +455,11 @@ macro_rules! impl_convert {
     };
 }
 
-for_all_array_variants! { impl_convert }
+for_all_variants! { impl_convert }
 
 /// Define `ArrayImplBuilder` with macro.
 macro_rules! array_builder_impl_enum {
-    ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+    ($( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
         /// `ArrayBuilderImpl` embeds all possible array in `array` module.
         #[derive(Debug, Clone, EstimateSize)]
         pub enum ArrayBuilderImpl {
@@ -468,7 +468,7 @@ macro_rules! array_builder_impl_enum {
     };
 }
 
-for_all_array_variants! { array_builder_impl_enum }
+for_all_variants! { array_builder_impl_enum }
 
 /// Implements all `ArrayBuilder` functions with `for_all_variant`.
 impl ArrayBuilderImpl {

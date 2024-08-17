@@ -201,12 +201,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::for_all_array_variants;
+    use crate::for_all_variants;
 
     #[test]
     fn test_create_array() {
         macro_rules! gen_rand_array {
-            ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+            ($( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
             $(
                 {
                     let array = seed_rand_array::<$array>(10, 1024, 0.5);
@@ -216,6 +216,6 @@ mod tests {
         };
     }
 
-        for_all_array_variants! { gen_rand_array }
+        for_all_variants! { gen_rand_array }
     }
 }
