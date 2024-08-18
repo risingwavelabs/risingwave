@@ -313,7 +313,7 @@ impl QueryRewriter<'_> {
             | Expr::Overlay { expr, .. }
             | Expr::Trim { expr, .. }
             | Expr::Nested(expr)
-            | Expr::ArrayIndex { obj: expr, .. }
+            | Expr::Index { obj: expr, .. }
             | Expr::ArrayRangeIndex { obj: expr, .. } => self.visit_expr(expr),
 
             Expr::Position { substring, string } => {
@@ -377,6 +377,12 @@ impl QueryRewriter<'_> {
             Expr::Row(exprs) | Expr::Array(Array { elem: exprs, .. }) => {
                 for expr in exprs {
                     self.visit_expr(expr);
+                }
+            }
+            Expr::Map { entries } => {
+                for (key, value) in entries {
+                    self.visit_expr(key);
+                    self.visit_expr(value);
                 }
             }
 
