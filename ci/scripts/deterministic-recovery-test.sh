@@ -55,7 +55,7 @@ if [[ -n "${USE_SQL_BACKEND:-}" ]]; then
 fi
 
 if [[ -n "${USE_ARRANGEMENT_BACKFILL:-}" ]]; then
-  export EXTRA_ARGS="$EXTRA_ARGS --arrangement-backfill"
+  export EXTRA_ARGS="$EXTRA_ARGS --use-arrangement-backfill"
 fi
 
 echo "--- EXTRA_ARGS: ${EXTRA_ARGS}"
