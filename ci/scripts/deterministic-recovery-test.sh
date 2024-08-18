@@ -45,14 +45,17 @@ filter_stack_trace_for_all_logs() {
 
 trap filter_stack_trace_for_all_logs ERR
 
-EXTRA_ARGS=""
+# NOTE(kwannoel): We must use `export` here, because the variables are not substituted
+# directly via bash subtitution. Instead, the `parallel` command substitutes the variables
+# from the environment. If they are declared without `export`, `parallel` can't read them from the env.
+export EXTRA_ARGS=""
 
 if [[ -n "${USE_SQL_BACKEND:-}" ]]; then
-  EXTRA_ARGS="--sqlite-data-dir=."
+  export EXTRA_ARGS="--sqlite-data-dir=."
 fi
 
 if [[ -n "${USE_ARRANGEMENT_BACKFILL:-}" ]]; then
-  EXTRA_ARGS="$EXTRA_ARGS --arrangement-backfill"
+  export EXTRA_ARGS="$EXTRA_ARGS --arrangement-backfill"
 fi
 
 echo "--- EXTRA_ARGS: ${EXTRA_ARGS}"
