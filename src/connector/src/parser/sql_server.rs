@@ -21,6 +21,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{Date, Decimal, ScalarImpl, Time, Timestamp, Timestamptz};
 use rust_decimal::Decimal as RustDecimal;
 use thiserror_ext::AsReport;
+use tiberius::xml::XmlData;
 use tiberius::Row;
 use uuid::Uuid;
 
@@ -208,15 +209,10 @@ impl<'a> tiberius::FromSql<'a> for ScalarImplTiberiusWrapper {
                 .map(|uuid| uuid.to_string().to_uppercase())
                 .map(ScalarImpl::from)
                 .map(ScalarImplTiberiusWrapper::from),
-            tiberius::ColumnData::Xml(_) => {
-                return Err(tiberius::error::Error::Conversion(
-                    format!(
-                        "the sql server decoding for {:?} is unsupported",
-                        value.type_name()
-                    )
-                    .into(),
-                ))
-            }
+            tiberius::ColumnData::Xml(_) => <&XmlData>::from_sql(value)?
+                .map(|xml| xml.clone().into_string())
+                .map(ScalarImpl::from)
+                .map(ScalarImplTiberiusWrapper::from),
         })
     }
 }

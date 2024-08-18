@@ -313,6 +313,7 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
             case "ntext":
             case "uniqueidentifier":
                 return val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "binary":
             case "varbinary":
                 return val == Data.DataType.TypeName.BYTEA_VALUE;
             case "date":
