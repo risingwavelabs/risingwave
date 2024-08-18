@@ -290,6 +290,11 @@ message ExprNode {
     MAP_VALUES = 703;
     MAP_ENTRIES = 704;
     MAP_FROM_KEY_VALUES = 705;
+    MAP_LENGTH = 706;
+    MAP_CONTAINS = 707;
+    MAP_CAT = 708;
+    MAP_INSERT = 709;
+    MAP_DELETE = 710;
 
     // Non-pure functions below (> 1000)
     // ------------------------
