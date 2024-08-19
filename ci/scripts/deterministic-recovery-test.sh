@@ -15,12 +15,12 @@ risingwave_meta::rpc::ddl_controller=debug,\
 risingwave_meta::barrier::mod=debug,\
 risingwave_simulation=debug,\
 risingwave_meta::stream::stream_manager=debug,\
-risingwave_meta::barrier::progress=debug,\
-risingwave_meta::controller::streaming_job=trace"
+risingwave_meta::barrier::progress=debug"
 
 # Extra logs you can enable if the existing trace does not give enough info.
 #risingwave_stream::executor::backfill=trace,
-#risingwave_meta::barrier::progress=debug,
+#risingwave_meta::barrier::progress=debug
+#risingwave_meta::controller::streaming_job=trace
 
 # ========= Some tips for debugging recovery tests =========
 # 1. If materialized view failed to create after multiple retries
