@@ -362,6 +362,7 @@ impl HummockManager {
         delta: HummockVersionDelta,
         group_parents: &HashMap<CompactionGroupId, CompactionGroupId>,
         skip_sst_ids: &HashSet<HummockSstableId>,
+        is_visible_table_committed_epoch: bool,
     ) -> Result<Option<HashSet<HummockSstableId>>> {
         async fn write_sstable_infos(
             sst_infos: impl Iterator<Item = &SstableInfo>,
@@ -388,16 +389,17 @@ impl HummockManager {
             Ok(count)
         }
 
-        let epoch = delta.visible_table_committed_epoch();
-        let version_id: u64 = delta.id.to_u64();
-        let m = hummock_epoch_to_version::ActiveModel {
-            epoch: Set(epoch.try_into().unwrap()),
-            version_id: Set(version_id.try_into().unwrap()),
-        };
-        hummock_epoch_to_version::Entity::insert(m)
-            .exec(txn)
-            .await?;
-
+        if is_visible_table_committed_epoch {
+            let epoch = delta.visible_table_committed_epoch();
+            let version_id: u64 = delta.id.to_u64();
+            let m = hummock_epoch_to_version::ActiveModel {
+                epoch: Set(epoch.try_into().unwrap()),
+                version_id: Set(version_id.try_into().unwrap()),
+            };
+            hummock_epoch_to_version::Entity::insert(m)
+                .exec(txn)
+                .await?;
+        }
         let mut version_sst_ids = None;
         let select_groups = group_parents
             .iter()
@@ -483,20 +485,18 @@ fn replay_archive(
     deltas: impl Iterator<Item = PbHummockVersionDelta>,
 ) -> HummockVersion {
     let mut last_version = HummockVersion::from_persisted_protobuf(&version);
-    let mut mce = last_version.visible_table_committed_epoch();
     for d in deltas {
         let d = HummockVersionDelta::from_persisted_protobuf(&d);
-        assert!(
-            d.visible_table_committed_epoch() > mce,
-            "time travel expects delta from commit_epoch only"
-        );
-        mce = d.visible_table_committed_epoch();
         // Need to work around the assertion in `apply_version_delta`.
         // Because compaction deltas are not included in time travel archive.
         while last_version.id < d.prev_id {
             last_version.id = last_version.id + 1;
         }
-        last_version.apply_version_delta(&d);
+        let is_commit_epoch = last_version.apply_version_delta(&d);
+        assert!(
+            is_commit_epoch,
+            "time travel expects delta from commit_epoch only"
+        );
     }
     last_version
 }

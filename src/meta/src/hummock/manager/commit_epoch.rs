@@ -298,6 +298,7 @@ impl HummockManager {
                     time_travel_delta,
                     &group_parents,
                     &versioning.last_time_travel_snapshot_sst_ids,
+                    is_visible_table_committed_epoch,
                 )
                 .await?;
             commit_multi_var_with_provided_txn!(

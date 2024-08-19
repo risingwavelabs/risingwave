@@ -553,7 +553,7 @@ impl HummockVersion {
         infos
     }
 
-    pub fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
+    pub fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) -> bool {
         assert_eq!(self.id, version_delta.prev_id);
 
         let (changed_table_info, mut is_commit_epoch) = self.state_table_info.apply_delta(
@@ -811,6 +811,8 @@ impl HummockVersion {
                 change_log.truncate(change_log_delta.truncate_epoch);
             }
         }
+
+        is_commit_epoch
     }
 
     pub fn build_branched_sst_info(&self) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo> {
