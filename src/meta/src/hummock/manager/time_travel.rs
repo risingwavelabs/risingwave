@@ -29,7 +29,7 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_meta_model_v2::hummock_sstable_info::SstableInfoV2Backend;
 use risingwave_meta_model_v2::{
-    compaction_config, hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
+    hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
     hummock_time_travel_version,
 };
 use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
