@@ -103,9 +103,9 @@ impl SqlServerExternalTable {
                 "SELECT
                     COLUMN_NAME,
                     DATA_TYPE
-                FROM 
+                FROM
                     INFORMATION_SCHEMA.COLUMNS
-                WHERE 
+                WHERE
                     TABLE_SCHEMA = '{}'
                     AND TABLE_NAME = '{}'",
                 config.schema.clone(),

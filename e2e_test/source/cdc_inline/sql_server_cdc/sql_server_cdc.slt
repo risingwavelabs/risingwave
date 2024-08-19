@@ -318,7 +318,7 @@ CREATE TABLE upper_table (
     "ID" INT,
     "Name" VARCHAR,
     PRIMARY KEY ("ID")
-) 
+)
 INCLUDE TIMESTAMP AS commit_ts
 INCLUDE DATABASE_NAME as database_name
 INCLUDE SCHEMA_NAME as schema_name
