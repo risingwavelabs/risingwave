@@ -122,7 +122,7 @@ impl SqlServerExternalTable {
                         column_descs.push(ColumnDesc::named(
                             col_name,
                             ColumnId::placeholder(),
-                            type_to_rw_type(col_type)?,
+                            type_to_rw_type(col_type, col_name)?,
                         ));
                     }
                 }
@@ -171,7 +171,7 @@ impl SqlServerExternalTable {
     }
 }
 
-fn type_to_rw_type(col_type: &str) -> ConnectorResult<DataType> {
+fn type_to_rw_type(col_type: &str, col_name: &str) -> ConnectorResult<DataType> {
     let dtype = match col_type.to_lowercase().as_str() {
         "bit" => DataType::Boolean,
         "binary" | "varbinary" => DataType::Bytea,
@@ -188,14 +188,10 @@ fn type_to_rw_type(col_type: &str) -> ConnectorResult<DataType> {
         "char" | "nchar" | "varchar" | "nvarchar" | "text" | "ntext" | "xml"
         | "uniqueidentifier" => DataType::Varchar,
         mssql_type => {
-            // NOTES: user-defined enum type is classified as `Unknown`
-            tracing::warn!(
-                "Unknown Sql Server data type: {:?}, map to varchar",
-                mssql_type
-            );
             return Err(anyhow!(
-                "Unknown Sql Server data type: {:?}, map to varchar",
-                mssql_type
+                "Unsupported Sql Server data type: {:?}, column name: {}",
+                mssql_type,
+                col_name
             )
             .into());
         }
