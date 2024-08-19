@@ -14,5 +14,5 @@
 
 /// Build a unique CDC table identifier from a source ID and external table name
 pub fn build_cdc_table_id(source_id: u32, external_table_name: &str) -> String {
-    format!("{}_{}", source_id, external_table_name)
+    format!("{}.{}", source_id, external_table_name)
 }
