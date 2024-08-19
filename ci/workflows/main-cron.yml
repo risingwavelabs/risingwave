@@ -374,8 +374,8 @@ steps:
     # NOTE(kwannoel): It will only run when the recovery tests label is added currently.
     # This is because there are currently some bugs which cause the test to fail.
     if: |
-      build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
-      || build.env("CI_STEPS") =~ /(^|,)recovery-tests?-deterministic-simulation(,|$$)/
+      build.pull_request.labels includes "ci/run-sql-recovery-test-deterministic-simulation"
+      || build.env("CI_STEPS") =~ /(^|,)sql-recovery-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
     plugins:
       - docker-compose#v5.1.0:

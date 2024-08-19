@@ -361,6 +361,10 @@ impl Cluster {
         println!("seed = {}", handle.seed());
         println!("{:#?}", conf);
 
+        if conf.sqlite_data_dir.is_some() && conf.etcd_data_path.is_some() {
+            bail!("sqlite_data_dir and etcd_data_path cannot be set at the same time");
+        }
+
         // setup DNS and load balance
         let net = madsim::net::NetSim::current();
         for i in 1..=conf.meta_nodes {
