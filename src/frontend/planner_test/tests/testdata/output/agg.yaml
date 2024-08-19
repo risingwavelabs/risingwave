@@ -2070,3 +2070,19 @@
           └─StreamHashAgg { group_key: [$expr5], aggs: [sum(t.v1), count, max(t.v2)] }
             └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr3, t.v2, t.v2::Float64 as $expr4, t._row_id, Vnode(t._row_id) as $expr5] }
               └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: test approx percentile with default relative_error
+  sql: |
+    CREATE TABLE t (v1 int);
+    SELECT approx_percentile(0.5) WITHIN GROUP (order by v1) from t;
+  logical_plan: |-
+    LogicalProject { exprs: [approx_percentile($expr1)] }
+    └─LogicalAgg { aggs: [approx_percentile($expr1)] }
+      └─LogicalProject { exprs: [t.v1::Float64 as $expr1] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+  stream_plan: |-
+    StreamMaterialize { columns: [approx_percentile], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }
+      └─StreamExchange { dist: Single }
+        └─StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }
+          └─StreamProject { exprs: [t.v1::Float64 as $expr1, t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
