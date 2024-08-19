@@ -97,6 +97,7 @@ message CombinedMutation {
 }
 
 message SubscriptionUpstreamInfo {
+  // can either be subscription_id or table_id of creating TableFragments
   uint32 subscriber_id = 1;
   uint32 upstream_mv_table_id = 2;
 }
@@ -543,6 +544,9 @@ enum StreamScanType {
 
   // ArrangementBackfillExecutor
   STREAM_SCAN_TYPE_ARRANGEMENT_BACKFILL = 5;
+
+  // SnapshotBackfillExecutor
+  STREAM_SCAN_TYPE_SNAPSHOT_BACKFILL = 6;
 }
 
 // StreamScanNode reads data from upstream table first, and then pass all events to downstream.
@@ -949,6 +953,7 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_DML = 128;
   FRAGMENT_TYPE_FLAG_CDC_FILTER = 256;
   FRAGMENT_TYPE_FLAG_SOURCE_SCAN = 1024;
+  FRAGMENT_TYPE_FLAG_SNAPSHOT_BACKFILL_STREAM_SCAN = 2048;
 }
 
 // The streaming context associated with a stream plan

@@ -281,12 +281,30 @@ test_backfill_snapshot_with_wider_rows() {
   kill_cluster
 }
 
+test_snapshot_backfill() {
+  echo "--- e2e, snapshot backfill test, $RUNTIME_CLUSTER_PROFILE"
+
+  risedev ci-start $RUNTIME_CLUSTER_PROFILE
+
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/create_nexmark_table.slt'
+
+  TEST_NAME=nexmark_q3 sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/nexmark/nexmark_q3.slt' &
+  TEST_NAME=nexmark_q7 sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/nexmark/nexmark_q7.slt' &
+
+  wait
+
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/drop_nexmark_table.slt'
+
+  kill_cluster
+}
+
 main() {
   set -euo pipefail
   test_snapshot_and_upstream_read
   test_backfill_tombstone
   test_replication_with_column_pruning
   test_sink_backfill_recovery
+  test_snapshot_backfill
 
   # Only if profile is "ci-release", run it.
   if [[ ${profile:-} == "ci-release" ]]; then

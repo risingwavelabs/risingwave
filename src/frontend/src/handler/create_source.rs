@@ -52,6 +52,7 @@ use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
+pub use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_connector::source::{
     ConnectorProperties, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
     KINESIS_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR,
@@ -89,8 +90,6 @@ use crate::utils::{
     resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options, OverwriteOptions,
 };
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions, WithOptionsSecResolved};
-
-pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 
 /// Map a JSON schema to a relational schema
 async fn extract_json_table_schema(
@@ -1119,9 +1118,24 @@ pub fn validate_compatibility(
     source_schema: &ConnectorSchema,
     props: &mut BTreeMap<String, String>,
 ) -> Result<()> {
-    let connector = props
+    let mut connector = props
         .get_connector()
         .ok_or_else(|| RwError::from(ProtocolError("missing field 'connector'".to_string())))?;
+
+    if connector == OPENDAL_S3_CONNECTOR {
+        // reject s3_v2 creation
+        return Err(RwError::from(Deprecated(
+            OPENDAL_S3_CONNECTOR.to_string(),
+            S3_CONNECTOR.to_string(),
+        )));
+    }
+    if connector == S3_CONNECTOR {
+        // S3 connector is deprecated, use OPENDAL_S3_CONNECTOR instead
+        // do s3 -> s3_v2 migration
+        let entry = props.get_mut(UPSTREAM_SOURCE_KEY).unwrap();
+        *entry = OPENDAL_S3_CONNECTOR.to_string();
+        connector = OPENDAL_S3_CONNECTOR.to_string();
+    }
 
     let compatible_formats = CONNECTORS_COMPATIBLE_FORMATS
         .get(&connector)
@@ -1150,13 +1164,6 @@ pub fn validate_compatibility(
                 UPSTREAM_SOURCE_KEY
             ))));
         }
-    }
-
-    if connector == S3_CONNECTOR {
-        return Err(RwError::from(Deprecated(
-            S3_CONNECTOR.to_string(),
-            OPENDAL_S3_CONNECTOR.to_string(),
-        )));
     }
 
     let compatible_encodes = compatible_formats

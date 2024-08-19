@@ -608,6 +608,7 @@ impl Parser<'_> {
                     Ok(exists_node)
                 }
                 Keyword::ARRAY if self.peek_token() == Token::LBracket => self.parse_array_expr(),
+                Keyword::MAP if self.peek_token() == Token::LBrace => self.parse_map_expr(),
                 // `LEFT` and `RIGHT` are reserved as identifier but okay as function
                 Keyword::LEFT | Keyword::RIGHT => {
                     *self = checkpoint;
@@ -1149,6 +1150,22 @@ impl Parser<'_> {
         Ok(exprs)
     }
 
+    /// Parses a map expression `MAP {k1:v1, k2:v2, ..}`
+    pub fn parse_map_expr(&mut self) -> PResult<Expr> {
+        self.expect_token(&Token::LBrace)?;
+        if self.consume_token(&Token::RBrace) {
+            return Ok(Expr::Map { entries: vec![] });
+        }
+        let entries = self.parse_comma_separated(|parser| {
+            let key = parser.parse_expr()?;
+            parser.expect_token(&Token::Colon)?;
+            let value = parser.parse_expr()?;
+            Ok((key, value))
+        })?;
+        self.expect_token(&Token::RBrace)?;
+        Ok(Expr::Map { entries })
+    }
+
     // This function parses date/time fields for interval qualifiers.
     pub fn parse_date_time_field(&mut self) -> PResult<DateTimeField> {
         dispatch! { peek(keyword);
@@ -1554,7 +1571,7 @@ impl Parser<'_> {
                     }
                     _ => {
                         // [N]
-                        Expr::ArrayIndex {
+                        Expr::Index {
                             obj: Box::new(expr),
                             index,
                         }
@@ -4670,6 +4687,9 @@ impl Parser<'_> {
                 if !arg_list.order_by.is_empty() {
                     parser_err!("ORDER BY is not supported in table-valued function calls");
                 }
+                if arg_list.ignore_nulls {
+                    parser_err!("IGNORE NULLS is not supported in table-valued function calls");
+                }
 
                 let args = arg_list.args;
                 let with_ordinality = self.parse_keywords(&[Keyword::WITH, Keyword::ORDINALITY]);
@@ -4980,11 +5000,14 @@ impl Parser<'_> {
                 vec![]
             };
 
+            let ignore_nulls = self.parse_keywords(&[Keyword::IGNORE, Keyword::NULLS]);
+
             let arg_list = FunctionArgList {
                 distinct,
                 args,
                 variadic,
                 order_by,
+                ignore_nulls,
             };
 
             self.expect_token(&Token::RParen)?;

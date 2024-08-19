@@ -30,7 +30,8 @@ use tracing::Instrument;
 
 use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{
-    BarrierScheduler, Command, CreateStreamingJobCommandInfo, ReplaceTablePlan, StreamRpcManager,
+    BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
+    ReplaceTablePlan, SnapshotBackfillInfo, StreamRpcManager,
 };
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob};
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
@@ -76,6 +77,8 @@ pub struct CreateStreamingJobContext {
 
     /// Context provided for potential replace table, typically used when sinking into a table.
     pub replace_table_job_info: Option<(StreamingJob, ReplaceTableContext, TableFragments)>,
+
+    pub snapshot_backfill_info: Option<SnapshotBackfillInfo>,
 
     pub option: CreateStreamingJobOption,
 
@@ -405,6 +408,7 @@ impl GlobalStreamManager {
             ddl_type,
             replace_table_job_info,
             internal_tables,
+            snapshot_backfill_info,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<NotificationVersion> {
@@ -488,17 +492,38 @@ impl GlobalStreamManager {
             create_type,
         };
 
-        let command = Command::CreateStreamingJob {
-            info,
-            replace_table: replace_table_command,
+        let command = if let Some(snapshot_backfill_info) = snapshot_backfill_info {
+            tracing::debug!(
+                ?snapshot_backfill_info,
+                "sending Command::CreateSnapshotBackfillStreamingJob"
+            );
+            Command::CreateStreamingJob {
+                info,
+                job_type: CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info),
+            }
+        } else {
+            tracing::debug!("sending Command::CreateStreamingJob");
+            if let Some(replace_table_command) = replace_table_command {
+                Command::CreateStreamingJob {
+                    info,
+                    job_type: CreateStreamingJobType::SinkIntoTable(replace_table_command),
+                }
+            } else {
+                Command::CreateStreamingJob {
+                    info,
+                    job_type: CreateStreamingJobType::Normal,
+                }
+            }
         };
-        tracing::debug!("sending Command::CreateStreamingJob");
         let result: MetaResult<NotificationVersion> = try {
             self.barrier_scheduler.run_command(command).await?;
-            tracing::debug!("first barrier collected for stream job");
-            self.metadata_manager
+            tracing::debug!(?streaming_job, "first barrier collected for stream job");
+            let result = self
+                .metadata_manager
                 .wait_streaming_job_finished(&streaming_job)
-                .await?
+                .await?;
+            tracing::debug!(?streaming_job, "stream job finish");
+            result
         };
         match result {
             Err(err) => {
@@ -802,7 +827,7 @@ impl GlobalStreamManager {
             upstream_mv_table_id: TableId::new(table_id),
         };
 
-        tracing::debug!("sending Command::DropSubscription");
+        tracing::debug!("sending Command::DropSubscriptions");
         let _ = self
             .barrier_scheduler
             .run_command(command)
@@ -1177,6 +1202,7 @@ mod tests {
                 create_type: Default::default(),
                 ddl_type: Default::default(),
                 replace_table_job_info: None,
+                snapshot_backfill_info: None,
                 option: Default::default(),
             };
 
