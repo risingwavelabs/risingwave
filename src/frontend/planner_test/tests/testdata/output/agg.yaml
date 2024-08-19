@@ -2109,5 +2109,5 @@
     create table t (v1 int, grp_col int);
     select approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) from t group by grp_col;
   stream_error: |-
-    Feature is not yet implemented: two-phase streaming approx percentile aggregation with group key,please use single phase aggregation instead
+    Feature is not yet implemented: two-phase streaming approx percentile aggregation with group key, please use single phase aggregation instead
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml

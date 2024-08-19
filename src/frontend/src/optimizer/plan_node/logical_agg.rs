@@ -312,7 +312,7 @@ impl LogicalAgg {
         } = approx;
         if !self.group_key().is_empty() && !approx_percentile_agg_calls.is_empty() {
             bail_not_implemented!(
-                "two-phase streaming approx percentile aggregation with group key,\
+                "two-phase streaming approx percentile aggregation with group key, \
              please use single phase aggregation instead"
             );
         }
