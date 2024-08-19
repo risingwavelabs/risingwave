@@ -140,11 +140,7 @@ impl Binder {
 
         // check signature and do implicit cast
         match (&kind, direct_args.len(), args.as_mut_slice()) {
-            (
-                AggKind::Builtin(PbAggKind::PercentileCont | PbAggKind::PercentileDisc),
-                1,
-                [arg],
-            ) => {
+            (AggKind::Builtin(PbAggKind::PercentileCont | PbAggKind::PercentileDisc), 1, [arg]) => {
                 let fraction = &mut direct_args[0];
                 decimal_to_float64(fraction, &kind)?;
                 if matches!(&kind, AggKind::Builtin(PbAggKind::PercentileCont)) {
@@ -157,32 +153,29 @@ impl Binder {
                 }
             }
             (AggKind::Builtin(PbAggKind::Mode), 0, [_arg]) => {}
-            (
-                AggKind::Builtin(PbAggKind::ApproxPercentile),
-                1..=2,
-                [_percentile_col],
-            ) => {
+            (AggKind::Builtin(PbAggKind::ApproxPercentile), 1..=2, [_percentile_col]) => {
                 let percentile = &mut direct_args[0];
                 decimal_to_float64(percentile, &kind)?;
                 match direct_args.len() {
                     2 => {
-                        let relative_error= &mut direct_args[1];
+                        let relative_error = &mut direct_args[1];
                         decimal_to_float64(relative_error, &kind)?;
                     }
                     1 => {
                         let relative_error: ExprImpl = Literal::new(
                             ScalarImpl::Float64(0.01.into()).into(),
                             DataType::Float64,
-                        ).into();
+                        )
+                        .into();
                         direct_args.push(relative_error);
                     }
                     _ => {
                         return Err(ErrorCode::InvalidInputSyntax(
                             "invalid direct args for approx_percentile aggregation".to_string(),
-                        ).into())
+                        )
+                        .into())
                     }
                 }
-
             }
             _ => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
