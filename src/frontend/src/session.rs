@@ -705,7 +705,7 @@ impl SessionImpl {
             ))
             .into(),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(CursorManager::default()),
+            cursor_manager: Arc::new(CursorManager::new(FrontendMetrics::for_test().cursor_metrics.clone())),
         }
     }
 
