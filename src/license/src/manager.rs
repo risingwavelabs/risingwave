@@ -213,6 +213,7 @@ mod tests {
                     sub: "rw-test",
                     iss: Test,
                     tier: Paid,
+                    cpu_core_limit: None,
                     exp: 9999999999,
                 }
             "#]],
@@ -233,6 +234,7 @@ mod tests {
                     sub: "rw-test",
                     iss: Test,
                     tier: Free,
+                    cpu_core_limit: None,
                     exp: 9999999999,
                 }
             "#]],
@@ -249,6 +251,7 @@ mod tests {
                     sub: "default",
                     iss: Prod,
                     tier: Free,
+                    cpu_core_limit: None,
                     exp: 18446744073709551615,
                 }
             "#]],
