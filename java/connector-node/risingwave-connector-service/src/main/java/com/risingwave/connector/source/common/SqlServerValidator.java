@@ -289,6 +289,7 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
                 return Data.DataType.TypeName.INT16_VALUE <= val
                         && val <= Data.DataType.TypeName.INT64_VALUE;
             case "integer":
+            case "int":
                 return Data.DataType.TypeName.INT32_VALUE <= val
                         && val <= Data.DataType.TypeName.INT64_VALUE;
             case "bigint":
