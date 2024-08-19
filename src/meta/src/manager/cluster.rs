@@ -504,7 +504,7 @@ impl ClusterManager {
                 is_streaming: worker_property.is_streaming,
                 is_serving: worker_property.is_serving,
                 is_unschedulable: worker_property.is_unschedulable,
-                secondary_host: worker_property.secondary_host,
+                internal_rpc_host_addr: worker_property.internal_rpc_host_addr,
             })
         } else {
             None
@@ -839,7 +839,7 @@ mod tests {
                         is_streaming: true,
                         is_serving: true,
                         is_unschedulable: false,
-                        secondary_host: "".to_string(),
+                        internal_rpc_host_addr: "".to_string(),
                     },
                     Default::default(),
                 )
@@ -881,7 +881,7 @@ mod tests {
                     is_streaming: true,
                     is_serving: true,
                     is_unschedulable: false,
-                    secondary_host: "".to_string(),
+                    internal_rpc_host_addr: "".to_string(),
                 },
                 Default::default(),
             )
@@ -904,7 +904,7 @@ mod tests {
                     is_streaming: true,
                     is_serving: true,
                     is_unschedulable: false,
-                    secondary_host: "".to_string(),
+                    internal_rpc_host_addr: "".to_string(),
                 },
                 Default::default(),
             )
@@ -954,7 +954,7 @@ mod tests {
                     is_streaming: true,
                     is_serving: true,
                     is_unschedulable: false,
-                    secondary_host: "".to_string(),
+                    internal_rpc_host_addr: "".to_string(),
                 },
                 Default::default(),
             )
@@ -1013,7 +1013,7 @@ mod tests {
                     is_streaming: true,
                     is_serving: true,
                     is_unschedulable: false,
-                    secondary_host: "".to_string(),
+                    internal_rpc_host_addr: "".to_string(),
                 },
                 Default::default(),
             )

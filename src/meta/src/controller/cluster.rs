@@ -85,7 +85,7 @@ impl From<WorkerInfo> for PbWorkerNode {
                 is_streaming: p.is_streaming,
                 is_serving: p.is_serving,
                 is_unschedulable: p.is_unschedulable,
-                secondary_host: p.secondary_host.clone(),
+                internal_rpc_host_addr: p.internal_rpc_host_addr.clone(),
             }),
             transactional_id: info.0.transaction_id.map(|id| id as _),
             resource: info.2.resource,
@@ -724,7 +724,7 @@ impl ClusterControllerInner {
                 is_streaming: Set(add_property.is_streaming),
                 is_serving: Set(add_property.is_serving),
                 is_unschedulable: Set(add_property.is_unschedulable),
-                secondary_host: Set(add_property.secondary_host),
+                internal_rpc_host_addr: Set(add_property.internal_rpc_host_addr),
             };
             WorkerProperty::insert(property).exec(&txn).await?;
         }
@@ -971,7 +971,7 @@ mod tests {
             is_streaming: true,
             is_serving: true,
             is_unschedulable: false,
-            secondary_host: "".to_string(),
+            internal_rpc_host_addr: "".to_string(),
         };
         let hosts = mock_worker_hosts_for_test(worker_count);
         let mut worker_ids = vec![];
@@ -1062,7 +1062,7 @@ mod tests {
             is_streaming: true,
             is_serving: true,
             is_unschedulable: false,
-            secondary_host: "".to_string(),
+            internal_rpc_host_addr: "".to_string(),
         };
         let worker_id = cluster_ctl
             .add_worker(

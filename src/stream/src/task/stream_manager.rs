@@ -577,7 +577,7 @@ impl StreamActorManager {
             } = actor;
             let actor = actor.unwrap();
             let actor_id = actor.actor_id;
-            let streaming_config = Arc::new(shared_context.config.clone());
+            let streaming_config = self.env.config().clone();
             let actor_context = ActorContext::create(
                 &actor,
                 self.env.total_mem_usage(),

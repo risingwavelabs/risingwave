@@ -137,7 +137,7 @@ where
                 .property
                 .as_ref()
                 .expect("frontend node property is missing");
-            HostAddr::from_str(prop.secondary_host.as_str())?
+            HostAddr::from_str(prop.internal_rpc_host_addr.as_str())?
         } else {
             node.get_host().unwrap().into()
         };

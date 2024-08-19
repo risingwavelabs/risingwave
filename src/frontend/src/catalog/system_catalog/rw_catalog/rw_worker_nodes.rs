@@ -33,7 +33,7 @@ struct RwWorkerNode {
     is_streaming: Option<bool>,
     is_serving: Option<bool>,
     is_unschedulable: Option<bool>,
-    secondary_host: Option<String>,
+    internal_rpc_host_addr: Option<String>,
     rw_version: Option<String>,
     system_total_memory_bytes: Option<i64>,
     system_total_cpu_cores: Option<i64>,
@@ -74,7 +74,7 @@ async fn read_rw_worker_nodes_info(reader: &SysCatalogReaderImpl) -> Result<Vec<
                 } else {
                     None
                 },
-                secondary_host: property.map(|p| p.secondary_host.clone()),
+                internal_rpc_host_addr: property.map(|p| p.internal_rpc_host_addr.clone()),
                 rw_version: resource.map(|r| r.rw_version.to_owned()),
                 system_total_memory_bytes: resource.map(|r| r.total_memory_bytes as _),
                 system_total_cpu_cores: resource.map(|r| r.total_cpu_cores as _),

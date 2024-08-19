@@ -19,7 +19,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(WorkerProperty::Table)
-                    .add_column(ColumnDef::new(WorkerProperty::SecondaryHost).string())
+                    .add_column(ColumnDef::new(WorkerProperty::InternalRpcHostAddr).string())
                     .to_owned(),
             )
             .await
@@ -39,7 +39,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(WorkerProperty::Table)
-                    .drop_column(WorkerProperty::SecondaryHost)
+                    .drop_column(WorkerProperty::InternalRpcHostAddr)
                     .to_owned(),
             )
             .await
@@ -55,5 +55,5 @@ enum Table {
 #[derive(DeriveIden)]
 enum WorkerProperty {
     Table,
-    SecondaryHost,
+    InternalRpcHostAddr,
 }

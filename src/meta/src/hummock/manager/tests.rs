@@ -405,7 +405,7 @@ async fn test_release_context_resource() {
                 is_streaming: true,
                 is_serving: true,
                 is_unschedulable: false,
-                secondary_host: "".to_string(),
+                internal_rpc_host_addr: "".to_string(),
             },
             Default::default(),
         )
@@ -488,7 +488,7 @@ async fn test_hummock_manager_basic() {
                 is_streaming: true,
                 is_serving: true,
                 is_unschedulable: false,
-                secondary_host: "".to_string(),
+                internal_rpc_host_addr: "".to_string(),
             },
             Default::default(),
         )

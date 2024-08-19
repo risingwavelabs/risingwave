@@ -274,7 +274,7 @@ impl FrontendEnv {
             WorkerType::Frontend,
             &frontend_address,
             AddWorkerNodeProperty {
-                secondary_host: frontend_rpc_addr.to_string(),
+                internal_rpc_host_addr: frontend_rpc_addr.to_string(),
                 ..Default::default()
             },
             &config.meta,
