@@ -122,7 +122,7 @@ impl SqlServerExternalTable {
                         column_descs.push(ColumnDesc::named(
                             col_name,
                             ColumnId::placeholder(),
-                            type_to_rw_type(&col_type)?,
+                            type_to_rw_type(col_type)?,
                         ));
                     }
                 }
