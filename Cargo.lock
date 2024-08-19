@@ -915,9 +915,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76cb6d108605c5489fff1ef9c520656946ad05ed0de3ea6d26d56bcb34bdb8c5"
 dependencies = [
  "anyhow",
- "arrow-array 52.0.0",
- "arrow-buffer 52.0.0",
- "arrow-schema 52.0.0",
+ "arrow-array 50.0.0",
+ "arrow-buffer 50.0.0",
+ "arrow-schema 50.0.0",
  "atomic-time",
  "rquickjs",
 ]
@@ -929,10 +929,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4506efc6fbc200c083add2a7ed4e3616a859941a745e922320ae7051d90d12ec"
 dependencies = [
  "anyhow",
- "arrow-array 52.0.0",
- "arrow-buffer 52.0.0",
- "arrow-ipc 52.0.0",
- "arrow-schema 52.0.0",
+ "arrow-array 50.0.0",
+ "arrow-buffer 50.0.0",
+ "arrow-ipc 50.0.0",
+ "arrow-schema 50.0.0",
  "lazy_static",
  "pyo3",
  "pyo3-build-config",
@@ -945,9 +945,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb829e25925161d93617d4b053bae03fe51e708f2cce088d85df856011d4f369"
 dependencies = [
  "anyhow",
- "arrow-array 52.0.0",
- "arrow-ipc 52.0.0",
- "arrow-schema 52.0.0",
+ "arrow-array 50.0.0",
+ "arrow-ipc 50.0.0",
+ "arrow-schema 50.0.0",
  "async-trait",
  "base64 0.22.0",
  "genawaiter",
