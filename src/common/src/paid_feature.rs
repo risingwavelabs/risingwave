@@ -144,9 +144,10 @@ impl Feature {
                 }
             }
         };
-        if let feature_name = Self::get_feature_name(&self)
-            && !feature_name.eq_ignore_ascii_case("TestPaid")
-        {
+
+        // Report the event to telemetry
+        let feature_name = Self::get_feature_name(&self);
+        if !feature_name.eq_ignore_ascii_case("TestPaid") {
             let mut attr_builder = jsonbb::Builder::<Vec<u8>>::new();
             attr_builder.begin_object();
             attr_builder.add_string("success");
