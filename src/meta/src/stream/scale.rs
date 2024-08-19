@@ -1983,7 +1983,7 @@ impl ScaleController {
             .map(|worker| (worker.id, worker))
             .collect();
 
-        let worker_slots = workers
+        let schedulable_worker_slots = workers
             .values()
             .map(|worker| (worker.id, worker.parallelism as usize))
             .collect::<BTreeMap<_, _>>();
@@ -2191,7 +2191,7 @@ impl ScaleController {
                     *fragment_slots.entry(*worker_id).or_default() += 1;
                 }
 
-                let all_available_slots: usize = worker_slots.values().cloned().sum();
+                let all_available_slots: usize = schedulable_worker_slots.values().cloned().sum();
 
                 if all_available_slots == 0 {
                     bail!(
@@ -2208,12 +2208,13 @@ impl ScaleController {
 
                         assert_eq!(*should_be_one, 1);
 
-                        if worker_slots.contains_key(single_worker_id) {
+                        if schedulable_worker_slots.contains_key(single_worker_id) {
                             // NOTE: shall we continue?
                             continue;
                         }
 
-                        let units = schedule_units_for_slots(&worker_slots, 1, table_id)?;
+                        let units =
+                            schedule_units_for_slots(&schedulable_worker_slots, 1, table_id)?;
 
                         let (chosen_target_worker_id, should_be_one) =
                             units.iter().exactly_one().ok().with_context(|| {
@@ -2237,14 +2238,41 @@ impl ScaleController {
                     }
                     FragmentDistributionType::Hash => match parallelism {
                         TableParallelism::Adaptive => {
-                            target_plan.insert(
-                                fragment_id,
-                                Self::diff_worker_slot_changes(&fragment_slots, &worker_slots),
-                            );
+                            if all_available_slots > VirtualNode::COUNT {
+                                tracing::warn!("available parallelism for table {table_id} is larger than VirtualNode::COUNT, force limit to VirtualNode::COUNT");
+                                // force limit to VirtualNode::COUNT
+                                let target_worker_slots = schedule_units_for_slots(
+                                    &schedulable_worker_slots,
+                                    VirtualNode::COUNT,
+                                    table_id,
+                                )?;
+
+                                target_plan.insert(
+                                    fragment_id,
+                                    Self::diff_worker_slot_changes(
+                                        &fragment_slots,
+                                        &target_worker_slots,
+                                    ),
+                                );
+                            } else {
+                                target_plan.insert(
+                                    fragment_id,
+                                    Self::diff_worker_slot_changes(
+                                        &fragment_slots,
+                                        &schedulable_worker_slots,
+                                    ),
+                                );
+                            }
                         }
-                        TableParallelism::Fixed(n) => {
+                        TableParallelism::Fixed(mut n) => {
+                            if n > VirtualNode::COUNT {
+                                // This should be unreachable, but we still intercept it to prevent accidental modifications.
+                                tracing::warn!("parallelism {n} for table {table_id} is larger than VirtualNode::COUNT, force limit to VirtualNode::COUNT");
+                                n = VirtualNode::COUNT
+                            }
+
                             let target_worker_slots =
-                                schedule_units_for_slots(&worker_slots, n, table_id)?;
+                                schedule_units_for_slots(&schedulable_worker_slots, n, table_id)?;
 
                             target_plan.insert(
                                 fragment_id,
