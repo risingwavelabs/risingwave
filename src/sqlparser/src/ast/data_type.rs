@@ -70,6 +70,8 @@ pub enum DataType {
     Array(Box<DataType>),
     /// Structs
     Struct(Vec<StructField>),
+    /// Map(key_type, value_type)
+    Map(Box<(DataType, DataType)>),
 }
 
 impl fmt::Display for DataType {
@@ -109,6 +111,9 @@ impl fmt::Display for DataType {
             DataType::Custom(ty) => write!(f, "{}", ty),
             DataType::Struct(defs) => {
                 write!(f, "STRUCT<{}>", display_comma_separated(defs))
+            }
+            DataType::Map(kv) => {
+                write!(f, "MAP({},{})", kv.0, kv.1)
             }
         }
     }

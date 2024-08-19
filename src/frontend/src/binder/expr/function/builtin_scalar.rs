@@ -129,6 +129,18 @@ impl Binder {
             )
         }
 
+        // `CURRENT_DATABASE` is the name of the database you are currently connected to.
+        // `CURRENT_CATALOG` is a synonym for `CURRENT_DATABASE`.
+        fn current_database() -> Handle {
+            guard_by_len(
+                0,
+                raw(|binder, _inputs| Ok(ExprImpl::literal_varchar(binder.db_name.clone()))),
+            )
+        }
+
+        // XXX: can we unify this with FUNC_SIG_MAP?
+        // For raw_call here, it seems unnecessary to declare it again here.
+        // For some functions, we have validation logic here. Is it still useful now?
         static HANDLES: LazyLock<HashMap<&'static str, Handle>> = LazyLock::new(|| {
             [
                 (
@@ -387,6 +399,9 @@ impl Binder {
                 ("jsonb_path_query_array", raw_call(ExprType::JsonbPathQueryArray)),
                 ("jsonb_path_query_first", raw_call(ExprType::JsonbPathQueryFirst)),
                 ("jsonb_set", raw_call(ExprType::JsonbSet)),
+                // map
+                ("map_from_entries", raw_call(ExprType::MapFromEntries)),
+                ("map_access",raw_call(ExprType::MapAccess)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least
@@ -404,9 +419,8 @@ impl Binder {
                         Ok(ExprImpl::literal_varchar(v))
                     })),
                 ),
-                ("current_database", guard_by_len(0, raw(|binder, _inputs| {
-                    Ok(ExprImpl::literal_varchar(binder.db_name.clone()))
-                }))),
+                ("current_catalog", current_database()),
+                ("current_database", current_database()),
                 ("current_schema", guard_by_len(0, raw(|binder, _inputs| {
                     return Ok(binder
                         .first_valid_schema()
@@ -692,6 +706,7 @@ impl Binder {
             return Ok(FunctionCall::new(func, inputs)?.into());
         }
 
+        // Note: for raw_call, we only check name here. The type check is done later.
         match HANDLES.get(function_name) {
             Some(handle) => handle(self, inputs),
             None => {

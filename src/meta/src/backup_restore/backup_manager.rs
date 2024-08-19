@@ -346,8 +346,11 @@ impl BackupWorker {
         let backup_manager_clone = self.backup_manager.clone();
         let job = async move {
             let hummock_manager = backup_manager_clone.hummock_manager.clone();
-            let hummock_version_builder =
-                async move { hummock_manager.get_current_version().await };
+            let hummock_version_builder = async move {
+                hummock_manager
+                    .on_current_version(|version| version.clone())
+                    .await
+            };
             match backup_manager_clone.env.meta_store() {
                 MetaStoreImpl::Kv(kv) => {
                     let mut snapshot_builder =
