@@ -501,7 +501,7 @@ impl IcebergConfig {
             .map_err(|e| SinkError::Iceberg(anyhow!(e)))
     }
 
-    async fn create_catalog_v2(&self) -> ConnectorResult<Arc<dyn CatalogV2>> {
+    fn create_catalog_v2(&self) -> ConnectorResult<Arc<dyn CatalogV2>> {
         match self.catalog_type() {
             "storage" => {
                 let config = StorageCatalogConfig::builder()
@@ -536,7 +536,7 @@ impl IcebergConfig {
                     })?)
                     .props(iceberg_configs)
                     .build();
-                let catalog = iceberg_catalog_rest::RestCatalog::new(config).await?;
+                let catalog = iceberg_catalog_rest::RestCatalog::new(config);
                 Ok(Arc::new(catalog))
             }
             catalog_type
@@ -570,7 +570,6 @@ impl IcebergConfig {
     pub async fn load_table_v2(&self) -> ConnectorResult<TableV2> {
         let catalog = self
             .create_catalog_v2()
-            .await
             .context("Unable to load iceberg catalog")?;
 
         let table_id = self
