@@ -536,7 +536,7 @@ impl IcebergConfig {
                     })?)
                     .props(iceberg_configs)
                     .build();
-                let catalog = iceberg_catalog_rest::RestCatalog::new(config).await?;
+                let catalog = iceberg_catalog_rest::RestCatalog::new(config);
                 Ok(Arc::new(catalog))
             }
             catalog_type
