@@ -820,10 +820,7 @@ mod tests {
             )
         };
 
-        test_env.inject_barrier(
-            &exchange_client_test_barrier(),
-            [remote_input.actor_id()],
-        );
+        test_env.inject_barrier(&exchange_client_test_barrier(), [remote_input.actor_id()]);
 
         pin_mut!(remote_input);
 
