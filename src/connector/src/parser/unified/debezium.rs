@@ -233,7 +233,7 @@ pub fn parse_schema_change(
             }
 
             // concatenate the source_id to the cdc_table_id
-            let cdc_table_id = build_cdc_table_id(source_id, id.replace('"', ""));
+            let cdc_table_id = build_cdc_table_id(source_id, id.replace('"', "").as_str());
             schema_changes.push(TableSchemaChange {
                 cdc_table_id,
                 columns: column_descs
