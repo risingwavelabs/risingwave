@@ -58,8 +58,8 @@ message ScanRange {
 }
 
 message SourceNode {
-  enum IcebergSourceType {
-    ICEBERG_TYPE_UNSPECIFIED = 0;
+  enum SourceType {
+    UNSPECIFIED = 0;
     SCAN = 1;
     COUNT_STAR = 2;
   }
@@ -69,7 +69,7 @@ message SourceNode {
   repeated bytes split = 4;
   catalog.StreamSourceInfo info = 5;
   map<string, secret.SecretRef> secret_refs = 6;
-  IcebergSourceType iceberg_source_type = 7;
+  SourceType source_type = 7;
 }
 
 message FileScanNode {

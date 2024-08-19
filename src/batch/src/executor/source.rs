@@ -29,7 +29,7 @@ use risingwave_connector::source::{
 };
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::source_node::IcebergSourceType;
+use risingwave_pb::batch_plan::source_node::SourceType;
 
 use super::iceberg_count_star_scan::IcebergCountStarExecutor;
 use super::Executor;
@@ -110,8 +110,8 @@ impl BoxedExecutorBuilder for SourceExecutor {
             assert_eq!(split_list.len(), 1);
             if let SplitImpl::Iceberg(split) = &split_list[0] {
                 let split: IcebergSplit = split.clone();
-                match IcebergSourceType::try_from(source_node.iceberg_source_type).unwrap() {
-                    IcebergSourceType::Scan => Ok(Box::new(IcebergScanExecutor::new(
+                match SourceType::try_from(source_node.source_type).unwrap() {
+                    SourceType::Scan => Ok(Box::new(IcebergScanExecutor::new(
                         iceberg_properties.to_iceberg_config(),
                         Some(split.snapshot_id),
                         split.table_meta.deserialize(),
@@ -120,12 +120,12 @@ impl BoxedExecutorBuilder for SourceExecutor {
                         schema,
                         source.plan_node().get_identity().clone(),
                     ))),
-                    IcebergSourceType::IcebergTypeUnspecified => unreachable!(),
-                    IcebergSourceType::CountStar => Ok(Box::new(IcebergCountStarExecutor::new(
+                    SourceType::CountStar => Ok(Box::new(IcebergCountStarExecutor::new(
                         schema,
                         source.plan_node().get_identity().clone(),
                         split.record_counts,
                     ))),
+                    SourceType::Unspecified => unreachable!(),
                 }
             } else {
                 unreachable!()

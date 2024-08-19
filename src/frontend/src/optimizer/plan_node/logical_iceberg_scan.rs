@@ -51,11 +51,6 @@ impl LogicalIcebergScan {
         LogicalIcebergScan { base, core }
     }
 
-    pub fn new_with_core(core: generic::Source) -> Self {
-        let base = PlanBase::new_logical_with_core(&core);
-        LogicalIcebergScan { base, core }
-    }
-
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
         self.core.catalog.clone()
     }

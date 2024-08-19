@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::source_node::IcebergSourceType;
+use risingwave_pb::batch_plan::source_node::SourceType;
 use risingwave_pb::batch_plan::SourceNode;
 use risingwave_sqlparser::ast::AsOf;
 
@@ -116,7 +116,7 @@ impl ToBatchPb for BatchSource {
             with_properties,
             split: vec![],
             secret_refs,
-            iceberg_source_type: IcebergSourceType::IcebergTypeUnspecified.into(),
+            source_type: SourceType::Scan.into(),
         })
     }
 }

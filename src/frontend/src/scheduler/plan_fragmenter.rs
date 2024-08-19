@@ -41,7 +41,7 @@ use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SplitEnumerator, SplitImpl,
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::source_node::IcebergSourceType;
+use risingwave_pb::batch_plan::source_node::SourceType;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::common::Buffer;
 use risingwave_pb::plan_common::Field as PbField;
@@ -275,7 +275,7 @@ pub struct SourceFetchInfo {
     pub connector: ConnectorProperties,
     pub timebound: (Option<i64>, Option<i64>),
     pub as_of: Option<AsOf>,
-    pub iceberg_source_type: IcebergSourceType,
+    pub source_type: SourceType,
 }
 
 #[derive(Clone, Debug)]
@@ -361,9 +361,8 @@ impl SourceScanInfo {
                     None => None,
                 };
 
-                let split_info = match fetch_info.iceberg_source_type {
-                    IcebergSourceType::IcebergTypeUnspecified => unreachable!(),
-                    IcebergSourceType::Scan => iceberg_enumerator
+                let split_info = match fetch_info.source_type {
+                    SourceType::Scan => iceberg_enumerator
                         .list_splits_batch_scan(
                             fetch_info.schema,
                             time_travel_info,
@@ -373,12 +372,13 @@ impl SourceScanInfo {
                         .into_iter()
                         .map(SplitImpl::Iceberg)
                         .collect_vec(),
-                    IcebergSourceType::CountStar => iceberg_enumerator
+                    SourceType::CountStar => iceberg_enumerator
                         .list_splits_batch_count_star(time_travel_info, batch_parallelism)
                         .await?
                         .into_iter()
                         .map(SplitImpl::Iceberg)
                         .collect_vec(),
+                    SourceType::Unspecified => unreachable!(),
                 };
 
                 Ok(SourceScanInfo::Complete(split_info))
@@ -1069,7 +1069,7 @@ impl BatchPlanFragmenter {
                     connector: property,
                     timebound: timestamp_bound,
                     as_of: None,
-                    iceberg_source_type: IcebergSourceType::IcebergTypeUnspecified,
+                    source_type: SourceType::Scan,
                 })));
             }
         } else if let Some(batch_iceberg_scan) = node.as_batch_iceberg_scan() {
@@ -1084,7 +1084,7 @@ impl BatchPlanFragmenter {
                     connector: property,
                     timebound: (None, None),
                     as_of,
-                    iceberg_source_type: IcebergSourceType::Scan,
+                    source_type: SourceType::Scan,
                 })));
             }
         } else if let Some(batch_iceberg_count_star_scan) = node.as_batch_iceberg_count_star_scan()
@@ -1101,7 +1101,7 @@ impl BatchPlanFragmenter {
                     connector: property,
                     timebound: (None, None),
                     as_of,
-                    iceberg_source_type: IcebergSourceType::CountStar,
+                    source_type: SourceType::CountStar,
                 })));
             }
         } else if let Some(source_node) = node.as_batch_source() {
@@ -1117,7 +1117,7 @@ impl BatchPlanFragmenter {
                     connector: property,
                     timebound: (None, None),
                     as_of,
-                    iceberg_source_type: IcebergSourceType::IcebergTypeUnspecified,
+                    source_type: SourceType::Scan,
                 })));
             }
         }

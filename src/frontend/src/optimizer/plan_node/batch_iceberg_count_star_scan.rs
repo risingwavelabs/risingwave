@@ -18,7 +18,7 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::source_node::IcebergSourceType;
+use risingwave_pb::batch_plan::source_node::SourceType;
 use risingwave_pb::batch_plan::SourceNode;
 use risingwave_sqlparser::ast::AsOf;
 
@@ -61,15 +61,6 @@ impl BatchIcebergCountStarScan {
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
         self.core.catalog.clone()
-    }
-
-    pub fn clone_with_core(&self, core: generic::Source) -> Self {
-        let base = PlanBase::new_batch_with_core(
-            &core,
-            self.base.distribution().clone(),
-            self.base.order().clone(),
-        );
-        Self { base, core }
     }
 
     pub fn clone_with_dist(&self) -> Self {
@@ -128,7 +119,7 @@ impl ToBatchPb for BatchIcebergCountStarScan {
             with_properties,
             split: vec![],
             secret_refs,
-            iceberg_source_type: IcebergSourceType::CountStar.into(),
+            source_type: SourceType::CountStar.into(),
         })
     }
 }
