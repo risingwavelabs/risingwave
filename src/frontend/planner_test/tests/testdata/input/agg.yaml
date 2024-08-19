@@ -1086,6 +1086,13 @@
     - logical_plan
     - batch_plan
     - stream_plan
+- name: test approx_percentile hash_agg forced should use single phase agg
+  sql: |
+    SET RW_FORCE_TWO_PHASE_AGG=true;
+    create table t (v1 int, grp_col int);
+    select approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) from t group by grp_col;
+  expected_outputs:
+    - stream_error
 - name: test approx percentile with default relative_error
   sql: |
     CREATE TABLE t (v1 int);
