@@ -29,7 +29,7 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_meta_model_v2::hummock_sstable_info::SstableInfoV2Backend;
 use risingwave_meta_model_v2::{
-    hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
+    compaction_config, hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
     hummock_time_travel_version,
 };
 use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
@@ -362,7 +362,6 @@ impl HummockManager {
         delta: HummockVersionDelta,
         group_parents: &HashMap<CompactionGroupId, CompactionGroupId>,
         skip_sst_ids: &HashSet<HummockSstableId>,
-        is_visible_table_committed_epoch: bool,
     ) -> Result<Option<HashSet<HummockSstableId>>> {
         async fn write_sstable_infos(
             sst_infos: impl Iterator<Item = &SstableInfo>,
@@ -389,17 +388,20 @@ impl HummockManager {
             Ok(count)
         }
 
-        if is_visible_table_committed_epoch {
-            let epoch = delta.visible_table_committed_epoch();
-            let version_id: u64 = delta.id.to_u64();
-            let m = hummock_epoch_to_version::ActiveModel {
-                epoch: Set(epoch.try_into().unwrap()),
-                version_id: Set(version_id.try_into().unwrap()),
-            };
-            hummock_epoch_to_version::Entity::insert(m)
-                .exec(txn)
-                .await?;
-        }
+        let epoch = delta.visible_table_committed_epoch();
+        let version_id: u64 = delta.id.to_u64();
+        let m = hummock_epoch_to_version::ActiveModel {
+            epoch: Set(epoch.try_into().unwrap()),
+            version_id: Set(version_id.try_into().unwrap()),
+        };
+        hummock_epoch_to_version::Entity::insert(m)
+            .on_conflict(
+                OnConflict::column(hummock_epoch_to_version::Column::Epoch)
+                    .update_columns([hummock_epoch_to_version::Column::VersionId])
+                    .to_owned(),
+            )
+            .exec(txn)
+            .await?;
         let mut version_sst_ids = None;
         let select_groups = group_parents
             .iter()
