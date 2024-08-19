@@ -311,7 +311,10 @@ impl LogicalAgg {
             col_mapping: approx_percentile_col_mapping,
         } = approx;
         if !self.group_key().is_empty() && !approx_percentile_agg_calls.is_empty() {
-            bail_not_implemented!("two-phase approx percentile agg with group key, please use single phase agg for approx_percentile with group key");
+            bail_not_implemented!(
+                "two-phase streaming approx percentile aggregation with group key,\
+             please use single phase aggregation instead"
+            );
         }
 
         // Either we have approx percentile aggs and non_approx percentile aggs,

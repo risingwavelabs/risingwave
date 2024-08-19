@@ -2103,3 +2103,11 @@
           └─StreamHashAgg { group_key: [$expr5], aggs: [sum(t.v1), count, max(t.v2)] }
             └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr3, t.v2, t.v2::Float64 as $expr4, t._row_id, Vnode(t._row_id) as $expr5] }
               └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: test approx_percentile hash_agg forced should use single phase agg
+  sql: |
+    SET RW_FORCE_TWO_PHASE_AGG=true;
+    create table t (v1 int, grp_col int);
+    select approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) from t group by grp_col;
+  stream_error: |-
+    Feature is not yet implemented: two-phase streaming approx percentile aggregation with group key,please use single phase aggregation instead
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
