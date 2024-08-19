@@ -35,7 +35,8 @@ impl ExecutorBuilder for BarrierRecvExecutorBuilder {
 
         let (sender, barrier_receiver) = unbounded_channel();
         params
-            .create_actor_context
+            .shared_context
+            .local_barrier_manager
             .register_sender(params.actor_context.id, sender);
 
         let exec = BarrierRecvExecutor::new(params.actor_context, barrier_receiver);

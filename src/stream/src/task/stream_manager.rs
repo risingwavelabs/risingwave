@@ -628,10 +628,7 @@ impl StreamActorManager {
 
             ret.push(actor);
         }
-        Ok(CreateActorOutput {
-            actors: ret,
-            senders: create_actor_context.collect_senders(),
-        })
+        Ok(CreateActorOutput { actors: ret })
     }
 }
 

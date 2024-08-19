@@ -143,7 +143,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
     ) -> StreamResult<Executor> {
         let (sender, barrier_receiver) = unbounded_channel();
         params
-            .create_actor_context
+            .shared_context
+            .local_barrier_manager
             .register_sender(params.actor_context.id, sender);
         let system_params = params.env.system_params_manager_ref().get_params();
 

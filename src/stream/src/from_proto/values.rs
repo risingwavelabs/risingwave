@@ -37,7 +37,8 @@ impl ExecutorBuilder for ValuesExecutorBuilder {
     ) -> StreamResult<Executor> {
         let (sender, barrier_receiver) = unbounded_channel();
         params
-            .create_actor_context
+            .shared_context
+            .local_barrier_manager
             .register_sender(params.actor_context.id, sender);
         let progress = params
             .local_barrier_manager

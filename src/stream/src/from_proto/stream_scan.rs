@@ -156,7 +156,8 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                 let vnodes = params.vnode_bitmap.map(Arc::new);
                 let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
                 params
-                    .create_actor_context
+                    .shared_context
+                    .local_barrier_manager
                     .register_sender(params.actor_context.id, barrier_tx);
 
                 let upstream_table =
