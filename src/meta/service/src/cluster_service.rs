@@ -25,7 +25,6 @@ use risingwave_pb::meta::{
     ListAllNodesResponse, UpdateWorkerNodeSchedulabilityRequest,
     UpdateWorkerNodeSchedulabilityResponse,
 };
-use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 use crate::MetaError;
@@ -58,31 +57,16 @@ impl ClusterService for ClusterServiceImpl {
             .property
             .ok_or_else(|| MetaError::invalid_parameter("worker node property is not provided"))?;
         let resource = req.resource.unwrap_or_default();
-        let result = self
+        let worker_id = self
             .metadata_manager
             .add_worker_node(worker_type, host, property, resource)
-            .await;
+            .await?;
         let cluster_id = self.metadata_manager.cluster_id().to_string();
-        match result {
-            Ok(worker_id) => Ok(Response::new(AddWorkerNodeResponse {
-                status: None,
-                node_id: Some(worker_id),
-                cluster_id,
-            })),
-            Err(e) => {
-                if e.is_invalid_worker() {
-                    return Ok(Response::new(AddWorkerNodeResponse {
-                        status: Some(risingwave_pb::common::Status {
-                            code: risingwave_pb::common::status::Code::UnknownWorker as i32,
-                            message: e.to_report_string(),
-                        }),
-                        node_id: None,
-                        cluster_id,
-                    }));
-                }
-                Err(e.into())
-            }
-        }
+
+        Ok(Response::new(AddWorkerNodeResponse {
+            node_id: Some(worker_id),
+            cluster_id,
+        }))
     }
 
     /// Update schedulability of a compute node. Will not affect actors which are already running on

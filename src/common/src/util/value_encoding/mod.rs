@@ -360,7 +360,7 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Map(map_type) => {
             // FIXME: clone type everytime here is inefficient
             let list = deserialize_list(&map_type.clone().into_struct(), data)?.into_list();
-            ScalarImpl::Map(MapValue::from_list_entries(list))
+            ScalarImpl::Map(MapValue::from_entries(list))
         }
     })
 }

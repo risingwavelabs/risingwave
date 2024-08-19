@@ -251,7 +251,16 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::QuoteLiteral
             | Type::QuoteNullable
             | Type::MapFromEntries
-            | Type::MapAccess =>
+            | Type::MapAccess
+            | Type::MapKeys
+            | Type::MapValues
+            | Type::MapEntries
+            | Type::MapFromKeyValues
+            | Type::MapCat
+            | Type::MapContains
+            | Type::MapDelete
+            | Type::MapInsert
+            | Type::MapLength =>
             // expression output is deterministic(same result for the same input)
             {
                 func_call

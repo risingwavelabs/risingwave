@@ -26,6 +26,7 @@ use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_license::LicenseManager;
 use risingwave_meta_model_v2::prelude::{Worker, WorkerProperty};
 use risingwave_meta_model_v2::worker::{WorkerStatus, WorkerType};
 use risingwave_meta_model_v2::{worker, worker_property, TransactionId, WorkerId};
@@ -38,8 +39,8 @@ use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulabili
 use sea_orm::prelude::Expr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect,
-    TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
+    QueryFilter, QuerySelect, TransactionTrait,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -582,6 +583,43 @@ impl ClusterControllerInner {
         }
     }
 
+    /// Check if the total CPU cores in the cluster exceed the license limit, after counting the
+    /// newly joined compute node.
+    pub async fn check_cpu_core_limit_on_newly_joined_compute_node(
+        &self,
+        txn: &DatabaseTransaction,
+        host_address: &HostAddress,
+        resource: &PbResource,
+    ) -> MetaResult<()> {
+        let this = resource.total_cpu_cores;
+
+        let other_worker_ids: Vec<WorkerId> = Worker::find()
+            .filter(
+                (worker::Column::Host
+                    .eq(host_address.host.clone())
+                    .and(worker::Column::Port.eq(host_address.port)))
+                .not()
+                .and(worker::Column::WorkerType.eq(WorkerType::ComputeNode as i32)),
+            )
+            .select_only()
+            .column(worker::Column::WorkerId)
+            .into_tuple()
+            .all(txn)
+            .await?;
+
+        let others = other_worker_ids
+            .into_iter()
+            .flat_map(|id| self.worker_extra_info.get(&id))
+            .flat_map(|info| info.resource.as_ref().map(|r| r.total_cpu_cores))
+            .sum::<u64>();
+
+        LicenseManager::get()
+            .check_cpu_core_limit(this + others)
+            .map_err(anyhow::Error::from)?;
+
+        Ok(())
+    }
+
     pub async fn add_worker(
         &mut self,
         r#type: PbWorkerType,
@@ -591,6 +629,11 @@ impl ClusterControllerInner {
         ttl: Duration,
     ) -> MetaResult<WorkerId> {
         let txn = self.db.begin().await?;
+
+        if let PbWorkerType::ComputeNode = r#type {
+            self.check_cpu_core_limit_on_newly_joined_compute_node(&txn, &host_address, &resource)
+                .await?;
+        }
 
         let worker = Worker::find()
             .filter(

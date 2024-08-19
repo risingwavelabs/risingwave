@@ -131,8 +131,7 @@ pub async fn compute_node_serve(
         },
         &config.meta,
     )
-    .await
-    .unwrap();
+    .await;
 
     let state_store_url = system_params.state_store();
 
