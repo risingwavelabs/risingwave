@@ -12,9 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Duration;
+
 use anyhow::Result;
+use madsim::time::sleep;
+use risingwave_common::hash::VirtualNode;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
+use risingwave_simulation::utils::AssertResult;
+
+use crate::scale::auto_parallelism::MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE;
 
 #[tokio::test]
 async fn test_streaming_parallelism_default() -> Result<()> {
@@ -133,5 +140,93 @@ async fn test_streaming_parallelism_index() -> Result<()> {
         materialize_fragments[1].inner.actors.len(),
         target_parallelism - 1
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_parallelism_exceed_virtual_node_max_create() -> Result<()> {
+    let vnode_max = VirtualNode::COUNT;
+    let mut configuration = Configuration::for_auto_parallelism(
+        MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE,
+        true,
+    );
+
+    configuration.compute_nodes = 1;
+    configuration.compute_node_cores = vnode_max + 1;
+    let mut cluster = Cluster::start(configuration).await?;
+
+    sleep(Duration::from_secs(
+        MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
+    ))
+    .await;
+
+    let mut session = cluster.start_session();
+    session.run("create table t(v int)").await?;
+    session
+        .run("select parallelism from rw_streaming_parallelism where name = 't'")
+        .await?
+        .assert_result_eq("ADAPTIVE");
+
+    session
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 't'")
+        .await?
+        .assert_result_eq(format!("{}", vnode_max));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_parallelism_exceed_virtual_node_max_alter_fixed() -> Result<()> {
+    let vnode_max = VirtualNode::COUNT;
+    let mut configuration = Configuration::for_scale();
+    configuration.compute_nodes = 1;
+    configuration.compute_node_cores = vnode_max + 100;
+    let mut cluster = Cluster::start(configuration).await?;
+    let mut session = cluster.start_session();
+    session.run("set streaming_parallelism = 1").await?;
+    session.run("create table t(v int)").await?;
+    session
+        .run("select parallelism from rw_streaming_parallelism where name = 't'")
+        .await?
+        .assert_result_eq("FIXED(1)");
+
+    session
+        .run(format!("alter table t set parallelism = {}", vnode_max + 1))
+        .await?;
+    session
+        .run("select parallelism from rw_streaming_parallelism where name = 't'")
+        .await?
+        .assert_result_eq(format!("FIXED({})", vnode_max));
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_parallelism_exceed_virtual_node_max_alter_adaptive() -> Result<()> {
+    let vnode_max = VirtualNode::COUNT;
+    let mut configuration = Configuration::for_scale();
+    configuration.compute_nodes = 1;
+    configuration.compute_node_cores = vnode_max + 100;
+    let mut cluster = Cluster::start(configuration).await?;
+    let mut session = cluster.start_session();
+    session.run("set streaming_parallelism = 1").await?;
+    session.run("create table t(v int)").await?;
+    session
+        .run("select parallelism from rw_streaming_parallelism where name = 't'")
+        .await?
+        .assert_result_eq("FIXED(1)");
+
+    session
+        .run("alter table t set parallelism = adaptive")
+        .await?;
+    session
+        .run("select parallelism from rw_streaming_parallelism where name = 't'")
+        .await?
+        .assert_result_eq("ADAPTIVE");
+
+    session
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 't'")
+        .await?
+        .assert_result_eq(format!("{}", vnode_max));
+
     Ok(())
 }
