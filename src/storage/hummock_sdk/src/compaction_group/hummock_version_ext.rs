@@ -565,7 +565,7 @@ impl HummockVersion {
             && self.visible_table_committed_epoch() < version_delta.visible_table_committed_epoch()
         {
             is_commit_epoch = true;
-            warn!("max committed epoch bumped but no table committed epoch is changed");
+            tracing::trace!("max committed epoch bumped but no table committed epoch is changed");
         }
 
         // apply to `levels`, which is different compaction groups

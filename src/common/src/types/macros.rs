@@ -64,63 +64,6 @@ macro_rules! for_all_variants {
     };
 }
 
-/// The projected version of `for_all_variants` for handling scalar variants.
-///
-/// Arguments are `$variant_name`, `$suffix_name`, `$scalar`, `$scalar_ref`.
-#[macro_export(local_inner_macros)]
-macro_rules! for_all_scalar_variants {
-    ($macro:ident $(, $x:tt)*) => {
-        for_all_variants! { project_scalar_variants, $macro, [ $($x, )* ] }
-    };
-}
-#[macro_export]
-macro_rules! project_scalar_variants {
-    ($macro:ident, [ $($x:tt, )* ], $( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
-        $macro! {
-            $($x, )*
-            $( { $variant_name, $suffix_name, $scalar, $scalar_ref } ),*
-        }
-    };
-}
-
-/// The projected version of `for_all_variants` for handling array variants.
-///
-/// Arguments are `$variant_name`, `$suffix_name`, `$array`, `$builder`.
-#[macro_export(local_inner_macros)]
-macro_rules! for_all_array_variants {
-    ($macro:ident $(, $x:tt)*) => {
-        for_all_variants! { project_array_variants, $macro, [ $($x, )* ] }
-    };
-}
-#[macro_export]
-macro_rules! project_array_variants {
-    ($macro:ident, [ $($x:tt, )* ], $( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
-        $macro! {
-            $($x, )*
-            $( { $variant_name, $suffix_name, $array, $builder } ),*
-        }
-    };
-}
-
-/// The projected version of `for_all_variants` for handling mapping of data types and array types.
-///
-/// Arguments are `$data_type`, `$variant_name`.
-#[macro_export(local_inner_macros)]
-macro_rules! for_all_type_pairs {
-    ($macro:ident $(, $x:tt)*) => {
-        for_all_variants! { project_type_pairs, $macro, [ $($x, )* ] }
-    };
-}
-#[macro_export]
-macro_rules! project_type_pairs {
-    ($macro:ident, [ $($x:tt, )* ], $( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
-        $macro! {
-            $($x, )*
-            $( { $data_type, $variant_name } ),*
-        }
-    };
-}
-
 /// Helper macro for expanding type aliases and constants. Internally used by `dispatch_` macros.
 #[macro_export]
 macro_rules! do_expand_alias {
