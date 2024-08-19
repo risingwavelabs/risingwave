@@ -143,6 +143,7 @@ arrow-buffer-iceberg = { package = "arrow-buffer", version = "52" }
 arrow-cast-iceberg = { package = "arrow-cast", version = "52" }
 iceberg = { git = "https://github.com/apache/iceberg-rust.git", rev = "4440af69a354d9af56f239a6126a7f4b7945d58b" }
 iceberg-catalog-rest = { git = "https://github.com/apache/iceberg-rust.git", rev = "4440af69a354d9af56f239a6126a7f4b7945d58b" }
+iceberg-catalog-glue = { git = "https://github.com/apache/iceberg-rust.git", rev = "4440af69a354d9af56f239a6126a7f4b7945d58b" }
 opendal = "0.47"
 arrow-array = "50"
 arrow-arith = "50"

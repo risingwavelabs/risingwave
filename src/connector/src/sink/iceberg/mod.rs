@@ -32,6 +32,7 @@ use iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY
 use iceberg::spec::TableMetadata;
 use iceberg::table::Table as TableV2;
 use iceberg::{Catalog as CatalogV2, TableIdent};
+use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 use icelake::catalog::{
     load_catalog, load_iceberg_base_catalog_config, BaseCatalogConfig, CatalogRef, CATALOG_NAME,
     CATALOG_TYPE,
@@ -501,7 +502,7 @@ impl IcebergConfig {
             .map_err(|e| SinkError::Iceberg(anyhow!(e)))
     }
 
-    fn create_catalog_v2(&self) -> ConnectorResult<Arc<dyn CatalogV2>> {
+    async fn create_catalog_v2(&self) -> ConnectorResult<Arc<dyn CatalogV2>> {
         match self.catalog_type() {
             "storage" => {
                 let config = StorageCatalogConfig::builder()
@@ -539,15 +540,52 @@ impl IcebergConfig {
                 let catalog = iceberg_catalog_rest::RestCatalog::new(config);
                 Ok(Arc::new(catalog))
             }
-            catalog_type
-                if catalog_type == "hive" || catalog_type == "jdbc" || catalog_type == "glue" =>
-            {
+            "glue" => {
+                let mut iceberg_configs = HashMap::new();
+                // glue
+                if let Some(region) = &self.region {
+                    iceberg_configs.insert(AWS_REGION_NAME.to_string(), region.clone().to_string());
+                }
+                iceberg_configs.insert(
+                    AWS_ACCESS_KEY_ID.to_string(),
+                    self.access_key.clone().to_string(),
+                );
+                iceberg_configs.insert(
+                    AWS_SECRET_ACCESS_KEY.to_string(),
+                    self.secret_key.clone().to_string(),
+                );
+                // s3
+                if let Some(region) = &self.region {
+                    iceberg_configs.insert(S3_REGION.to_string(), region.clone().to_string());
+                }
+                if let Some(endpoint) = &self.endpoint {
+                    iceberg_configs.insert(S3_ENDPOINT.to_string(), endpoint.clone().to_string());
+                }
+                iceberg_configs.insert(
+                    S3_ACCESS_KEY_ID.to_string(),
+                    self.access_key.clone().to_string(),
+                );
+                iceberg_configs.insert(
+                    S3_SECRET_ACCESS_KEY.to_string(),
+                    self.secret_key.clone().to_string(),
+                );
+                let config_builder = iceberg_catalog_glue::GlueCatalogConfig::builder()
+                    .warehouse(self.path.clone())
+                    .props(iceberg_configs);
+                let config = if let Some(uri) = self.uri.as_deref() {
+                    config_builder.uri(uri.to_string()).build()
+                } else {
+                    config_builder.build()
+                };
+                let catalog = iceberg_catalog_glue::GlueCatalog::new(config).await?;
+                Ok(Arc::new(catalog))
+            }
+            catalog_type if catalog_type == "hive" || catalog_type == "jdbc" => {
                 // Create java catalog
                 let (base_catalog_config, java_catalog_props) = self.build_jni_catalog_configs()?;
                 let catalog_impl = match catalog_type {
                     "hive" => "org.apache.iceberg.hive.HiveCatalog",
                     "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
-                    "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
                     _ => unreachable!(),
                 };
 
@@ -570,6 +608,7 @@ impl IcebergConfig {
     pub async fn load_table_v2(&self) -> ConnectorResult<TableV2> {
         let catalog = self
             .create_catalog_v2()
+            .await
             .context("Unable to load iceberg catalog")?;
 
         let table_id = self
