@@ -118,7 +118,7 @@ impl Sink for SnowflakeSink {
     }
 
     async fn validate(&self) -> Result<()> {
-        risingwave_common::license::Feature::SnowflakeSink
+        risingwave_common::paid_feature::Feature::SnowflakeSink
             .check_available()
             .map_err(|e| anyhow::anyhow!(e))?;
         if !self.is_append_only {

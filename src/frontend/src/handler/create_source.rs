@@ -27,7 +27,7 @@ use risingwave_common::catalog::{
     debug_assert_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
     INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
-use risingwave_common::license::Feature;
+use risingwave_common::paid_feature::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::additional_columns::{

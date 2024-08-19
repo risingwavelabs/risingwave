@@ -15,7 +15,7 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::license::Feature;
+use risingwave_common::paid_feature::Feature;
 use risingwave_sqlparser::ast::{CreateSecretStatement, SqlOption, Value};
 
 use crate::error::{ErrorCode, Result};

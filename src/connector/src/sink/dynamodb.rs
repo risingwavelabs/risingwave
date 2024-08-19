@@ -88,7 +88,7 @@ impl Sink for DynamoDbSink {
     const SINK_NAME: &'static str = DYNAMO_DB_SINK;
 
     async fn validate(&self) -> Result<()> {
-        risingwave_common::license::Feature::DynamoDbSink
+        risingwave_common::paid_feature::Feature::DynamoDbSink
             .check_available()
             .map_err(|e| anyhow::anyhow!(e))?;
         let client = (self.config.build_client().await)

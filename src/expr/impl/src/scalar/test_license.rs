@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::license::Feature;
+use risingwave_common::paid_feature::Feature;
 use risingwave_expr::{function, ExprError, Result};
 
 /// A function that checks if the `TestPaid` feature is available.

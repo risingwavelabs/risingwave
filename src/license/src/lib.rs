@@ -16,6 +16,5 @@ mod feature;
 mod key;
 mod manager;
 
-pub use feature::*;
 pub use key::*;
 pub use manager::*;

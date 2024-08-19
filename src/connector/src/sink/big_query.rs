@@ -358,7 +358,7 @@ impl Sink for BigQuerySink {
     }
 
     async fn validate(&self) -> Result<()> {
-        risingwave_common::license::Feature::BigQuerySink
+        risingwave_common::paid_feature::Feature::BigQuerySink
             .check_available()
             .map_err(|e| anyhow::anyhow!(e))?;
         if !self.is_append_only && self.pk_indices.is_empty() {

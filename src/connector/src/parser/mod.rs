@@ -1233,7 +1233,7 @@ impl SpecificParserConfig {
                 config.schema_location = if let Some(schema_arn) =
                     format_encode_options_with_secret.get(AWS_GLUE_SCHEMA_ARN_KEY)
                 {
-                    risingwave_common::license::Feature::GlueSchemaRegistry
+                    risingwave_common::paid_feature::Feature::GlueSchemaRegistry
                         .check_available()
                         .map_err(anyhow::Error::from)?;
                     SchemaLocation::Glue {

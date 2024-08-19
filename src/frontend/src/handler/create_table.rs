@@ -26,7 +26,7 @@ use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, TableId, TableVersionId, DEFAULT_SCHEMA_NAME,
     INITIAL_TABLE_VERSION_ID,
 };
-use risingwave_common::license::Feature;
+use risingwave_common::paid_feature::Feature;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_connector::source::cdc::external::{

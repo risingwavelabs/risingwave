@@ -60,7 +60,7 @@ pub enum Issuer {
 // TODO(license): Shall we add a version field?
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(super) struct License {
+pub struct License {
     /// Subject of the license.
     ///
     /// See <https://tools.ietf.org/html/rfc7519#section-4.1.2>.
@@ -166,7 +166,7 @@ impl LicenseManager {
     /// Get the current license if it is valid.
     ///
     /// Since the license can expire, the returned license should not be cached by the caller.
-    pub(super) fn license(&self) -> Result<License, LicenseKeyError> {
+    pub fn license(&self) -> Result<License, LicenseKeyError> {
         let license = self.inner.read().unwrap().license.clone()?;
 
         // Check the expiration time additionally.

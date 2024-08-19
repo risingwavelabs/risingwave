@@ -530,7 +530,7 @@ impl Sink for ClickHouseSink {
         let (clickhouse_column, clickhouse_engine) =
             query_column_engine_from_ck(client, &self.config).await?;
         if clickhouse_engine.is_shared_tree() {
-            risingwave_common::license::Feature::ClickHouseSharedEngine
+            risingwave_common::paid_feature::Feature::ClickHouseSharedEngine
                 .check_available()
                 .map_err(|e| anyhow::anyhow!(e))?;
         }

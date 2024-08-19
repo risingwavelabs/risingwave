@@ -320,7 +320,7 @@ macro_rules! plan_node_name {
     };
 }
 pub(crate) use plan_node_name;
-use risingwave_common::license::Feature;
+use risingwave_common::paid_feature::Feature;
 use risingwave_common::types::{DataType, Interval};
 use risingwave_expr::aggregate::PbAggKind;
 use risingwave_pb::plan_common::as_of::AsOfType;

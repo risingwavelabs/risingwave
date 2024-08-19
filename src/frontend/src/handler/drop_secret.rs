@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
-use risingwave_common::license::Feature;
+use risingwave_common::paid_feature::Feature;
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::catalog::root_catalog::SchemaPath;

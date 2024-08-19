@@ -144,7 +144,7 @@ impl Sink for SqlServerSink {
     const SINK_NAME: &'static str = SQLSERVER_SINK;
 
     async fn validate(&self) -> Result<()> {
-        risingwave_common::license::Feature::SqlServerSink
+        risingwave_common::paid_feature::Feature::SqlServerSink
             .check_available()
             .map_err(|e| anyhow::anyhow!(e))?;
 

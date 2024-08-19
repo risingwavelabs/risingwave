@@ -166,7 +166,7 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
 
 async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorResult<()> {
     if sink_name == OpenSearchSink::SINK_NAME {
-        risingwave_common::license::Feature::OpenSearchSink
+        risingwave_common::paid_feature::Feature::OpenSearchSink
             .check_available()
             .map_err(|e| anyhow::anyhow!(e))?;
     }

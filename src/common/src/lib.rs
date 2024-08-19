@@ -84,6 +84,7 @@ pub use {
 };
 pub mod lru;
 pub mod opts;
+pub mod paid_feature;
 pub mod range;
 pub mod row;
 pub mod sequence;
