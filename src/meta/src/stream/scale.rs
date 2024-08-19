@@ -1825,7 +1825,8 @@ impl ScaleController {
                         .map(|parallel_unit| parallel_unit.id as ParallelUnitId)
                         .collect::<BTreeSet<_>>(),
                 )
-            }).collect::<BTreeMap<_, _>>();
+            })
+            .collect::<BTreeMap<_, _>>();
 
         // index for no shuffle relation
         let mut no_shuffle_source_fragment_ids = HashSet::new();
@@ -2018,20 +2019,23 @@ impl ScaleController {
                     }
                     FragmentDistributionType::Hash => match parallelism {
                         TableParallelism::Adaptive => {
-                            if all_available_parallel_unit_ids > VirtualNode::COUNT {
+                            if all_available_parallel_unit_ids.len() > VirtualNode::COUNT {
                                 tracing::warn!("available parallelism for table {table_id} is larger than VirtualNode::COUNT, force limit to VirtualNode::COUNT");
                                 // force limit to VirtualNode::COUNT
-                                let target_worker_slots = schedule_units_for_slots(
+                                let rebalance_result = schedule_units_for_slots(
                                     &worker_parallel_units,
                                     VirtualNode::COUNT,
                                     table_id,
                                 )?;
 
+                                let target_parallel_unit_ids =
+                                    rebalance_result.into_values().flatten().collect();
+
                                 target_plan.insert(
                                     fragment_id,
                                     Self::diff_parallel_unit_change(
                                         &fragment_parallel_unit_ids,
-                                        &target_worker_slots,
+                                        &target_parallel_unit_ids,
                                     ),
                                 );
                             } else {

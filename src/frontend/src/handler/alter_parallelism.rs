@@ -101,7 +101,7 @@ pub async fn handle_alter_parallelism(
         .list_worker_nodes()
         .iter()
         .filter(|w| w.is_streaming_schedulable())
-        .map(|w| w.parallelism)
+        .map(|w| w.parallel_units.len() as u32)
         .sum::<u32>();
 
     let mut builder = RwPgResponse::builder(stmt_type);
