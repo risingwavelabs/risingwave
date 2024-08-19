@@ -494,11 +494,7 @@ fn replay_archive(
         while last_version.id < d.prev_id {
             last_version.id = last_version.id + 1;
         }
-        let is_commit_epoch = last_version.apply_version_delta(&d);
-        assert!(
-            is_commit_epoch,
-            "time travel expects delta from commit_epoch only"
-        );
+        last_version.apply_version_delta(&d);
     }
     last_version
 }
