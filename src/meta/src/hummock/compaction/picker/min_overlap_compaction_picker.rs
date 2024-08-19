@@ -865,7 +865,7 @@ pub mod tests {
             // limit max bytes
             let max_compaction_bytes = 100;
             let picker = NonOverlapSubLevelPicker::new(
-                0,
+                60,
                 max_compaction_bytes,
                 1,
                 10000,
@@ -875,6 +875,14 @@ pub mod tests {
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             assert_eq!(6, ret.len());
+
+            for plan in &ret {
+                if plan.total_file_size >= max_compaction_bytes {
+                    assert!(plan.expected);
+                } else {
+                    assert!(!plan.expected);
+                }
+            }
         }
 
         {
@@ -905,23 +913,23 @@ pub mod tests {
             // limit min_depth
             let min_depth = 3;
             let picker = NonOverlapSubLevelPicker::new(
-                1000,
+                10,
                 10000,
                 min_depth,
-                10000,
+                100,
                 Arc::new(RangeOverlapStrategy::default()),
                 true,
                 compaction_config::max_l0_compact_level_count() as usize,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
-            assert_eq!(3, ret.len());
+            assert_eq!(6, ret.len());
 
             for plan in ret {
-                let mut sst_id_set = BTreeSet::default();
-                for sst in &plan.sstable_infos {
-                    sst_id_set.insert(sst[0].sst_id);
+                if plan.sstable_infos.len() >= min_depth {
+                    assert!(plan.expected);
+                } else {
+                    assert!(!plan.expected);
                 }
-                assert!(plan.sstable_infos.len() >= min_depth);
             }
         }
     }
