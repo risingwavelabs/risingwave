@@ -1017,7 +1017,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Map(kv) => {
             let key = bind_data_type(&kv.0)?;
             let value = bind_data_type(&kv.1)?;
-            DataType::Map(MapType::try_from_kv(key, value)?)
+            DataType::Map(MapType::try_from_kv(key, value).map_err(ErrorCode::BindError)?)
         }
         AstDataType::Custom(qualified_type_name) => {
             let idents = qualified_type_name

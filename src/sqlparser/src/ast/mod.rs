@@ -1840,7 +1840,7 @@ impl fmt::Display for Statement {
                 if !include_column_options.is_empty() { // (Ident, Option<Ident>)
                     write!(f, "{}", display_comma_separated(
                         include_column_options.iter().map(|option_item: &IncludeOptionItem| {
-                            format!("INCLUDE {}{}{}",
+                            format!(" INCLUDE {}{}{}",
                                     option_item.column_type,
                                     if let Some(inner_field) = &option_item.inner_field {
                                         format!(" {}", inner_field)
