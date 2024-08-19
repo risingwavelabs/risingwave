@@ -425,11 +425,15 @@ impl LocalBarrierWorker {
                     }
                 },
                 event = self.barrier_event_rx.recv() => {
-                    self.handle_barrier_event(event.expect("should not be none"));
+                    // event should not be None because the LocalBarrierManager holds a copy of tx
+                    let result = self.handle_barrier_event(event.expect("should not be none"));
+                    if let Err((actor_id, err)) = result {
+                        self.notify_actor_failure(actor_id, err, "failed to handle barrier event").await;
+                    }
                 },
                 failure = self.actor_failure_rx.recv() => {
                     let (actor_id, err) = failure.unwrap();
-                    self.notify_actor_failure(actor_id, err).await;
+                    self.notify_actor_failure(actor_id, err, "recv actor failure").await;
                 },
                 actor_op = actor_op_rx.recv() => {
                     if let Some(actor_op) = actor_op {
@@ -515,7 +519,10 @@ impl LocalBarrierWorker {
         }
     }
 
-    fn handle_barrier_event(&mut self, event: LocalBarrierEvent) {
+    fn handle_barrier_event(
+        &mut self,
+        event: LocalBarrierEvent,
+    ) -> Result<(), (ActorId, StreamError)> {
         match event {
             LocalBarrierEvent::ReportActorCollected { actor_id, epoch } => {
                 self.collect(actor_id, epoch)
@@ -539,11 +546,14 @@ impl LocalBarrierWorker {
                 actor_id,
                 barrier_sender,
             } => {
-                self.state.register_barrier_sender(actor_id, barrier_sender);
+                self.state
+                    .register_barrier_sender(actor_id, barrier_sender)
+                    .map_err(|e| (actor_id, e))?;
             }
             #[cfg(test)]
             LocalBarrierEvent::Flush(sender) => sender.send(()).unwrap(),
         }
+        Ok(())
     }
 
     fn handle_actor_op(&mut self, actor_op: LocalActorOperation) {
@@ -768,7 +778,12 @@ impl LocalBarrierWorker {
 
     /// When a actor exit unexpectedly, the error is reported using this function. The control stream
     /// will be reset and the meta service will then trigger recovery.
-    async fn notify_actor_failure(&mut self, actor_id: ActorId, err: StreamError) {
+    async fn notify_actor_failure(
+        &mut self,
+        actor_id: ActorId,
+        err: StreamError,
+        err_context: &'static str,
+    ) {
         self.add_failure(actor_id, err.clone());
         let root_err = self.try_find_root_failure().await.unwrap(); // always `Some` because we just added one
 
@@ -777,7 +792,7 @@ impl LocalBarrierWorker {
         {
             self.control_stream_handle.reset_stream_with_err(
                 anyhow!(root_err)
-                    .context("failed to collect barrier")
+                    .context(err_context)
                     .to_status_unnamed(Code::Internal),
             );
         }

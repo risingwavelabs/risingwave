@@ -509,16 +509,23 @@ impl InflightActorState {
         }
     }
 
-    pub(super) fn register_barrier_sender(&mut self, tx: mpsc::UnboundedSender<Barrier>) {
+    pub(super) fn register_barrier_sender(
+        &mut self,
+        tx: mpsc::UnboundedSender<Barrier>,
+    ) -> StreamResult<()> {
         match &self.status {
             InflightActorStatus::NotStarted => {
                 self.barrier_senders.push(tx);
             }
             InflightActorStatus::IssuedFirst(pending_barriers) => {
                 for barrier in pending_barriers {
-                    // ignore the send err and register the tx anyway.
-                    // failed tx will trigger failure when handling the `InjectBarrier`.
-                    let _ = tx.send(barrier.clone());
+                    tx.send(barrier.clone()).map_err(|_| {
+                        StreamError::barrier_send(
+                            barrier.clone(),
+                            self.actor_id,
+                            "failed to send pending barriers to newly registered sender",
+                        )
+                    })?;
                 }
                 self.barrier_senders.push(tx);
             }
@@ -526,6 +533,7 @@ impl InflightActorState {
                 unreachable!("should not register barrier sender when entering Running status")
             }
         }
+        Ok(())
     }
 }
 
@@ -546,11 +554,11 @@ impl ManagedBarrierState {
         &mut self,
         actor_id: ActorId,
         tx: mpsc::UnboundedSender<Barrier>,
-    ) {
+    ) -> StreamResult<()> {
         self.actor_states
             .entry(actor_id)
             .or_insert_with(|| InflightActorState::not_started(actor_id))
-            .register_barrier_sender(tx);
+            .register_barrier_sender(tx)
     }
 
     pub(super) fn transform_to_issued(
