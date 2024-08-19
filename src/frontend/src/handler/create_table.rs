@@ -21,7 +21,6 @@ use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, TableId, TableVersionId, DEFAULT_SCHEMA_NAME,
     INITIAL_TABLE_VERSION_ID,
@@ -29,6 +28,7 @@ use risingwave_common::catalog::{
 use risingwave_common::license::Feature;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
+use risingwave_common::{bail_not_implemented, build_cdc_table_id};
 use risingwave_connector::source::cdc::external::{
     ExternalTableConfig, ExternalTableImpl, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
@@ -834,7 +834,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         vec![],
     );
 
-    let cdc_table_id = format!("{}_{}", source.id, external_table_name);
+    let cdc_table_id = build_cdc_table_id(source.id, &external_table_name);
     let materialize = plan_root.gen_table_plan(
         context,
         resolved_table_name,

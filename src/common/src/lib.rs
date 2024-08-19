@@ -82,6 +82,7 @@ pub use {
     risingwave_common_metrics as metrics, risingwave_common_secret as secret,
     risingwave_license as license,
 };
+pub mod cdc;
 pub mod lru;
 pub mod opts;
 pub mod range;
@@ -94,6 +95,9 @@ pub mod test_utils;
 pub mod transaction;
 pub mod types;
 pub mod vnode_mapping;
+
+pub use cdc::build_cdc_table_id;
+
 pub mod test_prelude {
     pub use super::array::{DataChunkTestExt, StreamChunkTestExt};
     pub use super::catalog::test_utils::ColumnDescTestExt;

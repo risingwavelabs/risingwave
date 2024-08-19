@@ -16,6 +16,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use regex::Regex;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash;
 use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
@@ -1136,4 +1137,12 @@ pub(crate) fn build_relation_group(relation_objects: Vec<PartialObject>) -> Noti
         }
     }
     NotificationInfo::RelationGroup(PbRelationGroup { relations })
+}
+
+pub fn extract_external_table_name_from_definition(table_definition: &str) -> Option<&str> {
+    let re = Regex::new(r#"TABLE\s+'([^']+)'"#).unwrap();
+    if let Some(captures) = re.captures(table_definition) {
+        return captures.get(1).map(|m| m.as_str());
+    }
+    None
 }
