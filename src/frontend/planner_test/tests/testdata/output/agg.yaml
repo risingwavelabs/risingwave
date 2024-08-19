@@ -1888,6 +1888,11 @@
     └─LogicalAgg { aggs: [approx_percentile($expr1)] }
       └─LogicalProject { exprs: [t.v1::Float64 as $expr1] }
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [approx_percentile($expr1)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.v1::Float64 as $expr1] }
+        └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [approx_percentile], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }
@@ -1904,6 +1909,11 @@
     └─LogicalAgg { aggs: [approx_percentile($expr1), sum(t.v1)] }
       └─LogicalProject { exprs: [t.v1::Float64 as $expr1, t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [approx_percentile($expr1), sum(t.v1)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.v1::Float64 as $expr1, t.v1] }
+        └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [approx_percentile, sum], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamRowMerge { output: [approx_percentile:Float64, sum(sum(t.v1)):Int64] }
@@ -1928,6 +1938,12 @@
     └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1), count(t.v1)] }
       └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1] }
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+  batch_plan: |-
+    BatchProject { exprs: [sum(t.v1), approx_percentile($expr1), sum(t.v1), count(t.v1)] }
+    └─BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1), count(t.v1)] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchProject { exprs: [t.v1, t.v1::Float64 as $expr1] }
+          └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [s1, approx_percentile, s2, count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(sum(t.v1)), approx_percentile, sum(sum(t.v1)), sum0(count(t.v1))] }
@@ -1970,6 +1986,11 @@
     └─LogicalAgg { aggs: [approx_percentile($expr1), approx_percentile($expr2)] }
       └─LogicalProject { exprs: [t.v1::Float64 as $expr1, t.v2::Float64 as $expr2] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [approx_percentile($expr1), approx_percentile($expr2)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.v1::Float64 as $expr1, t.v2::Float64 as $expr2] }
+        └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamRowMerge { output: [approx_percentile:Float64, approx_percentile:Float64] }
@@ -1994,6 +2015,12 @@
     └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, sum(t.v2), approx_percentile($expr2)] }
       └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+  batch_plan: |-
+    BatchProject { exprs: [sum(t.v1), approx_percentile($expr1), count, (sum(t.v2)::Float64 + approx_percentile($expr2)) as $expr3] }
+    └─BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, sum(t.v2), approx_percentile($expr2)] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2] }
+          └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [s1, x, count, y], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(sum(t.v1)), approx_percentile, sum0(count), (sum(sum(t.v2))::Float64 + approx_percentile) as $expr3] }
@@ -2026,6 +2053,12 @@
     └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, sum(t.v2), approx_percentile($expr2)] }
       └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+  batch_plan: |-
+    BatchProject { exprs: [sum(t.v1), approx_percentile($expr1), count, (sum(t.v2)::Float64 + approx_percentile($expr2)) as $expr3] }
+    └─BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, sum(t.v2), approx_percentile($expr2)] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2] }
+          └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [s1, x, count, y], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(sum(t.v1)), approx_percentile, sum0(count), (sum(sum(t.v2))::Float64 + approx_percentile) as $expr3] }
@@ -2058,6 +2091,11 @@
     └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1)] }
       └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.v1, t.v1::Float64 as $expr1] }
+        └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [s1, approx_percentile], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamRowMerge { output: [sum(sum(t.v1)):Int64, approx_percentile:Float64] }
@@ -2082,6 +2120,11 @@
     └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, max(t.v2), approx_percentile($expr2)] }
       └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, max(t.v2), approx_percentile($expr2)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2] }
+        └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [s1, x, count, m2, y], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamRowMerge { output: [sum(sum(t.v1)):Int64, approx_percentile:Float64, sum0(count):Int64, max(max(t.v2)):Int32, approx_percentile:Float64] }
@@ -2103,3 +2146,26 @@
           └─StreamHashAgg { group_key: [$expr5], aggs: [sum(t.v1), count, max(t.v2)] }
             └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr3, t.v2, t.v2::Float64 as $expr4, t._row_id, Vnode(t._row_id) as $expr5] }
               └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: test hash approx_percentile
+  sql: |
+    CREATE TABLE t (v1 int, v2 int);
+    SELECT approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) from t group by v2;
+  logical_plan: |-
+    LogicalProject { exprs: [approx_percentile($expr1)] }
+    └─LogicalAgg { group_key: [t.v2], aggs: [approx_percentile($expr1)] }
+      └─LogicalProject { exprs: [t.v2, t.v1::Float64 as $expr1] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [approx_percentile($expr1)] }
+      └─BatchHashAgg { group_key: [t.v2], aggs: [approx_percentile($expr1)] }
+        └─BatchExchange { order: [], dist: HashShard(t.v2) }
+          └─BatchProject { exprs: [t.v2, t.v1::Float64 as $expr1] }
+            └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [approx_percentile, t.v2(hidden)], stream_key: [t.v2], pk_columns: [t.v2], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [approx_percentile($expr1), t.v2] }
+      └─StreamHashAgg { group_key: [t.v2], aggs: [approx_percentile($expr1), count] }
+        └─StreamExchange { dist: HashShard(t.v2) }
+          └─StreamProject { exprs: [t.v2, t.v1::Float64 as $expr1, t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
