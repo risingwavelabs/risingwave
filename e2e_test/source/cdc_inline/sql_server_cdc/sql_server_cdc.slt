@@ -538,8 +538,8 @@ SELECT commit_ts > '2024-08-16 00:00:00.000+00:00' from upper_table where "ID" =
 t
 
 # ------------ drop stage ------------
-# statement ok
-# drop source upper_mssql_source cascade;
+statement ok
+drop source upper_mssql_source cascade;
 
-# statement ok
-# drop source mssql_source cascade;
+statement ok
+drop source mssql_source cascade;
