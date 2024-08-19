@@ -22,6 +22,7 @@ use std::str::FromStr;
 use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
+
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/catalog.rs")]
 pub mod catalog;
@@ -214,6 +215,14 @@ impl stream_plan::SourceNode {
                 .map(|c| c.get_column_desc().unwrap().column_id)
                 .collect(),
         )
+    }
+}
+
+impl common::WorkerNode {
+    pub fn is_streaming_schedulable(&self) -> bool {
+        let property = self.property.as_ref();
+        property.map_or(false, |p| p.is_streaming)
+            && !property.map_or(false, |p| p.is_unschedulable)
     }
 }
 

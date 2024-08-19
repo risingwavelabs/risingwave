@@ -1512,12 +1512,7 @@ impl DdlController {
             )));
         }
 
-        if available_parallel_units > MAX_PARALLELISM {
-            tracing::warn!("Too many parallel units, use {} instead", MAX_PARALLELISM);
-            Ok(MAX_PARALLELISM)
-        } else {
-            Ok(parallelism)
-        }
+        Ok(parallelism)
     }
 
     /// Builds the actor graph:
@@ -1565,6 +1560,15 @@ impl DdlController {
 
         let parallelism = self.resolve_stream_parallelism(specified_parallelism, &cluster_info)?;
 
+        const MAX_PARALLELISM: NonZeroUsize = NonZeroUsize::new(VirtualNode::COUNT).unwrap();
+
+        let parallelism_limited = parallelism > MAX_PARALLELISM;
+        if parallelism_limited {
+            tracing::warn!("Too many parallelism, use {} instead", MAX_PARALLELISM);
+        }
+
+        let parallelism = parallelism.min(MAX_PARALLELISM);
+
         let actor_graph_builder =
             ActorGraphBuilder::new(id, complete_graph, cluster_info, parallelism)?;
 
@@ -1586,6 +1590,10 @@ impl DdlController {
         // If the frontend does not specify the degree of parallelism and the default_parallelism is set to full, then set it to ADAPTIVE.
         // Otherwise, it defaults to FIXED based on deduction.
         let table_parallelism = match (specified_parallelism, &self.env.opts.default_parallelism) {
+            (None, DefaultParallelism::Full) if parallelism_limited => {
+                tracing::warn!("Parallelism limited to 256 in ADAPTIVE mode");
+                TableParallelism::Adaptive
+            }
             (None, DefaultParallelism::Full) => TableParallelism::Adaptive,
             _ => TableParallelism::Fixed(parallelism.get()),
         };
