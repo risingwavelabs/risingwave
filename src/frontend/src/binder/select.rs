@@ -683,7 +683,7 @@ fn derive_alias(expr: &Expr) -> Option<String> {
         Expr::Value(Value::Interval { .. }) => Some("interval".to_string()),
         Expr::Row(_) => Some("row".to_string()),
         Expr::Array(_) => Some("array".to_string()),
-        Expr::ArrayIndex { obj, index: _ } => derive_alias(&obj),
+        Expr::Index { obj, index: _ } => derive_alias(&obj),
         _ => None,
     }
 }
