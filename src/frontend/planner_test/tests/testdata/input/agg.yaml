@@ -1070,3 +1070,10 @@
   expected_outputs:
     - logical_plan
     - stream_plan
+- name: test approx percentile with default relative_error
+  sql: |
+    CREATE TABLE t (v1 int);
+    SELECT approx_percentile(0.5) WITHIN GROUP (order by v1) from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan

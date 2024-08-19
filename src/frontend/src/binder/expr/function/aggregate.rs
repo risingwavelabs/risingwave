@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
 use risingwave_sqlparser::ast::{Function, FunctionArgExpr};
 
@@ -139,12 +139,13 @@ impl Binder {
         let order_by = OrderBy::new(vec![self.bind_order_by_expr(within_group)?]);
 
         // check signature and do implicit cast
-        match (&kind, direct_args.as_mut_slice(), args.as_mut_slice()) {
+        match (&kind, direct_args.len(), args.as_mut_slice()) {
             (
                 AggKind::Builtin(PbAggKind::PercentileCont | PbAggKind::PercentileDisc),
-                [fraction],
+                1,
                 [arg],
             ) => {
+                let fraction = &mut direct_args[0];
                 decimal_to_float64(fraction, &kind)?;
                 if matches!(&kind, AggKind::Builtin(PbAggKind::PercentileCont)) {
                     arg.cast_implicit_mut(DataType::Float64).map_err(|_| {
@@ -155,14 +156,33 @@ impl Binder {
                     })?;
                 }
             }
-            (AggKind::Builtin(PbAggKind::Mode), [], [_arg]) => {}
+            (AggKind::Builtin(PbAggKind::Mode), 0, [_arg]) => {}
             (
                 AggKind::Builtin(PbAggKind::ApproxPercentile),
-                [percentile, relative_error],
+                1..=2,
                 [_percentile_col],
             ) => {
+                let percentile = &mut direct_args[0];
                 decimal_to_float64(percentile, &kind)?;
-                decimal_to_float64(relative_error, &kind)?;
+                match direct_args.len() {
+                    2 => {
+                        let relative_error= &mut direct_args[1];
+                        decimal_to_float64(relative_error, &kind)?;
+                    }
+                    1 => {
+                        let relative_error: ExprImpl = Literal::new(
+                            ScalarImpl::Float64(0.01.into()).into(),
+                            DataType::Float64,
+                        ).into();
+                        direct_args.push(relative_error);
+                    }
+                    _ => {
+                        return Err(ErrorCode::InvalidInputSyntax(
+                            "invalid direct args for approx_percentile aggregation".to_string(),
+                        ).into())
+                    }
+                }
+
             }
             _ => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
