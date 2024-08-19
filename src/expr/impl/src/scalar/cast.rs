@@ -249,7 +249,7 @@ fn map_cast(map: MapRef<'_>, ctx: &Context) -> Result<MapValue> {
         return_type: ctx.return_type.as_map().clone().into_list(),
         variadic: ctx.variadic,
     };
-    list_cast(map.into_inner(), &new_ctx).map(MapValue::from_list_entries)
+    list_cast(map.into_inner(), &new_ctx).map(MapValue::from_entries)
 }
 
 #[cfg(test)]

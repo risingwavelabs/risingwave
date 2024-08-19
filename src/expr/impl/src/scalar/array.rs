@@ -32,8 +32,14 @@ fn row_(row: impl Row) -> StructValue {
     StructValue::new(row.iter().map(|d| d.to_owned_datum()).collect())
 }
 
-fn map_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
-    let map = MapType::try_from_kv(args[0].as_list().clone(), args[1].as_list().clone())?;
+fn map_from_key_values_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
+    let map = MapType::try_from_kv(args[0].as_list().clone(), args[1].as_list().clone())
+        .map_err(ExprError::Custom)?;
+    Ok(map.into())
+}
+
+fn map_from_entries_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
+    let map = MapType::try_from_entries(args[0].as_list().clone()).map_err(ExprError::Custom)?;
     Ok(map.into())
 }
 
@@ -41,62 +47,70 @@ fn map_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
 ///
 /// ```slt
 /// query T
-/// select map_from_entries(null::int[], array[1,2,3]);
+/// select map_from_key_values(null::int[], array[1,2,3]);
 /// ----
 /// NULL
 ///
 /// query T
-/// select map_from_entries(array['a','b','c'], array[1,2,3]);
+/// select map_from_key_values(array['a','b','c'], array[1,2,3]);
 /// ----
 /// {a:1,b:2,c:3}
 /// ```
 #[function(
-    "map_from_entries(anyarray, anyarray) -> anymap",
-    type_infer = "map_type_infer"
+    "map_from_key_values(anyarray, anyarray) -> anymap",
+    type_infer = "map_from_key_values_type_infer"
 )]
-fn map_from_entries(key: ListRef<'_>, value: ListRef<'_>) -> Result<MapValue, ExprError> {
+fn map_from_key_values(key: ListRef<'_>, value: ListRef<'_>) -> Result<MapValue, ExprError> {
     MapValue::try_from_kv(key.to_owned(), value.to_owned()).map_err(ExprError::Custom)
+}
+
+#[function(
+    "map_from_entries(anyarray) -> anymap",
+    type_infer = "map_from_entries_type_infer"
+)]
+fn map_from_entries(entries: ListRef<'_>) -> Result<MapValue, ExprError> {
+    MapValue::try_from_entries(entries.to_owned()).map_err(ExprError::Custom)
 }
 
 /// # Example
 ///
 /// ```slt
 /// query T
-/// select map_access(map_from_entries(array[1,2,3], array[100,200,300]), 3);
+/// select map_access(map_from_key_values(array[1,2,3], array[100,200,300]), 3);
 /// ----
 /// 300
 ///
 /// query T
-/// select map_access(map_from_entries(array[1,2,3], array[100,200,300]), '3');
+/// select map_access(map_from_key_values(array[1,2,3], array[100,200,300]), '3');
 /// ----
 /// 300
 ///
 /// query error
-/// select map_access(map_from_entries(array[1,2,3], array[100,200,300]), 1.0);
+/// select map_access(map_from_key_values(array[1,2,3], array[100,200,300]), 1.0);
 /// ----
 /// db error: ERROR: Failed to run the query
 ///
 /// Caused by these errors (recent errors listed first):
-///   1: Failed to bind expression: map_access(map_from_entries(ARRAY[1, 2, 3], ARRAY[100, 200, 300]), 1.0)
+///   1: Failed to bind expression: map_access(map_from_key_values(ARRAY[1, 2, 3], ARRAY[100, 200, 300]), 1.0)
 ///   2: Bind error: Cannot access numeric in map(integer,integer)
 ///
 ///
 /// query T
-/// select map_access(map_from_entries(array['a','b','c'], array[1,2,3]), 'a');
+/// select map_access(map_from_key_values(array['a','b','c'], array[1,2,3]), 'a');
 /// ----
 /// 1
 ///
 /// query T
-/// select map_access(map_from_entries(array['a','b','c'], array[1,2,3]), 'd');
+/// select map_access(map_from_key_values(array['a','b','c'], array[1,2,3]), 'd');
 /// ----
 /// NULL
 ///
 /// query T
-/// select map_access(map_from_entries(array['a','b','c'], array[1,2,3]), null);
+/// select map_access(map_from_key_values(array['a','b','c'], array[1,2,3]), null);
 /// ----
 /// NULL
 /// ```
-#[function("map_access(anymap, any) -> any")]
+#[function("map_access(anymap, any) -> any", type_infer = "unreachable")]
 fn map_access<'a>(
     map: MapRef<'a>,
     key: ScalarRefImpl<'_>,
@@ -109,6 +123,122 @@ fn map_access<'a>(
         Some(idx) => Ok(values.get((idx - 1) as usize).unwrap()),
         None => Ok(None),
     }
+}
+
+/// ```slt
+/// query T
+/// select
+///     map_contains(MAP{1:1}, 1),
+///     map_contains(MAP{1:1}, 2),
+///     map_contains(MAP{1:1}, NULL::varchar),
+///     map_contains(MAP{1:1}, 1.0)
+/// ----
+/// t f NULL f
+/// ```
+#[function("map_contains(anymap, any) -> boolean")]
+fn map_contains(map: MapRef<'_>, key: ScalarRefImpl<'_>) -> Result<bool, ExprError> {
+    let (keys, _values) = map.into_kv();
+    let idx = array_position(keys, Some(key))?;
+    Ok(idx.is_some())
+}
+
+/// ```slt
+/// query I
+/// select
+///     map_length(NULL::map(int,int)),
+///     map_length(MAP {}::map(int,int)),
+///     map_length(MAP {1:1,2:2}::map(int,int))
+/// ----
+/// NULL 0 2
+/// ```
+#[function("map_length(anymap) -> int4")]
+fn map_length<T: TryFrom<usize>>(map: MapRef<'_>) -> Result<T, ExprError> {
+    map.inner()
+        .len()
+        .try_into()
+        .map_err(|_| ExprError::NumericOverflow)
+}
+
+/// If both `m1` and `m2` have a value with the same key, then the output map contains the value from `m2`.
+///
+/// ```slt
+/// query T
+/// select map_cat(MAP{'a':1,'b':2},null::map(varchar,int));
+/// ----
+/// {a:1,b:2}
+///
+/// query T
+/// select map_cat(MAP{'a':1,'b':2},MAP{'b':3,'c':4});
+/// ----
+/// {a:1,b:3,c:4}
+///
+/// # implicit type cast
+/// query T
+/// select map_cat(MAP{'a':1,'b':2},MAP{'b':3.0,'c':4.0});
+/// ----
+/// {a:1,b:3.0,c:4.0}
+/// ```
+#[function("map_cat(anymap, anymap) -> anymap")]
+fn map_cat(m1: Option<MapRef<'_>>, m2: Option<MapRef<'_>>) -> Result<Option<MapValue>, ExprError> {
+    match (m1, m2) {
+        (None, None) => Ok(None),
+        (Some(m), None) | (None, Some(m)) => Ok(Some(m.to_owned())),
+        (Some(m1), Some(m2)) => Ok(Some(MapValue::concat(m1, m2))),
+    }
+}
+
+/// Inserts a key-value pair into the map. If the key already exists, the value is updated.
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// select map_insert(map{'a':1, 'b':2}, 'c', 3);
+/// ----
+/// {a:1,b:2,c:3}
+///
+/// query T
+/// select map_insert(map{'a':1, 'b':2}, 'b', 4);
+/// ----
+/// {a:1,b:4}
+/// ```
+///
+/// TODO: support variadic arguments
+#[function("map_insert(anymap, any, any) -> anymap")]
+fn map_insert(
+    map: MapRef<'_>,
+    key: Option<ScalarRefImpl<'_>>,
+    value: Option<ScalarRefImpl<'_>>,
+) -> MapValue {
+    let Some(key) = key else {
+        return map.to_owned();
+    };
+    MapValue::insert(map, key.into_scalar_impl(), value.to_owned_datum())
+}
+
+/// Deletes a key-value pair from the map.
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// select map_delete(map{'a':1, 'b':2, 'c':3}, 'b');
+/// ----
+/// {a:1,c:3}
+///
+/// query T
+/// select map_delete(map{'a':1, 'b':2, 'c':3}, 'd');
+/// ----
+/// {a:1,b:2,c:3}
+/// ```
+///
+/// TODO: support variadic arguments
+#[function("map_delete(anymap, any) -> anymap")]
+fn map_delete(map: MapRef<'_>, key: Option<ScalarRefImpl<'_>>) -> MapValue {
+    let Some(key) = key else {
+        return map.to_owned();
+    };
+    MapValue::delete(map, key)
 }
 
 #[cfg(test)]
