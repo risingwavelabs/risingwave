@@ -911,7 +911,7 @@ impl HummockVersion {
                     }
                 }
 
-                split_count as u64
+                split_count
             })
     }
 

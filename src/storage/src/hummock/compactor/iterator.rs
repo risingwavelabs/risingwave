@@ -278,17 +278,15 @@ impl SstableStreamIterator {
             {
                 self.block_iter = None;
             }
-        } else {
-            if self
-                .block_iter
-                .as_ref()
-                .unwrap_or_else(|| panic!("no block iter sstinfo={}", self.sst_debug_info()))
-                .key()
-                .cmp(&self.key_range_right.to_ref())
-                .is_gt()
-            {
-                self.block_iter = None;
-            }
+        } else if self
+            .block_iter
+            .as_ref()
+            .unwrap_or_else(|| panic!("no block iter sstinfo={}", self.sst_debug_info()))
+            .key()
+            .cmp(&self.key_range_right.to_ref())
+            .is_gt()
+        {
+            self.block_iter = None;
         }
 
         Ok(())

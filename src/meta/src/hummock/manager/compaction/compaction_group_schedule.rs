@@ -799,13 +799,15 @@ pub fn is_table_high_write_throughput(
 ) -> bool {
     if let Some(history) = table_write_throughput.get(&table_id) {
         if history.len() >= window_size {
-            let is_high_write_throughput = history
-                .iter()
-                .take(history.len() - window_size)
-                .any(|throughput| *throughput / checkpoint_secs > threshold);
-            if is_high_write_throughput {
-                return true;
+            // Determine if 1/2 of the values in the interval exceed the threshold.
+            let mut high_write_throughput_count = 0;
+            for throughput in history.iter().take(history.len() - window_size) {
+                if *throughput / checkpoint_secs > threshold {
+                    high_write_throughput_count += 1;
+                }
             }
+
+            return high_write_throughput_count * 2 > window_size;
         }
     }
 
@@ -820,15 +822,15 @@ pub fn is_table_low_write_throughput(
     threshold: u64,
 ) -> bool {
     if let Some(history) = table_write_throughput.get(&table_id) {
-        if history.len() >= window_size {
-            let is_low_write_throughput = history
-                .iter()
-                .take(history.len() - window_size)
-                .all(|throughput| *throughput / checkpoint_secs < threshold);
-            if is_low_write_throughput {
-                return true;
+        // Determine if 2/3 of the values in the interval below the threshold.
+        let mut low_write_throughput_count = 0;
+        for throughput in history.iter().take(history.len() - window_size) {
+            if *throughput / checkpoint_secs < threshold {
+                low_write_throughput_count += 1;
             }
         }
+
+        return low_write_throughput_count * 3 > window_size;
     }
 
     false

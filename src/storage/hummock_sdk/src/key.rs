@@ -1112,7 +1112,7 @@ impl<T: AsRef<[u8]> + Ord + Eq, const SKIP_DEDUP: bool> FullKeyTracker<T, SKIP_D
                     }
                 );
 
-                return (
+                (
                     false,
                     Some(format!(
                         "key {:?} <= prev key {:?}",
@@ -1122,7 +1122,7 @@ impl<T: AsRef<[u8]> + Ord + Eq, const SKIP_DEDUP: bool> FullKeyTracker<T, SKIP_D
                             epoch_with_gap: self.last_observed_epoch_with_gap,
                         },
                     )),
-                );
+                )
             }
         }
     }
