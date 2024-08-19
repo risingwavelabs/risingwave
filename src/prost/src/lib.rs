@@ -19,8 +19,10 @@
 
 use std::str::FromStr;
 
+pub use prost::Message;
 use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
+
 
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/catalog.rs")]
@@ -241,6 +243,14 @@ impl meta::table_fragments::ActorStatus {
     }
 }
 
+impl common::WorkerNode {
+    pub fn is_streaming_schedulable(&self) -> bool {
+        let property = self.property.as_ref();
+        property.map_or(false, |p| p.is_streaming)
+            && !property.map_or(false, |p| p.is_unschedulable)
+    }
+}
+
 impl common::ActorLocation {
     pub fn from_worker(worker_node_id: u32) -> Option<Self> {
         Some(Self { worker_node_id })
@@ -304,6 +314,15 @@ impl catalog::Sink {
     pub fn unique_identity(&self) -> String {
         // TODO: use a more unique name
         format!("{}", self.id)
+    }
+}
+
+impl std::fmt::Debug for meta::SystemParams {
+    /// Directly formatting `SystemParams` can be inaccurate or leak sensitive information.
+    ///
+    /// Use `SystemParamsReader` instead.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SystemParams").finish_non_exhaustive()
     }
 }
 

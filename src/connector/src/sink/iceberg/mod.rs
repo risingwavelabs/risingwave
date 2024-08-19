@@ -515,7 +515,7 @@ impl IcebergConfig {
             .map_err(|e| SinkError::Iceberg(anyhow!(e)))
     }
 
-    async fn create_catalog_v2(&self) -> ConnectorResult<Arc<dyn CatalogV2>> {
+    fn create_catalog_v2(&self) -> ConnectorResult<Arc<dyn CatalogV2>> {
         match self.catalog_type() {
             "storage" => {
                 let config = StorageCatalogConfig::builder()
@@ -550,7 +550,7 @@ impl IcebergConfig {
                     })?)
                     .props(iceberg_configs)
                     .build();
-                let catalog = iceberg_catalog_rest::RestCatalog::new(config).await?;
+                let catalog = iceberg_catalog_rest::RestCatalog::new(config);
                 Ok(Arc::new(catalog))
             }
             catalog_type
@@ -584,7 +584,6 @@ impl IcebergConfig {
     pub async fn load_table_v2(&self) -> ConnectorResult<TableV2> {
         let catalog = self
             .create_catalog_v2()
-            .await
             .context("Unable to load iceberg catalog")?;
 
         let table_id = self
@@ -778,10 +777,12 @@ impl Sink for IcebergSink {
     }
 
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+        let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
         let partition_type = table.current_partition_type()?;
 
         Ok(IcebergSinkCommitter {
+            catalog,
             table,
             partition_type,
         })
@@ -1153,6 +1154,7 @@ impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
 }
 
 pub struct IcebergSinkCommitter {
+    catalog: CatalogRef,
     table: Table,
     partition_type: Any,
 }
@@ -1179,6 +1181,12 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             tracing::debug!(?epoch, "no data to commit");
             return Ok(());
         }
+        // Load the latest table to avoid concurrent modification with the best effort.
+        self.table = self
+            .catalog
+            .clone()
+            .load_table(self.table.table_name())
+            .await?;
         let mut txn = Transaction::new(&mut self.table);
         write_results.into_iter().for_each(|s| {
             txn.append_data_file(s.data_files);

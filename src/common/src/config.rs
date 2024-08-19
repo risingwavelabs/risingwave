@@ -24,7 +24,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
-use foyer::{LfuConfig, LruConfig, S3FifoConfig};
+use foyer::{LfuConfig, LruConfig, RecoverMode, S3FifoConfig};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -863,6 +863,18 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::flush_buffer_threshold_mb")]
     pub flush_buffer_threshold_mb: Option<usize>,
 
+    /// Recover mode.
+    ///
+    /// Options:
+    ///
+    /// - "None": Do not recover disk cache.
+    /// - "Quiet": Recover disk cache and skip errors.
+    /// - "Strict": Recover disk cache and panic on errors.
+    ///
+    /// More details, see [`RecoverMode::None`], [`RecoverMode::Quiet`] and [`RecoverMode::Strict`],
+    #[serde(default = "default::file_cache::recover_mode")]
+    pub recover_mode: RecoverMode,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -1249,7 +1261,7 @@ impl SystemConfig {
         macro_rules! fields {
             ($({ $field:ident, $($rest:tt)* },)*) => {
                 SystemParams {
-                    $($field: self.$field,)*
+                    $($field: self.$field.map(Into::into),)*
                     ..Default::default() // deprecated fields
                 }
             };
@@ -1673,6 +1685,8 @@ pub mod default {
     }
 
     pub mod file_cache {
+        use foyer::RecoverMode;
+
         pub fn dir() -> String {
             "".to_string()
         }
@@ -1711,6 +1725,10 @@ pub mod default {
 
         pub fn flush_buffer_threshold_mb() -> Option<usize> {
             None
+        }
+
+        pub fn recover_mode() -> RecoverMode {
+            RecoverMode::None
         }
     }
 
@@ -1842,11 +1860,11 @@ pub mod default {
         }
 
         pub fn memory_controller_threshold_graceful() -> f64 {
-            0.8
+            0.81
         }
 
         pub fn memory_controller_threshold_stable() -> f64 {
-            0.7
+            0.72
         }
 
         pub fn memory_controller_eviction_factor_aggressive() -> f64 {
@@ -2379,12 +2397,14 @@ pub struct CompactionConfig {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_license::LicenseKey;
+
     use super::*;
 
     fn default_config_for_docs() -> RwConfig {
         let mut config = RwConfig::default();
-        // Set `license_key` to empty to avoid showing the test-only license key in the docs.
-        config.system.license_key = Some("".to_owned());
+        // Set `license_key` to empty in the docs to avoid any confusion.
+        config.system.license_key = Some(LicenseKey::empty());
         config
     }
 

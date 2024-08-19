@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::aggregate::{agg_kinds, AggKind, PbAggKind};
 use risingwave_sqlparser::ast::{Function, FunctionArgExpr};
 
@@ -53,7 +53,7 @@ impl Binder {
     ) -> Result<ExprImpl> {
         self.ensure_aggregate_allowed()?;
 
-        let distinct = f.distinct;
+        let distinct = f.arg_list.distinct;
         let filter_expr = f.filter.clone();
 
         let (direct_args, args, order_by) = if matches!(kind, agg_kinds::ordered_set!()) {
@@ -105,14 +105,14 @@ impl Binder {
 
         assert!(matches!(kind, agg_kinds::ordered_set!()));
 
-        if !f.order_by.is_empty() {
+        if !f.arg_list.order_by.is_empty() {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                 "ORDER BY is not allowed for ordered-set aggregation `{}`",
                 kind
             ))
             .into());
         }
-        if f.distinct {
+        if f.arg_list.distinct {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                 "DISTINCT is not allowed for ordered-set aggregation `{}`",
                 kind
@@ -128,6 +128,7 @@ impl Binder {
         })?;
 
         let mut direct_args: Vec<_> = f
+            .arg_list
             .args
             .into_iter()
             .map(|arg| self.bind_function_arg(arg))
@@ -138,12 +139,9 @@ impl Binder {
         let order_by = OrderBy::new(vec![self.bind_order_by_expr(within_group)?]);
 
         // check signature and do implicit cast
-        match (&kind, direct_args.as_mut_slice(), args.as_mut_slice()) {
-            (
-                AggKind::Builtin(PbAggKind::PercentileCont | PbAggKind::PercentileDisc),
-                [fraction],
-                [arg],
-            ) => {
+        match (&kind, direct_args.len(), args.as_mut_slice()) {
+            (AggKind::Builtin(PbAggKind::PercentileCont | PbAggKind::PercentileDisc), 1, [arg]) => {
+                let fraction = &mut direct_args[0];
                 decimal_to_float64(fraction, &kind)?;
                 if matches!(&kind, AggKind::Builtin(PbAggKind::PercentileCont)) {
                     arg.cast_implicit_mut(DataType::Float64).map_err(|_| {
@@ -154,14 +152,30 @@ impl Binder {
                     })?;
                 }
             }
-            (AggKind::Builtin(PbAggKind::Mode), [], [_arg]) => {}
-            (
-                AggKind::Builtin(PbAggKind::ApproxPercentile),
-                [percentile, relative_error],
-                [_percentile_col],
-            ) => {
+            (AggKind::Builtin(PbAggKind::Mode), 0, [_arg]) => {}
+            (AggKind::Builtin(PbAggKind::ApproxPercentile), 1..=2, [_percentile_col]) => {
+                let percentile = &mut direct_args[0];
                 decimal_to_float64(percentile, &kind)?;
-                decimal_to_float64(relative_error, &kind)?;
+                match direct_args.len() {
+                    2 => {
+                        let relative_error = &mut direct_args[1];
+                        decimal_to_float64(relative_error, &kind)?;
+                    }
+                    1 => {
+                        let relative_error: ExprImpl = Literal::new(
+                            ScalarImpl::Float64(0.01.into()).into(),
+                            DataType::Float64,
+                        )
+                        .into();
+                        direct_args.push(relative_error);
+                    }
+                    _ => {
+                        return Err(ErrorCode::InvalidInputSyntax(
+                            "invalid direct args for approx_percentile aggregation".to_string(),
+                        )
+                        .into())
+                    }
+                }
             }
             _ => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -207,19 +221,21 @@ impl Binder {
         }
 
         let args: Vec<_> = f
+            .arg_list
             .args
             .iter()
             .map(|arg| self.bind_function_arg(arg.clone()))
             .flatten_ok()
             .try_collect()?;
         let order_by = OrderBy::new(
-            f.order_by
+            f.arg_list
+                .order_by
                 .into_iter()
                 .map(|e| self.bind_order_by_expr(e))
                 .try_collect()?,
         );
 
-        if f.distinct {
+        if f.arg_list.distinct {
             if matches!(
                 kind,
                 AggKind::Builtin(PbAggKind::ApproxCountDistinct)

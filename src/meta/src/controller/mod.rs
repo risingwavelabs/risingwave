@@ -38,6 +38,7 @@ pub mod cluster;
 pub mod fragment;
 pub mod id;
 pub mod rename;
+pub mod scale;
 pub mod session_params;
 pub mod streaming_job;
 pub mod system_param;
@@ -200,6 +201,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             secret_refs: secret_ref_map,
+            rate_limit: value.0.rate_limit.map(|v| v as _),
         }
     }
 }

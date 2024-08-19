@@ -1,0 +1,260 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+
+statement error
+create table t (m map (float, float));
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Bind error: invalid map key type: double precision
+
+
+query error
+select map_from_key_values(array[1.0,2.0,3.0], array[1,2,3]);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: map_from_key_values(ARRAY[1.0, 2.0, 3.0], ARRAY[1, 2, 3])
+  2: Expr error
+  3: invalid map key type: numeric
+
+
+query error
+select map_from_key_values(array[1,1,3], array[1,2,3]);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: error while evaluating expression `map_from_key_values('{1,1,3}', '{1,2,3}')`
+  3: map keys must be unique
+
+
+query ?
+select map_from_key_values(array[1,2,3], array[1,null,3]);
+----
+{1:1,2:NULL,3:3}
+
+
+query error
+select map_from_key_values(array[1,null,3], array[1,2,3]);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: error while evaluating expression `map_from_key_values('{1,NULL,3}', '{1,2,3}')`
+  3: map keys must not be NULL
+
+
+query error
+select map_from_key_values(array[1,3], array[1,2,3]);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: error while evaluating expression `map_from_key_values('{1,3}', '{1,2,3}')`
+  3: map keys and values have different length
+
+
+query error
+select map_from_key_values(array[1,2], array[1,2]) = map_from_key_values(array[2,1], array[2,1]);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: map_from_key_values(ARRAY[1, 2], ARRAY[1, 2]) = map_from_key_values(ARRAY[2, 1], ARRAY[2, 1])
+  2: function equal(map(integer,integer), map(integer,integer)) does not exist
+
+
+statement ok
+create table t (
+    m1 map(varchar, float),
+    m2 map(int, bool),
+    m3 map(varchar, map(varchar, varchar)),
+    l map(varchar,int)[],
+    s struct<m map(varchar, struct<x int>)>,
+);
+
+
+statement ok
+insert into t values (
+    map_from_key_values(array['a','b','c'], array[1.0,2.0,3.0]::float[]),
+    map_from_key_values(array[1,2,3], array[true,false,true]),
+    map_from_key_values(array['a','b'],
+        array[
+            map_from_key_values(array['a1'], array['a2']),
+            map_from_key_values(array['b1'], array['b2'])
+        ]
+    ),
+    array[
+        map_from_key_values(array['a','b','c'], array[1,2,3]),
+        map_from_key_values(array['d','e','f'], array[4,5,6])
+    ],
+    row(
+        map_from_key_values(array['a','b','c'], array[row(1),row(2),row(3)]::struct<x int>[])
+    )
+);
+
+# cast(map(character varying,integer)) -> map(character varying,double precision)
+query ?
+select map_from_key_values(array['a','b','c'], array[1,2,3])::map(varchar,float);
+----
+{a:1,b:2,c:3}
+
+
+statement ok
+insert into t(m1) values (map_from_key_values(array['a','b','c'], array[1,2,3]));
+
+query ????? rowsort
+select * from t;
+----
+{a:1,b:2,c:3}	NULL	NULL	NULL	NULL
+{a:1,b:2,c:3}	{1:t,2:f,3:t}	{a:{a1:a2},b:{b1:b2}}	{"{a:1,b:2,c:3}","{d:4,e:5,f:6}"}	("{a:(1),b:(2),c:(3)}")
+
+query ????? rowsort
+select to_jsonb(m1), to_jsonb(m2), to_jsonb(m3), to_jsonb(l), to_jsonb(s) from t;
+----
+{"a": 1.0, "b": 2.0, "c": 3.0}	null	null	null	null
+{"a": 1.0, "b": 2.0, "c": 3.0}	{"1": true, "2": false, "3": true}	{"a": {"a1": "a2"}, "b": {"b1": "b2"}}	[{"a": 1, "b": 2, "c": 3}, {"d": 4, "e": 5, "f": 6}]	{"m": {"a": {"x": 1}, "b": {"x": 2}, "c": {"x": 3}}}
+
+statement ok
+drop table t;
+
+query ??????
+select
+  MAP {'a':1, 'b':2},
+  MAP {'a':1, 'b':2}['b'],
+  MAP {'a':1, 'b':2}['c'], -- non-existent key
+  MAP {'a':1, 'b':2}[1], -- type mismatch here
+  MAP {1:1,   '2':2.0}[2], -- implicit cast
+  MAP {1:MAP{2:3}}[1][2];
+----
+{a:1,b:2}	2	NULL	NULL	2.0	3
+
+
+query error
+select MAP {'a':1,'a':2};
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: error while evaluating expression `map_from_key_values('{a,a}', '{1,2}')`
+  3: map keys must be unique
+
+
+query error
+select MAP {};
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: MAP {}
+  2: Bind error: cannot determine type of empty map
+HINT:  Explicitly cast to the desired type, for example MAP{}::map(int,int).
+
+
+query ??
+select
+  MAP{}::MAP(VARCHAR,INT),
+  MAP{1:'a',2:'b'}::MAP(VARCHAR,VARCHAR)
+----
+{}	{1:a,2:b}
+
+query error
+select map_from_entries(array[]);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: map_from_entries(ARRAY[])
+  2: Bind error: cannot determine type of empty array
+HINT:  Explicitly cast to the desired type, for example ARRAY[]::integer[].
+
+
+query error
+select map_from_entries(array[]::int[]);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: map_from_entries(CAST(ARRAY[] AS INT[]))
+  2: Expr error
+  3: invalid map entries type, expected struct, got: integer
+
+
+query error
+select map_from_entries(array[]::struct<key float, value int>[]);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: map_from_entries(CAST(ARRAY[] AS STRUCT<key FLOAT, value INT>[]))
+  2: Expr error
+  3: invalid map key type: double precision
+
+
+query ?
+select map_from_entries(array[]::struct<key int, value int>[]);
+----
+{}
+
+
+query ?
+select map_from_entries(array[row('a',1), row('b',2), row('c',3)]);
+----
+{a:1,b:2,c:3}
+
+
+query error
+select map_from_entries(array[row('a',1), row('a',2), row('c',3)]);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: error while evaluating expression `map_from_entries('{"(a,1)","(a,2)","(c,3)"}')`
+  3: map keys must be unique
+
+
+query error
+select map_from_entries(array[row('a',1,2)]);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: map_from_entries(ARRAY[ROW('a', 1, 2)])
+  2: Expr error
+  3: the underlying struct for map must have exactly two fields, got: StructType { field_names: [], field_types: [Varchar, Int32, Int32] }
+
+
+query error
+select map_from_entries(array[row(1.0,1)]);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: map_from_entries(ARRAY[ROW(1.0, 1)])
+  2: Expr error
+  3: invalid map key type: numeric
+
+
+query error
+select map_from_entries(null);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: map_from_entries(NULL)
+  2: Bind error: Cannot implicitly cast 'null:Varchar' to polymorphic type AnyArray
+
+
+query ?
+select map_from_entries(null::struct<key int, value int>[]);
+----
+NULL

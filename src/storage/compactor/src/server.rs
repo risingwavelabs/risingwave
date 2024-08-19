@@ -197,8 +197,7 @@ pub async fn compactor_serve(
         Default::default(),
         &config.meta,
     )
-    .await
-    .unwrap();
+    .await;
 
     info!("Assigned compactor id {}", meta_client.worker_id());
 

@@ -401,7 +401,7 @@ pub async fn handle(
             declare_cursor::handle_declare_cursor(handler_args, stmt).await
         }
         Statement::FetchCursor { stmt } => {
-            fetch_cursor::handle_fetch_cursor(handler_args, stmt).await
+            fetch_cursor::handle_fetch_cursor(handler_args, stmt, &formats).await
         }
         Statement::CloseCursor { stmt } => {
             close_cursor::handle_close_cursor(handler_args, stmt).await
@@ -702,6 +702,18 @@ pub async fn handle(
             alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                 handler_args,
                 PbThrottleTarget::TableWithSource,
+                name,
+                rate_limit,
+            )
+            .await
+        }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetBackfillRateLimit { rate_limit },
+        } => {
+            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                handler_args,
+                PbThrottleTarget::CdcTable,
                 name,
                 rate_limit,
             )
