@@ -598,7 +598,7 @@ impl ClusterControllerInner {
                     .eq(host_address.host.clone())
                     .and(worker::Column::Port.eq(host_address.port)))
                 .not()
-                .and(worker::Column::WorkerType.eq(WorkerType::ComputeNode as i32)),
+                .and(worker::Column::WorkerType.eq(WorkerType::ComputeNode)),
             )
             .select_only()
             .column(worker::Column::WorkerId)
