@@ -26,7 +26,6 @@ use anyhow::{anyhow, Context};
 pub use database::*;
 pub use fragment::*;
 use itertools::Itertools;
-use regex::Regex;
 use risingwave_common::catalog::{
     valid_table_name, TableId as StreamingJobId, TableOption, DEFAULT_DATABASE_NAME,
     DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
@@ -140,6 +139,7 @@ use self::utils::{
 use crate::controller::rename::{
     alter_relation_rename, alter_relation_rename_refs, ReplaceTableExprRewriter,
 };
+use crate::controller::utils::extract_external_table_name_from_definition;
 use crate::manager::catalog::utils::{refcnt_dec_connection, refcnt_inc_connection};
 use crate::rpc::ddl_controller::DropMode;
 use crate::telemetry::MetaTelemetryJobDesc;
@@ -380,12 +380,12 @@ impl CatalogManager {
             .collect_vec();
         for mut table in legacy_tables {
             let source_id = table.dependent_relations[0];
-            match extract_cdc_table_name(&table.definition) {
+            match extract_external_table_name_from_definition(&table.definition) {
                 None => {
                     tracing::warn!(
                         table_id = table.id,
-                        "failed to extract cdc table name from table definition: {}",
-                        table.definition
+                        definition = table.definition,
+                        "failed to extract cdc table name from table definition.",
                     )
                 }
                 Some(cdc_table_name) => {
@@ -397,14 +397,6 @@ impl CatalogManager {
         commit_meta!(self, tables)?;
         Ok(())
     }
-}
-
-fn extract_cdc_table_name(sql_statement: &str) -> Option<&str> {
-    let re = Regex::new(r#"TABLE\s+'([^']+)'"#).unwrap();
-    if let Some(captures) = re.captures(sql_statement) {
-        return captures.get(1).map(|m| m.as_str());
-    }
-    None
 }
 
 // Database catalog related methods
@@ -4941,13 +4933,19 @@ impl CatalogManager {
 
 #[cfg(test)]
 mod tests {
-    use crate::manager::catalog::extract_cdc_table_name;
+    use crate::manager::catalog::extract_external_table_name_from_definition;
 
     #[test]
     fn test_extract_cdc_table_name() {
         let ddl1 = "CREATE TABLE t1 () FROM pg_source TABLE 'public.t1'";
         let ddl2 = "CREATE TABLE t2 (v1 int) FROM pg_source TABLE 'mydb.t2'";
-        assert_eq!(extract_cdc_table_name(ddl1), Some("public.t1"));
-        assert_eq!(extract_cdc_table_name(ddl2), Some("mydb.t2"));
+        assert_eq!(
+            extract_external_table_name_from_definition(ddl1),
+            Some("public.t1")
+        );
+        assert_eq!(
+            extract_external_table_name_from_definition(ddl2),
+            Some("mydb.t2")
+        );
     }
 }

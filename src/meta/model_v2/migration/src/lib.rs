@@ -1,5 +1,7 @@
 #![allow(clippy::enum_variant_names)]
 
+extern crate core;
+
 pub use sea_orm_migration::prelude::*;
 pub use sea_orm_migration::MigrationStatus;
 mod m20230908_072257_init;

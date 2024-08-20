@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::build_cdc_table_id;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::types::{
     DataType, Datum, DatumCow, Scalar, ScalarImpl, ScalarRefImpl, Timestamptz, ToDatumRef,
@@ -232,7 +233,7 @@ pub fn parse_schema_change(
             }
 
             // concatenate the source_id to the cdc_table_id
-            let cdc_table_id = format!("{}_{}", source_id, id.replace('"', ""));
+            let cdc_table_id = build_cdc_table_id(source_id, id.replace('"', "").as_str());
             schema_changes.push(TableSchemaChange {
                 cdc_table_id,
                 columns: column_descs
