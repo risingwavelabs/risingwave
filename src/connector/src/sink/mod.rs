@@ -485,14 +485,14 @@ macro_rules! def_sink_impl {
         #[derive(Debug)]
         pub enum SinkImpl {
             $(
-                $variant_name($sink_type),
+                $variant_name(Box<$sink_type>),
             )*
         }
 
         $(
             impl From<$sink_type> for SinkImpl {
                 fn from(sink: $sink_type) -> SinkImpl {
-                    SinkImpl::$variant_name(sink)
+                    SinkImpl::$variant_name(Box::new(sink))
                 }
             }
         )*

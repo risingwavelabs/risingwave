@@ -229,7 +229,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
                     dispatch_sink!(self.sink, sink, {
                         let consume_log_stream = Self::execute_consume_log(
-                            sink,
+                            *sink,
                             log_reader,
                             self.input_columns,
                             self.sink_param,
