@@ -607,7 +607,8 @@ impl LocalBarrierWorker {
                 let trace_span =
                     format!("Actor {actor_id}: `{}`", stream_actor_ref.mview_definition);
                 let barrier_manager = self.current_shared_context.local_barrier_manager.clone();
-                let actor = self.actor_manager.clone().create_actor(actor, self.current_shared_context.clone()).and_then(|actor| actor.run()).map(move |result| {
+                // wrap the future of `create_actor` with `boxed` to avoid stack overflow
+                let actor = self.actor_manager.clone().create_actor(actor, self.current_shared_context.clone()).boxed().and_then(|actor| actor.run()).map(move |result| {
                     if let Err(err) = result {
                         // TODO: check error type and panic if it's unexpected.
                         // Intentionally use `?` on the report to also include the backtrace.
