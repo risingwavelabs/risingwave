@@ -32,7 +32,7 @@ use risingwave_common::catalog::{
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::secret::LocalSecretManager;
-use risingwave_common::{bail, current_cluster_version, ensure};
+use risingwave_common::{bail, build_cdc_table_id, current_cluster_version, ensure};
 use risingwave_connector::source::{should_copy_to_format_encode_options, UPSTREAM_SOURCE_KEY};
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType};
@@ -388,8 +388,8 @@ impl CatalogManager {
                         "failed to extract cdc table name from table definition.",
                     )
                 }
-                Some(cdc_table_name) => {
-                    table.cdc_table_id = Some(format!("{}_{}", source_id, cdc_table_name));
+                Some(external_table_name) => {
+                    table.cdc_table_id = Some(build_cdc_table_id(source_id, external_table_name));
                 }
             }
             tables.insert(table.id, table);
