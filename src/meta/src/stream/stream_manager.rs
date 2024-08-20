@@ -1038,6 +1038,7 @@ mod tests {
                         is_streaming: true,
                         is_serving: true,
                         is_unschedulable: false,
+                        internal_rpc_host_addr: "".to_string(),
                     },
                     Default::default(),
                 )
