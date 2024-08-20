@@ -806,7 +806,7 @@ impl GlobalBarrierManager {
                                             r#type: node.r#type,
                                             host: node.host.clone(),
                                             parallelism: node.parallelism,
-                                            property: node.property,
+                                            property: node.property.clone(),
                                             resource: node.resource.clone(),
                                             ..Default::default()
                                         },

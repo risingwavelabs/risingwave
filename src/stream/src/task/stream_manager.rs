@@ -577,6 +577,7 @@ impl StreamActorManager {
             } = actor;
             let actor = actor.unwrap();
             let actor_id = actor.actor_id;
+            let streaming_config = self.env.config().clone();
             let actor_context = ActorContext::create(
                 &actor,
                 self.env.total_mem_usage(),
@@ -591,6 +592,8 @@ impl StreamActorManager {
                         )
                     })
                     .collect(),
+                self.env.meta_client().clone(),
+                streaming_config,
             );
             let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
             let expr_context = actor.expr_context.clone().unwrap();
