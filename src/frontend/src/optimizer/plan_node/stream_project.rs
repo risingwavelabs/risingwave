@@ -63,7 +63,8 @@ impl Distill for StreamProject {
 
 impl StreamProject {
     pub fn new(core: generic::Project<PlanRef>) -> Self {
-        Self::new_inner(core, false)
+        let noop_update_hint = core.likely_produces_noop_updates();
+        Self::new_inner(core, noop_update_hint)
     }
 
     /// Set the `noop_update_hint` flag to the given value.
