@@ -154,7 +154,7 @@ impl RandValue for ListValue {
 impl RandValue for MapValue {
     fn rand_value<R: Rng>(_rand: &mut R) -> Self {
         // dummy value
-        MapValue::from_list_entries(ListValue::empty(&DataType::Struct(
+        MapValue::from_entries(ListValue::empty(&DataType::Struct(
             MapType::struct_type_for_map(DataType::Varchar, DataType::Varchar),
         )))
     }
