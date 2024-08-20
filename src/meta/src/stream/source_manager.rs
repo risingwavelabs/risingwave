@@ -1323,7 +1323,7 @@ mod tests {
 
         {
             let mut split_to_actor = HashMap::new();
-            for (_, actor_to_splits) in &mut fragment_assignment {
+            for actor_to_splits in fragment_assignment.values() {
                 for (actor_id, splits) in actor_to_splits {
                     let _ = splits.iter().map(|split| {
                         split_to_actor
@@ -1334,7 +1334,7 @@ mod tests {
                 }
             }
 
-            for (_split_id, actor_ids) in &mut split_to_actor {
+            for actor_ids in split_to_actor.values() {
                 assert_eq!(actor_ids.len(), 1);
             }
         }
