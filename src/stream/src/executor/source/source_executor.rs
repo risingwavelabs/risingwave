@@ -24,6 +24,7 @@ use risingwave_common::metrics::{LabelGuardedIntCounter, GLOBAL_ERROR_METRICS};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
+use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
@@ -32,8 +33,8 @@ use risingwave_connector::source::{
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
@@ -122,6 +123,43 @@ impl<S: StateStore> SourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
+
+        let (schema_change_tx, mut schema_change_rx) =
+            tokio::sync::mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
+        let schema_change_tx = if self.is_auto_schema_change_enable() {
+            let meta_client = self.actor_ctx.meta_client.clone();
+            // spawn a task to handle schema change event from source parser
+            let _join_handle = tokio::task::spawn(async move {
+                while let Some((schema_change, finish_tx)) = schema_change_rx.recv().await {
+                    let table_names = schema_change.table_names();
+                    tracing::info!("recv a schema change event for tables: {:?}", table_names);
+                    // TODO: retry on rpc error
+                    if let Some(ref meta_client) = meta_client {
+                        match meta_client
+                            .auto_schema_change(schema_change.to_protobuf())
+                            .await
+                        {
+                            Ok(_) => {
+                                tracing::info!(
+                                    "schema change success for tables: {:?}",
+                                    table_names
+                                );
+                                finish_tx.send(()).unwrap();
+                            }
+                            Err(e) => {
+                                tracing::error!(error = ?e.as_report(), "schema change error");
+                                finish_tx.send(()).unwrap();
+                            }
+                        }
+                    }
+                }
+            });
+            Some(schema_change_tx)
+        } else {
+            info!("auto schema change is disabled in config");
+            None
+        };
+
         let source_ctx = SourceContext::new(
             self.actor_ctx.id,
             self.stream_source_core.as_ref().unwrap().source_id,
@@ -137,6 +175,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 rate_limit: self.rate_limit_rps,
             },
             source_desc.source.config.clone(),
+            schema_change_tx,
         );
         let stream = source_desc
             .source
@@ -145,6 +184,13 @@ impl<S: StateStore> SourceExecutor<S> {
             .map_err(StreamExecutorError::connector_error);
 
         Ok(apply_rate_limit(stream?, self.rate_limit_rps).boxed())
+    }
+
+    fn is_auto_schema_change_enable(&self) -> bool {
+        self.actor_ctx
+            .streaming_config
+            .developer
+            .enable_auto_schema_change
     }
 
     /// `source_id | source_name | actor_id | fragment_id`

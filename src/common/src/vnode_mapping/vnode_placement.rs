@@ -213,6 +213,7 @@ mod tests {
             is_unschedulable: false,
             is_serving: true,
             is_streaming: false,
+            internal_rpc_host_addr: "".to_string(),
         };
 
         let count_same_vnode_mapping = |wm1: &WorkerSlotMapping, wm2: &WorkerSlotMapping| {
@@ -231,7 +232,7 @@ mod tests {
         let worker_1 = WorkerNode {
             id: 1,
             parallelism: 1,
-            property: Some(serving_property),
+            property: Some(serving_property.clone()),
             ..Default::default()
         };
 
@@ -246,7 +247,7 @@ mod tests {
         let worker_2 = WorkerNode {
             id: 2,
             parallelism: 50,
-            property: Some(serving_property),
+            property: Some(serving_property.clone()),
             ..Default::default()
         };
 
@@ -265,7 +266,7 @@ mod tests {
         let worker_3 = WorkerNode {
             id: 3,
             parallelism: 60,
-            property: Some(serving_property),
+            property: Some(serving_property.clone()),
             ..Default::default()
         };
         let re_pu_mapping_2 = place_vnode(
