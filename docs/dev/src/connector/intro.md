@@ -46,9 +46,9 @@ MySQL, which will be used to test sources.
     steps:
       # RisingWave cluster
       - use: minio
-      - use: postgres
+      - use: sqlite
       - use: meta-node
-        meta-backend: postgres
+        meta-backend: sqlite
       - use: compute-node
       - use: frontend
       - use: compactor
