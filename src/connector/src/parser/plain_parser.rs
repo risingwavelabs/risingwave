@@ -508,7 +508,7 @@ mod tests {
                 SchemaChangeEnvelope {
                     table_changes: [
                         TableSchemaChange {
-                            cdc_table_id: "mydb.test",
+                            cdc_table_id: "1.mydb.test",
                             columns: [
                                 ColumnCatalog {
                                     column_desc: ColumnDesc {
@@ -560,6 +560,7 @@ mod tests {
                                 },
                             ],
                             change_type: Alter,
+                            upstream_ddl: "ALTER TABLE test add column v2 varchar(32)",
                         },
                     ],
                 },
