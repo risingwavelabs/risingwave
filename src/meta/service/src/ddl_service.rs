@@ -16,6 +16,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::MetadataManager;
@@ -25,10 +27,13 @@ use risingwave_pb::catalog::connection::private_link_service::{
 };
 use risingwave_pb::catalog::connection::PbPrivateLinkService;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{connection, Comment, Connection, CreateType, Secret};
+use risingwave_pb::catalog::{connection, Comment, Connection, CreateType, Secret, Table};
+use risingwave_pb::common::worker_node::State;
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
+use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
@@ -915,6 +920,79 @@ impl DdlService for DdlServiceImpl {
             .await?;
 
         Ok(Response::new(AlterParallelismResponse {}))
+    }
+
+    /// Auto schema change for cdc sources,
+    /// called by the source parser when a schema change is detected.
+    async fn auto_schema_change(
+        &self,
+        request: Request<AutoSchemaChangeRequest>,
+    ) -> Result<Response<AutoSchemaChangeResponse>, Status> {
+        let req = request.into_inner();
+
+        // randomly select a frontend worker to get the replace table plan
+        let workers = self
+            .metadata_manager
+            .list_worker_node(Some(WorkerType::Frontend), Some(State::Running))
+            .await?;
+        let worker = workers
+            .choose(&mut thread_rng())
+            .ok_or_else(|| MetaError::from(anyhow!("no frontend worker available")))?;
+
+        let client = self
+            .env
+            .frontend_client_pool()
+            .get(worker)
+            .await
+            .map_err(MetaError::from)?;
+
+        let Some(schema_change) = req.schema_change else {
+            return Err(Status::invalid_argument(
+                "schema change message is required",
+            ));
+        };
+
+        for table_change in schema_change.table_changes {
+            let cdc_table_id = table_change.cdc_table_id.clone();
+            // get the table catalog corresponding to the cdc table
+            let tables: Vec<Table> = self
+                .metadata_manager
+                .get_table_catalog_by_cdc_table_id(cdc_table_id)
+                .await?;
+
+            tracing::info!(
+                "(auto schema change) Table jobs to replace: {:?}",
+                tables.iter().map(|t| t.id).collect::<Vec<_>>()
+            );
+            for table in tables {
+                // send a request to the frontend to get the ReplaceTablePlan
+                // will retry with exponential backoff if the request fails
+                let resp = client
+                    .get_table_replace_plan(GetTableReplacePlanRequest {
+                        database_id: table.database_id,
+                        owner: table.owner,
+                        table_name: table.name,
+                        table_change: Some(table_change.clone()),
+                    })
+                    .await?
+                    .into_inner();
+
+                if let Some(plan) = resp.replace_plan {
+                    plan.table
+                        .as_ref()
+                        .inspect(|t| tracing::info!("Table job to replace: {}", t.id));
+                    // start the schema change procedure
+                    self.ddl_controller
+                        .run_command(DdlCommand::ReplaceTable(Self::extract_replace_table_info(
+                            plan,
+                        )))
+                        .await?;
+                    tracing::info!("(auto schema change) Table {} replaced success", table.id);
+                }
+            }
+        }
+
+        Ok(Response::new(AutoSchemaChangeResponse {}))
     }
 }
 

@@ -84,6 +84,7 @@ impl From<WorkerInfo> for PbWorkerNode {
                 is_streaming: p.is_streaming,
                 is_serving: p.is_serving,
                 is_unschedulable: p.is_unschedulable,
+                internal_rpc_host_addr: p.internal_rpc_host_addr.clone(),
             }),
             transactional_id: info.0.transaction_id.map(|id| id as _),
             resource: info.2.resource,
@@ -670,7 +671,7 @@ impl ClusterControllerInner {
         };
         let insert_res = Worker::insert(worker).exec(&txn).await?;
         let worker_id = insert_res.last_insert_id as WorkerId;
-        if r#type == PbWorkerType::ComputeNode {
+        if r#type == PbWorkerType::ComputeNode || r#type == PbWorkerType::Frontend {
             let property = worker_property::ActiveModel {
                 worker_id: Set(worker_id),
                 parallelism: Set(add_property
@@ -680,6 +681,7 @@ impl ClusterControllerInner {
                 is_streaming: Set(add_property.is_streaming),
                 is_serving: Set(add_property.is_serving),
                 is_unschedulable: Set(add_property.is_unschedulable),
+                internal_rpc_host_addr: Set(add_property.internal_rpc_host_addr),
             };
             WorkerProperty::insert(property).exec(&txn).await?;
         }
@@ -926,6 +928,7 @@ mod tests {
             is_streaming: true,
             is_serving: true,
             is_unschedulable: false,
+            internal_rpc_host_addr: "".to_string(),
         };
         let hosts = mock_worker_hosts_for_test(worker_count);
         let mut worker_ids = vec![];
@@ -935,7 +938,7 @@ mod tests {
                     .add_worker(
                         PbWorkerType::ComputeNode,
                         host.clone(),
-                        property,
+                        property.clone(),
                         PbResource::default(),
                     )
                     .await?,
@@ -967,7 +970,7 @@ mod tests {
         );
 
         // re-register existing worker node with larger parallelism and change its serving mode.
-        let mut new_property = property;
+        let mut new_property = property.clone();
         new_property.worker_node_parallelism = (parallelism_num * 2) as _;
         new_property.is_serving = false;
         cluster_ctl
@@ -1016,12 +1019,13 @@ mod tests {
             is_streaming: true,
             is_serving: true,
             is_unschedulable: false,
+            internal_rpc_host_addr: "".to_string(),
         };
         let worker_id = cluster_ctl
             .add_worker(
                 PbWorkerType::ComputeNode,
                 host.clone(),
-                property,
+                property.clone(),
                 PbResource::default(),
             )
             .await?;
