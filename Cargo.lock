@@ -1314,32 +1314,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aws-lc-rs"
-version = "1.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df33e4a55b03f8780ba55041bc7be91a2a8ec8c03517b0379d2d6c96d2c30d95"
-dependencies = [
- "aws-lc-sys",
- "mirai-annotations",
- "paste",
- "zeroize",
-]
-
-[[package]]
-name = "aws-lc-sys"
-version = "0.13.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37ede3d6e360a48436fee127cb81710834407b1ec0c48a001cc29dec9005f73e"
-dependencies = [
- "bindgen",
- "cmake",
- "dunce",
- "fs_extra",
- "libc",
- "paste",
-]
-
-[[package]]
 name = "aws-msk-iam-sasl-signer"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2010,15 +1984,12 @@ dependencies = [
  "itertools 0.12.1",
  "lazy_static",
  "lazycell",
- "log",
- "prettyplease 0.2.15",
  "proc-macro2",
  "quote",
  "regex",
  "rustc-hash",
  "shlex",
  "syn 2.0.66",
- "which",
 ]
 
 [[package]]
@@ -4125,12 +4096,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dunce"
-version = "1.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56ce8c6da7551ec6c462cbaf3bfbc75131ebbfa1c944aeaa9dab51ca1c5f0c3b"
-
-[[package]]
 name = "duration-str"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4966,12 +4931,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fs_extra"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
-
-[[package]]
 name = "function_name"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5170,23 +5129,27 @@ dependencies = [
 
 [[package]]
 name = "gcp-bigquery-client"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0ce6fcbdaca0a4521a734f2bc7f2f6bd872fe40576e24f8bd0b05732c19a74f"
+version = "0.23.0"
+source = "git+https://github.com/risingwavelabs/gcp-bigquery-client?rev=ddd6ba738755efde3c9a922a5e66b2831e2bf75d#ddd6ba738755efde3c9a922a5e66b2831e2bf75d"
 dependencies = [
  "async-stream",
  "async-trait",
  "dyn-clone",
- "hyper 0.14.27",
- "hyper-rustls 0.24.2",
+ "flate2",
+ "hyper 1.4.1",
+ "hyper-util",
  "log",
- "reqwest 0.11.20",
+ "prost 0.13.1",
+ "prost-types 0.13.1",
+ "reqwest 0.12.4",
  "serde",
  "serde_json",
  "thiserror",
  "time",
  "tokio",
  "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tonic 0.12.1",
+ "tonic-build",
  "url",
  "yup-oauth2",
 ]
@@ -5811,6 +5774,24 @@ dependencies = [
  "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.25.0",
+ "tower-service",
+]
+
+[[package]]
+name = "hyper-rustls"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ee4be2c948921a1a5320b629c4193916ed787a7f7f293fd3f7f5a6c9de74155"
+dependencies = [
+ "futures-util",
+ "http 1.1.0",
+ "hyper 1.4.1",
+ "hyper-util",
+ "rustls 0.23.5",
+ "rustls-native-certs 0.7.0",
+ "rustls-pki-types",
+ "tokio",
+ "tokio-rustls 0.26.0",
  "tower-service",
 ]
 
@@ -7154,12 +7135,6 @@ dependencies = [
  "wasi",
  "windows-sys 0.48.0",
 ]
-
-[[package]]
-name = "mirai-annotations"
-version = "1.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9be0862c1b3f26a88803c4a49de6889c10e608b3ee9344e6ef5b45fb37ad3d1"
 
 [[package]]
 name = "mockall"
@@ -9020,6 +8995,8 @@ dependencies = [
  "prettyplease 0.2.15",
  "prost 0.13.1",
  "prost-types 0.13.1",
+ "pulldown-cmark",
+ "pulldown-cmark-to-cmark",
  "regex",
  "syn 2.0.66",
  "tempfile",
@@ -9178,6 +9155,15 @@ dependencies = [
  "bitflags 1.3.2",
  "memchr",
  "unicase",
+]
+
+[[package]]
+name = "pulldown-cmark-to-cmark"
+version = "10.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0194e6e1966c23cc5fd988714f85b18d548d773e81965413555d96569931833d"
+dependencies = [
+ "pulldown-cmark",
 ]
 
 [[package]]
@@ -10516,7 +10502,6 @@ dependencies = [
  "walkdir",
  "with_options",
  "workspace-hack",
- "yup-oauth2",
 ]
 
 [[package]]
@@ -11936,7 +11921,6 @@ version = "0.23.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "afabcee0551bd1aa3e18e5adbf2c0544722014b899adb31bd186ec638d3da97e"
 dependencies = [
- "aws-lc-rs",
  "log",
  "once_cell",
  "ring 0.17.5",
@@ -12012,7 +11996,6 @@ version = "0.102.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faaa0a62740bedb9b2ef5afa303da42764c012f743917351dc9a237ea1663610"
 dependencies = [
- "aws-lc-rs",
  "ring 0.17.5",
  "rustls-pki-types",
  "untrusted 0.9.0",
@@ -14226,6 +14209,7 @@ dependencies = [
  "percent-encoding",
  "pin-project",
  "prost 0.13.1",
+ "rustls-native-certs 0.7.0",
  "rustls-pemfile 2.1.1",
  "socket2 0.5.6",
  "tokio",
@@ -15909,28 +15893,28 @@ checksum = "09041cd90cf85f7f8b2df60c646f853b7f535ce68f85244eb6731cf89fa498ec"
 
 [[package]]
 name = "yup-oauth2"
-version = "8.3.0"
+version = "11.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "364ca376b5c04d9b2be9693054e3e0d2d146b363819d0f9a10c6ee66e4c8406b"
+checksum = "4ed5f19242090128c5809f6535cc7b8d4e2c32433f6c6005800bbc20a644a7f0"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.13.1",
+ "base64 0.22.0",
  "futures",
- "http 0.2.9",
- "hyper 0.14.27",
- "hyper-rustls 0.24.2",
- "itertools 0.10.5",
+ "http 1.1.0",
+ "http-body-util",
+ "hyper 1.4.1",
+ "hyper-rustls 0.27.2",
+ "hyper-util",
  "log",
  "percent-encoding",
- "rustls 0.21.11",
- "rustls-pemfile 1.0.4",
+ "rustls 0.23.5",
+ "rustls-pemfile 2.1.1",
  "seahash",
  "serde",
  "serde_json",
  "time",
  "tokio",
- "tower-service",
  "url",
 ]
 

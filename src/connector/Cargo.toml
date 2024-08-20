@@ -59,7 +59,7 @@ easy-ext = "1"
 enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-gcp-bigquery-client = "0.18.0"
+gcp-bigquery-client = { git = "https://github.com/risingwavelabs/gcp-bigquery-client", rev = "ddd6ba738755efde3c9a922a5e66b2831e2bf75d" }
 glob = "0.3"
 google-cloud-bigquery = { version = "0.12.0", features = ["auth"] }
 google-cloud-gax = "0.19.0"
@@ -181,7 +181,6 @@ url = "2"
 urlencoding = "2"
 uuid = { version = "1", features = ["v4", "fast-rng"] }
 with_options = { path = "./with_options" }
-yup-oauth2 = "8.3"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
