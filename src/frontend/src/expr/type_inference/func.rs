@@ -613,13 +613,47 @@ fn infer_type_for_special(
         }
         ExprType::MapAccess => {
             ensure_arity!("map_access", | inputs | == 2);
-            let map_type = inputs[0].return_type().into_map();
+            let map_type = inputs[0].try_into_map_type()?;
             // We do not align the map's key type with the input type here, but cast the latter to the former instead.
             // e.g., for {1:'a'}[1.0], if we align them, we will get "numeric" as the key type, which violates the map type's restriction.
             match inputs[1].cast_implicit_mut(map_type.key().clone()) {
                 Ok(()) => Ok(Some(map_type.value().clone())),
                 Err(_) => Err(ErrorCode::BindError(format!(
                     "Cannot access {} in {}",
+                    inputs[1].return_type(),
+                    inputs[0].return_type(),
+                ))
+                .into()),
+            }
+        }
+        ExprType::MapCat => {
+            ensure_arity!("map_contains", | inputs | == 2);
+            Ok(Some(align_types(inputs.iter_mut())?))
+        }
+        ExprType::MapInsert => {
+            ensure_arity!("map_insert", | inputs | == 3);
+            let map_type = inputs[0].try_into_map_type()?;
+            let rk = inputs[1].cast_implicit_mut(map_type.key().clone());
+            let rv = inputs[2].cast_implicit_mut(map_type.value().clone());
+            match (rk, rv) {
+                (Ok(()), Ok(())) => Ok(Some(map_type.into())),
+                _ => Err(ErrorCode::BindError(format!(
+                    "Cannot insert ({},{}) to {}",
+                    inputs[1].return_type(),
+                    inputs[2].return_type(),
+                    inputs[0].return_type(),
+                ))
+                .into()),
+            }
+        }
+        ExprType::MapDelete => {
+            ensure_arity!("map_delete", | inputs | == 2);
+            let map_type = inputs[0].try_into_map_type()?;
+            let rk = inputs[1].cast_implicit_mut(map_type.key().clone());
+            match rk {
+                Ok(()) => Ok(Some(map_type.into())),
+                _ => Err(ErrorCode::BindError(format!(
+                    "Cannot delete {} from {}",
                     inputs[1].return_type(),
                     inputs[0].return_type(),
                 ))

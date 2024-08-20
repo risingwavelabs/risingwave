@@ -395,9 +395,13 @@ impl HummockManager {
             version_id: Set(version_id.try_into().unwrap()),
         };
         hummock_epoch_to_version::Entity::insert(m)
+            .on_conflict(
+                OnConflict::column(hummock_epoch_to_version::Column::Epoch)
+                    .update_columns([hummock_epoch_to_version::Column::VersionId])
+                    .to_owned(),
+            )
             .exec(txn)
             .await?;
-
         let mut version_sst_ids = None;
         let select_groups = group_parents
             .iter()
@@ -483,14 +487,8 @@ fn replay_archive(
     deltas: impl Iterator<Item = PbHummockVersionDelta>,
 ) -> HummockVersion {
     let mut last_version = HummockVersion::from_persisted_protobuf(&version);
-    let mut mce = last_version.visible_table_committed_epoch();
     for d in deltas {
         let d = HummockVersionDelta::from_persisted_protobuf(&d);
-        assert!(
-            d.visible_table_committed_epoch() > mce,
-            "time travel expects delta from commit_epoch only"
-        );
-        mce = d.visible_table_committed_epoch();
         // Need to work around the assertion in `apply_version_delta`.
         // Because compaction deltas are not included in time travel archive.
         while last_version.id < d.prev_id {

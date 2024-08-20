@@ -91,9 +91,15 @@ impl ApproxPercentile {
                     } else if non_neg {
                         let count = state.pos_buckets.entry(bucket_id).or_insert(0);
                         *count -= 1;
+                        if *count == 0 {
+                            state.pos_buckets.remove(&bucket_id);
+                        }
                     } else {
                         let count = state.neg_buckets.entry(bucket_id).or_insert(0);
                         *count -= 1;
+                        if *count == 0 {
+                            state.neg_buckets.remove(&bucket_id);
+                        }
                     }
                     state.count -= 1;
                 }
