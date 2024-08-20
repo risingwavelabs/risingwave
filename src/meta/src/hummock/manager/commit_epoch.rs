@@ -232,7 +232,7 @@ impl HummockManager {
             is_visible_table_committed_epoch,
             new_compaction_group,
             commit_sstables,
-            new_table_ids,
+            &new_table_ids,
             new_table_watermarks,
             change_log_delta,
         );
@@ -289,6 +289,21 @@ impl HummockManager {
                 .values()
                 .map(|g| (g.group_id, g.parent_group_id))
                 .collect();
+            let time_travel_tables_to_commit =
+                new_table_ids
+                    .iter()
+                    .chain(tables_to_commit.iter().filter_map(|table_id| {
+                        let Some(info) = version
+                            .latest_version()
+                            .state_table_info
+                            .info()
+                            .get(table_id)
+                        else {
+                            tracing::warn!("state table info not found for {table_id}");
+                            return None;
+                        };
+                        Some((table_id, &info.compaction_group_id))
+                    }));
             let mut txn = sql_store.conn.begin().await?;
             let version_snapshot_sst_ids = self
                 .write_time_travel_metadata(
@@ -297,6 +312,8 @@ impl HummockManager {
                     time_travel_delta,
                     &group_parents,
                     &versioning.last_time_travel_snapshot_sst_ids,
+                    time_travel_tables_to_commit,
+                    committed_epoch,
                 )
                 .await?;
             commit_multi_var_with_provided_txn!(

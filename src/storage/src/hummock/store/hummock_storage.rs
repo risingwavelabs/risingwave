@@ -330,7 +330,7 @@ impl HummockStorage {
         let fetch = async {
             let pb_version = self
                 .hummock_meta_client
-                .get_version_by_epoch(epoch)
+                .get_version_by_epoch(epoch, table_id.table_id())
                 .await
                 .inspect_err(|e| tracing::error!("{}", e.to_report_string()))
                 .map_err(|e| HummockError::meta_error(e.to_report_string()))?;

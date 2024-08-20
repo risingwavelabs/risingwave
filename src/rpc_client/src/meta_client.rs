@@ -1432,8 +1432,12 @@ impl MetaClient {
         Ok(resp.ret)
     }
 
-    pub async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion> {
-        let req = GetVersionByEpochRequest { epoch };
+    pub async fn get_version_by_epoch(
+        &self,
+        epoch: HummockEpoch,
+        table_id: u32,
+    ) -> Result<PbHummockVersion> {
+        let req = GetVersionByEpochRequest { epoch, table_id };
         let resp = self.inner.get_version_by_epoch(req).await?;
         Ok(resp.version.unwrap())
     }
@@ -1607,8 +1611,12 @@ impl HummockMetaClient for MetaClient {
         Ok((request_sender, Box::pin(stream)))
     }
 
-    async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion> {
-        self.get_version_by_epoch(epoch).await
+    async fn get_version_by_epoch(
+        &self,
+        epoch: HummockEpoch,
+        table_id: u32,
+    ) -> Result<PbHummockVersion> {
+        self.get_version_by_epoch(epoch, table_id).await
     }
 }
 

@@ -833,6 +833,7 @@ message CancelCompactTaskResponse {
 
 message GetVersionByEpochRequest {
   uint64 epoch = 1;
+  uint32 table_id = 2;
 }
 
 message GetVersionByEpochResponse {

@@ -710,8 +710,11 @@ impl HummockManagerService for HummockServiceImpl {
         &self,
         request: Request<GetVersionByEpochRequest>,
     ) -> Result<Response<GetVersionByEpochResponse>, Status> {
-        let GetVersionByEpochRequest { epoch } = request.into_inner();
-        let version = self.hummock_manager.epoch_to_version(epoch).await?;
+        let GetVersionByEpochRequest { epoch, table_id } = request.into_inner();
+        let version = self
+            .hummock_manager
+            .epoch_to_version(epoch, table_id)
+            .await?;
         Ok(Response::new(GetVersionByEpochResponse {
             version: Some(version.to_protobuf()),
         }))
