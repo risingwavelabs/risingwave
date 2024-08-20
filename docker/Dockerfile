@@ -75,9 +75,9 @@ ENV OPENSSL_STATIC=1
 RUN cargo fetch && \
   cargo build -p risingwave_cmd_all --features "rw-static-link" --features all-udf && \
   mkdir -p /risingwave/bin && \
-    mv /risingwave/target/production/risingwave /risingwave/bin/ && \
-    mv /risingwave/target/production/risingwave.dwp /risingwave/bin/ && \
-  cp ./target/production/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
+    mv /risingwave/target/${CARGO_PROFILE}/risingwave /risingwave/bin/ && \
+    mv /risingwave/target/${CARGO_PROFILE}/risingwave.dwp /risingwave/bin/ && \
+  cp ./target/${CARGO_PROFILE}/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
   chmod +x /risingwave/bin/jeprof && \
   mkdir -p /risingwave/lib && cargo clean
 
