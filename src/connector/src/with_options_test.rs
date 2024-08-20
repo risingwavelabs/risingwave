@@ -238,14 +238,14 @@ fn extract_comments(attrs: &[Attribute]) -> String {
             if let Ok(Meta::NameValue(mnv)) = attr.parse_meta() {
                 if mnv.path.is_ident("doc") {
                     if let syn::Lit::Str(lit_str) = mnv.lit {
-                        return Some(lit_str.value());
+                        return Some(lit_str.value().trim().to_string());
                     }
                 }
             }
             None
         })
         .collect::<Vec<_>>()
-        .join(" ")
+        .join("\n")
         .trim()
         .to_string()
 }
