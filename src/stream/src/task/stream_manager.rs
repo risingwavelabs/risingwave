@@ -15,7 +15,6 @@
 use core::time::Duration;
 use std::collections::HashSet;
 use std::fmt::Debug;
-use std::future::Future;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Instant;
@@ -350,20 +349,7 @@ impl LocalBarrierWorker {
                 }
             }
         };
-        let actor_manager = self.actor_manager.clone();
-        let shared_context = self.current_shared_context.clone();
-        self.spawn_actors(actors.into_iter().map(|actor| {
-            let stream_actor = actor.actor.as_ref().unwrap();
-            let (actor_id, mview_definition) =
-                (stream_actor.actor_id, stream_actor.mview_definition.clone());
-            (
-                actor_id,
-                mview_definition,
-                actor_manager
-                    .clone()
-                    .create_actor(actor, shared_context.clone()),
-            )
-        }));
+        self.spawn_actors(actors);
         let _ = result_sender.send(Ok(()));
     }
 }
@@ -612,19 +598,16 @@ impl StreamActorManager {
 }
 
 impl LocalBarrierWorker {
-    pub(super) fn spawn_actors<
-        F: Future<Output = StreamResult<Actor<DispatchExecutor>>> + Send + 'static,
-    >(
-        &mut self,
-        actors: impl Iterator<Item = (ActorId, String, F)>,
-    ) {
-        for (actor_id, mview_definition, actor) in actors {
+    pub(super) fn spawn_actors(&mut self, actors: Vec<BuildActorInfo>) {
+        for actor in actors {
             let monitor = tokio_metrics::TaskMonitor::new();
-
+            let stream_actor_ref = actor.actor.as_ref().unwrap();
+            let actor_id = stream_actor_ref.actor_id;
             let handle = {
-                let trace_span = format!("Actor {actor_id}: `{}`", mview_definition);
+                let trace_span =
+                    format!("Actor {actor_id}: `{}`", stream_actor_ref.mview_definition);
                 let barrier_manager = self.current_shared_context.local_barrier_manager.clone();
-                let actor = actor.and_then(|actor| actor.run()).map(move |result| {
+                let actor = self.actor_manager.clone().create_actor(actor, self.current_shared_context.clone()).and_then(|actor| actor.run()).map(move |result| {
                     if let Err(err) = result {
                         // TODO: check error type and panic if it's unexpected.
                         // Intentionally use `?` on the report to also include the backtrace.
