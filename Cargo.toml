@@ -302,9 +302,6 @@ lto = "off"
 # It will trade-off lto for faster build time.
 [profile.patch-production]
 inherits = "production"
-debug = "full"
-incremental = false
-split-debuginfo = "packed"
 lto = "off"
 
 [profile.production]
