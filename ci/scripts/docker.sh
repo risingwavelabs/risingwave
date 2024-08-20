@@ -6,7 +6,7 @@ set -euo pipefail
 ghcraddr="ghcr.io/risingwavelabs/risingwave"
 dockerhubaddr="risingwavelabs/risingwave"
 arch="$(uname -m)"
-CARGO_BUILD_PROFILE=${CARGO_BUILD_PROFILE:-production}
+CARGO_PROFILE=${CARGO_PROFILE:-production}
 
 echo "--- ghcr login"
 echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
@@ -24,14 +24,14 @@ fi
 
 # Build RisingWave docker image ${BUILDKITE_COMMIT}-${arch}
 echo "--- docker build and tag"
-echo "CARGO_BUILD_PROFILE is set to ${CARGO_BUILD_PROFILE}"
+echo "CARGO_PROFILE is set to ${CARGO_PROFILE}"
 docker buildx create \
   --name container \
   --driver=docker-container
 
 docker buildx build -f docker/Dockerfile \
   --build-arg "GIT_SHA=${BUILDKITE_COMMIT}" \
-  --build-arg "CARGO_BUILD_PROFILE=${CARGO_BUILD_PROFILE:-production}" \
+  --build-arg "CARGO_PROFILE=${CARGO_PROFILE}" \
   -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" \
   --progress plain \
   --builder=container \
