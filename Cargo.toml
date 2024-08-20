@@ -301,6 +301,7 @@ lto = "off"
 # Patch profile for production clusters.
 # It will trade-off lto for faster build time.
 [profile.patch-production]
+inherits = "production"
 debug = "full"
 incremental = false
 split-debuginfo = "packed"
