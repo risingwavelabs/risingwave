@@ -63,6 +63,9 @@ FROM rust-base AS rust-builder
 ARG GIT_SHA
 ENV GIT_SHA=$GIT_SHA
 
+ARG CARGO_BUILD_PROFILE
+ENV CARGO_BUILD_PROFILE=$CARGO_BUILD_PROFILE
+
 COPY ./ /risingwave
 WORKDIR /risingwave
 
@@ -70,7 +73,7 @@ ENV ENABLE_BUILD_DASHBOARD=1
 ENV OPENSSL_STATIC=1
 
 RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --profile production --features "rw-static-link" --features all-udf && \
+  cargo build -p risingwave_cmd_all --profile "${CARGO_BULD_PROFILE}" --features "rw-static-link" --features all-udf && \
   mkdir -p /risingwave/bin && \
     mv /risingwave/target/production/risingwave /risingwave/bin/ && \
     mv /risingwave/target/production/risingwave.dwp /risingwave/bin/ && \
