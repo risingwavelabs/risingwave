@@ -596,6 +596,7 @@ pub(crate) mod tests {
             incoming_sinks: vec![],
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
+            cdc_table_id: None,
         };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
@@ -680,6 +681,7 @@ pub(crate) mod tests {
                 is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
+                internal_rpc_host_addr: "".to_string(),
             }),
             transactional_id: Some(0),
             ..Default::default()
@@ -697,6 +699,7 @@ pub(crate) mod tests {
                 is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
+                internal_rpc_host_addr: "".to_string(),
             }),
             transactional_id: Some(1),
             ..Default::default()
@@ -714,6 +717,7 @@ pub(crate) mod tests {
                 is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
+                internal_rpc_host_addr: "".to_string(),
             }),
             transactional_id: Some(2),
             ..Default::default()
