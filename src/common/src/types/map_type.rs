@@ -36,26 +36,37 @@ impl MapType {
         Self(Box::new((key, value)))
     }
 
-    pub fn try_from_kv(key: DataType, value: DataType) -> Result<Self, anyhow::Error> {
+    pub fn try_from_kv(key: DataType, value: DataType) -> Result<Self, String> {
         Self::check_key_type_valid(&key)?;
         Ok(Self(Box::new((key, value))))
+    }
+
+    pub fn try_from_entries(list_entries_type: DataType) -> Result<Self, String> {
+        match list_entries_type {
+            DataType::Struct(s) => {
+                let Some((k, v)) = s.iter().collect_tuple() else {
+                    return Err(format!(
+                        "the underlying struct for map must have exactly two fields, got: {s:?}"
+                    ));
+                };
+                // the field names are not strictly enforced
+                // Currently this panics for SELECT * FROM t
+                // if cfg!(debug_assertions) {
+                //     itertools::assert_equal(struct_type.names(), ["key", "value"]);
+                // }
+                Self::try_from_kv(k.1.clone(), v.1.clone())
+            }
+            _ => Err(format!(
+                "invalid map entries type, expected struct, got: {list_entries_type}"
+            )),
+        }
     }
 
     /// # Panics
     /// Panics if the key type is not valid for a map, or the
     /// entries type is not a valid struct type.
-    pub fn from_list_entries(list_entries_type: DataType) -> Self {
-        let struct_type = list_entries_type.as_struct();
-        let (k, v) = struct_type
-            .iter()
-            .collect_tuple()
-            .expect("the underlying struct for map must have exactly two fields");
-        // the field names are not strictly enforced
-        // Currently this panics for SELECT * FROM t
-        // if cfg!(debug_assertions) {
-        //     itertools::assert_equal(struct_type.names(), ["key", "value"]);
-        // }
-        Self::from_kv(k.1.clone(), v.1.clone())
+    pub fn from_entries(list_entries_type: DataType) -> Self {
+        Self::try_from_entries(list_entries_type).unwrap()
     }
 
     /// # Panics
@@ -89,7 +100,7 @@ impl MapType {
     ///
     /// Note that this isn't definitive.
     /// Just be conservative at the beginning, but not too restrictive (like only allowing strings).
-    pub fn check_key_type_valid(data_type: &DataType) -> anyhow::Result<()> {
+    pub fn check_key_type_valid(data_type: &DataType) -> Result<(), String> {
         let ok = match data_type {
             DataType::Int16 | DataType::Int32 | DataType::Int64 => true,
             DataType::Varchar => true,
@@ -111,7 +122,7 @@ impl MapType {
             | DataType::Map(_) => false,
         };
         if !ok {
-            Err(anyhow::anyhow!("invalid map key type: {data_type}"))
+            Err(format!("invalid map key type: {data_type}"))
         } else {
             Ok(())
         }
@@ -128,7 +139,7 @@ impl FromStr for MapType {
         if let Some((key, value)) = s[4..s.len() - 1].split(',').collect_tuple() {
             let key = key.parse().context("failed to parse map key type")?;
             let value = value.parse().context("failed to parse map value type")?;
-            MapType::try_from_kv(key, value)
+            MapType::try_from_kv(key, value).map_err(|e| anyhow::anyhow!(e))
         } else {
             Err(anyhow::anyhow!("expect map(...,...)"))
         }

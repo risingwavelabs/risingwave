@@ -251,7 +251,7 @@ impl From<&PbDataType> for DataType {
                 // Map is physically the same as a list.
                 // So the first (and only) item is the list element type.
                 let list_entries_type: DataType = (&proto.field_type[0]).into();
-                DataType::Map(MapType::from_list_entries(list_entries_type))
+                DataType::Map(MapType::from_entries(list_entries_type))
             }
             PbTypeName::Int256 => DataType::Int256,
         }
@@ -846,6 +846,12 @@ impl From<Vec<u8>> for ScalarImpl {
 impl From<Bytes> for ScalarImpl {
     fn from(v: Bytes) -> Self {
         Self::Bytea(v.as_ref().into())
+    }
+}
+
+impl From<ListRef<'_>> for ScalarImpl {
+    fn from(list: ListRef<'_>) -> Self {
+        Self::List(list.to_owned_scalar())
     }
 }
 
