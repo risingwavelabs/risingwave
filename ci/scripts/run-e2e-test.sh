@@ -50,8 +50,6 @@ cluster_start() {
   fi
 }
 
-# `cluster_stop false` will not check the log.
-# shellcheck disable=SC2120
 cluster_stop() {
   if [[ $mode == "standalone" ]]
   then
@@ -62,13 +60,7 @@ cluster_stop() {
   then
     stop_single_node
   else
-    check_log=${1:-"true"}
-    if [[ $check_log == "true" ]]
-    then
-      risedev ci-kill
-    else
-      risedev kill
-    fi
+    risedev ci-kill
   fi
 }
 
@@ -142,7 +134,7 @@ sqllogictest -p 4566 -d dev './e2e_test/udf/js_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/python_udf.slt'
 
 echo "--- Kill cluster"
-cluster_stop false
+cluster_stop
 
 echo "--- e2e, $mode, generated"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
