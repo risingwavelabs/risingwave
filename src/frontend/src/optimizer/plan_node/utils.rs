@@ -178,6 +178,7 @@ impl TableCatalogBuilder {
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             retention_seconds: None,
+            cdc_table_id: None,
         }
     }
 
