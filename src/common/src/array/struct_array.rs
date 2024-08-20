@@ -393,6 +393,15 @@ impl<'a> StructRef<'a> {
         iter_fields_ref!(self, it, { Either::Left(it) }, { Either::Right(it) })
     }
 
+    /// # Panics
+    /// Panics if the index is out of bounds.
+    pub fn field_at(&self, i: usize) -> DatumRef<'a> {
+        match self {
+            StructRef::Indexed { arr, idx } => arr.field_at(i).value_at(*idx),
+            StructRef::ValueRef { val } => val.fields[i].to_datum_ref(),
+        }
+    }
+
     pub fn memcmp_serialize(
         self,
         serializer: &mut memcomparable::Serializer<impl BufMut>,

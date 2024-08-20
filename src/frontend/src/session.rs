@@ -267,7 +267,7 @@ impl FrontendEnv {
             Default::default(),
             &config.meta,
         )
-        .await?;
+        .await;
 
         let worker_id = meta_client.worker_id();
         info!("Assigned worker node id {}", worker_id);

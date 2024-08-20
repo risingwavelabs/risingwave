@@ -14,7 +14,7 @@
 
 use either::Either;
 use risingwave_common::array::*;
-use risingwave_common::for_all_array_variants;
+use risingwave_common::for_all_variants;
 use risingwave_common::types::{Datum, DatumRef, Scalar, ToDatumRef};
 
 /// The type-erased return value of an expression.
@@ -79,7 +79,7 @@ impl<'a, A: Array> ValueRef<'a, A> {
 }
 
 macro_rules! impl_convert {
-    ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+    ($( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
         $(
             paste::paste! {
                 /// Converts a type-erased value to a reference of a specific array type.
@@ -102,4 +102,4 @@ macro_rules! impl_convert {
     };
 }
 
-for_all_array_variants! { impl_convert }
+for_all_variants! { impl_convert }
