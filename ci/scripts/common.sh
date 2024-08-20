@@ -97,7 +97,6 @@ function filter_stack_trace() {
   touch tmp
   cat "$1" \
   | sed -E '/  [1-9][0-9]+:/d' \
-  | sed -E '/  [3-9]+:/d' \
   | sed -E '/  at .rustc/d' \
   | sed -E '/  at ...cargo/d' > tmp
   cp tmp "$1"

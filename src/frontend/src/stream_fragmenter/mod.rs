@@ -26,7 +26,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag, NoOpNode,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanType,
 };
 
 use self::rewrite::build_delta_join_without_arrange;
@@ -289,6 +289,10 @@ fn build_fragment(
 
             NodeBody::StreamScan(node) => {
                 current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
+                if node.stream_scan_type() == StreamScanType::SnapshotBackfill {
+                    current_fragment.fragment_type_mask |=
+                        FragmentTypeFlag::SnapshotBackfillStreamScan as u32;
+                }
                 // memorize table id for later use
                 // The table id could be a upstream CDC source
                 state

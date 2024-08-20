@@ -91,9 +91,15 @@ impl ApproxPercentile {
                     } else if non_neg {
                         let count = state.pos_buckets.entry(bucket_id).or_insert(0);
                         *count -= 1;
+                        if *count == 0 {
+                            state.pos_buckets.remove(&bucket_id);
+                        }
                     } else {
                         let count = state.neg_buckets.entry(bucket_id).or_insert(0);
                         *count -= 1;
+                        if *count == 0 {
+                            state.neg_buckets.remove(&bucket_id);
+                        }
                     }
                     state.count -= 1;
                 }
@@ -150,7 +156,7 @@ impl AggregateFunction for ApproxPercentile {
     // approximate quantile bucket on the fly.
     async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
         let state = state.downcast_ref::<State>();
-        let quantile_count = (state.count as f64 * self.quantile) as u64;
+        let quantile_count = (state.count as f64 * self.quantile).floor() as u64;
         let mut acc_count = 0;
         for (bucket_id, count) in state.neg_buckets.iter().rev() {
             acc_count += count;

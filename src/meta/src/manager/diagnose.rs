@@ -23,12 +23,13 @@ use risingwave_common::types::Timestamptz;
 use risingwave_common::util::StackTraceResponseExt;
 use risingwave_hummock_sdk::level::Level;
 use risingwave_meta_model_v2::table::TableType;
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::event_log::Event;
 use risingwave_pb::meta::EventLog;
 use risingwave_pb::monitor_service::StackTraceResponse;
 use risingwave_rpc_client::ComputeClientPool;
+use risingwave_sqlparser::ast::{CompatibleSourceSchema, Statement, Value};
+use risingwave_sqlparser::parser::Parser;
 use serde_json::json;
 use thiserror_ext::AsReport;
 
@@ -413,10 +414,8 @@ impl DiagnoseCommand {
 
     #[cfg_attr(coverage, coverage(off))]
     async fn write_storage(&self, s: &mut String) {
-        let version = self.hummock_manger.get_current_version().await;
         let mut sst_num = 0;
         let mut sst_total_file_size = 0;
-        let compaction_group_num = version.levels.len();
         let back_pressured_compaction_groups = self
             .hummock_manger
             .write_limits()
@@ -469,34 +468,41 @@ impl DiagnoseCommand {
 
         let top_k = 10;
         let mut top_tombstone_delete_sst = BinaryHeap::with_capacity(top_k);
-        for compaction_group in version.levels.values() {
-            let mut visit_level = |level: &Level| {
-                sst_num += level.table_infos.len();
-                sst_total_file_size += level.table_infos.iter().map(|t| t.file_size).sum::<u64>();
-                for sst in &level.table_infos {
-                    if sst.total_key_count == 0 {
-                        continue;
-                    }
-                    let tombstone_delete_ratio = sst.stale_key_count * 10000 / sst.total_key_count;
-                    let e = SstableSort {
-                        compaction_group_id: compaction_group.group_id,
-                        sst_id: sst.sst_id,
-                        delete_ratio: tombstone_delete_ratio,
+        let compaction_group_num = self
+            .hummock_manger
+            .on_current_version(|version| {
+                for compaction_group in version.levels.values() {
+                    let mut visit_level = |level: &Level| {
+                        sst_num += level.table_infos.len();
+                        sst_total_file_size +=
+                            level.table_infos.iter().map(|t| t.file_size).sum::<u64>();
+                        for sst in &level.table_infos {
+                            if sst.total_key_count == 0 {
+                                continue;
+                            }
+                            let tombstone_delete_ratio =
+                                sst.stale_key_count * 10000 / sst.total_key_count;
+                            let e = SstableSort {
+                                compaction_group_id: compaction_group.group_id,
+                                sst_id: sst.sst_id,
+                                delete_ratio: tombstone_delete_ratio,
+                            };
+                            top_k_sstables(top_k, &mut top_tombstone_delete_sst, e);
+                        }
                     };
-                    top_k_sstables(top_k, &mut top_tombstone_delete_sst, e);
+                    let l0 = &compaction_group.l0;
+                    // FIXME: why chaining levels iter leads to segmentation fault?
+                    for level in &l0.sub_levels {
+                        visit_level(level);
+                    }
+                    for level in &compaction_group.levels {
+                        visit_level(level);
+                    }
                 }
-            };
-            let Some(ref l0) = compaction_group.l0 else {
-                continue;
-            };
-            // FIXME: why chaining levels iter leads to segmentation fault?
-            for level in &l0.sub_levels {
-                visit_level(level);
-            }
-            for level in &compaction_group.levels {
-                visit_level(level);
-            }
-        }
+                version.levels.len()
+            })
+            .await;
+
         let _ = writeln!(s, "number of SSTables: {sst_num}");
         let _ = writeln!(s, "total size of SSTables (byte): {sst_total_file_size}");
         let _ = writeln!(s, "number of compaction groups: {compaction_group_num}");
@@ -688,65 +694,35 @@ impl DiagnoseCommand {
             .list_sources()
             .await?
             .into_iter()
-            .map(|s| {
-                // The usage of secrets suggests that it's safe to display the definition.
-                let redact = if !s.get_secret_refs().is_empty() {
-                    false
-                } else {
-                    !s.get_info()
-                        .map(|i| !i.get_format_encode_secret_refs().is_empty())
-                        .unwrap_or(false)
-                };
-                (s.id, (s.name, s.schema_id, s.definition, redact))
-            })
+            .map(|s| (s.id, (s.name, s.schema_id, s.definition)))
             .collect::<BTreeMap<_, _>>();
         let tables = mgr
             .catalog_controller
             .list_tables_by_type(TableType::Table)
             .await?
             .into_iter()
-            .map(|t| {
-                let redact =
-                    if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
-                        t.optional_associated_source_id
-                    {
-                        sources.get(&source_id).map(|s| s.3).unwrap_or(true)
-                    } else {
-                        false
-                    };
-                (t.id, (t.name, t.schema_id, t.definition, redact))
-            })
+            .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
             .collect::<BTreeMap<_, _>>();
         let mvs = mgr
             .catalog_controller
             .list_tables_by_type(TableType::MaterializedView)
             .await?
             .into_iter()
-            .map(|t| (t.id, (t.name, t.schema_id, t.definition, false)))
+            .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
             .collect::<BTreeMap<_, _>>();
         let indexes = mgr
             .catalog_controller
             .list_tables_by_type(TableType::Index)
             .await?
             .into_iter()
-            .map(|t| (t.id, (t.name, t.schema_id, t.definition, false)))
+            .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
             .collect::<BTreeMap<_, _>>();
         let sinks = mgr
             .catalog_controller
             .list_sinks()
             .await?
             .into_iter()
-            .map(|s| {
-                // The usage of secrets suggests that it's safe to display the definition.
-                let redact = if !s.get_secret_refs().is_empty() {
-                    false
-                } else {
-                    !s.format_desc
-                        .map(|i| !i.get_secret_refs().is_empty())
-                        .unwrap_or(false)
-                };
-                (s.id, (s.name, s.schema_id, s.definition, redact))
-            })
+            .map(|s| (s.id, (s.name, s.schema_id, s.definition)))
             .collect::<BTreeMap<_, _>>();
         let catalogs = [
             ("SOURCE", sources),
@@ -766,13 +742,10 @@ impl DiagnoseCommand {
                 row.add_cell("definition".into());
                 row
             });
-            for (id, (name, schema_id, definition, redact)) in items {
+            for (id, (name, schema_id, definition)) in items {
                 let mut row = Row::new();
-                let may_redact = if redact {
-                    "[REDACTED]".into()
-                } else {
-                    definition
-                };
+                let may_redact =
+                    redact_all_sql_options(&definition).unwrap_or_else(|| "[REDACTED]".into());
                 row.add_cell(id.into());
                 row.add_cell(name.into());
                 row.add_cell(schema_id.into());
@@ -802,4 +775,53 @@ fn try_add_cell<T: Into<comfy_table::Cell>>(row: &mut comfy_table::Row, t: Optio
 #[cfg_attr(coverage, coverage(off))]
 fn merge_prometheus_selector<'a>(selectors: impl IntoIterator<Item = &'a str>) -> String {
     selectors.into_iter().filter(|s| !s.is_empty()).join(",")
+}
+
+fn redact_all_sql_options(sql: &str) -> Option<String> {
+    let Ok(mut statements) = Parser::parse_sql(sql) else {
+        return None;
+    };
+    let mut redacted = String::new();
+    for statement in &mut statements {
+        let options = match statement {
+            Statement::CreateTable {
+                with_options,
+                source_schema,
+                ..
+            } => {
+                let connector_schema = match source_schema {
+                    Some(CompatibleSourceSchema::V2(cs)) => Some(&mut cs.row_options),
+                    _ => None,
+                };
+                (Some(with_options), connector_schema)
+            }
+            Statement::CreateSource { stmt } => {
+                let connector_schema = match &mut stmt.source_schema {
+                    CompatibleSourceSchema::V2(cs) => Some(&mut cs.row_options),
+                    _ => None,
+                };
+                (Some(&mut stmt.with_properties.0), connector_schema)
+            }
+            Statement::CreateSink { stmt } => {
+                let connector_schema = match &mut stmt.sink_schema {
+                    Some(cs) => Some(&mut cs.row_options),
+                    _ => None,
+                };
+                (Some(&mut stmt.with_properties.0), connector_schema)
+            }
+            _ => (None, None),
+        };
+        if let Some(options) = options.0 {
+            for option in options {
+                option.value = Value::SingleQuotedString("[REDACTED]".into());
+            }
+        }
+        if let Some(options) = options.1 {
+            for option in options {
+                option.value = Value::SingleQuotedString("[REDACTED]".into());
+            }
+        }
+        writeln!(&mut redacted, "{statement}").unwrap();
+    }
+    Some(redacted)
 }

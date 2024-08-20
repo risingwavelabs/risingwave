@@ -313,6 +313,7 @@ define_keywords!(
     LOGICAL,
     LOGIN,
     LOWER,
+    MAP,
     MATCH,
     MATERIALIZED,
     MAX,

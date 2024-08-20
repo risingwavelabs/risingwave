@@ -16,6 +16,7 @@ postmaster enable_tracing
 postmaster license_key
 postmaster max_concurrent_creating_streaming_jobs
 postmaster pause_on_next_bootstrap
+postmaster time_travel_retention_ms
 user application_name
 user backfill_rate_limit
 user background_ddl
@@ -58,6 +59,7 @@ user standard_conforming_strings
 user statement_timeout
 user streaming_parallelism
 user streaming_use_arrangement_backfill
+user streaming_use_snapshot_backfill
 user synchronize_seqscans
 user timezone
 user transaction_isolation

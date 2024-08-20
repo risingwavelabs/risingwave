@@ -464,7 +464,7 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "S3_v2 source check on AWS (json parser)"
+  - label: "S3 source check on AWS (json parser)"
     key: "s3-v2-source-check-aws-json-parser"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_source_v2.py -t json"
     if: |
@@ -486,7 +486,7 @@ steps:
     timeout_in_minutes: 25
     retry: *auto-retry
 
-  - label: "S3_v2 source new file check on AWS (json)"
+  - label: "S3 source new file check on AWS (json)"
     key: "s3-v2-source-new-file-check-aws"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_source_v2_new_file.py"
     if: |
@@ -508,7 +508,7 @@ steps:
     timeout_in_minutes: 25
     retry: *auto-retry
 
-  - label: "S3_v2 source check on parquet file"
+  - label: "S3 source check on parquet file"
     key: "s3-v2-source-check-parquet-file"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_parquet_source.py"
     if: |
@@ -530,7 +530,7 @@ steps:
     timeout_in_minutes: 25
     retry: *auto-retry
 
-  - label: "S3_v2 source batch read on AWS (json parser)"
+  - label: "S3 source batch read on AWS (json parser)"
     key: "s3-v2-source-batch-read-check-aws-json-parser"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_source_batch.py -t json"
     if: |
@@ -552,7 +552,7 @@ steps:
     timeout_in_minutes: 25
     retry: *auto-retry
 
-  - label: "S3_v2 source check on AWS (csv parser)"
+  - label: "S3 source check on AWS (csv parser)"
     key: "s3-v2-source-check-aws-csv-parser"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s fs_source_v2.py -t csv_without_header"
     if: |
@@ -743,7 +743,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 24
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "e2e standalone binary test"

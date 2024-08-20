@@ -1,0 +1,78 @@
+control substitution on
+
+# mysql env vars will be read from the `.risingwave/config/risedev-env` file
+
+system ok
+mysql -e "
+    SET GLOBAL time_zone = '+00:00';
+"
+
+system ok
+mysql -e "
+  DROP DATABASE IF EXISTS testdb2;
+  CREATE DATABASE testdb2;
+  USE testdb2;
+  CREATE TABLE orders (
+      order_id INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      order_date DATETIME NOT NULL,
+      customer_name VARCHAR(255) NOT NULL,
+      price DECIMAL(10, 5) NOT NULL,
+      product_id INTEGER NOT NULL,
+      order_status BOOLEAN NOT NULL
+  ) AUTO_INCREMENT = 10001;
+  INSERT INTO orders
+  VALUES (default, '2020-07-30 10:08:22', 'Jark', 50.50, 102, false),
+         (default, '2020-07-30 10:11:09', 'Sally', 15.00, 105, false),
+         (default, '2020-07-30 12:00:30', 'Edward', 25.25, 106, false);
+"
+
+statement ok
+create source mysql_source with (
+  connector = 'mysql-cdc',
+  hostname = '${MYSQL_HOST}',
+  port = '${MYSQL_TCP_PORT}',
+  username = 'root',
+  password = '${MYSQL_PWD}',
+  database.name = 'testdb2',
+  server.id = '5185'
+);
+
+# backfill rate limit to zero
+statement ok
+set backfill_rate_limit=0;
+
+statement ok
+create table my_orders (
+   order_id int,
+   order_date timestamp,
+   customer_name string,
+   price decimal,
+   product_id int,
+   order_status smallint,
+   PRIMARY KEY (order_id)
+) from mysql_source table 'testdb2.orders';
+
+sleep 3s
+
+query I
+select count(*) from my_orders;
+----
+0
+
+# alter rate limit
+statement ok
+ALTER TABLE my_orders SET backfill_rate_limit = 1000;
+
+# wait alter ddl
+sleep 3s
+
+query I
+select count(*) from my_orders;
+----
+3
+
+statement ok
+drop table my_orders;
+
+statement ok
+drop source mysql_source cascade;

@@ -159,6 +159,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let first_barrier = expect_first_barrier(&mut upstream).await?;
 
         let mut is_snapshot_paused = first_barrier.is_pause_on_startup();
+        let mut rate_limit_to_zero = self.rate_limit_rps.is_some_and(|val| val == 0);
 
         // Check whether this parallelism has been assigned splits,
         // if not, we should bypass the backfill directly.
@@ -343,7 +344,23 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                     && *new_rate_limit != self.rate_limit_rps
                                                 {
                                                     self.rate_limit_rps = *new_rate_limit;
-                                                    // rebuild the new reader stream with new rate limit
+                                                    rate_limit_to_zero = self
+                                                        .rate_limit_rps
+                                                        .is_some_and(|val| val == 0);
+
+                                                    // update and persist current backfill progress without draining the buffered upstream chunks
+                                                    state_impl
+                                                        .mutate_state(
+                                                            current_pk_pos.clone(),
+                                                            last_binlog_offset.clone(),
+                                                            total_snapshot_row_count,
+                                                            false,
+                                                        )
+                                                        .await?;
+                                                    state_impl.commit_state(barrier.epoch).await?;
+                                                    yield Message::Barrier(barrier);
+
+                                                    // rebuild the snapshot stream with new rate limit
                                                     continue 'backfill_loop;
                                                 }
                                             }
@@ -497,7 +514,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 // It maybe a cancellation bug of the mysql driver.
                 let (_, mut snapshot_stream) = backfill_stream.into_inner();
 
+                // skip consume the snapshot stream if it is paused or rate limit to 0
                 if !is_snapshot_paused
+                    && !rate_limit_to_zero
                     && let Some(msg) = snapshot_stream
                         .next()
                         .instrument_await("consume_snapshot_stream_once")
@@ -655,7 +674,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                     // mark progress as finished
                     if let Some(progress) = self.progress.as_mut() {
-                        progress.finish(barrier.epoch.curr, total_snapshot_row_count);
+                        progress.finish(barrier.epoch, total_snapshot_row_count);
                     }
                     yield msg;
                     // break after the state have been saved

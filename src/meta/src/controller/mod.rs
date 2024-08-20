@@ -200,6 +200,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             secret_refs: secret_ref_map,
+            rate_limit: value.0.rate_limit.map(|v| v as _),
         }
     }
 }
@@ -240,6 +241,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             created_at_cluster_version: value.1.created_at_cluster_version,
             create_type: PbCreateType::Foreground as _,
             secret_refs: secret_ref_map,
+            original_target_columns: value.0.original_target_columns.to_protobuf(),
         }
     }
 }

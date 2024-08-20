@@ -567,7 +567,7 @@ pub mod tests {
         ];
         let levels = Levels {
             levels,
-            l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
+            l0: generate_l0_nonoverlapping_sublevels(vec![]),
             ..Default::default()
         };
         let mut level_handlers = vec![
@@ -636,7 +636,7 @@ pub mod tests {
         ];
         let levels = Levels {
             levels,
-            l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
+            l0: generate_l0_nonoverlapping_sublevels(vec![]),
             ..Default::default()
         };
         let levels_handler = vec![

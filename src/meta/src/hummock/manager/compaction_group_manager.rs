@@ -46,7 +46,10 @@ use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
 use crate::manager::{MetaSrvEnv, MetaStoreImpl};
-use crate::model::{BTreeMapTransaction, MetadataModel, MetadataModelError};
+use crate::model::{
+    BTreeMapTransaction, BTreeMapTransactionInner, DerefMutForward, MetadataModel,
+    MetadataModelError,
+};
 
 type CompactionGroupTransaction<'a> = BTreeMapTransaction<'a, CompactionGroupId, CompactionGroup>;
 
@@ -218,7 +221,9 @@ impl HummockManager {
             &self.metrics,
         );
         let mut new_version_delta = version.new_delta();
-        let epoch = new_version_delta.latest_version().max_committed_epoch;
+        let epoch = new_version_delta
+            .latest_version()
+            .visible_table_committed_epoch();
 
         for (table_id, raw_group_id) in pairs {
             let mut group_id = *raw_group_id;
@@ -691,6 +696,26 @@ impl CompactionGroupManager {
     /// Starts a transaction to update compaction group configs.
     pub fn start_compaction_groups_txn(&mut self) -> CompactionGroupTransaction<'_> {
         CompactionGroupTransaction::new(&mut self.compaction_groups)
+    }
+
+    pub fn start_owned_compaction_groups_txn<P: DerefMut<Target = Self>>(
+        inner: P,
+    ) -> BTreeMapTransactionInner<
+        CompactionGroupId,
+        CompactionGroup,
+        DerefMutForward<
+            Self,
+            BTreeMap<CompactionGroupId, CompactionGroup>,
+            P,
+            impl Fn(&Self) -> &BTreeMap<CompactionGroupId, CompactionGroup>,
+            impl Fn(&mut Self) -> &mut BTreeMap<CompactionGroupId, CompactionGroup>,
+        >,
+    > {
+        BTreeMapTransactionInner::new(DerefMutForward::new(
+            inner,
+            |mgr| &mgr.compaction_groups,
+            |mgr| &mut mgr.compaction_groups,
+        ))
     }
 
     /// Tries to get compaction group config for `compaction_group_id`.

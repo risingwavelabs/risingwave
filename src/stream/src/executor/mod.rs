@@ -40,10 +40,10 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    BarrierMutation, CombinedMutation, CreateSubscriptionMutation, Dispatchers,
-    DropSubscriptionMutation, PauseMutation, PbAddMutation, PbBarrier, PbBarrierMutation,
-    PbDispatcher, PbStreamMessage, PbUpdateMutation, PbWatermark, ResumeMutation,
-    SourceChangeSplitMutation, StopMutation, ThrottleMutation,
+    BarrierMutation, CombinedMutation, Dispatchers, DropSubscriptionsMutation, PauseMutation,
+    PbAddMutation, PbBarrier, PbBarrierMutation, PbDispatcher, PbStreamMessage, PbUpdateMutation,
+    PbWatermark, ResumeMutation, SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo,
+    ThrottleMutation,
 };
 use smallvec::SmallVec;
 
@@ -103,6 +103,10 @@ mod watermark;
 mod watermark_filter;
 mod wrapper;
 
+mod approx_percentile;
+
+mod row_merge;
+
 #[cfg(test)]
 mod integration_tests;
 pub mod test_utils;
@@ -110,9 +114,12 @@ mod utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
+pub use approx_percentile::global::GlobalApproxPercentileExecutor;
+pub use approx_percentile::local::LocalApproxPercentileExecutor;
 pub use backfill::arrangement_backfill::*;
 pub use backfill::cdc::{CdcBackfillExecutor, CdcScanOptions, ExternalStorageTable};
 pub use backfill::no_shuffle_backfill::*;
+pub use backfill::snapshot_backfill::*;
 pub use barrier_recv::BarrierRecvExecutor;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
@@ -139,6 +146,7 @@ pub use project_set::*;
 pub use rearranged_chain::RearrangedChainExecutor;
 pub use receiver::ReceiverExecutor;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+pub use row_merge::RowMergeExecutor;
 pub use simple_agg::SimpleAggExecutor;
 pub use sink::SinkExecutor;
 pub use sort::*;
@@ -274,6 +282,8 @@ pub struct AddMutation {
     // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
     pub splits: HashMap<ActorId, Vec<SplitImpl>>,
     pub pause: bool,
+    /// (`upstream_mv_table_id`,  `subscriber_id`)
+    pub subscriptions_to_add: Vec<(TableId, u32)>,
 }
 
 /// See [`PbMutation`] for the semantics of each mutation.
@@ -287,13 +297,9 @@ pub enum Mutation {
     Resume,
     Throttle(HashMap<ActorId, Option<u32>>),
     AddAndUpdate(AddMutation, UpdateMutation),
-    CreateSubscription {
-        subscription_id: u32,
-        upstream_mv_table_id: TableId,
-    },
-    DropSubscription {
-        subscription_id: u32,
-        upstream_mv_table_id: TableId,
+    DropSubscriptions {
+        /// `subscriber` -> `upstream_mv_table_id`
+        subscriptions_to_drop: Vec<(u32, TableId)>,
     },
 }
 
@@ -446,8 +452,7 @@ impl Barrier {
             | Mutation::Resume
             | Mutation::SourceChangeSplit(_)
             | Mutation::Throttle(_)
-            | Mutation::CreateSubscription { .. }
-            | Mutation::DropSubscription { .. } => false,
+            | Mutation::DropSubscriptions { .. } => false,
         }
     }
 
@@ -457,6 +462,7 @@ impl Barrier {
             Some(
                   Mutation::Update { .. } // new actors for scaling
                 | Mutation::Add(AddMutation { pause: true, .. }) // new streaming job, or recovery
+                | Mutation::AddAndUpdate(AddMutation { pause: true, .. }, _) // new actors for replacing table
             ) => true,
             _ => false,
         }
@@ -510,6 +516,31 @@ impl Barrier {
     /// Retrieve the tracing context for the **current** epoch of this barrier.
     pub fn tracing_context(&self) -> &TracingContext {
         &self.tracing_context
+    }
+
+    pub fn added_subscriber_on_mv_table(
+        &self,
+        mv_table_id: TableId,
+    ) -> impl Iterator<Item = u32> + '_ {
+        if let Some(Mutation::Add(add)) | Some(Mutation::AddAndUpdate(add, _)) =
+            self.mutation.as_deref()
+        {
+            Some(add)
+        } else {
+            None
+        }
+        .into_iter()
+        .flat_map(move |add| {
+            add.subscriptions_to_add.iter().filter_map(
+                move |(upstream_mv_table_id, subscriber_id)| {
+                    if *upstream_mv_table_id == mv_table_id {
+                        Some(*subscriber_id)
+                    } else {
+                        None
+                    }
+                },
+            )
+        })
     }
 }
 
@@ -580,6 +611,7 @@ impl Mutation {
                 added_actors,
                 splits,
                 pause,
+                subscriptions_to_add,
             }) => PbMutation::Add(PbAddMutation {
                 actor_dispatchers: adds
                     .iter()
@@ -595,6 +627,13 @@ impl Mutation {
                 added_actors: added_actors.iter().copied().collect(),
                 actor_splits: actor_splits_to_protobuf(splits),
                 pause: *pause,
+                subscriptions_to_add: subscriptions_to_add
+                    .iter()
+                    .map(|(table_id, subscriber_id)| SubscriptionUpstreamInfo {
+                        subscriber_id: *subscriber_id,
+                        upstream_mv_table_id: table_id.table_id,
+                    })
+                    .collect(),
             }),
             Mutation::SourceChangeSplit(changes) => PbMutation::Splits(SourceChangeSplitMutation {
                 actor_splits: changes
@@ -628,19 +667,18 @@ impl Mutation {
                     },
                 ],
             }),
-            Mutation::CreateSubscription {
-                upstream_mv_table_id,
-                subscription_id,
-            } => PbMutation::CreateSubscription(CreateSubscriptionMutation {
-                upstream_mv_table_id: upstream_mv_table_id.table_id,
-                subscription_id: *subscription_id,
-            }),
-            Mutation::DropSubscription {
-                upstream_mv_table_id,
-                subscription_id,
-            } => PbMutation::DropSubscription(DropSubscriptionMutation {
-                upstream_mv_table_id: upstream_mv_table_id.table_id,
-                subscription_id: *subscription_id,
+            Mutation::DropSubscriptions {
+                subscriptions_to_drop,
+            } => PbMutation::DropSubscriptions(DropSubscriptionsMutation {
+                info: subscriptions_to_drop
+                    .iter()
+                    .map(
+                        |(subscriber_id, upstream_mv_table_id)| SubscriptionUpstreamInfo {
+                            subscriber_id: *subscriber_id,
+                            upstream_mv_table_id: upstream_mv_table_id.table_id,
+                        },
+                    )
+                    .collect(),
             }),
         }
     }
@@ -711,6 +749,18 @@ impl Mutation {
                     })
                     .collect(),
                 pause: add.pause,
+                subscriptions_to_add: add
+                    .subscriptions_to_add
+                    .iter()
+                    .map(
+                        |SubscriptionUpstreamInfo {
+                             subscriber_id,
+                             upstream_mv_table_id,
+                         }| {
+                            (TableId::new(*upstream_mv_table_id), *subscriber_id)
+                        },
+                    )
+                    .collect(),
             }),
 
             PbMutation::Splits(s) => {
@@ -739,13 +789,12 @@ impl Mutation {
                     .map(|(actor_id, limit)| (*actor_id, limit.rate_limit))
                     .collect(),
             ),
-            PbMutation::CreateSubscription(create) => Mutation::CreateSubscription {
-                upstream_mv_table_id: TableId::new(create.upstream_mv_table_id),
-                subscription_id: create.subscription_id,
-            },
-            PbMutation::DropSubscription(drop) => Mutation::DropSubscription {
-                upstream_mv_table_id: TableId::new(drop.upstream_mv_table_id),
-                subscription_id: drop.subscription_id,
+            PbMutation::DropSubscriptions(drop) => Mutation::DropSubscriptions {
+                subscriptions_to_drop: drop
+                    .info
+                    .iter()
+                    .map(|info| (info.subscriber_id, TableId::new(info.upstream_mv_table_id)))
+                    .collect(),
             },
             PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
                 [BarrierMutation {

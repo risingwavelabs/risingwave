@@ -323,12 +323,14 @@ impl TableFragments {
     }
 
     /// Returns the actor ids with the given fragment type.
-    pub fn filter_actor_ids(&self, check_type: impl Fn(u32) -> bool) -> Vec<ActorId> {
+    pub fn filter_actor_ids(
+        &self,
+        check_type: impl Fn(u32) -> bool + 'static,
+    ) -> impl Iterator<Item = ActorId> + '_ {
         self.fragments
             .values()
-            .filter(|fragment| check_type(fragment.get_fragment_type_mask()))
+            .filter(move |fragment| check_type(fragment.get_fragment_type_mask()))
             .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
-            .collect()
     }
 
     /// Check if the fragment type mask is injectable.
@@ -337,7 +339,8 @@ impl TableFragments {
             & (PbFragmentTypeFlag::Source as u32
                 | PbFragmentTypeFlag::Now as u32
                 | PbFragmentTypeFlag::Values as u32
-                | PbFragmentTypeFlag::BarrierRecv as u32))
+                | PbFragmentTypeFlag::BarrierRecv as u32
+                | PbFragmentTypeFlag::SnapshotBackfillStreamScan as u32))
             != 0
     }
 
@@ -346,6 +349,7 @@ impl TableFragments {
         Self::filter_actor_ids(self, |fragment_type_mask| {
             (fragment_type_mask & FragmentTypeFlag::Mview as u32) != 0
         })
+        .collect()
     }
 
     /// Returns actor ids that need to be tracked when creating MV.
@@ -400,7 +404,13 @@ impl TableFragments {
         Self::filter_actor_ids(self, |fragment_type_mask| {
             (fragment_type_mask & FragmentTypeFlag::StreamScan as u32) != 0
         })
-        .into_iter()
+        .collect()
+    }
+
+    pub fn snapshot_backfill_actor_ids(&self) -> HashSet<ActorId> {
+        Self::filter_actor_ids(self, |mask| {
+            (mask & FragmentTypeFlag::SnapshotBackfillStreamScan as u32) != 0
+        })
         .collect()
     }
 

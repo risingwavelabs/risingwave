@@ -30,7 +30,8 @@ use tracing::Instrument;
 
 use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{
-    BarrierScheduler, Command, CreateStreamingJobCommandInfo, ReplaceTablePlan, StreamRpcManager,
+    BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
+    ReplaceTablePlan, SnapshotBackfillInfo, StreamRpcManager,
 };
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob};
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
@@ -76,6 +77,8 @@ pub struct CreateStreamingJobContext {
 
     /// Context provided for potential replace table, typically used when sinking into a table.
     pub replace_table_job_info: Option<(StreamingJob, ReplaceTableContext, TableFragments)>,
+
+    pub snapshot_backfill_info: Option<SnapshotBackfillInfo>,
 
     pub option: CreateStreamingJobOption,
 
@@ -405,6 +408,7 @@ impl GlobalStreamManager {
             ddl_type,
             replace_table_job_info,
             internal_tables,
+            snapshot_backfill_info,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<NotificationVersion> {
@@ -488,17 +492,38 @@ impl GlobalStreamManager {
             create_type,
         };
 
-        let command = Command::CreateStreamingJob {
-            info,
-            replace_table: replace_table_command,
+        let command = if let Some(snapshot_backfill_info) = snapshot_backfill_info {
+            tracing::debug!(
+                ?snapshot_backfill_info,
+                "sending Command::CreateSnapshotBackfillStreamingJob"
+            );
+            Command::CreateStreamingJob {
+                info,
+                job_type: CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info),
+            }
+        } else {
+            tracing::debug!("sending Command::CreateStreamingJob");
+            if let Some(replace_table_command) = replace_table_command {
+                Command::CreateStreamingJob {
+                    info,
+                    job_type: CreateStreamingJobType::SinkIntoTable(replace_table_command),
+                }
+            } else {
+                Command::CreateStreamingJob {
+                    info,
+                    job_type: CreateStreamingJobType::Normal,
+                }
+            }
         };
-        tracing::debug!("sending Command::CreateStreamingJob");
         let result: MetaResult<NotificationVersion> = try {
             self.barrier_scheduler.run_command(command).await?;
-            tracing::debug!("first barrier collected for stream job");
-            self.metadata_manager
+            tracing::debug!(?streaming_job, "first barrier collected for stream job");
+            let result = self
+                .metadata_manager
                 .wait_streaming_job_finished(&streaming_job)
-                .await?
+                .await?;
+            tracing::debug!(?streaming_job, "stream job finish");
+            result
         };
         match result {
             Err(err) => {
@@ -802,7 +827,7 @@ impl GlobalStreamManager {
             upstream_mv_table_id: TableId::new(table_id),
         };
 
-        tracing::debug!("sending Command::DropSubscription");
+        tracing::debug!("sending Command::DropSubscriptions");
         let _ = self
             .barrier_scheduler
             .run_command(command)
@@ -841,7 +866,6 @@ mod tests {
     #[cfg(feature = "failpoints")]
     use tokio::sync::Notify;
     use tokio::task::JoinHandle;
-    use tokio::time::sleep;
     use tokio_stream::wrappers::UnboundedReceiverStream;
     use tonic::{Request, Response, Status, Streaming};
 
@@ -851,7 +875,7 @@ mod tests {
     use crate::manager::sink_coordination::SinkCoordinatorManager;
     use crate::manager::{
         CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, FragmentManagerRef,
-        RelationIdEnum, StreamingClusterInfo,
+        RelationIdEnum, StreamingClusterInfo, WorkerId,
     };
     use crate::rpc::ddl_controller::DropMode;
     use crate::rpc::metrics::MetaMetrics;
@@ -865,6 +889,7 @@ mod tests {
     }
 
     struct FakeStreamService {
+        worker_id: WorkerId,
         inner: Arc<FakeFragmentState>,
     }
 
@@ -932,6 +957,7 @@ mod tests {
             let (tx, rx) = unbounded_channel();
             let mut request_stream = request.into_inner();
             let inner = self.inner.clone();
+            let worker_id = self.worker_id;
             let _join_handle = spawn(async move {
                 while let Ok(Some(request)) = request_stream.try_next().await {
                     match request.request.unwrap() {
@@ -945,15 +971,21 @@ mod tests {
                                 )),
                             }));
                         }
-                        streaming_control_stream_request::Request::InjectBarrier(_) => {
+                        streaming_control_stream_request::Request::InjectBarrier(req) => {
                             let _ = tx.send(Ok(StreamingControlStreamResponse {
                                 response: Some(
                                     streaming_control_stream_response::Response::CompleteBarrier(
-                                        BarrierCompleteResponse::default(),
+                                        BarrierCompleteResponse {
+                                            epoch: req.barrier.unwrap().epoch.unwrap().prev,
+                                            worker_id,
+                                            partial_graph_id: req.partial_graph_id,
+                                            ..BarrierCompleteResponse::default()
+                                        },
                                     ),
                                 ),
                             }));
                         }
+                        streaming_control_stream_request::Request::RemovePartialGraph(..) => {}
                     }
                 }
             });
@@ -985,21 +1017,7 @@ mod tests {
                 actor_infos: Mutex::new(HashMap::new()),
             });
 
-            let fake_service = FakeStreamService {
-                inner: state.clone(),
-            };
-
             let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-            let stream_srv = StreamServiceServer::new(fake_service);
-            let join_handle = tokio::spawn(async move {
-                tonic::transport::Server::builder()
-                    .add_service(stream_srv)
-                    .serve_with_shutdown(addr, async move { shutdown_rx.await.unwrap() })
-                    .await
-                    .unwrap();
-            });
-
-            sleep(Duration::from_secs(1)).await;
 
             let env = MetaSrvEnv::for_test_opts(MetaOpts::test(enable_recovery)).await;
             let system_params = env.system_params_reader().await;
@@ -1011,7 +1029,7 @@ mod tests {
                 port: port as i32,
             };
             let fake_parallelism = 4;
-            cluster_manager
+            let worker_node = cluster_manager
                 .add_worker_node(
                     WorkerType::ComputeNode,
                     host.clone(),
@@ -1025,6 +1043,19 @@ mod tests {
                 )
                 .await?;
             cluster_manager.activate_worker_node(host).await?;
+
+            let fake_service = FakeStreamService {
+                worker_id: worker_node.id,
+                inner: state.clone(),
+            };
+            let stream_srv = StreamServiceServer::new(fake_service);
+            let join_handle = tokio::spawn(async move {
+                tonic::transport::Server::builder()
+                    .add_service(stream_srv)
+                    .serve_with_shutdown(addr, async move { shutdown_rx.await.unwrap() })
+                    .await
+                    .unwrap();
+            });
 
             let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await?);
             let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
@@ -1084,7 +1115,8 @@ mod tests {
                 meta_metrics.clone(),
                 stream_rpc_manager.clone(),
                 scale_controller.clone(),
-            );
+            )
+            .await;
 
             let stream_manager = GlobalStreamManager::new(
                 env.clone(),
@@ -1169,6 +1201,7 @@ mod tests {
                 create_type: Default::default(),
                 ddl_type: Default::default(),
                 replace_table_job_info: None,
+                snapshot_backfill_info: None,
                 option: Default::default(),
             };
 

@@ -19,6 +19,7 @@
 
 use std::str::FromStr;
 
+pub use prost::Message;
 use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
@@ -293,6 +294,26 @@ impl catalog::StreamSourceInfo {
     /// Refer to [`Self::cdc_source_job`] for details.
     pub fn is_shared(&self) -> bool {
         self.cdc_source_job
+    }
+}
+
+impl catalog::Sink {
+    // TODO: remove this placeholder
+    // creating table sink does not have an id, so we need a placeholder
+    pub const UNIQUE_IDENTITY_FOR_CREATING_TABLE_SINK: &'static str = "PLACE_HOLDER";
+
+    pub fn unique_identity(&self) -> String {
+        // TODO: use a more unique name
+        format!("{}", self.id)
+    }
+}
+
+impl std::fmt::Debug for meta::SystemParams {
+    /// Directly formatting `SystemParams` can be inaccurate or leak sensitive information.
+    ///
+    /// Use `SystemParamsReader` instead.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SystemParams").finish_non_exhaustive()
     }
 }
 
