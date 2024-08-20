@@ -2080,7 +2080,7 @@ fn parse_aggregate_with_order_by() {
 
 #[test]
 fn parse_aggregate_with_filter() {
-    let sql = "SELECT sum(a) FILTER(WHERE (a > 0) AND (a IS NOT NULL)) FROM foo";
+    let sql = "SELECT sum(a) FILTER (WHERE (a > 0) AND (a IS NOT NULL)) FROM foo";
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Function(Function {
