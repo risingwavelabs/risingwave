@@ -154,7 +154,9 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         Worker::insert(worker::ActiveModel::from(&worker.worker_node))
             .exec(&meta_store_sql.conn)
             .await?;
-        if worker.worker_type() == WorkerType::ComputeNode {
+        if worker.worker_type() == WorkerType::ComputeNode
+            || worker.worker_type() == WorkerType::Frontend
+        {
             let pb_property = worker.worker_node.property.as_ref().unwrap();
             let property = worker_property::ActiveModel {
                 worker_id: Set(worker.worker_id() as _),
