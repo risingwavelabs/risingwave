@@ -36,7 +36,6 @@
 #![feature(used_with_arg)]
 #![feature(entry_insert)]
 #![recursion_limit = "256"]
-#![feature(once_cell_try)]
 
 #[cfg(test)]
 risingwave_expr_impl::enable!();
