@@ -52,26 +52,6 @@ export CQLSH_PORT=9042
 echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/cassandra_sink.slt'
 
-if cat ./query_result.csv | awk -F "," '{
-    exit !($1 == 1 && $2 == 1 && $3 == 1 && $4 == 1.1 && $5 == 1.2 && $6 == "test" && $7 == "2013-01-01" && $8 == "2013-01-01 01:01:01.000+0000" && $9 == "False\r"); }'; then
-  echo "Cassandra sink check passed"
-else
-  echo "The output is not as expected."
-  echo "output:"
-  cat ./query_result.csv
-  exit 1
-fi
-
-if cat ./query_result2.csv | awk -F "," '{
-    exit !($1 == 1 && $2 == 1 && $3 == "1\r"); }'; then
-  echo "Cassandra sink check passed"
-else
-  echo "The output is not as expected."
-  echo "output:"
-  cat ./query_result2.csv
-  exit 1
-fi
-
 echo "--- Kill cluster"
 cd ../../
 risedev ci-kill

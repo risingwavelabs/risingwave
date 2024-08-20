@@ -62,3 +62,14 @@ ${CASSANDRA_DIR}/bin/cqlsh --request-timeout=20 -e "COPY demo.demo_bhv_table TO 
 
 system ok
 ${CASSANDRA_DIR}/bin/cqlsh --request-timeout=20 -e "COPY demo.\"Test_uppercase\" TO './query_result2.csv' WITH HEADER = false AND ENCODING = 'UTF-8';"
+
+system ok
+cat ./query_result.csv
+----
+1,1,1,1.1,1.2,"test","2013-01-01","2013-01-01 01:01:01.000+0000","False"
+
+
+system ok
+cat ./query_result2.csv
+----
+1,1,1
