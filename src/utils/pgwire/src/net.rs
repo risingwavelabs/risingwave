@@ -17,6 +17,7 @@ use std::net::SocketAddr as IpSocketAddr;
 #[cfg(madsim)]
 use std::os::unix::net::SocketAddr as UnixSocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 #[cfg(not(madsim))]
 use tokio::net::unix::SocketAddr as UnixSocketAddr;
@@ -79,6 +80,13 @@ impl Listener {
             Self::Tcp(listener) => {
                 let (stream, addr) = listener.accept().await?;
                 stream.set_nodelay(true)?;
+                // Set TCP keepalive to 5 minutes, which is less than the connection idle timeout of 350 seconds in AWS ELB.
+                // https://docs.aws.amazon.com/elasticloadbalancing/latest/network/network-load-balancers.html#connection-idle-timeout
+                {
+                    let r = socket2::SockRef::from(&stream);
+                    let ka = socket2::TcpKeepalive::new().with_time(Duration::from_secs(300));
+                    r.set_tcp_keepalive(&ka)?;
+                }
                 Ok((Stream::Tcp(stream), Address::Tcp(addr)))
             }
             Self::Unix(listener) => {
