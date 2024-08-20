@@ -70,6 +70,7 @@ impl<S: StateStore> FsListExecutor<S> {
         &self,
         source_desc: &SourceDesc,
     ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<StreamChunk>>> {
+        println!("这里");
         let stream = source_desc
             .source
             .get_source_list()

@@ -207,7 +207,7 @@ async fn build_opendal_fs_list_stream<Src: OpendalSource>(lister: OpendalEnumera
         }
 
         // todo: make this refresh time configurable, refer to https://github.com/risingwavelabs/risingwave/issues/18123.
-        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 }
 

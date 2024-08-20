@@ -12,21 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::IntoFuture;
 use std::marker::PhantomData;
+use std::num;
 use std::ops::Bound;
 
 use either::Either;
-use futures::{stream, TryStreamExt};
+use futures::{stream, StreamExt, TryStreamExt};
+use futures_async_stream::try_stream;
+use parquet::arrow::ParquetRecordBatchStreamBuilder;
+use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::ScalarRef;
+use risingwave_common::util::tokio_util::compat::FuturesAsyncReadCompatExt;
+use risingwave_connector::parser::EncodingProperties;
+use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
+use risingwave_connector::source::filesystem::opendal_source::opendal_reader::OpendalReader;
 use risingwave_connector::source::filesystem::opendal_source::{
     OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
 };
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
-    BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
+    BoxChunkSourceStream, ConnectorProperties, SourceContext, SourceCtrlOpts, SplitImpl,
+    SplitMetaData,
 };
 use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
@@ -299,19 +309,52 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 // Receiving file assignments from upstream list executor,
                                 // store into state table.
                                 Message::Chunk(chunk) => {
-                                    let file_assignment = chunk
-                                        .data_chunk()
-                                        .rows()
-                                        .map(|row| {
-                                            let filename = row.datum_at(0).unwrap().into_utf8();
-                                            let size = row.datum_at(2).unwrap().into_int64();
-                                            OpendalFsSplit::<Src>::new(
-                                                filename.to_owned(),
-                                                0,
-                                                size as usize,
+                                    let file_assignment = if let EncodingProperties::Parquet =
+                                        source_desc.source.parser_config.encoding_config
+                                    {
+
+                                        let filename_list: Vec<_> = chunk
+                                            .data_chunk()
+                                            .rows()
+                                            .map(|row| {
+                                                let filename = row.datum_at(0).unwrap().into_utf8();
+                                                filename.to_string()
+                                            })
+                                            .collect();
+                                        let mut parquet_file_assignment = vec![];
+                                        for filename in &filename_list {
+                                            let total_row_nums =
+                                                get_total_row_nums_for_parquet_file(
+                                                    filename,
+                                                    source_desc.clone(),
+                                                )
+                                                .await
+                                                .unwrap();
+                                            parquet_file_assignment.push(
+                                                OpendalFsSplit::<Src>::new(
+                                                    filename.to_owned(),
+                                                    0,
+                                                    total_row_nums-1,
+                                                ),
                                             )
-                                        })
-                                        .collect();
+                                        }
+                                        parquet_file_assignment
+                                    } else {
+                                        chunk
+                                            .data_chunk()
+                                            .rows()
+                                            .map(|row| {
+                                                let filename = row.datum_at(0).unwrap().into_utf8();
+
+                                                let size = row.datum_at(2).unwrap().into_int64();
+                                                OpendalFsSplit::<Src>::new(
+                                                    filename.to_owned(),
+                                                    0,
+                                                    size as usize,
+                                                )
+                                            })
+                                            .collect()
+                                    };
                                     state_store_handler.set_states(file_assignment).await?;
                                     state_store_handler.state_table.try_flush().await?;
                                 }
@@ -338,7 +381,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     _ => unreachable!(),
                                 };
 
-                                if offset.parse::<usize>().unwrap() >= fs_split.size {
+                                if offset.parse::<usize>().unwrap() >= fs_split.size  {
                                     splits_on_fetch -= 1;
                                     state_store_handler.delete(split_id).await?;
                                 } else {
@@ -380,4 +423,79 @@ impl<S: StateStore, Src: OpendalSource> Debug for FsFetchExecutor<S, Src> {
             f.debug_struct("FsFetchExecutor").finish()
         }
     }
+}
+
+async fn get_total_row_nums_for_parquet_file(
+    file_name: &str,
+    source_desc: SourceDesc,
+) -> StreamExecutorResult<usize> {
+    let num_rows = match source_desc.source.config {
+        ConnectorProperties::Gcs(prop) => {
+            // let file: OpendalFsSplit<OpendalGcs> = item;
+            let connector: OpendalEnumerator<OpendalGcs> =
+                OpendalEnumerator::new_gcs_source(*prop).unwrap();
+            let reader = connector
+                .op
+                .reader_with(&file_name)
+                .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
+                .await
+                .unwrap()
+                .into_futures_async_read(..)
+                .await
+                .unwrap()
+                .compat();
+
+            ParquetRecordBatchStreamBuilder::new(reader)
+                .await
+                .unwrap()
+                .metadata()
+                .file_metadata()
+                .num_rows()
+        }
+        ConnectorProperties::OpendalS3(prop) => {
+            let connector: OpendalEnumerator<OpendalS3> =
+                OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role).unwrap();
+            let reader = connector
+                .op
+                .reader_with(&file_name)
+                .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
+                .await
+                .unwrap()
+                .into_futures_async_read(..)
+                .await
+                .unwrap()
+                .compat();
+            let parquet_file_num_rows = ParquetRecordBatchStreamBuilder::new(reader)
+                .await
+                .unwrap()
+                .metadata()
+                .file_metadata()
+                .num_rows();
+            parquet_file_num_rows
+        }
+
+        ConnectorProperties::PosixFs(prop) => {
+            let connector: OpendalEnumerator<OpendalPosixFs> =
+                OpendalEnumerator::new_posix_fs_source(*prop).unwrap();
+            let reader = connector
+                .op
+                .reader_with(&file_name)
+                .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
+                .await
+                .unwrap()
+                .into_futures_async_read(..)
+                .await
+                .unwrap()
+                .compat();
+            let parquet_file_num_rows = ParquetRecordBatchStreamBuilder::new(reader)
+                .await
+                .unwrap()
+                .metadata()
+                .file_metadata()
+                .num_rows();
+            parquet_file_num_rows
+        }
+        other => bail!("Unsupported source: {:?}", other),
+    };
+    Ok(num_rows as usize)
 }

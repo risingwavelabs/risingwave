@@ -124,6 +124,10 @@ impl<Src: OpendalSource> OpendalFsSplit<Src> {
         }
     }
 
+    pub fn file_name(self) -> String {
+        self.name
+    }
+
     pub fn empty_split() -> Self {
         Self {
             name: "empty_split".to_string(),
