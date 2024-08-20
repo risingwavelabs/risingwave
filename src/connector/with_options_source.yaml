@@ -1,4 +1,5 @@
 # THIS FILE IS AUTO_GENERATED. DO NOT EDIT
+# UPDATE WITH: ./risedev generate-with-options
 
 DatagenProperties:
   fields:
@@ -100,6 +101,10 @@ KafkaProperties:
     alias:
     - kafka.time.offset
     - scan.startup.timestamp_millis
+  - name: group.id.prefix
+    field_type: String
+    comments: 'Specify a custom consumer group id prefix for the source.  Defaults to `rw-consumer`.   Notes:  - Each job (materialized view) will have a separated consumer group and    contains a generated suffix in the group id.    The consumer group will be `{group_id_prefix}-{fragment_id}`.  - The consumer group is solely for monintoring progress in some external    Kafka tools, and for authorization. RisingWave does not rely on committed    offsets, and does not join the consumer group. It just reports offsets    to the group.'
+    required: false
   - name: upsert
     field_type: String
     comments: 'This parameter is used to tell `KafkaSplitReader` to produce `UpsertMessage`s, which  combine both key and value fields of the Kafka message.  TODO: Currently, `Option<bool>` can not be parsed here.'

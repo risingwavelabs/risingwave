@@ -170,7 +170,7 @@ fn generate_with_options_yaml_inner(path: &Path) -> String {
 
     // Generate the output
     format!(
-        "# THIS FILE IS AUTO_GENERATED. DO NOT EDIT\n\n{}",
+        "# THIS FILE IS AUTO_GENERATED. DO NOT EDIT\n# UPDATE WITH: ./risedev generate-with-options\n\n{}",
         serde_yaml::to_string(&struct_infos).unwrap()
     )
 }
