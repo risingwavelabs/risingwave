@@ -75,7 +75,7 @@ use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEn
 use crate::error::ConnectorError;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
-// use crate::sink::file_sink::fs::FsSink;
+use crate::sink::file_sink::fs::FsSink;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
 const BOUNDED_CHANNEL_SIZE: usize = 16;
@@ -103,7 +103,7 @@ macro_rules! for_all_sinks {
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
                 { S3, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::S3Sink>},
                 { Gcs, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::gcs::GcsSink>  },
-                // { Fs, $crate::sink::file_sink::opendal_sink::FileSink<FsSink>  },
+                { Fs, $crate::sink::file_sink::opendal_sink::FileSink<FsSink>  },
                 { Snowflake, $crate::sink::snowflake::SnowflakeSink },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },

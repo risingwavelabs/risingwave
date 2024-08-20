@@ -42,7 +42,7 @@ use crate::with_options::WithOptions;
 /// - S: The type parameter S represents the concrete implementation of the `OpendalSinkBackend` trait used by this file sink.
 #[derive(Debug, Clone)]
 pub struct FileSink<S: OpendalSinkBackend> {
-    pub(crate) op: Operator,
+    pub(crate) op: Box<Operator>,
     /// The path to the file where the sink writes data.
     pub(crate) path: String,
     /// The schema describing the structure of the data being written to the file sink.
@@ -138,7 +138,7 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
         let op = S::new_operator(config.clone())?;
         let engine_type = S::get_engine_type();
         Ok(Self {
-            op,
+            op: Box::new(op),
             path,
             schema,
             is_append_only: param.sink_type.is_append_only(),
@@ -153,7 +153,7 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
 
 pub struct OpenDalSinkWriter {
     schema: SchemaRef,
-    operator: Operator,
+    operator: Box<Operator>,
     sink_writer: Option<FileWriterEnum>,
     is_append_only: bool,
     write_path: String,
@@ -219,7 +219,7 @@ impl SinkWriter for OpenDalSinkWriter {
 
 impl OpenDalSinkWriter {
     pub fn new(
-        operator: Operator,
+        operator: Box<Operator>,
         write_path: &str,
         rw_schema: Schema,
         is_append_only: bool,
