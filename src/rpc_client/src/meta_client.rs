@@ -37,6 +37,7 @@ use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::RW_VERSION;
 use risingwave_error::bail;
+use risingwave_error::tonic::ErrorIsFromTonicServerImpl;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
@@ -287,7 +288,9 @@ impl MetaClient {
 
                 Ok((add_worker_resp, system_params_resp, grpc_meta_client))
             },
-            RpcError::is_connection_error,
+            // Only retry if there's any transient connection issue.
+            // If the error is from our implementation or business, do not retry it.
+            |e: &RpcError| !e.is_from_tonic_server_impl(),
         )
         .await;
 
