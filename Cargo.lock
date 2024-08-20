@@ -11502,6 +11502,7 @@ dependencies = [
  "memcomparable",
  "multimap 0.10.0",
  "parking_lot 0.12.1",
+ "parquet 52.0.0",
  "pin-project",
  "prehash",
  "prometheus",
