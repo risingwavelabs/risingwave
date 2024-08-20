@@ -213,7 +213,7 @@ mod tests {
             is_unschedulable: false,
             is_serving: true,
             is_streaming: false,
-            secondary_host: "".to_string(),
+            internal_rpc_host_addr: "".to_string(),
         };
 
         let count_same_vnode_mapping = |wm1: &WorkerSlotMapping, wm2: &WorkerSlotMapping| {

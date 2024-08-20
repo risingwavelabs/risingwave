@@ -136,6 +136,10 @@ pub struct Args {
     #[clap(long)]
     etcd_dump: Option<PathBuf>,
 
+    /// dir to store sqlite backend data of meta node
+    #[clap(long)]
+    sqlite_data_dir: Option<PathBuf>,
+
     #[arg(short, long)]
     e2e_extended_test: bool,
 
@@ -144,7 +148,7 @@ pub struct Args {
     #[clap(long, default_value = "0.0")]
     background_ddl_rate: f64,
 
-    /// Use arrangement backfill by default
+    /// Use arrangement backfill
     #[clap(long, default_value = "false")]
     use_arrangement_backfill: bool,
 }
@@ -176,6 +180,7 @@ async fn main() {
         meta_nodes: args.meta_nodes,
         etcd_timeout_rate: args.etcd_timeout_rate,
         etcd_data_path: args.etcd_data,
+        sqlite_data_dir: args.sqlite_data_dir,
         per_session_queries: if args.use_arrangement_backfill {
             vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".to_string()].into()
         } else {

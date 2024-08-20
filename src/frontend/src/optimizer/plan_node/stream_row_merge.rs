@@ -29,6 +29,7 @@ use crate::optimizer::plan_node::utils::{childless_record, Distill};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanBase, PlanTreeNodeBinary, Stream, StreamNode,
 };
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
@@ -57,6 +58,8 @@ impl StreamRowMerge {
         assert_eq!(lhs_mapping.target_size(), rhs_mapping.target_size());
         assert_eq!(lhs_input.distribution(), rhs_input.distribution());
         assert_eq!(lhs_input.stream_key(), rhs_input.stream_key());
+        let functional_dependency =
+            FunctionalDependencySet::with_key(lhs_mapping.target_size(), &[]);
         let mut schema_fields = Vec::with_capacity(lhs_mapping.target_size());
         let o2i_lhs = lhs_mapping
             .inverse()
@@ -84,7 +87,7 @@ impl StreamRowMerge {
             lhs_input.ctx(),
             schema,
             lhs_input.stream_key().map(|k| k.to_vec()),
-            lhs_input.functional_dependency().clone(),
+            functional_dependency,
             lhs_input.distribution().clone(),
             lhs_input.append_only(),
             lhs_input.emit_on_window_close(),

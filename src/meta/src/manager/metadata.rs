@@ -368,7 +368,7 @@ impl MetadataManager {
             MetadataManager::V2(mgr) => {
                 let tables = mgr
                     .catalog_controller
-                    .list_background_creating_mviews()
+                    .list_background_creating_mviews(false)
                     .await?;
 
                 Ok(tables

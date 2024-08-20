@@ -23,6 +23,7 @@ pub use prost::Message;
 use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
+
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/catalog.rs")]
 pub mod catalog;
@@ -242,6 +243,14 @@ impl meta::table_fragments::ActorStatus {
             .as_ref()
             .expect("actor location should be exist")
             .worker_node_id
+    }
+}
+
+impl common::WorkerNode {
+    pub fn is_streaming_schedulable(&self) -> bool {
+        let property = self.property.as_ref();
+        property.map_or(false, |p| p.is_streaming)
+            && !property.map_or(false, |p| p.is_unschedulable)
     }
 }
 

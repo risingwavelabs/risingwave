@@ -609,8 +609,16 @@ impl CatalogController {
         Ok(())
     }
 
-    pub async fn list_background_creating_mviews(&self) -> MetaResult<Vec<table::Model>> {
+    pub async fn list_background_creating_mviews(
+        &self,
+        include_initial: bool,
+    ) -> MetaResult<Vec<table::Model>> {
         let inner = self.inner.read().await;
+        let status_cond = if include_initial {
+            streaming_job::Column::JobStatus.is_in([JobStatus::Initial, JobStatus::Creating])
+        } else {
+            streaming_job::Column::JobStatus.eq(JobStatus::Creating)
+        };
         let tables = Table::find()
             .join(JoinType::LeftJoin, table::Relation::Object1.def())
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
@@ -620,7 +628,7 @@ impl CatalogController {
                     .and(
                         streaming_job::Column::CreateType
                             .eq(CreateType::Background)
-                            .and(streaming_job::Column::JobStatus.eq(JobStatus::Creating)),
+                            .and(status_cond),
                     ),
             )
             .all(&inner.db)

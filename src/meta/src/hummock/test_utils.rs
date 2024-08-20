@@ -352,7 +352,7 @@ pub async fn setup_compute_env_with_metric(
                 is_streaming: true,
                 is_serving: true,
                 is_unschedulable: false,
-                secondary_host: "".to_string(),
+                internal_rpc_host_addr: "".to_string(),
             },
             Default::default(),
         )

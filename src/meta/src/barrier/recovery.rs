@@ -167,7 +167,7 @@ impl GlobalBarrierManagerContext {
         let mgr = self.metadata_manager.as_v2_ref();
         let mviews = mgr
             .catalog_controller
-            .list_background_creating_mviews()
+            .list_background_creating_mviews(false)
             .await?;
 
         let mut mview_map = HashMap::new();
@@ -401,7 +401,6 @@ impl GlobalBarrierManager {
                     let command_ctx = Arc::new(CommandContext::new(
                         active_streaming_nodes.current().clone(),
                         subscription_info.clone(),
-                        info.existing_table_ids().collect(),
                         prev_epoch.clone(),
                         new_epoch.clone(),
                         paused_reason,
@@ -411,8 +410,12 @@ impl GlobalBarrierManager {
                         tracing::Span::current(), // recovery span
                     ));
 
-                    let mut node_to_collect =
-                        control_stream_manager.inject_barrier(&command_ctx, &info, Some(&info))?;
+                    let mut node_to_collect = control_stream_manager.inject_command_ctx_barrier(
+                        &command_ctx,
+                        &info,
+                        Some(&info),
+                        HashMap::new(),
+                    )?;
                     debug!(?node_to_collect, "inject initial barrier");
                     while !node_to_collect.is_empty() {
                         let (worker_id, result) = control_stream_manager

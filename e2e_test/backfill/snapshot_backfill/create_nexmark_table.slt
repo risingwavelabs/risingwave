@@ -1,0 +1,54 @@
+statement ok
+CREATE table person (
+    "id" BIGINT,
+    "name" VARCHAR,
+    "email_address" VARCHAR,
+    "credit_card" VARCHAR,
+    "city" VARCHAR,
+    "state" VARCHAR,
+    "date_time" TIMESTAMP,
+    "extra" VARCHAR
+) with (
+    connector = 'nexmark',
+    nexmark.table.type = 'Person',
+    nexmark.split.num = '8',
+    nexmark.min.event.gap.in.ns = '50000'
+);
+
+statement ok
+CREATE table auction (
+    "id" BIGINT,
+    "item_name" VARCHAR,
+    "description" VARCHAR,
+    "initial_bid" BIGINT,
+    "reserve" BIGINT,
+    "date_time" TIMESTAMP,
+    "expires" TIMESTAMP,
+    "seller" BIGINT,
+    "category" BIGINT,
+    "extra" VARCHAR
+) with (
+    connector = 'nexmark',
+    nexmark.table.type = 'Auction',
+    nexmark.split.num = '8',
+    nexmark.min.event.gap.in.ns = '50000'
+);
+
+statement ok
+CREATE table bid (
+    "auction" BIGINT,
+    "bidder" BIGINT,
+    "price" BIGINT,
+    "channel" VARCHAR,
+    "url" VARCHAR,
+    "date_time" TIMESTAMP,
+    "extra" VARCHAR
+) with (
+    connector = 'nexmark',
+    nexmark.table.type = 'Bid',
+    nexmark.split.num = '8',
+    nexmark.min.event.gap.in.ns = '100000'
+);
+
+# sleep for a while to let table accumulate enough data
+sleep 10s

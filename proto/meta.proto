@@ -312,9 +312,8 @@ message AddWorkerNodeRequest {
     bool is_streaming = 2;
     bool is_serving = 3;
     bool is_unschedulable = 4;
-    // Secondary host address for the worker node.
     // This is used for frontend node to register its rpc address
-    string secondary_host = 5;
+    string internal_rpc_host_addr = 5;
   }
   common.WorkerType worker_type = 1;
   common.HostAddress host = 2;
@@ -324,9 +323,6 @@ message AddWorkerNodeRequest {
 }
 
 message AddWorkerNodeResponse {
-  reserved 3;
-  reserved "system_params";
-  common.Status status = 1;
   optional uint32 node_id = 2;
   string cluster_id = 4;
 }

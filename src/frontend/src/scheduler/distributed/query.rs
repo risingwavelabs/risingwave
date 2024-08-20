@@ -681,7 +681,7 @@ pub(crate) mod tests {
                 is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
-                secondary_host: "".to_string(),
+                internal_rpc_host_addr: "".to_string(),
             }),
             transactional_id: Some(0),
             ..Default::default()
@@ -699,7 +699,7 @@ pub(crate) mod tests {
                 is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
-                secondary_host: "".to_string(),
+                internal_rpc_host_addr: "".to_string(),
             }),
             transactional_id: Some(1),
             ..Default::default()
@@ -717,7 +717,7 @@ pub(crate) mod tests {
                 is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
-                secondary_host: "".to_string(),
+                internal_rpc_host_addr: "".to_string(),
             }),
             transactional_id: Some(2),
             ..Default::default()

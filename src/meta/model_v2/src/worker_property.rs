@@ -26,7 +26,7 @@ pub struct Model {
     pub is_streaming: bool,
     pub is_serving: bool,
     pub is_unschedulable: bool,
-    pub secondary_host: String,
+    pub internal_rpc_host_addr: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

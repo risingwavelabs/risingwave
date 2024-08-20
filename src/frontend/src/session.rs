@@ -263,7 +263,7 @@ impl FrontendEnv {
         info!("advertise addr is {}", frontend_address);
 
         let rpc_addr: HostAddr = opts.frontend_rpc_listener_addr.parse().unwrap();
-        let frontend_rpc_addr = HostAddr {
+        let internal_rpc_host_addr = HostAddr {
             // Use the host of advertise address for the frontend rpc address.
             host: frontend_address.host.clone(),
             port: rpc_addr.port,
@@ -274,12 +274,12 @@ impl FrontendEnv {
             WorkerType::Frontend,
             &frontend_address,
             AddWorkerNodeProperty {
-                secondary_host: frontend_rpc_addr.to_string(),
+                internal_rpc_host_addr: internal_rpc_host_addr.to_string(),
                 ..Default::default()
             },
             &config.meta,
         )
-        .await?;
+        .await;
 
         let worker_id = meta_client.worker_id();
         info!("Assigned worker node id {}", worker_id);
