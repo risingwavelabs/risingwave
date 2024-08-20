@@ -18,8 +18,8 @@ use std::future::pending;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
-use futures::stream::{BoxStream, FuturesUnordered};
+use anyhow::anyhow;
+use futures::stream::BoxStream;
 use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::error::tonic::extra::Score;
@@ -27,7 +27,6 @@ use risingwave_pb::stream_service::barrier_complete_response::{
     GroupedSstableInfo, PbCreateMviewProgress,
 };
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
-use rw_futures_util::{pending_on_none, AttachedFuture};
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -66,10 +65,7 @@ use risingwave_pb::stream_service::{
 
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{
-    Actor, Barrier, BarrierInner, DispatchExecutor, DispatcherBarrier, Mutation,
-    StreamExecutorError,
-};
+use crate::executor::{Barrier, BarrierInner, DispatcherBarrier, Mutation, StreamExecutorError};
 use crate::task::barrier_manager::managed_state::ManagedBarrierStateDebugInfo;
 use crate::task::barrier_manager::progress::BackfillState;
 
@@ -184,9 +180,6 @@ impl ControlStreamHandle {
     }
 }
 
-#[derive(Clone, Default)]
-pub struct CreateActorContext {}
-
 pub(crate) type SubscribeMutationItem = (u64, Option<Arc<Mutation>>);
 
 pub(super) enum LocalBarrierEvent {
@@ -248,10 +241,6 @@ pub(super) enum LocalActorOperation {
     },
 }
 
-pub(super) struct CreateActorOutput {
-    pub(super) actors: Vec<Actor<DispatchExecutor>>,
-}
-
 pub(crate) struct StreamActorManagerState {
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
     /// `handles` store join handles of these futures, and therefore we could wait their
@@ -263,14 +252,6 @@ pub(crate) struct StreamActorManagerState {
 
     /// Stores all actor tokio runtime monitoring tasks.
     pub(super) actor_monitor_tasks: HashMap<ActorId, ActorHandle>,
-
-    #[expect(clippy::type_complexity)]
-    pub(super) creating_actors: FuturesUnordered<
-        AttachedFuture<
-            JoinHandle<StreamResult<CreateActorOutput>>,
-            (BTreeSet<ActorId>, oneshot::Sender<StreamResult<()>>),
-        >,
-    >,
 }
 
 impl StreamActorManagerState {
@@ -279,21 +260,7 @@ impl StreamActorManagerState {
             handles: HashMap::new(),
             actors: HashMap::new(),
             actor_monitor_tasks: HashMap::new(),
-            creating_actors: FuturesUnordered::new(),
         }
-    }
-
-    async fn next_created_actors(
-        &mut self,
-    ) -> (
-        oneshot::Sender<StreamResult<()>>,
-        StreamResult<CreateActorOutput>,
-    ) {
-        let (join_result, (_, sender)) = pending_on_none(self.creating_actors.next()).await;
-        (
-            sender,
-            try { join_result.context("failed to join creating actors futures")?? },
-        )
     }
 }
 
@@ -313,7 +280,6 @@ pub(crate) struct StreamActorManager {
 
 pub(super) struct LocalBarrierWorkerDebugInfo<'a> {
     running_actors: BTreeSet<ActorId>,
-    creating_actors: Vec<BTreeSet<ActorId>>,
     managed_barrier_state: ManagedBarrierStateDebugInfo<'a>,
     has_control_stream_connected: bool,
 }
@@ -323,13 +289,6 @@ impl Display for LocalBarrierWorkerDebugInfo<'_> {
         write!(f, "running_actors: ")?;
         for actor_id in &self.running_actors {
             write!(f, "{}, ", actor_id)?;
-        }
-
-        write!(f, "\ncreating_actors: ")?;
-        for actors in &self.creating_actors {
-            for actor_id in actors {
-                write!(f, "{}, ", actor_id)?;
-            }
         }
 
         writeln!(
@@ -400,12 +359,6 @@ impl LocalBarrierWorker {
     fn to_debug_info(&self) -> LocalBarrierWorkerDebugInfo<'_> {
         LocalBarrierWorkerDebugInfo {
             running_actors: self.actor_manager_state.handles.keys().cloned().collect(),
-            creating_actors: self
-                .actor_manager_state
-                .creating_actors
-                .iter()
-                .map(|fut| fut.item().0.clone())
-                .collect(),
             managed_barrier_state: self.state.to_debug_info(),
             has_control_stream_connected: self.control_stream_handle.connected(),
         }
@@ -415,9 +368,6 @@ impl LocalBarrierWorker {
         loop {
             select! {
                 biased;
-                (sender, create_actors_result) = self.actor_manager_state.next_created_actors() => {
-                    self.handle_actor_created(sender, create_actors_result);
-                }
                 (partial_graph_id, completed_epoch) = self.state.next_completed_epoch() => {
                     let result = self.on_epoch_completed(partial_graph_id, completed_epoch);
                     if let Err(err) = result {
@@ -472,18 +422,6 @@ impl LocalBarrierWorker {
                 },
             }
         }
-    }
-
-    fn handle_actor_created(
-        &mut self,
-        sender: oneshot::Sender<StreamResult<()>>,
-        create_actor_result: StreamResult<CreateActorOutput>,
-    ) {
-        let result = create_actor_result.map(|output| {
-            self.spawn_actors(output.actors);
-        });
-
-        let _ = sender.send(result);
     }
 
     fn handle_streaming_control_request(

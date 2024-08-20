@@ -15,7 +15,7 @@
 use core::time::Duration;
 use std::collections::HashSet;
 use std::fmt::Debug;
-use std::mem::take;
+use std::future::Future;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Instant;
@@ -24,7 +24,7 @@ use anyhow::anyhow;
 use async_recursion::async_recursion;
 use await_tree::InstrumentAwait;
 use futures::stream::BoxStream;
-use futures::FutureExt;
+use futures::{FutureExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
@@ -41,7 +41,6 @@ use risingwave_pb::stream_service::{
 };
 use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::{dispatch_state_store, StateStore};
-use rw_futures_util::AttachedFuture;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
@@ -59,11 +58,11 @@ use crate::executor::{
 };
 use crate::from_proto::create_executor;
 use crate::task::barrier_manager::{
-    ControlStreamHandle, CreateActorOutput, EventSender, LocalActorOperation, LocalBarrierWorker,
+    ControlStreamHandle, EventSender, LocalActorOperation, LocalBarrierWorker,
 };
 use crate::task::{
-    ActorId, CreateActorContext, FragmentId, LocalBarrierManager, SharedContext,
-    StreamActorManager, StreamActorManagerState, StreamEnvironment, UpDownActorIds,
+    ActorId, FragmentId, LocalBarrierManager, SharedContext, StreamActorManager,
+    StreamActorManagerState, StreamEnvironment, UpDownActorIds,
 };
 
 #[cfg(test)]
@@ -151,8 +150,6 @@ pub struct ExecutorParams {
     pub shared_context: Arc<SharedContext>,
 
     pub local_barrier_manager: LocalBarrierManager,
-
-    pub create_actor_context: CreateActorContext,
 }
 
 impl Debug for ExecutorParams {
@@ -309,15 +306,6 @@ impl LocalBarrierWorker {
             let result = handle.await;
             assert!(result.is_ok() || result.unwrap_err().is_cancelled());
         }
-        // Clear the join handle of creating actors
-        for handle in take(&mut self.actor_manager_state.creating_actors)
-            .into_iter()
-            .map(|attached_future| attached_future.into_inner().0)
-        {
-            handle.abort();
-            let result = handle.await;
-            assert!(result.is_ok() || result.err().unwrap().is_cancelled());
-        }
         self.actor_manager_state.clear_state();
         if let Some(m) = self.actor_manager.await_tree_reg.as_ref() {
             m.clear();
@@ -362,19 +350,21 @@ impl LocalBarrierWorker {
                 }
             }
         };
-        let actor_ids = actors
-            .iter()
-            .map(|actor| actor.actor.as_ref().unwrap().actor_id)
-            .collect();
         let actor_manager = self.actor_manager.clone();
-        let create_actors_fut = crate::CONFIG.scope(
-            self.actor_manager.env.config().clone(),
-            actor_manager.create_actors(actors, self.current_shared_context.clone()),
-        );
-        let join_handle = self.actor_manager.runtime.spawn(create_actors_fut);
-        self.actor_manager_state
-            .creating_actors
-            .push(AttachedFuture::new(join_handle, (actor_ids, result_sender)));
+        let shared_context = self.current_shared_context.clone();
+        self.spawn_actors(actors.into_iter().map(|actor| {
+            let stream_actor = actor.actor.as_ref().unwrap();
+            let (actor_id, mview_definition) =
+                (stream_actor.actor_id, stream_actor.mview_definition.clone());
+            (
+                actor_id,
+                mview_definition,
+                actor_manager
+                    .clone()
+                    .create_actor(actor, shared_context.clone()),
+            )
+        }));
+        let _ = result_sender.send(Ok(()));
     }
 }
 
@@ -419,7 +409,6 @@ impl StreamActorManager {
         has_stateful: bool,
         subtasks: &mut Vec<SubtaskHandle>,
         shared_context: &Arc<SharedContext>,
-        create_actor_context: &CreateActorContext,
     ) -> StreamResult<Executor> {
         // The "stateful" here means that the executor may issue read operations to the state store
         // massively and continuously. Used to decide whether to apply the optimization of subtasks.
@@ -453,7 +442,6 @@ impl StreamActorManager {
                     has_stateful || is_stateful,
                     subtasks,
                     shared_context,
-                    create_actor_context,
                 )
                 .await?,
             );
@@ -501,7 +489,6 @@ impl StreamActorManager {
             watermark_epoch: self.watermark_epoch.clone(),
             shared_context: shared_context.clone(),
             local_barrier_manager: shared_context.local_barrier_manager.clone(),
-            create_actor_context: create_actor_context.clone(),
         };
 
         let executor = create_executor(executor_params, node, store).await?;
@@ -531,7 +518,6 @@ impl StreamActorManager {
     }
 
     /// Create a chain(tree) of nodes and return the head executor.
-    #[expect(clippy::too_many_arguments)]
     async fn create_nodes(
         &self,
         fragment_id: FragmentId,
@@ -540,7 +526,6 @@ impl StreamActorManager {
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
         shared_context: &Arc<SharedContext>,
-        create_actor_context: &CreateActorContext,
     ) -> StreamResult<(Executor, Vec<SubtaskHandle>)> {
         let mut subtasks = vec![];
 
@@ -555,7 +540,6 @@ impl StreamActorManager {
                 false,
                 &mut subtasks,
                 shared_context,
-                create_actor_context,
             )
             .await
         })?;
@@ -563,14 +547,12 @@ impl StreamActorManager {
         Ok((executor, subtasks))
     }
 
-    async fn create_actors(
+    async fn create_actor(
         self: Arc<Self>,
-        actors: Vec<BuildActorInfo>,
+        actor: BuildActorInfo,
         shared_context: Arc<SharedContext>,
-    ) -> StreamResult<CreateActorOutput> {
-        let mut ret = Vec::with_capacity(actors.len());
-        let create_actor_context = CreateActorContext::default();
-        for actor in actors {
+    ) -> StreamResult<Actor<DispatchExecutor>> {
+        {
             let BuildActorInfo {
                 actor,
                 related_subscriptions,
@@ -603,7 +585,6 @@ impl StreamActorManager {
                     &actor_context,
                     vnode_bitmap,
                     &shared_context,
-                    &create_actor_context,
                 )
                 // If hummock tracing is not enabled, it directly returns wrapped future.
                 .may_trace_hummock()
@@ -625,24 +606,25 @@ impl StreamActorManager {
                 expr_context,
                 shared_context.local_barrier_manager.clone(),
             );
-
-            ret.push(actor);
+            Ok(actor)
         }
-        Ok(CreateActorOutput { actors: ret })
     }
 }
 
 impl LocalBarrierWorker {
-    pub(super) fn spawn_actors(&mut self, actors: Vec<Actor<DispatchExecutor>>) {
-        for actor in actors {
+    pub(super) fn spawn_actors<
+        F: Future<Output = StreamResult<Actor<DispatchExecutor>>> + Send + 'static,
+    >(
+        &mut self,
+        actors: impl Iterator<Item = (ActorId, String, F)>,
+    ) {
+        for (actor_id, mview_definition, actor) in actors {
             let monitor = tokio_metrics::TaskMonitor::new();
-            let actor_context = actor.actor_context.clone();
-            let actor_id = actor_context.id;
 
             let handle = {
-                let trace_span = format!("Actor {actor_id}: `{}`", actor_context.mview_definition);
+                let trace_span = format!("Actor {actor_id}: `{}`", mview_definition);
                 let barrier_manager = self.current_shared_context.local_barrier_manager.clone();
-                let actor = actor.run().map(move |result| {
+                let actor = actor.and_then(|actor| actor.run()).map(move |result| {
                     if let Err(err) = result {
                         // TODO: check error type and panic if it's unexpected.
                         // Intentionally use `?` on the report to also include the backtrace.
