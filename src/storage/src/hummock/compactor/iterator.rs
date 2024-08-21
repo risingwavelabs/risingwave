@@ -99,24 +99,8 @@ impl SstableStreamIterator {
             sstable_info.key_range.clone(),
         );
 
-        let key_range_left = {
-            let tmp = FullKey::decode(&sstable_info.key_range.left);
-            FullKey::new_with_gap_epoch(
-                tmp.user_key.table_id,
-                TableKey(tmp.user_key.table_key.to_vec()),
-                tmp.epoch_with_gap,
-            )
-        };
-
-        let key_range_right = {
-            let tmp = FullKey::decode(&sstable_info.key_range.right);
-            FullKey::new_with_gap_epoch(
-                tmp.user_key.table_id,
-                TableKey(tmp.user_key.table_key.to_vec()),
-                tmp.epoch_with_gap,
-            )
-        };
-
+        let key_range_left = FullKey::decode(&sstable_info.key_range.left).to_vec();
+        let key_range_right = FullKey::decode(&sstable_info.key_range.right).to_vec();
         let key_range_right_exclusive = sstable_info.key_range.right_exclusive;
 
         Self {
