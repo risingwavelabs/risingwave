@@ -428,11 +428,6 @@ impl HummockManager {
         let mut commit_sstables: BTreeMap<u64, Vec<SstableInfo>> = BTreeMap::new();
 
         for (mut sst, group_table_ids) in sst_to_cg_vec {
-            let sst_size_from_stats = sst
-                .table_stats
-                .values()
-                .map(|stat| stat.total_key_size as u64 + stat.total_value_size as u64)
-                .sum::<u64>();
             for (group_id, match_ids) in group_table_ids {
                 let group_members_table_ids = group_members_table_ids.get(&group_id).unwrap();
                 if match_ids
@@ -447,27 +442,24 @@ impl HummockManager {
                 }
 
                 let origin_sst_size = sst.sst_info.file_size;
-                let new_sst_size = if !sst.table_stats.is_empty() {
-                    let match_table_ids_size: u64 = match_ids
-                        .iter()
-                        .map(|id| {
-                            let stat = sst.table_stats.get(id).unwrap();
-                            stat.total_key_size as u64 + stat.total_value_size as u64
-                        })
-                        .sum();
-                    // Since the block encode may trigger a compress, the sst size may not necessarily match the stats, so a proportional calculation is used to determine the estimated size of the new sst.
-                    (match_table_ids_size as f64 / sst_size_from_stats as f64
-                        * origin_sst_size as f64) as u64
-                } else {
-                    origin_sst_size / 2
-                };
+                let new_sst_size = match_ids
+                    .iter()
+                    .map(|id| {
+                        let stat = sst.table_stats.get(id).unwrap();
+                        stat.compressed_size_in_sstable
+                    })
+                    .sum();
 
-                let branch_sst = split_sst(
+                let mut branch_sst = split_sst(
                     &mut sst.sst_info,
                     &mut new_sst_id,
                     origin_sst_size - new_sst_size,
                     new_sst_size,
                 );
+
+                // FIXME(li0k): We would change table_ids inside the `split_sst` function
+                branch_sst.table_ids = match_ids;
+
                 commit_sstables
                     .entry(group_id)
                     .or_default()

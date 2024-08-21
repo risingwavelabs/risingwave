@@ -1196,6 +1196,8 @@ async fn test_version_stats() {
         total_key_size: 1000,
         total_value_size: 100,
         total_key_count: 10,
+
+        compressed_size_in_sstable: 1024 * 1024,
     };
     let ssts_with_table_ids = vec![vec![1, 2], vec![2, 3]];
     let sst_ids = get_sst_ids(&hummock_manager, ssts_with_table_ids.len() as _).await;
@@ -1266,6 +1268,7 @@ async fn test_version_stats() {
                 total_key_size: -1000,
                 total_value_size: -100,
                 total_key_count: -10,
+                compressed_size_in_sstable: 0, // unused
             },
         ),
         (
@@ -1274,6 +1277,7 @@ async fn test_version_stats() {
                 total_key_size: -1000,
                 total_value_size: -100,
                 total_key_count: -10,
+                compressed_size_in_sstable: 0, // unused
             },
         ),
     ]);

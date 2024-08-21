@@ -196,11 +196,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         mut meta: BlockMeta,
     ) -> HummockResult<bool> {
         let table_id = smallest_key.user_key.table_id.table_id;
-        if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
-            self.table_ids.insert(table_id);
-            self.finalize_last_table_stats();
-            self.last_table_id = Some(table_id);
-        }
         if !self.block_builder.is_empty() {
             let min_block_size = std::cmp::min(MIN_BLOCK_SIZE, self.options.block_capacity / 4);
             if self.block_builder.approximate_len() < min_block_size {
@@ -235,6 +230,20 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.filter_builder.add_raw_data(filter_data);
         let block_meta = self.block_metas.last_mut().unwrap();
         self.writer.write_block_bytes(buf, block_meta).await?;
+
+        self.last_table_stats.compressed_size_in_sstable = self
+            .block_metas
+            .iter()
+            .filter(|block_meta| block_meta.table_id().table_id() == self.last_table_id.unwrap())
+            .map(|block_meta| block_meta.len as u64)
+            .sum::<u64>();
+
+        if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
+            self.table_ids.insert(table_id);
+            self.finalize_last_table_stats();
+            self.last_table_id = Some(table_id);
+        }
+
         Ok(true)
     }
 
@@ -297,12 +306,22 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 "is_new_user_key {} sst_id {} block_idx {} table_id {} last_table_id {:?} full_key {:?}",
                 is_new_user_key, self.sstable_id, self.block_metas.len(), table_id, self.last_table_id, full_key
             );
-            self.table_ids.insert(table_id);
-            self.finalize_last_table_stats();
-            self.last_table_id = Some(table_id);
             if !self.block_builder.is_empty() {
                 self.build_block().await?;
             }
+
+            self.last_table_stats.compressed_size_in_sstable = self
+                .block_metas
+                .iter()
+                .filter(|block_meta| {
+                    block_meta.table_id().table_id() == self.last_table_id.unwrap()
+                })
+                .map(|block_meta| block_meta.len as u64)
+                .sum::<u64>();
+
+            self.table_ids.insert(table_id);
+            self.finalize_last_table_stats();
+            self.last_table_id = Some(table_id);
         } else if is_block_full && could_switch_block {
             self.build_block().await?;
         }
@@ -368,9 +387,16 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             self.block_metas[0].smallest_key.clone()
         };
         let largest_key = self.last_full_key.clone();
-        self.finalize_last_table_stats();
-
         self.build_block().await?;
+
+        self.last_table_stats.compressed_size_in_sstable = self
+            .block_metas
+            .iter()
+            .filter(|block_meta| block_meta.table_id().table_id() == self.last_table_id.unwrap())
+            .map(|block_meta| block_meta.len as u64)
+            .sum::<u64>();
+
+        self.finalize_last_table_stats();
         let right_exclusive = false;
         let meta_offset = self.writer.data_len() as u64;
 
@@ -610,6 +636,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         if self.table_ids.is_empty() || self.last_table_id.is_none() {
             return;
         }
+
         self.table_stats.insert(
             self.last_table_id.unwrap(),
             std::mem::take(&mut self.last_table_stats),
