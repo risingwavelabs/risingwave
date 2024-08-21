@@ -100,7 +100,7 @@ where
             last_table_id: 0,
             table_partition_vnode,
             split_weight_by_vnode: 0,
-            largest_vnode_in_current_partition: VirtualNode::DEFAULT_MAX.to_index(),
+            largest_vnode_in_current_partition: VirtualNode::max().to_index(),
             concurrent_upload_join_handle: FuturesUnordered::new(),
             concurrent_uploading_sst_count,
         }
@@ -116,7 +116,7 @@ where
             last_table_id: 0,
             table_partition_vnode: BTreeMap::default(),
             split_weight_by_vnode: 0,
-            largest_vnode_in_current_partition: VirtualNode::DEFAULT_MAX.to_index(),
+            largest_vnode_in_current_partition: VirtualNode::max().to_index(),
             concurrent_upload_join_handle: FuturesUnordered::new(),
             concurrent_uploading_sst_count: None,
         }
@@ -229,14 +229,14 @@ where
                 switch_builder = true;
                 if self.split_weight_by_vnode > 1 {
                     self.largest_vnode_in_current_partition =
-                        VirtualNode::DEFAULT_COUNT / (self.split_weight_by_vnode as usize) - 1;
+                        VirtualNode::count() / (self.split_weight_by_vnode as usize) - 1;
                 } else {
                     // default
-                    self.largest_vnode_in_current_partition = VirtualNode::DEFAULT_MAX.to_index();
+                    self.largest_vnode_in_current_partition = VirtualNode::max().to_index();
                 }
             }
         }
-        if self.largest_vnode_in_current_partition != VirtualNode::DEFAULT_MAX.to_index() {
+        if self.largest_vnode_in_current_partition != VirtualNode::max().to_index() {
             let key_vnode = user_key.get_vnode_id();
             if key_vnode > self.largest_vnode_in_current_partition {
                 // vnode partition change
@@ -244,7 +244,7 @@ where
 
                 // SAFETY: `self.split_weight_by_vnode > 1` here.
                 let (basic, remainder) =
-                    VirtualNode::DEFAULT_COUNT.div_rem(&(self.split_weight_by_vnode as usize));
+                    VirtualNode::count().div_rem(&(self.split_weight_by_vnode as usize));
                 let small_segments_area = basic * (self.split_weight_by_vnode as usize - remainder);
                 self.largest_vnode_in_current_partition = (if key_vnode < small_segments_area {
                     (key_vnode / basic + 1) * basic

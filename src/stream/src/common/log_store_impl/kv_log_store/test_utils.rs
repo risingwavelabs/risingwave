@@ -177,7 +177,7 @@ pub(crate) fn gen_test_log_store_table(pk_info: &'static KvLogStorePkInfo) -> Pb
 pub(crate) fn calculate_vnode_bitmap<'a>(
     test_data: impl Iterator<Item = (Op, RowRef<'a>)>,
 ) -> Bitmap {
-    let mut builder = BitmapBuilder::zeroed(VirtualNode::DEFAULT_COUNT);
+    let mut builder = BitmapBuilder::zeroed(VirtualNode::count());
     for vnode in
         test_data.map(|(_, row)| VirtualNode::compute_row(row, &[TEST_SCHEMA_DIST_KEY_INDEX]))
     {

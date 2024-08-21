@@ -1610,7 +1610,7 @@ impl DdlController {
 
         let parallelism = self.resolve_stream_parallelism(specified_parallelism, &cluster_info)?;
 
-        const MAX_PARALLELISM: NonZeroUsize = NonZeroUsize::new(VirtualNode::DEFAULT_COUNT).unwrap();
+        const MAX_PARALLELISM: NonZeroUsize = NonZeroUsize::new(VirtualNode::count()).unwrap();
 
         let parallelism_limited = parallelism > MAX_PARALLELISM;
         if parallelism_limited {

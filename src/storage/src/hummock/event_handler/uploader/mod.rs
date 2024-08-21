@@ -370,14 +370,14 @@ impl TableUnsyncData {
                         prev_watermarks.extend(table_watermarks);
                     }
                     Entry::Vacant(entry) => {
-                        let mut vnode_bitmap = BitmapBuilder::zeroed(VirtualNode::DEFAULT_COUNT);
+                        let mut vnode_bitmap = BitmapBuilder::zeroed(VirtualNode::count());
                         apply_new_vnodes(&mut vnode_bitmap, &table_watermarks);
                         entry.insert((table_watermarks, vnode_bitmap));
                     }
                 }
             }
             None => {
-                let mut vnode_bitmap = BitmapBuilder::zeroed(VirtualNode::DEFAULT_COUNT);
+                let mut vnode_bitmap = BitmapBuilder::zeroed(VirtualNode::count());
                 apply_new_vnodes(&mut vnode_bitmap, &table_watermarks);
                 self.table_watermarks = Some((
                     direction,

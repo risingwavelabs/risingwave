@@ -74,7 +74,7 @@ pub fn vnode_range(range: &TableKeyRange) -> (usize, usize) {
                 vnode.to_index() + 1
             }
         }
-        Unbounded => VirtualNode::DEFAULT_COUNT,
+        Unbounded => VirtualNode::count(),
     };
     (left, right)
 }
@@ -321,7 +321,7 @@ pub fn prev_full_key(full_key: &[u8]) -> Vec<u8> {
 }
 
 pub fn end_bound_of_vnode(vnode: VirtualNode) -> Bound<Bytes> {
-    if vnode == VirtualNode::DEFAULT_MAX {
+    if vnode == VirtualNode::max() {
         Unbounded
     } else {
         let end_bound_index = vnode.to_index() + 1;
@@ -1299,7 +1299,7 @@ mod tests {
                 Excluded(TableKey(concat(234, b"")))
             )
         );
-        let max_vnode = VirtualNode::DEFAULT_COUNT - 1;
+        let max_vnode = VirtualNode::count() - 1;
         assert_eq!(
             prefixed_range_with_vnode(
                 (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
@@ -1332,7 +1332,7 @@ mod tests {
             Excluded(b"1".as_slice()),
             Unbounded,
         ];
-        for vnode in 0..VirtualNode::DEFAULT_COUNT {
+        for vnode in 0..VirtualNode::count() {
             for left in &left_bound {
                 for right in &right_bound {
                     assert_eq!(

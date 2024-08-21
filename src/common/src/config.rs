@@ -427,10 +427,10 @@ impl<'de> Deserialize<'de> for DefaultParallelism {
                     )))
                 }
             }
-            Parallelism::Int(i) => Ok(DefaultParallelism::Default(if i > VirtualNode::DEFAULT_COUNT {
+            Parallelism::Int(i) => Ok(DefaultParallelism::Default(if i > VirtualNode::count() {
                 Err(serde::de::Error::custom(format!(
                     "default parallelism should be not great than {}",
-                    VirtualNode::DEFAULT_COUNT
+                    VirtualNode::count()
                 )))?
             } else {
                 NonZeroUsize::new(i).ok_or_else(|| {

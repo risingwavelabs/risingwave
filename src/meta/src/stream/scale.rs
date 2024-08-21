@@ -258,7 +258,7 @@ pub fn rebalance_actor_vnode(
         balance: i32,
         builder: BitmapBuilder,
     }
-    let (expected, mut remain) = VirtualNode::DEFAULT_COUNT.div_rem(&target_actor_count);
+    let (expected, mut remain) = VirtualNode::count().div_rem(&target_actor_count);
 
     tracing::debug!(
         "expected {}, remain {}, prev actors {}, target actors {}",
@@ -289,7 +289,7 @@ pub fn rebalance_actor_vnode(
         builder
     };
 
-    let (prev_expected, _) = VirtualNode::DEFAULT_COUNT.div_rem(&actors.len());
+    let (prev_expected, _) = VirtualNode::count().div_rem(&actors.len());
 
     let prev_remain = removed
         .iter()
@@ -322,7 +322,7 @@ pub fn rebalance_actor_vnode(
         .map(|actor_id| Balance {
             actor_id: *actor_id,
             balance: -(expected as i32),
-            builder: BitmapBuilder::zeroed(VirtualNode::DEFAULT_COUNT),
+            builder: BitmapBuilder::zeroed(VirtualNode::count()),
         })
         .collect_vec();
 
@@ -384,7 +384,7 @@ pub fn rebalance_actor_vnode(
         let n = min(abs(src.balance), abs(dst.balance));
 
         let mut moved = 0;
-        for idx in (0..VirtualNode::DEFAULT_COUNT).rev() {
+        for idx in (0..VirtualNode::count()).rev() {
             if moved >= n {
                 break;
             }
@@ -2238,12 +2238,12 @@ impl ScaleController {
                     }
                     FragmentDistributionType::Hash => match parallelism {
                         TableParallelism::Adaptive => {
-                            if all_available_slots > VirtualNode::DEFAULT_COUNT {
+                            if all_available_slots > VirtualNode::count() {
                                 tracing::warn!("available parallelism for table {table_id} is larger than VirtualNode::COUNT, force limit to VirtualNode::COUNT");
                                 // force limit to VirtualNode::COUNT
                                 let target_worker_slots = schedule_units_for_slots(
                                     &schedulable_worker_slots,
-                                    VirtualNode::DEFAULT_COUNT,
+                                    VirtualNode::count(),
                                     table_id,
                                 )?;
 
@@ -2265,10 +2265,10 @@ impl ScaleController {
                             }
                         }
                         TableParallelism::Fixed(mut n) => {
-                            if n > VirtualNode::DEFAULT_COUNT {
+                            if n > VirtualNode::count() {
                                 // This should be unreachable, but we still intercept it to prevent accidental modifications.
                                 tracing::warn!("parallelism {n} for table {table_id} is larger than VirtualNode::COUNT, force limit to VirtualNode::COUNT");
-                                n = VirtualNode::DEFAULT_COUNT
+                                n = VirtualNode::count()
                             }
 
                             let target_worker_slots =

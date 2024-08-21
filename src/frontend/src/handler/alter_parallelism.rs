@@ -108,16 +108,16 @@ pub async fn handle_alter_parallelism(
 
     match &target_parallelism.parallelism {
         Some(Parallelism::Adaptive(_)) | Some(Parallelism::Auto(_)) => {
-            if available_parallelism > VirtualNode::DEFAULT_COUNT as u32 {
-                builder = builder.notice(format!("Available parallelism exceeds the maximum parallelism limit, the actual parallelism will be limited to {}", VirtualNode::DEFAULT_COUNT));
+            if available_parallelism > VirtualNode::count() as u32 {
+                builder = builder.notice(format!("Available parallelism exceeds the maximum parallelism limit, the actual parallelism will be limited to {}", VirtualNode::count()));
             }
         }
         Some(Parallelism::Fixed(FixedParallelism { parallelism })) => {
-            if *parallelism > VirtualNode::DEFAULT_COUNT as u32 {
-                builder = builder.notice(format!("Provided parallelism exceeds the maximum parallelism limit, resetting to FIXED({})", VirtualNode::DEFAULT_COUNT));
+            if *parallelism > VirtualNode::count() as u32 {
+                builder = builder.notice(format!("Provided parallelism exceeds the maximum parallelism limit, resetting to FIXED({})", VirtualNode::count()));
                 target_parallelism = PbTableParallelism {
                     parallelism: Some(PbParallelism::Fixed(FixedParallelism {
-                        parallelism: VirtualNode::DEFAULT_COUNT as u32,
+                        parallelism: VirtualNode::count() as u32,
                     })),
                 };
             }

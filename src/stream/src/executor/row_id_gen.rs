@@ -140,7 +140,7 @@ mod tests {
         ]);
         let pk_indices = vec![0];
         let row_id_index = 0;
-        let row_id_generator = Bitmap::ones(VirtualNode::DEFAULT_COUNT);
+        let row_id_generator = Bitmap::ones(VirtualNode::count());
         let (mut tx, upstream) = MockSource::channel();
         let upstream = upstream.into_executor(schema.clone(), pk_indices.clone());
 

@@ -44,10 +44,7 @@ pub fn place_vnode(
     // `max_parallelism` and total number of virtual nodes.
     let serving_parallelism = std::cmp::min(
         worker_slots.iter().map(|slots| slots.len()).sum(),
-        std::cmp::min(
-            max_parallelism.unwrap_or(usize::MAX),
-            VirtualNode::DEFAULT_COUNT,
-        ),
+        std::cmp::min(max_parallelism.unwrap_or(usize::MAX), VirtualNode::count()),
     );
 
     // Select `serving_parallelism` worker slots in a round-robin fashion, to distribute workload
@@ -82,14 +79,14 @@ pub fn place_vnode(
         is_temp: bool,
     }
 
-    let (expected, mut remain) = VirtualNode::DEFAULT_COUNT.div_rem(&selected_slots.len());
+    let (expected, mut remain) = VirtualNode::count().div_rem(&selected_slots.len());
     let mut balances: HashMap<WorkerSlotId, Balance> = HashMap::default();
 
     for slot in &selected_slots {
         let mut balance = Balance {
             slot: *slot,
             balance: -(expected as i32),
-            builder: BitmapBuilder::zeroed(VirtualNode::DEFAULT_COUNT),
+            builder: BitmapBuilder::zeroed(VirtualNode::count()),
             is_temp: false,
         };
 
@@ -105,7 +102,7 @@ pub fn place_vnode(
     let mut temp_slot = Balance {
         slot: WorkerSlotId::new(0u32, usize::MAX), /* This id doesn't matter for `temp_slot`. It's distinguishable via `is_temp`. */
         balance: 0,
-        builder: BitmapBuilder::zeroed(VirtualNode::DEFAULT_COUNT),
+        builder: BitmapBuilder::zeroed(VirtualNode::count()),
         is_temp: true,
     };
     match hint_worker_slot_mapping {
@@ -161,7 +158,7 @@ pub fn place_vnode(
         let mut dst = balances.pop_back().unwrap();
         let n = std::cmp::min(src.balance.abs(), dst.balance.abs());
         let mut moved = 0;
-        for idx in 0..VirtualNode::DEFAULT_COUNT {
+        for idx in 0..VirtualNode::count() {
             if moved >= n {
                 break;
             }
@@ -192,7 +189,7 @@ pub fn place_vnode(
     for (worker_slot, bitmap) in results {
         worker_result
             .entry(worker_slot)
-            .or_insert(BitmapBuilder::zeroed(VirtualNode::DEFAULT_COUNT).finish())
+            .or_insert(BitmapBuilder::zeroed(VirtualNode::count()).finish())
             .bitor_assign(&bitmap);
     }
 
@@ -210,7 +207,7 @@ mod tests {
     use crate::vnode_mapping::vnode_placement::place_vnode;
     #[test]
     fn test_place_vnode() {
-        assert_eq!(VirtualNode::DEFAULT_COUNT, 256);
+        assert_eq!(VirtualNode::count(), 256);
 
         let serving_property = Property {
             is_unschedulable: false,
@@ -223,7 +220,7 @@ mod tests {
             assert_eq!(wm1.len(), 256);
             assert_eq!(wm2.len(), 256);
             let mut count: usize = 0;
-            for idx in 0..VirtualNode::DEFAULT_COUNT {
+            for idx in 0..VirtualNode::count() {
                 let vnode = VirtualNode::from_index(idx);
                 if wm1.get(vnode) == wm2.get(vnode) {
                     count += 1;

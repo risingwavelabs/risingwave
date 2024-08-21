@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::num::NonZero;
 use std::sync::LazyLock;
 
 use itertools::Itertools;
@@ -45,7 +46,6 @@ impl From<Crc32HashCode> for VirtualNode {
 }
 
 impl VirtualNode {
-    pub const MAX_COUNT: usize = 1 << VirtualNodeInner::BITS;
     /// We may use `VirtualNode` as a datum in a stream, or store it as a column.
     /// Hence this reifies it as a RW datatype.
     pub const RW_TYPE: DataType = DataType::Int16;
@@ -56,26 +56,24 @@ impl VirtualNode {
 }
 
 impl VirtualNode {
-    /// The total count of virtual nodes.
-    pub const DEFAULT_COUNT: usize = 1 << 8;
-    /// The maximum value of the virtual node.
-    pub const DEFAULT_MAX: VirtualNode =
-        unsafe { VirtualNode::from_index_unchecked(Self::DEFAULT_COUNT - 1) };
-}
-
-impl VirtualNode {
     pub fn count() -> usize {
+        const MAX_COUNT: usize = 1 << VirtualNodeInner::BITS;
+        const DEFAULT_COUNT: usize = 1 << 8;
+
         static COUNT: LazyLock<usize> = LazyLock::new(|| {
             if let Ok(count) = std::env::var("RW_VNODE_COUNT") {
-                let count: usize = count.parse().expect("RW_VNODE_COUNT must be a number");
+                let count = count
+                    .parse::<NonZero<usize>>()
+                    .expect("`RW_VNODE_COUNT` must be a positive integer")
+                    .get();
                 assert!(
-                    count <= VirtualNode::MAX_COUNT,
-                    "vnode count must be less than {}",
-                    VirtualNode::MAX_COUNT
+                    count <= MAX_COUNT,
+                    "`RW_VNODE_COUNT` should not exceed maximum value {}",
+                    MAX_COUNT
                 );
                 count
             } else {
-                VirtualNode::DEFAULT_COUNT
+                DEFAULT_COUNT
             }
         });
 

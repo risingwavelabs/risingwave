@@ -15,17 +15,14 @@
 use std::cmp::Ordering;
 use std::time::SystemTime;
 
-use static_assertions::const_assert;
-
 use super::epoch::UNIX_RISINGWAVE_DATE_EPOCH;
 use crate::hash::VirtualNode;
 
+// TODO(var-vnode): should fit vnode count up to 16 bits
 const TIMESTAMP_SHIFT_BITS: u8 = 22;
 const VNODE_ID_SHIFT_BITS: u8 = 12;
-const SEQUENCE_UPPER_BOUND: u16 = 1 << 12;
-const VNODE_ID_UPPER_BOUND: u32 = 1 << 10;
-
-const_assert!(VNODE_ID_UPPER_BOUND >= VirtualNode::DEFAULT_COUNT as u32);
+const SEQUENCE_UPPER_BOUND: u16 = 1 << VNODE_ID_SHIFT_BITS;
+const VNODE_ID_UPPER_BOUND: u32 = 1 << (TIMESTAMP_SHIFT_BITS - VNODE_ID_SHIFT_BITS);
 
 /// `RowIdGenerator` generates unique row ids using snowflake algorithm as following format:
 ///
@@ -62,6 +59,12 @@ pub fn extract_vnode_id_from_row_id(id: RowId) -> VirtualNode {
 impl RowIdGenerator {
     /// Create a new `RowIdGenerator` with given virtual nodes.
     pub fn new(vnodes: impl IntoIterator<Item = VirtualNode>) -> Self {
+        assert!(
+            VirtualNode::count() <= VNODE_ID_UPPER_BOUND as usize,
+            "vnode count should not exceed {} due to limitation of row id format",
+            VNODE_ID_UPPER_BOUND
+        );
+
         let base = *UNIX_RISINGWAVE_DATE_EPOCH;
         Self {
             base,
