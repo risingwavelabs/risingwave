@@ -280,6 +280,7 @@ impl From<KafkaConfig> for KafkaProperties {
             rdkafka_properties_consumer: Default::default(),
             privatelink_common: val.privatelink_common,
             aws_auth_props: val.aws_auth_props,
+            group_id_prefix: None,
             unknown_fields: Default::default(),
         }
     }

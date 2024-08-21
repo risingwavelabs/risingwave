@@ -55,6 +55,7 @@ macro_rules! for_all_features {
             { CdcTableSchemaMap,    Paid,       "Automatically map upstream schema to CDC Table."},
             { SqlServerSink,        Paid,       "Sink data from RisingWave to SQL Server." },
             { SqlServerCdcSource,   Paid,       "CDC source connector for Sql Server." },
+            { CdcAutoSchemaChange,  Paid,       "Auto replicate upstream DDL to CDC Table." },
         }
     };
 }
