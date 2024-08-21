@@ -19,7 +19,7 @@ Caused by these errors (recent errors listed first):
   2: invalid IPv4 address
 
 
-statement error Failed to run the query
+statement error failed to send requests to UDF service
 create function int_42() returns int as int_42 using link '55.55.55.55:5555';
 
 
