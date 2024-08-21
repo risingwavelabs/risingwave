@@ -502,8 +502,8 @@ pub enum Expr {
     Array(Array),
     /// An array constructing subquery `ARRAY(SELECT 2 UNION SELECT 3)`
     ArraySubquery(Box<Query>),
-    /// A subscript expression `arr[1]`
-    ArrayIndex {
+    /// A subscript expression `arr[1]` or `map['a']`
+    Index {
         obj: Box<Expr>,
         index: Box<Expr>,
     },
@@ -516,6 +516,9 @@ pub enum Expr {
     LambdaFunction {
         args: Vec<Ident>,
         body: Box<Expr>,
+    },
+    Map {
+        entries: Vec<(Expr, Expr)>,
     },
 }
 
@@ -797,7 +800,7 @@ impl fmt::Display for Expr {
                     .as_slice()
                     .join(", ")
             ),
-            Expr::ArrayIndex { obj, index } => {
+            Expr::Index { obj, index } => {
                 write!(f, "{}[{}]", obj, index)?;
                 Ok(())
             }
@@ -821,6 +824,16 @@ impl fmt::Display for Expr {
                     "|{}| {}",
                     args.iter().map(ToString::to_string).join(", "),
                     body
+                )
+            }
+            Expr::Map { entries } => {
+                write!(
+                    f,
+                    "MAP {{{}}}",
+                    entries
+                        .iter()
+                        .map(|(k, v)| format!("{}: {}", k, v))
+                        .join(", ")
                 )
             }
         }
@@ -1827,7 +1840,7 @@ impl fmt::Display for Statement {
                 if !include_column_options.is_empty() { // (Ident, Option<Ident>)
                     write!(f, "{}", display_comma_separated(
                         include_column_options.iter().map(|option_item: &IncludeOptionItem| {
-                            format!("INCLUDE {}{}{}",
+                            format!(" INCLUDE {}{}{}",
                                     option_item.column_type,
                                     if let Some(inner_field) = &option_item.inner_field {
                                         format!(" {}", inner_field)
@@ -3349,13 +3362,13 @@ mod tests {
 
     #[test]
     fn test_array_index_display() {
-        let array_index = Expr::ArrayIndex {
+        let array_index = Expr::Index {
             obj: Box::new(Expr::Identifier(Ident::new_unchecked("v1"))),
             index: Box::new(Expr::Value(Value::Number("1".into()))),
         };
         assert_eq!("v1[1]", format!("{}", array_index));
 
-        let array_index2 = Expr::ArrayIndex {
+        let array_index2 = Expr::Index {
             obj: Box::new(array_index),
             index: Box::new(Expr::Value(Value::Number("1".into()))),
         };

@@ -309,7 +309,7 @@ impl CheckpointControl {
             );
         }
 
-        debug!(
+        tracing::trace!(
             prev_epoch = command_ctx.prev_epoch.value().0,
             ?jobs_to_wait,
             "enqueue command"
@@ -354,7 +354,7 @@ impl CheckpointControl {
     fn barrier_collected(&mut self, resp: BarrierCompleteResponse) {
         let worker_id = resp.worker_id;
         let prev_epoch = resp.epoch;
-        debug!(
+        tracing::trace!(
             worker_id,
             prev_epoch,
             partial_graph_id = resp.partial_graph_id,
@@ -806,7 +806,7 @@ impl GlobalBarrierManager {
                                             r#type: node.r#type,
                                             host: node.host.clone(),
                                             parallelism: node.parallelism,
-                                            property: node.property,
+                                            property: node.property.clone(),
                                             resource: node.resource.clone(),
                                             ..Default::default()
                                         },
@@ -1005,7 +1005,7 @@ impl GlobalBarrierManager {
             BarrierKind::Barrier
         };
 
-        debug!(prev_epoch = prev_epoch.value().0, "inject barrier");
+        tracing::trace!(prev_epoch = prev_epoch.value().0, "inject barrier");
 
         // Collect the jobs to finish
         if let (BarrierKind::Checkpoint(_), Command::Plain(None)) = (&kind, &command)
@@ -1206,7 +1206,7 @@ impl GlobalBarrierManagerContext {
         mut finished_jobs: Vec<TrackingJob>,
         backfill_pinned_log_epoch: HashMap<TableId, (u64, HashSet<TableId>)>,
     ) -> MetaResult<Option<HummockVersionStats>> {
-        debug!(
+        tracing::trace!(
             prev_epoch = node.command_ctx.prev_epoch.value().0,
             kind = ?node.command_ctx.kind,
             "complete barrier"

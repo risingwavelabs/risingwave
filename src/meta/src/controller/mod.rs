@@ -38,6 +38,7 @@ pub mod cluster;
 pub mod fragment;
 pub mod id;
 pub mod rename;
+pub mod scale;
 pub mod session_params;
 pub mod streaming_job;
 pub mod system_param;
@@ -161,6 +162,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             retention_seconds: value.0.retention_seconds.map(|id| id as u32),
+            cdc_table_id: value.0.cdc_table_id,
         }
     }
 }
