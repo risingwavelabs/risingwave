@@ -17,7 +17,6 @@ use std::net::SocketAddr as IpSocketAddr;
 #[cfg(madsim)]
 use std::os::unix::net::SocketAddr as UnixSocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
 
 #[cfg(not(madsim))]
 use tokio::net::unix::SocketAddr as UnixSocketAddr;
@@ -75,7 +74,7 @@ impl Listener {
     /// Accepts a new incoming connection from this listener.
     ///
     /// Returns a tuple of the stream and the string representation of the peer address.
-    pub async fn accept(&self) -> io::Result<(Stream, Address)> {
+    pub async fn accept(&self, tcp_keepalive: &TcpKeepalive) -> io::Result<(Stream, Address)> {
         match self {
             Self::Tcp(listener) => {
                 let (stream, addr) = listener.accept().await?;
@@ -85,8 +84,7 @@ impl Listener {
                 #[cfg(not(madsim))]
                 {
                     let r = socket2::SockRef::from(&stream);
-                    let ka = socket2::TcpKeepalive::new().with_time(Duration::from_secs(300));
-                    r.set_tcp_keepalive(&ka)?;
+                    r.set_tcp_keepalive(tcp_keepalive)?;
                 }
                 Ok((Stream::Tcp(stream), Address::Tcp(addr)))
             }
@@ -97,3 +95,5 @@ impl Listener {
         }
     }
 }
+
+pub use socket2::TcpKeepalive;
