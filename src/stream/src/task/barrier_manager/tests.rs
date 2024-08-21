@@ -31,11 +31,10 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
     let manager = &test_env.shared_context.local_barrier_manager;
 
     let register_sender = |actor_id: u32| {
-        let (barrier_tx, barrier_rx) = unbounded_channel();
-        test_env
+        let barrier_rx = test_env
             .shared_context
             .local_barrier_manager
-            .register_sender(actor_id, barrier_tx);
+            .subscribe_barrier(actor_id);
         (actor_id, barrier_rx)
     };
 
@@ -91,11 +90,10 @@ async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
     let manager = &test_env.shared_context.local_barrier_manager;
 
     let register_sender = |actor_id: u32| {
-        let (barrier_tx, barrier_rx) = unbounded_channel();
-        test_env
+        let barrier_rx = test_env
             .shared_context
             .local_barrier_manager
-            .register_sender(actor_id, barrier_tx);
+            .subscribe_barrier(actor_id);
         (actor_id, barrier_rx)
     };
 
@@ -170,11 +168,10 @@ async fn test_late_register_barrier_sender() -> StreamResult<()> {
     let manager = &test_env.shared_context.local_barrier_manager;
 
     let register_sender = |actor_id: u32| {
-        let (barrier_tx, barrier_rx) = unbounded_channel();
-        test_env
+        let barrier_rx = test_env
             .shared_context
             .local_barrier_manager
-            .register_sender(actor_id, barrier_tx);
+            .subscribe_barrier(actor_id);
         (actor_id, barrier_rx)
     };
 

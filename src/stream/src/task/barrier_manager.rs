@@ -893,11 +893,13 @@ impl LocalBarrierManager {
         rx
     }
 
-    pub fn register_sender(&self, actor_id: ActorId, tx: UnboundedSender<Barrier>) {
+    pub fn subscribe_barrier(&self, actor_id: ActorId) -> UnboundedReceiver<Barrier> {
+        let (tx, rx) = mpsc::unbounded_channel();
         self.send_event(LocalBarrierEvent::RegisterBarrierSender {
             actor_id,
             barrier_sender: tx,
-        })
+        });
+        rx
     }
 }
 
