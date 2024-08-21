@@ -76,7 +76,7 @@ pub trait OpendalSinkBackend: Send + Sync + 'static + Clone + PartialEq {
     const SINK_NAME: &'static str;
 
     fn from_btreemap(btree_map: BTreeMap<String, String>) -> Result<Self::Properties>;
-    fn new_operator(properties: Self::Properties) -> Result<Operator>;
+    fn new_operator(properties: Self::Properties) -> Result<Box<Operator>>;
     fn get_path(properties: Self::Properties) -> String;
     fn get_engine_type() -> EngineType;
 }
@@ -135,7 +135,7 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
         let schema = param.schema();
         let config = S::from_btreemap(param.properties)?;
         let path = S::get_path(config.clone());
-        let op = S::new_operator(config.clone())?;
+        let op = *S::new_operator(config.clone())?;
         let engine_type = S::get_engine_type();
         Ok(Self {
             op,

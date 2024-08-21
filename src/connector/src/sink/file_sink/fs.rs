@@ -53,7 +53,7 @@ impl UnknownFields for FsConfig {
 pub const FS_SINK: &str = "fs";
 
 impl<S: OpendalSinkBackend> FileSink<S> {
-    pub fn new_fs_sink(config: FsConfig) -> Result<Operator> {
+    pub fn new_fs_sink(config: FsConfig) -> Result<Box<Operator>> {
         // Create fs builder.
         let mut builder = Fs::default();
         // Create fs backend builder.
@@ -62,7 +62,7 @@ impl<S: OpendalSinkBackend> FileSink<S> {
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
             .finish();
-        Ok(operator)
+        Ok(Box::new(operator))
     }
 }
 
@@ -88,7 +88,7 @@ impl OpendalSinkBackend for FsSink {
         Ok(config)
     }
 
-    fn new_operator(properties: FsConfig) -> Result<Operator> {
+    fn new_operator(properties: FsConfig) -> Result<Box<Operator>> {
         FileSink::<FsSink>::new_fs_sink(properties)
     }
 

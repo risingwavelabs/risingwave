@@ -65,7 +65,7 @@ impl UnknownFields for GcsConfig {
 pub const GCS_SINK: &str = "gcs";
 
 impl<S: OpendalSinkBackend> FileSink<S> {
-    pub fn new_gcs_sink(config: GcsConfig) -> Result<Operator> {
+    pub fn new_gcs_sink(config: GcsConfig) -> Result<Box<Operator>> {
         // Create gcs builder.
         let mut builder = Gcs::default();
 
@@ -79,7 +79,7 @@ impl<S: OpendalSinkBackend> FileSink<S> {
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
             .finish();
-        Ok(operator)
+        Ok(Box::new(operator))
     }
 }
 
@@ -105,7 +105,7 @@ impl OpendalSinkBackend for GcsSink {
         Ok(config)
     }
 
-    fn new_operator(properties: GcsConfig) -> Result<Operator> {
+    fn new_operator(properties: GcsConfig) -> Result<Box<Operator>> {
         FileSink::<GcsSink>::new_gcs_sink(properties)
     }
 

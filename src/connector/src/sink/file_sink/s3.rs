@@ -59,7 +59,7 @@ pub struct S3Config {
 pub const S3_SINK: &str = "s3";
 
 impl<S: OpendalSinkBackend> FileSink<S> {
-    pub fn new_s3_sink(config: S3Config) -> Result<Operator> {
+    pub fn new_s3_sink(config: S3Config) -> Result<Box<Operator>> {
         // Create s3 builder.
         let mut builder = S3::default();
         builder.bucket(&config.common.bucket_name);
@@ -96,7 +96,7 @@ impl<S: OpendalSinkBackend> FileSink<S> {
             .layer(RetryLayer::default())
             .finish();
 
-        Ok(operator)
+        Ok(Box::new(operator))
     }
 }
 
@@ -128,7 +128,7 @@ impl OpendalSinkBackend for S3Sink {
         Ok(config)
     }
 
-    fn new_operator(properties: S3Config) -> Result<Operator> {
+    fn new_operator(properties: S3Config) -> Result<Box<Operator>> {
         FileSink::<S3Sink>::new_s3_sink(properties)
     }
 
