@@ -397,9 +397,13 @@ impl HummockManager {
         hummock_epoch_to_version::Entity::insert(m)
             .on_conflict(
                 OnConflict::column(hummock_epoch_to_version::Column::Epoch)
-                    .update_columns([hummock_epoch_to_version::Column::VersionId])
+                    // The existing row must be inserted by the common committed epoch of created MVs.
+                    // While any duplicate row must be inserted by MVs still in creation.
+                    // So the row shouldn't be updated.
+                    .do_nothing()
                     .to_owned(),
             )
+            .do_nothing()
             .exec(txn)
             .await?;
         let mut version_sst_ids = None;
