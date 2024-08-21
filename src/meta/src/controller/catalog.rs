@@ -165,18 +165,20 @@ impl CatalogController {
                 Some(external_table_name) => {
                     cdc_table_ids.insert(
                         table_id,
-                        build_cdc_table_id(source_id as u32, external_table_name),
+                        build_cdc_table_id(source_id as u32, &external_table_name),
                     );
                 }
             }
         }
 
         for (table_id, cdc_table_id) in cdc_table_ids {
-            Table::update_many()
-                .col_expr(table::Column::CdcTableId, cdc_table_id.into())
-                .filter(table::Column::TableId.eq(table_id))
-                .exec(&txn)
-                .await?;
+            table::ActiveModel {
+                table_id: Set(table_id as _),
+                cdc_table_id: Set(Some(cdc_table_id)),
+                ..Default::default()
+            }
+            .update(&txn)
+            .await?;
         }
         txn.commit().await?;
         Ok(())

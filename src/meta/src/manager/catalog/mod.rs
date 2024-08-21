@@ -390,7 +390,7 @@ impl CatalogManager {
                     )
                 }
                 Some(external_table_name) => {
-                    table.cdc_table_id = Some(build_cdc_table_id(source_id, external_table_name));
+                    table.cdc_table_id = Some(build_cdc_table_id(source_id, &external_table_name));
                 }
             }
             tables.insert(table.id, table);

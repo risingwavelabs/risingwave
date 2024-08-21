@@ -14,9 +14,8 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use itertools::Itertools;
-use regex::Regex;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash;
 use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
@@ -43,6 +42,8 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
 use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
+use risingwave_sqlparser::ast::Statement as SqlStatement;
+use risingwave_sqlparser::parser::Parser;
 use sea_orm::sea_query::{
     Alias, CommonTableExpression, Expr, Query, QueryStatementBuilder, SelectStatement, UnionType,
     WithClause,
@@ -51,6 +52,7 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, DerivePartialModel, EntityTrait, FromQueryResult, JoinType,
     Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
 };
+use thiserror_ext::AsReport;
 
 use crate::{MetaError, MetaResult};
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -1139,10 +1141,22 @@ pub(crate) fn build_relation_group(relation_objects: Vec<PartialObject>) -> Noti
     NotificationInfo::RelationGroup(PbRelationGroup { relations })
 }
 
-pub fn extract_external_table_name_from_definition(table_definition: &str) -> Option<&str> {
-    let re = Regex::new(r#"TABLE\s+'([^']+)'"#).unwrap();
-    if let Some(captures) = re.captures(table_definition) {
-        return captures.get(1).map(|m| m.as_str());
-    }
-    None
+pub fn extract_external_table_name_from_definition(table_definition: &str) -> Option<String> {
+    let [mut definition]: [_; 1] = Parser::parse_sql(table_definition)
+        .context("unable to parse table definition")
+        .inspect_err(|e| {
+            tracing::error!(
+                target: "auto_schema_change",
+                error = %e.as_report(),
+                "failed to parse table definition")
+        })
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let SqlStatement::CreateTable { cdc_table_info, .. } = &mut definition else {
+        panic!("unexpected statement: {:?}", definition);
+    };
+    cdc_table_info
+        .clone()
+        .map(|cdc_table_info| cdc_table_info.external_table_name)
 }
