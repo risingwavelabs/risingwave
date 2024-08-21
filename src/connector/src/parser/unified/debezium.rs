@@ -211,7 +211,7 @@ pub fn parse_schema_change(
                 }
             }
             schema_changes.push(TableSchemaChange {
-                cdc_table_name: id.replace('"', ""), // remove the double quotes
+                cdc_table_id: id.replace('"', ""), // remove the double quotes
                 columns: column_descs
                     .into_iter()
                     .map(|column_desc| ColumnCatalog {
