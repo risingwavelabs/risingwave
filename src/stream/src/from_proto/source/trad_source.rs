@@ -27,7 +27,6 @@ use risingwave_pb::plan_common::{
 };
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_storage::panic_store::PanicStateStore;
-use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
 use crate::executor::source::{
@@ -141,10 +140,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         node: &Self::Node,
         store: impl StateStore,
     ) -> StreamResult<Executor> {
-        let (sender, barrier_receiver) = unbounded_channel();
-        params
-            .create_actor_context
-            .register_sender(params.actor_context.id, sender);
+        let barrier_receiver = params
+            .shared_context
+            .local_barrier_manager
+            .subscribe_barrier(params.actor_context.id);
         let system_params = params.env.system_params_manager_ref().get_params();
 
         if let Some(source) = &node.source_inner {
