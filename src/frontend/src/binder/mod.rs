@@ -814,6 +814,7 @@ mod tests {
                                                 ],
                                                 variadic: false,
                                                 order_by: [],
+                                                ignore_nulls: false,
                                             },
                                             over: None,
                                             filter: None,

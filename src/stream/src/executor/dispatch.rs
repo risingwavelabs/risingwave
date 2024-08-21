@@ -1271,7 +1271,7 @@ mod tests {
                 actor_new_dispatchers: Default::default(),
             },
         ));
-        barrier_test_env.inject_barrier(&b1, [], [actor_id]);
+        barrier_test_env.inject_barrier(&b1, [actor_id]);
         tx.send(Message::Barrier(b1.clone().into_dispatcher()))
             .await
             .unwrap();
@@ -1291,7 +1291,7 @@ mod tests {
 
         // 6. Send another barrier.
         let b2 = Barrier::new_test_barrier(test_epoch(2));
-        barrier_test_env.inject_barrier(&b2, [], [actor_id]);
+        barrier_test_env.inject_barrier(&b2, [actor_id]);
         tx.send(Message::Barrier(b2.into_dispatcher()))
             .await
             .unwrap();
@@ -1330,7 +1330,7 @@ mod tests {
                 actor_new_dispatchers: Default::default(),
             },
         ));
-        barrier_test_env.inject_barrier(&b3, [], [actor_id]);
+        barrier_test_env.inject_barrier(&b3, [actor_id]);
         tx.send(Message::Barrier(b3.into_dispatcher()))
             .await
             .unwrap();
@@ -1344,7 +1344,7 @@ mod tests {
 
         // 11. Send another barrier.
         let b4 = Barrier::new_test_barrier(test_epoch(4));
-        barrier_test_env.inject_barrier(&b4, [], [actor_id]);
+        barrier_test_env.inject_barrier(&b4, [actor_id]);
         tx.send(Message::Barrier(b4.into_dispatcher()))
             .await
             .unwrap();

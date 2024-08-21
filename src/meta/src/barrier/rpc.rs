@@ -23,11 +23,14 @@ use futures::future::try_join_all;
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{pin_mut, FutureExt, StreamExt};
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
+use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::{Barrier, BarrierMutation};
+use risingwave_pb::stream_service::streaming_control_stream_request::RemovePartialGraphRequest;
 use risingwave_pb::stream_service::{
     streaming_control_stream_request, streaming_control_stream_response, BarrierCompleteResponse,
     BroadcastActorInfoTableRequest, BuildActorInfo, BuildActorsRequest, DropActorsRequest,
@@ -45,7 +48,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use super::command::CommandContext;
-use super::GlobalBarrierManagerContext;
+use super::{BarrierKind, GlobalBarrierManagerContext, TracedEpoch};
 use crate::barrier::info::InflightGraphInfo;
 use crate::manager::{MetaSrvEnv, WorkerId};
 use crate::{MetaError, MetaResult};
@@ -245,18 +248,44 @@ impl ControlStreamManager {
 }
 
 impl ControlStreamManager {
-    /// Send inject-barrier-rpc to stream service and wait for its response before returns.
-    pub(super) fn inject_barrier(
+    pub(super) fn inject_command_ctx_barrier(
         &mut self,
-        command_context: &CommandContext,
+        command_ctx: &CommandContext,
         pre_applied_graph_info: &InflightGraphInfo,
         applied_graph_info: Option<&InflightGraphInfo>,
+        actor_ids_to_pre_sync_mutation: HashMap<WorkerId, Vec<ActorId>>,
+    ) -> MetaResult<HashSet<WorkerId>> {
+        self.inject_barrier(
+            None,
+            command_ctx.to_mutation(),
+            (&command_ctx.curr_epoch, &command_ctx.prev_epoch),
+            &command_ctx.kind,
+            pre_applied_graph_info,
+            applied_graph_info,
+            actor_ids_to_pre_sync_mutation,
+        )
+    }
+
+    pub(super) fn inject_barrier(
+        &mut self,
+        creating_table_id: Option<TableId>,
+        mutation: Option<Mutation>,
+        (curr_epoch, prev_epoch): (&TracedEpoch, &TracedEpoch),
+        kind: &BarrierKind,
+        pre_applied_graph_info: &InflightGraphInfo,
+        applied_graph_info: Option<&InflightGraphInfo>,
+        actor_ids_to_pre_sync_mutation: HashMap<WorkerId, Vec<ActorId>>,
     ) -> MetaResult<HashSet<WorkerId>> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
             "inject_barrier_err"
         ));
-        let mutation = command_context.to_mutation();
-        let mut node_need_collect = HashSet::new();
+
+        let partial_graph_id = creating_table_id
+            .map(|table_id| {
+                assert!(actor_ids_to_pre_sync_mutation.is_empty());
+                table_id.table_id
+            })
+            .unwrap_or(u32::MAX);
 
         for worker_id in pre_applied_graph_info.worker_ids().chain(
             applied_graph_info
@@ -268,18 +297,14 @@ impl ControlStreamManager {
             }
         }
 
+        let mut node_need_collect = HashSet::new();
+
         self.nodes
             .iter_mut()
             .map(|(node_id, node)| {
-                let actor_ids_to_send: Vec<_> =
-                    pre_applied_graph_info.actor_ids_to_send(*node_id).collect();
                 let actor_ids_to_collect: Vec<_> = pre_applied_graph_info
                     .actor_ids_to_collect(*node_id)
                     .collect();
-                if actor_ids_to_collect.is_empty() {
-                    // No need to send or collect barrier for this node.
-                    assert!(actor_ids_to_send.is_empty());
-                }
                 let table_ids_to_sync = if let Some(graph_info) = applied_graph_info {
                     graph_info
                         .existing_table_ids()
@@ -293,15 +318,12 @@ impl ControlStreamManager {
                     let mutation = mutation.clone();
                     let barrier = Barrier {
                         epoch: Some(risingwave_pb::data::Epoch {
-                            curr: command_context.curr_epoch.value().0,
-                            prev: command_context.prev_epoch.value().0,
+                            curr: curr_epoch.value().0,
+                            prev: prev_epoch.value().0,
                         }),
                         mutation: mutation.clone().map(|_| BarrierMutation { mutation }),
-                        tracing_context: TracingContext::from_span(
-                            command_context.curr_epoch.span(),
-                        )
-                        .to_protobuf(),
-                        kind: command_context.kind.to_protobuf() as i32,
+                        tracing_context: TracingContext::from_span(curr_epoch.span()).to_protobuf(),
+                        kind: kind.to_protobuf() as i32,
                         passed_actors: vec![],
                     };
 
@@ -312,10 +334,16 @@ impl ControlStreamManager {
                                     InjectBarrierRequest {
                                         request_id: StreamRpcManager::new_request_id(),
                                         barrier: Some(barrier),
-                                        actor_ids_to_send,
                                         actor_ids_to_collect,
                                         table_ids_to_sync,
-                                        partial_graph_id: u32::MAX,
+                                        partial_graph_id,
+                                        actor_ids_to_pre_sync_barrier_mutation:
+                                            actor_ids_to_pre_sync_mutation
+                                                .get(node_id)
+                                                .into_iter()
+                                                .flatten()
+                                                .cloned()
+                                                .collect(),
                                     },
                                 ),
                             ),
@@ -337,8 +365,8 @@ impl ControlStreamManager {
                 // Record failure in event log.
                 use risingwave_pb::meta::event_log;
                 let event = event_log::EventInjectBarrierFail {
-                    prev_epoch: command_context.prev_epoch.value().0,
-                    cur_epoch: command_context.curr_epoch.value().0,
+                    prev_epoch: prev_epoch.value().0,
+                    cur_epoch: curr_epoch.value().0,
                     error: e.to_report_string(),
                 };
                 self.context
@@ -347,6 +375,27 @@ impl ControlStreamManager {
                     .add_event_logs(vec![event_log::Event::InjectBarrierFail(event)]);
             })?;
         Ok(node_need_collect)
+    }
+
+    pub(super) fn remove_partial_graph(&mut self, partial_graph_ids: Vec<u32>) {
+        self.nodes.retain(|_, node| {
+            if node
+                .sender
+                .send(StreamingControlStreamRequest {
+                    request: Some(
+                        streaming_control_stream_request::Request::RemovePartialGraph(
+                            RemovePartialGraphRequest { partial_graph_ids: partial_graph_ids.clone() },
+                        ),
+                    ),
+                })
+                .is_ok()
+            {
+                true
+            } else {
+                warn!(id = node.worker.id, host = ?node.worker.host, ?partial_graph_ids, "fail to remove_partial_graph request, node removed");
+                false
+            }
+        })
     }
 }
 

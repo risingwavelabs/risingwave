@@ -508,7 +508,7 @@ mod tests {
                 SchemaChangeEnvelope {
                     table_changes: [
                         TableSchemaChange {
-                            cdc_table_name: "mydb.test",
+                            cdc_table_id: "mydb.test",
                             columns: [
                                 ColumnCatalog {
                                     column_desc: ColumnDesc {
