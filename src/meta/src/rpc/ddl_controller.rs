@@ -1610,14 +1610,14 @@ impl DdlController {
 
         let parallelism = self.resolve_stream_parallelism(specified_parallelism, &cluster_info)?;
 
-        const MAX_PARALLELISM: NonZeroUsize = NonZeroUsize::new(VirtualNode::count()).unwrap();
+        let max_parallelism: NonZeroUsize = NonZeroUsize::new(VirtualNode::count()).unwrap();
 
-        let parallelism_limited = parallelism > MAX_PARALLELISM;
+        let parallelism_limited = parallelism > max_parallelism;
         if parallelism_limited {
-            tracing::warn!("Too many parallelism, use {} instead", MAX_PARALLELISM);
+            tracing::warn!("Too many parallelism, use {} instead", max_parallelism);
         }
 
-        let parallelism = parallelism.min(MAX_PARALLELISM);
+        let parallelism = parallelism.min(max_parallelism);
 
         let actor_graph_builder =
             ActorGraphBuilder::new(id, complete_graph, cluster_info, parallelism)?;
