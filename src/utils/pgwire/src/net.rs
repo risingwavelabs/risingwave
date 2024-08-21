@@ -82,6 +82,7 @@ impl Listener {
                 stream.set_nodelay(true)?;
                 // Set TCP keepalive to 5 minutes, which is less than the connection idle timeout of 350 seconds in AWS ELB.
                 // https://docs.aws.amazon.com/elasticloadbalancing/latest/network/network-load-balancers.html#connection-idle-timeout
+                #[cfg(not(madsim))]
                 {
                     let r = socket2::SockRef::from(&stream);
                     let ka = socket2::TcpKeepalive::new().with_time(Duration::from_secs(300));
