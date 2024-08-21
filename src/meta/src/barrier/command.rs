@@ -46,7 +46,9 @@ use super::trace::TracedEpoch;
 use crate::barrier::GlobalBarrierManagerContext;
 use crate::manager::{DdlType, MetadataManager, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
-use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
+use crate::stream::{
+    build_actor_connector_splits, validate_assignment, SplitAssignment, ThrottleConfig,
+};
 use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -446,9 +448,14 @@ impl CommandContext {
                 }
 
                 Command::SourceSplitAssignment(change) => {
+                    let mut checked_assignment = change.clone();
+                    checked_assignment
+                        .iter_mut()
+                        .for_each(|(_, assignment)| validate_assignment(assignment));
+
                     let mut diff = HashMap::new();
 
-                    for actor_splits in change.values() {
+                    for actor_splits in checked_assignment.values() {
                         diff.extend(actor_splits.clone());
                     }
 
@@ -493,7 +500,12 @@ impl CommandContext {
                         })
                         .collect();
                     let added_actors = table_fragments.actor_ids();
-                    let actor_splits = split_assignment
+
+                    let mut checked_split_assignment = split_assignment.clone();
+                    checked_split_assignment
+                        .iter_mut()
+                        .for_each(|(_, assignment)| validate_assignment(assignment));
+                    let actor_splits = checked_split_assignment
                         .values()
                         .flat_map(build_actor_connector_splits)
                         .collect();
@@ -667,7 +679,10 @@ impl CommandContext {
                     let mut actor_splits = HashMap::new();
 
                     for reschedule in reschedules.values() {
-                        for (actor_id, splits) in &reschedule.actor_splits {
+                        let mut checked_assignment = reschedule.actor_splits.clone();
+                        validate_assignment(&mut checked_assignment);
+
+                        for (actor_id, splits) in &checked_assignment {
                             actor_splits.insert(
                                 *actor_id as ActorId,
                                 ConnectorSplits {
