@@ -4942,11 +4942,11 @@ mod tests {
         let ddl2 = "CREATE TABLE t2 (v1 int) FROM pg_source TABLE 'mydb.t2'";
         assert_eq!(
             extract_external_table_name_from_definition(ddl1),
-            Some("public.t1")
+            Some("public.t1".into())
         );
         assert_eq!(
             extract_external_table_name_from_definition(ddl2),
-            Some("mydb.t2")
+            Some("mydb.t2".into())
         );
     }
 }
