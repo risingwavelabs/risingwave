@@ -56,7 +56,7 @@ macro_rules! define_system_params_read_trait {
                         ParameterInfo {
                             name: stringify!($field),
                             mutable: $is_mutable,
-                            value: self.$field().to_string(),
+                            value: self.$field().to_string(), // use `to_string` to get displayable (maybe redacted) value
                             description: $doc,
                         },
                     )*
