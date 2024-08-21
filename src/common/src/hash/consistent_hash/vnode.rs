@@ -104,6 +104,11 @@ impl VirtualNode {
     }
 
     /// Creates a virtual node from the `usize` index without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the index is within the range of virtual nodes,
+    /// i.e., less than [`Self::count`].
     pub const unsafe fn from_index_unchecked(index: usize) -> Self {
         Self(index as _)
     }
