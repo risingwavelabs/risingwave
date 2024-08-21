@@ -42,7 +42,7 @@ use crate::with_options::WithOptions;
 /// - S: The type parameter S represents the concrete implementation of the `OpendalSinkBackend` trait used by this file sink.
 #[derive(Debug, Clone)]
 pub struct FileSink<S: OpendalSinkBackend> {
-    pub(crate) op: Box<Operator>,
+    pub(crate) op: Operator,
     /// The path to the file where the sink writes data.
     pub(crate) path: String,
     /// The schema describing the structure of the data being written to the file sink.
@@ -75,9 +75,9 @@ pub trait OpendalSinkBackend: Send + Sync + 'static + Clone + PartialEq {
     type Properties: TryFromBTreeMap + Send + Sync + Clone + WithOptions;
     const SINK_NAME: &'static str;
 
-    fn from_btreemap(btree_map: BTreeMap<String, String>) -> Result<Box<Self::Properties>>;
-    fn new_operator(properties: Self::Properties) -> Result<Box<Operator>>;
-    fn get_path(properties: Self::Properties) -> Box<str>;
+    fn from_btreemap(btree_map: BTreeMap<String, String>) -> Result<Self::Properties>;
+    fn new_operator(properties: Self::Properties) -> Result<Operator>;
+    fn get_path(properties: Self::Properties) -> String;
     fn get_engine_type() -> EngineType;
 }
 
@@ -133,7 +133,7 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = *S::from_btreemap(param.properties)?;
+        let config = S::from_btreemap(param.properties)?;
         let path = S::get_path(config.clone()).to_string();
         let op = S::new_operator(config.clone())?;
         let engine_type = S::get_engine_type();
@@ -153,7 +153,7 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
 
 pub struct OpenDalSinkWriter {
     schema: SchemaRef,
-    operator: Box<Operator>,
+    operator: Operator,
     sink_writer: Option<FileWriterEnum>,
     is_append_only: bool,
     write_path: String,
@@ -219,7 +219,7 @@ impl SinkWriter for OpenDalSinkWriter {
 
 impl OpenDalSinkWriter {
     pub fn new(
-        operator: Box<Operator>,
+        operator: Operator,
         write_path: &str,
         rw_schema: Schema,
         is_append_only: bool,

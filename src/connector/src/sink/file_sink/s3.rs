@@ -59,7 +59,7 @@ pub struct S3Config {
 pub const S3_SINK: &str = "s3";
 
 impl<S: OpendalSinkBackend> FileSink<S> {
-    pub fn new_s3_sink(config: S3Config) -> Result<Box<Operator>> {
+    pub fn new_s3_sink(config: S3Config) -> Result<Operator> {
         // Create s3 builder.
         let mut builder = S3::default();
         builder.bucket(&config.common.bucket_name);
@@ -96,7 +96,7 @@ impl<S: OpendalSinkBackend> FileSink<S> {
             .layer(RetryLayer::default())
             .finish();
 
-        Ok(Box::new(operator))
+        Ok(operator)
     }
 }
 
@@ -114,7 +114,7 @@ impl OpendalSinkBackend for S3Sink {
 
     const SINK_NAME: &'static str = S3_SINK;
 
-    fn from_btreemap(btree_map: BTreeMap<String, String>) -> Result<Box<Self::Properties>> {
+    fn from_btreemap(btree_map: BTreeMap<String, String>) -> Result<Self::Properties> {
         let config = serde_json::from_value::<S3Config>(serde_json::to_value(btree_map).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
@@ -125,15 +125,15 @@ impl OpendalSinkBackend for S3Sink {
                 SINK_TYPE_UPSERT
             )));
         }
-        Ok(Box::new(config))
+        Ok(config)
     }
 
-    fn new_operator(properties: S3Config) -> Result<Box<Operator>> {
+    fn new_operator(properties: S3Config) -> Result<Operator> {
         FileSink::<S3Sink>::new_s3_sink(properties)
     }
 
-    fn get_path(properties: Self::Properties) -> Box<str> {
-        properties.common.path.into_boxed_str()
+    fn get_path(properties: Self::Properties) -> String {
+        properties.common.path
     }
 
     fn get_engine_type() -> super::opendal_sink::EngineType {

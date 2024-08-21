@@ -65,7 +65,7 @@ impl UnknownFields for GcsConfig {
 pub const GCS_SINK: &str = "gcs";
 
 impl<S: OpendalSinkBackend> FileSink<S> {
-    pub fn new_gcs_sink(config: GcsConfig) -> Result<Box<Operator>> {
+    pub fn new_gcs_sink(config: GcsConfig) -> Result<Operator> {
         // Create gcs builder.
         let mut builder = Gcs::default();
 
@@ -79,7 +79,7 @@ impl<S: OpendalSinkBackend> FileSink<S> {
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
             .finish();
-        Ok(Box::new(operator))
+        Ok(operator)
     }
 }
 
@@ -91,7 +91,7 @@ impl OpendalSinkBackend for GcsSink {
 
     const SINK_NAME: &'static str = GCS_SINK;
 
-    fn from_btreemap(btree_map: BTreeMap<String, String>) -> Result<Box<Self::Properties>> {
+    fn from_btreemap(btree_map: BTreeMap<String, String>) -> Result<Self::Properties> {
         let config = serde_json::from_value::<GcsConfig>(serde_json::to_value(btree_map).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
@@ -102,15 +102,15 @@ impl OpendalSinkBackend for GcsSink {
                 SINK_TYPE_UPSERT
             )));
         }
-        Ok(Box::new(config))
+        Ok(config)
     }
 
-    fn new_operator(properties: GcsConfig) -> Result<Box<Operator>> {
+    fn new_operator(properties: GcsConfig) -> Result<Operator> {
         FileSink::<GcsSink>::new_gcs_sink(properties)
     }
 
-    fn get_path(properties: Self::Properties) -> Box<str> {
-        properties.common.path.into_boxed_str()
+    fn get_path(properties: Self::Properties) -> String {
+        properties.common.path
     }
 
     fn get_engine_type() -> super::opendal_sink::EngineType {

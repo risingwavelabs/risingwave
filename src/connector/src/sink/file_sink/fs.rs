@@ -53,7 +53,7 @@ impl UnknownFields for FsConfig {
 pub const FS_SINK: &str = "fs";
 
 impl<S: OpendalSinkBackend> FileSink<S> {
-    pub fn new_fs_sink(config: FsConfig) -> Result<Box<Operator>> {
+    pub fn new_fs_sink(config: FsConfig) -> Result<Operator> {
         // Create fs builder.
         let mut builder = Fs::default();
         // Create fs backend builder.
@@ -62,7 +62,7 @@ impl<S: OpendalSinkBackend> FileSink<S> {
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
             .finish();
-        Ok(Box::new(operator))
+        Ok(operator)
     }
 }
 
@@ -74,7 +74,7 @@ impl OpendalSinkBackend for FsSink {
 
     const SINK_NAME: &'static str = FS_SINK;
 
-    fn from_btreemap(btree_map: BTreeMap<String, String>) -> Result<Box<Self::Properties>> {
+    fn from_btreemap(btree_map: BTreeMap<String, String>) -> Result<Self::Properties> {
         let config = serde_json::from_value::<FsConfig>(serde_json::to_value(btree_map).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
@@ -85,15 +85,15 @@ impl OpendalSinkBackend for FsSink {
                 SINK_TYPE_UPSERT
             )));
         }
-        Ok(Box::new(config))
+        Ok(config)
     }
 
-    fn new_operator(properties: FsConfig) -> Result<Box<Operator>> {
+    fn new_operator(properties: FsConfig) -> Result<Operator> {
         FileSink::<FsSink>::new_fs_sink(properties)
     }
 
-    fn get_path(properties: Self::Properties) -> Box<str> {
-        properties.common.path.into_boxed_str()
+    fn get_path(properties: Self::Properties) -> String {
+        properties.common.path
     }
 
     fn get_engine_type() -> super::opendal_sink::EngineType {
