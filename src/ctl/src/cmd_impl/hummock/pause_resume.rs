@@ -23,7 +23,8 @@ pub async fn disable_commit_epoch(context: &CtlContext) -> anyhow::Result<()> {
     println!(
         "Disabled.\
         Current version: id {}, max_committed_epoch {}",
-        version.id, version.max_committed_epoch
+        version.id,
+        version.visible_table_committed_epoch()
     );
     Ok(())
 }

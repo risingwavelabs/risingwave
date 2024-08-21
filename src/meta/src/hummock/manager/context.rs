@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use fail::fail_point;
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
@@ -196,7 +197,9 @@ impl HummockManager {
 
     pub async fn commit_epoch_sanity_check(
         &self,
-        epoch: HummockEpoch,
+        committed_epoch: HummockEpoch,
+        tables_to_commit: &HashSet<TableId>,
+        is_visible_table_committed_epoch: bool,
         sstables: &[LocalSstableInfo],
         sst_to_context: &HashMap<HummockSstableObjectId, HummockContextId>,
         current_version: &HummockVersion,
@@ -221,13 +224,30 @@ impl HummockManager {
             }
         }
 
-        if epoch <= current_version.max_committed_epoch {
+        if is_visible_table_committed_epoch
+            && committed_epoch <= current_version.visible_table_committed_epoch()
+        {
             return Err(anyhow::anyhow!(
                 "Epoch {} <= max_committed_epoch {}",
-                epoch,
-                current_version.max_committed_epoch
+                committed_epoch,
+                current_version.visible_table_committed_epoch()
             )
             .into());
+        }
+
+        // sanity check on monotonically increasing table committed epoch
+        for table_id in tables_to_commit {
+            if let Some(info) = current_version.state_table_info.info().get(table_id) {
+                if committed_epoch <= info.committed_epoch {
+                    return Err(anyhow::anyhow!(
+                        "table {} Epoch {} <= committed_epoch {}",
+                        table_id,
+                        committed_epoch,
+                        info.committed_epoch,
+                    )
+                    .into());
+                }
+            }
         }
 
         async {
@@ -252,7 +272,7 @@ impl HummockManager {
                 .send_event(ResponseEvent::ValidationTask(ValidationTask {
                     sst_infos: sst_infos.into_iter().map(|sst| sst.into()).collect_vec(),
                     sst_id_to_worker_id: sst_to_context.clone(),
-                    epoch,
+                    epoch: committed_epoch,
                 }))
                 .is_err()
             {
@@ -427,7 +447,7 @@ impl HummockManager {
         let _timer = start_measure_real_process_timer!(self, "unpin_snapshot_before");
         // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
         // visible in the snapshot.
-        let max_committed_epoch = versioning.current_version.max_committed_epoch;
+        let max_committed_epoch = versioning.current_version.visible_table_committed_epoch();
         // Ensure the unpin will not clean the latest one.
         let snapshot_committed_epoch = hummock_snapshot.committed_epoch;
         #[cfg(not(test))]

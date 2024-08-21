@@ -292,6 +292,16 @@ impl Strong {
             | ExprType::JsonbToRecord
             | ExprType::JsonbSet
             | ExprType::MapFromEntries
+            | ExprType::MapAccess
+            | ExprType::MapKeys
+            | ExprType::MapValues
+            | ExprType::MapEntries
+            | ExprType::MapFromKeyValues
+            | ExprType::MapCat
+            | ExprType::MapContains
+            | ExprType::MapDelete
+            | ExprType::MapInsert
+            | ExprType::MapLength
             | ExprType::Vnode
             | ExprType::TestPaidTier
             | ExprType::Proctime

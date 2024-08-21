@@ -137,6 +137,9 @@ pub struct StreamingMetrics {
     cdc_backfill_snapshot_read_row_count: LabelGuardedIntCounterVec<2>,
     cdc_backfill_upstream_output_row_count: LabelGuardedIntCounterVec<2>,
 
+    // Snapshot Backfill
+    pub(crate) snapshot_backfill_consume_row_count: LabelGuardedIntCounterVec<3>,
+
     // Over Window
     over_window_cached_entry_count: LabelGuardedIntGaugeVec<3>,
     over_window_cache_lookup_count: LabelGuardedIntCounterVec<3>,
@@ -722,6 +725,14 @@ impl StreamingMetrics {
             )
             .unwrap();
 
+        let snapshot_backfill_consume_row_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_snapshot_backfill_consume_snapshot_row_count",
+            "Total number of rows that have been output from snapshot backfill",
+            &["table_id", "actor_id", "stage"],
+            registry
+        )
+        .unwrap();
+
         let over_window_cached_entry_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_over_window_cached_entry_count",
             "Total entry (partition) count in over window executor cache",
@@ -1161,6 +1172,7 @@ impl StreamingMetrics {
             backfill_upstream_output_row_count,
             cdc_backfill_snapshot_read_row_count,
             cdc_backfill_upstream_output_row_count,
+            snapshot_backfill_consume_row_count,
             over_window_cached_entry_count,
             over_window_cache_lookup_count,
             over_window_cache_miss_count,

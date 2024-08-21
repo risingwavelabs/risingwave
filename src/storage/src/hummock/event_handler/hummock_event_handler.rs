@@ -317,7 +317,7 @@ impl HummockEventHandler {
         let (hummock_event_tx, hummock_event_rx) =
             event_channel(state_store_metrics.event_handler_pending_event.clone());
         let (version_update_notifier_tx, _) =
-            tokio::sync::watch::channel(pinned_version.max_committed_epoch());
+            tokio::sync::watch::channel(pinned_version.visible_table_committed_epoch());
         let version_update_notifier_tx = Arc::new(version_update_notifier_tx);
         let read_version_mapping = Arc::new(RwLock::new(HashMap::default()));
         let buffer_tracker = BufferTracker::from_storage_opts(
@@ -511,8 +511,8 @@ impl HummockEventHandler {
 
                 info!(
                     ?version_id,
-                    current_mce = current_version.max_committed_epoch(),
-                    refiller_mce = new_pinned_version.max_committed_epoch(),
+                    current_mce = current_version.visible_table_committed_epoch(),
+                    refiller_mce = new_pinned_version.visible_table_committed_epoch(),
                     "refiller is clear in recovery"
                 );
 
@@ -643,8 +643,8 @@ impl HummockEventHandler {
             );
         }
 
-        let prev_max_committed_epoch = pinned_version.max_committed_epoch();
-        let max_committed_epoch = new_pinned_version.max_committed_epoch();
+        let prev_max_committed_epoch = pinned_version.visible_table_committed_epoch();
+        let max_committed_epoch = new_pinned_version.visible_table_committed_epoch();
 
         // only notify local_version_manager when MCE change
         self.version_update_notifier_tx.send_if_modified(|state| {
@@ -661,16 +661,17 @@ impl HummockEventHandler {
             conflict_detector.set_watermark(max_committed_epoch);
         }
 
+        // TODO: should we change the logic when supporting partial ckpt?
         if let Some(sstable_object_id_manager) = &self.sstable_object_id_manager {
             sstable_object_id_manager.remove_watermark_object_id(TrackerId::Epoch(
-                self.pinned_version.load().max_committed_epoch(),
+                self.pinned_version.load().visible_table_committed_epoch(),
             ));
         }
 
         debug!(
             "update to hummock version: {}, epoch: {}",
             new_pinned_version.id(),
-            new_pinned_version.max_committed_epoch()
+            new_pinned_version.visible_table_committed_epoch()
         );
 
         self.uploader.update_pinned_version(new_pinned_version);

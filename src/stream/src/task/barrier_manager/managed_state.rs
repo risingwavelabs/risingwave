@@ -234,6 +234,25 @@ impl InflightActorState {
         }
     }
 
+    pub(super) fn sync_barrier(&mut self, barrier: &Barrier) {
+        if let Some(mut subscribers) = self.pending_subscribers.remove(&barrier.epoch.prev) {
+            subscribers.retain(|tx| {
+                tx.send((barrier.epoch.prev, barrier.mutation.clone()))
+                    .is_ok()
+            });
+            if !subscribers.is_empty() {
+                self.pending_subscribers
+                    .entry(barrier.epoch.curr)
+                    .or_default()
+                    .extend(subscribers);
+            }
+        }
+        self.barrier_mutations.insert(
+            barrier.epoch.prev,
+            (barrier.mutation.clone(), barrier.epoch.curr),
+        );
+    }
+
     pub(super) fn issue_barrier(
         &mut self,
         partial_graph_id: PartialGraphId,
@@ -271,13 +290,13 @@ impl InflightActorState {
             .insert(barrier.epoch.prev, partial_graph_id)
             .is_none());
 
-        assert!(self
-            .barrier_mutations
-            .insert(
-                barrier.epoch.prev,
-                (barrier.mutation.clone(), barrier.epoch.curr),
-            )
-            .is_none());
+        if let Some((_, curr_epoch)) = self.barrier_mutations.insert(
+            barrier.epoch.prev,
+            (barrier.mutation.clone(), barrier.epoch.curr),
+        ) {
+            assert_eq!(curr_epoch, barrier.epoch.curr);
+        }
+
         if is_stop {
             assert!(self.pending_subscribers.is_empty());
             assert!(
@@ -416,12 +435,16 @@ impl InflightActorState {
             for (mutation_prev_epoch, (mutation, mutation_curr_epoch)) in
                 self.barrier_mutations.range(start_curr_epoch..)
             {
-                assert_eq!(prev_epoch, *mutation_prev_epoch);
-                if tx.send((prev_epoch, mutation.clone())).is_err() {
-                    // No more subscribe on the mutation. Simply return.
-                    return;
+                if prev_epoch == *mutation_prev_epoch {
+                    if tx.send((prev_epoch, mutation.clone())).is_err() {
+                        // No more subscribe on the mutation. Simply return.
+                        return;
+                    }
+                    prev_epoch = *mutation_curr_epoch;
+                } else {
+                    assert!(prev_epoch < *mutation_prev_epoch);
+                    break;
                 }
-                prev_epoch = *mutation_curr_epoch;
             }
             if !self.status.is_stopping() {
                 // Only add the subscribers when the actor is not stopped yet.
@@ -469,6 +492,7 @@ impl ManagedBarrierState {
         actor_ids_to_collect: HashSet<ActorId>,
         table_ids: HashSet<TableId>,
         partial_graph_id: PartialGraphId,
+        actor_ids_to_pre_sync_barrier: HashSet<ActorId>,
     ) {
         let actor_to_stop = barrier.all_stop_actors();
         let graph_state = self
@@ -498,6 +522,17 @@ impl ManagedBarrierState {
                         .map(|actors| actors.contains(&actor_id))
                         .unwrap_or(false),
                 );
+        }
+
+        if partial_graph_id.is_global_graph() {
+            for actor_id in actor_ids_to_pre_sync_barrier {
+                self.actor_states
+                    .entry(actor_id)
+                    .or_insert_with(InflightActorState::not_started)
+                    .sync_barrier(barrier);
+            }
+        } else {
+            assert!(actor_ids_to_pre_sync_barrier.is_empty());
         }
     }
 
@@ -598,7 +633,7 @@ impl PartialGraphManagedBarrierState {
                         "ignore sealing data for the first barrier"
                     );
                     if let Some(hummock) = self.state_store.as_hummock() {
-                        let mce = hummock.get_pinned_version().max_committed_epoch();
+                        let mce = hummock.get_pinned_version().visible_table_committed_epoch();
                         assert_eq!(
                             mce, prev_epoch,
                             "first epoch should match with the current version",

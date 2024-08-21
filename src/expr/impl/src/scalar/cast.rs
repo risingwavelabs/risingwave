@@ -189,13 +189,13 @@ pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
     cast::str_to_bytea(elem).map_err(|err| ExprError::Parse(err.into()))
 }
 
-#[function("cast(varchar) -> anyarray", type_infer = "panic")]
+#[function("cast(varchar) -> anyarray", type_infer = "unreachable")]
 fn str_to_list(input: &str, ctx: &Context) -> Result<ListValue> {
     ListValue::from_str(input, &ctx.return_type).map_err(|err| ExprError::Parse(err.into()))
 }
 
 /// Cast array with `source_elem_type` into array with `target_elem_type` by casting each element.
-#[function("cast(anyarray) -> anyarray", type_infer = "panic")]
+#[function("cast(anyarray) -> anyarray", type_infer = "unreachable")]
 fn list_cast(input: ListRef<'_>, ctx: &Context) -> Result<ListValue> {
     let cast = build_func(
         PbType::Cast,
@@ -213,7 +213,7 @@ fn list_cast(input: ListRef<'_>, ctx: &Context) -> Result<ListValue> {
 }
 
 /// Cast struct of `source_elem_type` to `target_elem_type` by casting each element.
-#[function("cast(struct) -> struct", type_infer = "panic")]
+#[function("cast(struct) -> struct", type_infer = "unreachable")]
 fn struct_cast(input: StructRef<'_>, ctx: &Context) -> Result<StructValue> {
     let fields = (input.iter_fields_ref())
         .zip_eq_fast(ctx.arg_types[0].as_struct().types())
@@ -242,14 +242,14 @@ fn struct_cast(input: StructRef<'_>, ctx: &Context) -> Result<StructValue> {
 }
 
 /// Cast array with `source_elem_type` into array with `target_elem_type` by casting each element.
-#[function("cast(anymap) -> anymap", type_infer = "panic")]
+#[function("cast(anymap) -> anymap", type_infer = "unreachable")]
 fn map_cast(map: MapRef<'_>, ctx: &Context) -> Result<MapValue> {
     let new_ctx = Context {
         arg_types: vec![ctx.arg_types[0].clone().as_map().clone().into_list()],
         return_type: ctx.return_type.as_map().clone().into_list(),
         variadic: ctx.variadic,
     };
-    list_cast(map.into_inner(), &new_ctx).map(MapValue::from_list_entries)
+    list_cast(map.into_inner(), &new_ctx).map(MapValue::from_entries)
 }
 
 #[cfg(test)]

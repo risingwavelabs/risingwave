@@ -734,6 +734,7 @@ fn gen_table_plan_inner(
         version,
         is_external_source,
         retention_seconds,
+        None,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -817,7 +818,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     let options = CdcScanOptions::from_with_options(context.with_options())?;
 
     let logical_scan = LogicalCdcScan::create(
-        external_table_name,
+        external_table_name.clone(),
         Rc::new(cdc_table_desc),
         context.clone(),
         options,
@@ -847,6 +848,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         Some(col_id_gen.into_version()),
         true,
         None,
+        Some(external_table_name),
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);

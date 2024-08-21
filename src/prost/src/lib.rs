@@ -19,8 +19,10 @@
 
 use std::str::FromStr;
 
+pub use prost::Message;
 use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
+
 
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/catalog.rs")]
@@ -82,6 +84,9 @@ pub mod monitor_service;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/backup_service.rs")]
 pub mod backup_service;
+#[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/frontend_service.rs")]
+pub mod frontend_service;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/java_binding.rs")]
 pub mod java_binding;
@@ -238,6 +243,14 @@ impl meta::table_fragments::ActorStatus {
             .as_ref()
             .expect("actor location should be exist")
             .worker_node_id
+    }
+}
+
+impl common::WorkerNode {
+    pub fn is_streaming_schedulable(&self) -> bool {
+        let property = self.property.as_ref();
+        property.map_or(false, |p| p.is_streaming)
+            && !property.map_or(false, |p| p.is_unschedulable)
     }
 }
 

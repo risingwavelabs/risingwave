@@ -106,7 +106,7 @@ fiemap = "0.1.1"
 [features]
 # rocksdb-local = ["rocksdb"]
 # tikv = ["tikv-client"]
-test = []
+test = ["risingwave_hummock_sdk/test"]
 failpoints = ["fail/failpoints"]
 bpf = []
 hm-trace = []

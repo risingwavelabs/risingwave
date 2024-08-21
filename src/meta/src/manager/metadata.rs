@@ -368,7 +368,7 @@ impl MetadataManager {
             MetadataManager::V2(mgr) => {
                 let tables = mgr
                     .catalog_controller
-                    .list_background_creating_mviews()
+                    .list_background_creating_mviews(false)
                     .await?;
 
                 Ok(tables
@@ -560,6 +560,23 @@ impl MetadataManager {
             MetadataManager::V2(mgr) => {
                 mgr.catalog_controller
                     .get_sink_by_ids(ids.iter().map(|id| *id as _).collect())
+                    .await
+            }
+        }
+    }
+
+    pub async fn get_table_catalog_by_cdc_table_id(
+        &self,
+        cdc_table_id: String,
+    ) -> MetaResult<Vec<PbTable>> {
+        match &self {
+            MetadataManager::V1(mgr) => Ok(mgr
+                .catalog_manager
+                .get_table_by_cdc_table_id(cdc_table_id)
+                .await),
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .get_table_by_cdc_table_id(cdc_table_id)
                     .await
             }
         }

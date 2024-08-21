@@ -389,8 +389,7 @@ pub mod grpc_middleware {
 
     use either::Either;
     use futures::Future;
-    use hyper::Body;
-    use tonic::transport::NamedService;
+    use tonic::body::BoxBody;
     use tower::{Layer, Service};
 
     /// Manages the await-trees of `gRPC` requests that are currently served by the compute node.
@@ -438,10 +437,9 @@ pub mod grpc_middleware {
         next_id: Arc<AtomicU64>,
     }
 
-    impl<S> Service<hyper::Request<Body>> for AwaitTreeMiddleware<S>
+    impl<S> Service<http::Request<BoxBody>> for AwaitTreeMiddleware<S>
     where
-        S: Service<hyper::Request<Body>> + Clone + Send + 'static,
-        S::Future: Send + 'static,
+        S: Service<http::Request<BoxBody>> + Clone,
     {
         type Error = S::Error;
         type Response = S::Response;
@@ -452,7 +450,7 @@ pub mod grpc_middleware {
             self.inner.poll_ready(cx)
         }
 
-        fn call(&mut self, req: hyper::Request<Body>) -> Self::Future {
+        fn call(&mut self, req: http::Request<BoxBody>) -> Self::Future {
             let Some(registry) = self.registry.clone() else {
                 return Either::Left(self.inner.call(req));
             };
@@ -479,7 +477,8 @@ pub mod grpc_middleware {
         }
     }
 
-    impl<S: NamedService> NamedService for AwaitTreeMiddleware<S> {
+    #[cfg(not(madsim))]
+    impl<S: tonic::server::NamedService> tonic::server::NamedService for AwaitTreeMiddleware<S> {
         const NAME: &'static str = S::NAME;
     }
 }
