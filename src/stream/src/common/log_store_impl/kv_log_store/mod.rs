@@ -1515,6 +1515,13 @@ mod tests {
         assert_eq!(2, chunk_ids.len());
 
         reader
+            .truncate(TruncateOffset::Chunk {
+                epoch: epoch2,
+                chunk_id: chunk_ids[0],
+            })
+            .unwrap();
+
+        reader
             .truncate(TruncateOffset::Barrier { epoch: epoch2 })
             .unwrap();
         reader.rewind().await.unwrap();
