@@ -56,10 +56,16 @@ impl VirtualNode {
 }
 
 impl VirtualNode {
-    pub fn count() -> usize {
-        const MAX_COUNT: usize = 1 << VirtualNodeInner::BITS;
-        const DEFAULT_COUNT: usize = 1 << 8;
+    /// The default count of virtual nodes.
+    const DEFAULT_COUNT: usize = 1 << 8;
+    /// The maximum count of virtual nodes, limited by the size of the inner type [`VirtualNodeInner`].
+    const MAX_COUNT: usize = 1 << VirtualNodeInner::BITS;
 
+    /// The total count of virtual nodes.
+    ///
+    /// It can be customized by the environment variable `RW_VNODE_COUNT`, or defaults to [`Self::DEFAULT_COUNT`].
+    pub fn count() -> usize {
+        // Cache the value to avoid repeated env lookups and parsing.
         static COUNT: LazyLock<usize> = LazyLock::new(|| {
             if let Ok(count) = std::env::var("RW_VNODE_COUNT") {
                 let count = count
@@ -67,19 +73,21 @@ impl VirtualNode {
                     .expect("`RW_VNODE_COUNT` must be a positive integer")
                     .get();
                 assert!(
-                    count <= MAX_COUNT,
+                    count <= VirtualNode::MAX_COUNT,
                     "`RW_VNODE_COUNT` should not exceed maximum value {}",
-                    MAX_COUNT
+                    VirtualNode::MAX_COUNT
                 );
+                // TODO(var-vnode): shall we enforce it to be a power of 2?
                 count
             } else {
-                DEFAULT_COUNT
+                VirtualNode::DEFAULT_COUNT
             }
         });
 
         *COUNT
     }
 
+    /// The last virtual node in the range. It's derived from [`Self::count`].
     pub fn max() -> VirtualNode {
         VirtualNode::from_index(Self::count() - 1)
     }
@@ -95,6 +103,7 @@ impl VirtualNode {
         Self(index as _)
     }
 
+    /// Creates a virtual node from the `usize` index without bounds checking.
     pub const unsafe fn from_index_unchecked(index: usize) -> Self {
         Self(index as _)
     }
