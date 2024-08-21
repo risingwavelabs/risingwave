@@ -1116,9 +1116,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
-            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT / num_outputs])
+            .flat_map(|id| vec![id as ActorId; VirtualNode::DEFAULT_COUNT / num_outputs])
             .collect_vec();
-        hash_mapping.resize(VirtualNode::COUNT, num_outputs as u32);
+        hash_mapping.resize(VirtualNode::DEFAULT_COUNT, num_outputs as u32);
         let mut hash_dispatcher = HashDataDispatcher::new(
             outputs,
             key_indices.to_vec(),
@@ -1372,9 +1372,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
-            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT / num_outputs])
+            .flat_map(|id| vec![id as ActorId; VirtualNode::DEFAULT_COUNT / num_outputs])
             .collect_vec();
-        hash_mapping.resize(VirtualNode::COUNT, num_outputs as u32);
+        hash_mapping.resize(VirtualNode::DEFAULT_COUNT, num_outputs as u32);
         let mut hash_dispatcher = HashDataDispatcher::new(
             outputs,
             key_indices.to_vec(),
@@ -1408,7 +1408,7 @@ mod tests {
                 hasher.update(&bytes);
             }
             let output_idx =
-                hash_mapping[hasher.finish() as usize % VirtualNode::COUNT] as usize - 1;
+                hash_mapping[hasher.finish() as usize % VirtualNode::DEFAULT_COUNT] as usize - 1;
             for (builder, val) in builders.iter_mut().zip_eq_fast(one_row.iter()) {
                 builder.append(Some(*val));
             }

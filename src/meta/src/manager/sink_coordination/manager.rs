@@ -414,11 +414,11 @@ mod tests {
         let epoch1 = 233;
         let epoch2 = 234;
 
-        let mut all_vnode = (0..VirtualNode::COUNT).collect_vec();
+        let mut all_vnode = (0..VirtualNode::DEFAULT_COUNT).collect_vec();
         all_vnode.shuffle(&mut rand::thread_rng());
-        let (first, second) = all_vnode.split_at(VirtualNode::COUNT / 2);
+        let (first, second) = all_vnode.split_at(VirtualNode::DEFAULT_COUNT / 2);
         let build_bitmap = |indexes: &[usize]| {
-            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::DEFAULT_COUNT);
             for i in indexes {
                 builder.set(*i, true);
             }
@@ -584,9 +584,9 @@ mod tests {
         let epoch1 = 233;
         let epoch2 = 234;
 
-        let all_vnode = (0..VirtualNode::COUNT).collect_vec();
+        let all_vnode = (0..VirtualNode::DEFAULT_COUNT).collect_vec();
         let build_bitmap = |indexes: &[usize]| {
-            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::DEFAULT_COUNT);
             for i in indexes {
                 builder.set(*i, true);
             }
@@ -705,7 +705,7 @@ mod tests {
 
         let mut build_client_future1 = pin!(CoordinatorStreamHandle::new_with_init_stream(
             param.to_proto(),
-            Bitmap::zeros(VirtualNode::COUNT),
+            Bitmap::zeros(VirtualNode::DEFAULT_COUNT),
             |rx| async {
                 Ok(tonic::Response::new(
                     manager
@@ -742,11 +742,11 @@ mod tests {
 
         let epoch = 233;
 
-        let mut all_vnode = (0..VirtualNode::COUNT).collect_vec();
+        let mut all_vnode = (0..VirtualNode::DEFAULT_COUNT).collect_vec();
         all_vnode.shuffle(&mut rand::thread_rng());
-        let (first, second) = all_vnode.split_at(VirtualNode::COUNT / 2);
+        let (first, second) = all_vnode.split_at(VirtualNode::DEFAULT_COUNT / 2);
         let build_bitmap = |indexes: &[usize]| {
-            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::DEFAULT_COUNT);
             for i in indexes {
                 builder.set(*i, true);
             }
@@ -821,11 +821,11 @@ mod tests {
 
         let epoch = 233;
 
-        let mut all_vnode = (0..VirtualNode::COUNT).collect_vec();
+        let mut all_vnode = (0..VirtualNode::DEFAULT_COUNT).collect_vec();
         all_vnode.shuffle(&mut rand::thread_rng());
-        let (first, second) = all_vnode.split_at(VirtualNode::COUNT / 2);
+        let (first, second) = all_vnode.split_at(VirtualNode::DEFAULT_COUNT / 2);
         let build_bitmap = |indexes: &[usize]| {
-            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::DEFAULT_COUNT);
             for i in indexes {
                 builder.set(*i, true);
             }

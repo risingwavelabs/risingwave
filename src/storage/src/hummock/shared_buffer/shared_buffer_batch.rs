@@ -533,9 +533,9 @@ impl SharedBufferBatch {
     }
 
     pub fn collect_vnodes(&self) -> Vec<usize> {
-        let mut vnodes = Vec::with_capacity(VirtualNode::COUNT);
+        let mut vnodes = Vec::with_capacity(VirtualNode::DEFAULT_COUNT);
         let mut next_vnode_id = 0;
-        while next_vnode_id < VirtualNode::COUNT {
+        while next_vnode_id < VirtualNode::DEFAULT_COUNT {
             let seek_key = TableKey(
                 VirtualNode::from_index(next_vnode_id)
                     .to_be_bytes()

@@ -108,7 +108,7 @@ impl TableDistribution {
     pub fn singleton_vnode_bitmap_ref() -> &'static Arc<Bitmap> {
         /// A bitmap that only the default vnode is set.
         static SINGLETON_VNODES: LazyLock<Arc<Bitmap>> = LazyLock::new(|| {
-            let mut vnodes = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            let mut vnodes = BitmapBuilder::zeroed(VirtualNode::DEFAULT_COUNT);
             vnodes.set(SINGLETON_VNODE.to_index(), true);
             vnodes.finish().into()
         });
@@ -123,7 +123,7 @@ impl TableDistribution {
     pub fn all_vnodes_ref() -> &'static Arc<Bitmap> {
         /// A bitmap that all vnodes are set.
         static ALL_VNODES: LazyLock<Arc<Bitmap>> =
-            LazyLock::new(|| Bitmap::ones(VirtualNode::COUNT).into());
+            LazyLock::new(|| Bitmap::ones(VirtualNode::DEFAULT_COUNT).into());
         &ALL_VNODES
     }
 

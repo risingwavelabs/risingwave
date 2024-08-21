@@ -1149,7 +1149,7 @@ mod tests {
                 table_id: TEST_TABLE_ID,
                 new_read_version_sender: tx,
                 is_replicated: false,
-                vnodes: Arc::new(BitmapBuilder::filled(VirtualNode::COUNT).finish()),
+                vnodes: Arc::new(BitmapBuilder::filled(VirtualNode::DEFAULT_COUNT).finish()),
             });
             rx.await.unwrap()
         };

@@ -1000,15 +1000,15 @@ mod tests {
         test_env.register_table(table.clone()).await;
 
         fn build_bitmap(indexes: impl Iterator<Item = usize>) -> Arc<Bitmap> {
-            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::DEFAULT_COUNT);
             for i in indexes {
                 builder.set(i, true);
             }
             Arc::new(builder.finish())
         }
 
-        let vnodes1 = build_bitmap((0..VirtualNode::COUNT).filter(|i| i % 2 == 0));
-        let vnodes2 = build_bitmap((0..VirtualNode::COUNT).filter(|i| i % 2 == 1));
+        let vnodes1 = build_bitmap((0..VirtualNode::DEFAULT_COUNT).filter(|i| i % 2 == 0));
+        let vnodes2 = build_bitmap((0..VirtualNode::DEFAULT_COUNT).filter(|i| i % 2 == 1));
 
         let factory1 = KvLogStoreFactory::new(
             test_env.storage.clone(),
@@ -1150,7 +1150,7 @@ mod tests {
             .clear_shared_buffer(test_env.manager.get_current_version().await.id)
             .await;
 
-        let vnodes = build_bitmap(0..VirtualNode::COUNT);
+        let vnodes = build_bitmap(0..VirtualNode::DEFAULT_COUNT);
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),

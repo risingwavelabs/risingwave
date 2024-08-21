@@ -25,7 +25,7 @@ const VNODE_ID_SHIFT_BITS: u8 = 12;
 const SEQUENCE_UPPER_BOUND: u16 = 1 << 12;
 const VNODE_ID_UPPER_BOUND: u32 = 1 << 10;
 
-const_assert!(VNODE_ID_UPPER_BOUND >= VirtualNode::COUNT as u32);
+const_assert!(VNODE_ID_UPPER_BOUND >= VirtualNode::DEFAULT_COUNT as u32);
 
 /// `RowIdGenerator` generates unique row ids using snowflake algorithm as following format:
 ///

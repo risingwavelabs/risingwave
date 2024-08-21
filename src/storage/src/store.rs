@@ -733,7 +733,7 @@ impl NewLocalOptions {
                 retention_seconds: None,
             },
             is_replicated: false,
-            vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT)),
+            vnodes: Arc::new(Bitmap::ones(VirtualNode::DEFAULT_COUNT)),
         }
     }
 }

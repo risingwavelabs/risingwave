@@ -910,7 +910,7 @@ impl BatchPlanFragmenter {
                                 .take(1)
                                 .update(|(_, info)| {
                                     info.vnode_bitmap =
-                                        Bitmap::ones(VirtualNode::COUNT).to_protobuf();
+                                        Bitmap::ones(VirtualNode::DEFAULT_COUNT).to_protobuf();
                                 })
                                 .collect();
                         }
