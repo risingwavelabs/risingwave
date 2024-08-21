@@ -44,6 +44,13 @@ lru = { workspace = true }
 maplit = "1.0.2"
 memcomparable = "0.2"
 multimap = "0.10"
+opendal = { workspace = true, features = [
+    "executors-tokio",
+    "services-azblob",
+    "services-fs",
+    "services-gcs",
+    "services-s3",
+] }
 parking_lot = { workspace = true }
 parquet = { workspace = true }
 pin-project = "1"

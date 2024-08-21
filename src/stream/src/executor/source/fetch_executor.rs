@@ -323,18 +323,17 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                             .collect();
                                         let mut parquet_file_assignment = vec![];
                                         for filename in &filename_list {
-                                            let total_row_nums =
+                                            let total_row_num =
                                                 get_total_row_nums_for_parquet_file(
                                                     filename,
                                                     source_desc.clone(),
                                                 )
-                                                .await
-                                                .unwrap();
+                                                .await?;
                                             parquet_file_assignment.push(
                                                 OpendalFsSplit::<Src>::new(
                                                     filename.to_owned(),
                                                     0,
-                                                    total_row_nums - 1, // offset start from 0.
+                                                    total_row_num - 1, // -1 because offset start from 0.
                                                 ),
                                             )
                                         }
@@ -447,41 +446,35 @@ async fn get_total_row_nums_for_parquet_file(
     let total_row_num = match source_desc.source.config {
         ConnectorProperties::Gcs(prop) => {
             let connector: OpendalEnumerator<OpendalGcs> =
-                OpendalEnumerator::new_gcs_source(*prop).unwrap();
+                OpendalEnumerator::new_gcs_source(*prop)?;
             let reader = connector
                 .op
                 .reader_with(parquet_file_name)
                 .into_future()
-                .await
-                .unwrap()
+                .await?
                 .into_futures_async_read(..)
-                .await
-                .unwrap()
+                .await?
                 .compat();
 
             ParquetRecordBatchStreamBuilder::new(reader)
-                .await
-                .unwrap()
+                .await?
                 .metadata()
                 .file_metadata()
                 .num_rows()
         }
         ConnectorProperties::OpendalS3(prop) => {
             let connector: OpendalEnumerator<OpendalS3> =
-                OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role).unwrap();
+                OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
             let reader = connector
                 .op
                 .reader_with(parquet_file_name)
                 .into_future()
-                .await
-                .unwrap()
+                .await?
                 .into_futures_async_read(..)
-                .await
-                .unwrap()
+                .await?
                 .compat();
             let parquet_file_num_rows = ParquetRecordBatchStreamBuilder::new(reader)
-                .await
-                .unwrap()
+                .await?
                 .metadata()
                 .file_metadata()
                 .num_rows();
@@ -490,20 +483,17 @@ async fn get_total_row_nums_for_parquet_file(
 
         ConnectorProperties::PosixFs(prop) => {
             let connector: OpendalEnumerator<OpendalPosixFs> =
-                OpendalEnumerator::new_posix_fs_source(*prop).unwrap();
+                OpendalEnumerator::new_posix_fs_source(*prop)?;
             let reader = connector
                 .op
                 .reader_with(parquet_file_name)
                 .into_future()
-                .await
-                .unwrap()
+                .await?
                 .into_futures_async_read(..)
-                .await
-                .unwrap()
+                .await?
                 .compat();
             let parquet_file_num_rows = ParquetRecordBatchStreamBuilder::new(reader)
-                .await
-                .unwrap()
+                .await?
                 .metadata()
                 .file_metadata()
                 .num_rows();

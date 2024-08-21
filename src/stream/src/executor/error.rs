@@ -100,6 +100,20 @@ pub enum ErrorKind {
     ),
 
     #[error(transparent)]
+    OpendalError(
+        #[from]
+        #[backtrace]
+        opendal::Error,
+    ),
+
+    #[error(transparent)]
+    Parquet(
+        #[from]
+        #[backtrace]
+        parquet::errors::ParquetError,
+    ),
+
+    #[error(transparent)]
     NotImplemented(#[from] NotImplemented),
 
     #[error(transparent)]

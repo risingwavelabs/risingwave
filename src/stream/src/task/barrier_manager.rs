@@ -1071,6 +1071,8 @@ impl ScoredStreamError {
                 | ErrorKind::ExprError(_)
                 | ErrorKind::SerdeError(_)
                 | ErrorKind::SinkError(_, _)
+                | ErrorKind::OpendalError(_)
+                | ErrorKind::Parquet(_)
                 | ErrorKind::RpcError(_)
                 | ErrorKind::AlignBarrier(_, _)
                 | ErrorKind::ConnectorError(_)
