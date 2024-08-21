@@ -260,11 +260,6 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
                     .write_build_l0_bytes
                     .inc_by(sst_info.file_size());
 
-                println!(
-                    "sst_info: {:?} size {:?} stats {:?}",
-                    sst_info.sst_info.sst_id, sst_info.sst_info.file_size, sst_info.table_stats
-                );
-
                 sst_infos.push(sst_info.sst_info.clone());
             }
             level0.extend(ssts);
