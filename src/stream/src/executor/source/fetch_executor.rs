@@ -473,12 +473,11 @@ async fn get_total_row_nums_for_parquet_file(
                 .into_futures_async_read(..)
                 .await?
                 .compat();
-            let parquet_file_num_rows = ParquetRecordBatchStreamBuilder::new(reader)
+            ParquetRecordBatchStreamBuilder::new(reader)
                 .await?
                 .metadata()
                 .file_metadata()
-                .num_rows();
-            parquet_file_num_rows
+                .num_rows()
         }
 
         ConnectorProperties::PosixFs(prop) => {
@@ -492,12 +491,11 @@ async fn get_total_row_nums_for_parquet_file(
                 .into_futures_async_read(..)
                 .await?
                 .compat();
-            let parquet_file_num_rows = ParquetRecordBatchStreamBuilder::new(reader)
+            ParquetRecordBatchStreamBuilder::new(reader)
                 .await?
                 .metadata()
                 .file_metadata()
-                .num_rows();
-            parquet_file_num_rows
+                .num_rows()
         }
         other => bail!("Unsupported source: {:?}", other),
     };
