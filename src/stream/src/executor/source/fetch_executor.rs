@@ -307,6 +307,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 // Receiving file assignments from upstream list executor,
                                 // store into state table.
                                 Message::Chunk(chunk) => {
+                                    // For Parquet encoding, the offset indicates the current row being read.
+                                    // Therefore, to determine if the end of a Parquet file has been reached, we need to compare its offset with the total number of rows.
+                                    // We directly obtain the total row count and set the size in `OpendalFsSplit` to this value.
                                     let file_assignment = if let EncodingProperties::Parquet =
                                         source_desc.source.parser_config.encoding_config
                                     {
@@ -331,7 +334,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                                 OpendalFsSplit::<Src>::new(
                                                     filename.to_owned(),
                                                     0,
-                                                    total_row_nums - 1,
+                                                    total_row_nums - 1, // offset start from 0.
                                                 ),
                                             )
                                         }
@@ -422,19 +425,33 @@ impl<S: StateStore, Src: OpendalSource> Debug for FsFetchExecutor<S, Src> {
     }
 }
 
+/// Retrieves the total number of rows in the specified Parquet file.
+///
+/// This function constructs an `OpenDAL` operator using the information
+/// from the provided `source_desc`. It then accesses the metadata of the
+/// Parquet file to determine and return the total row count.
+///
+/// # Arguments
+///
+/// * `file_name` - The parquet file name.
+/// * `source_desc` - A struct or type containing the necessary information
+///                   to construct the `OpenDAL` operator.
+///
+/// # Returns
+///
+/// Returns the total number of rows in the Parquet file as a `usize`.
 async fn get_total_row_nums_for_parquet_file(
-    file_name: &str,
+    parquet_file_name: &str,
     source_desc: SourceDesc,
 ) -> StreamExecutorResult<usize> {
-    let num_rows = match source_desc.source.config {
+    let total_row_num = match source_desc.source.config {
         ConnectorProperties::Gcs(prop) => {
-            // let file: OpendalFsSplit<OpendalGcs> = item;
             let connector: OpendalEnumerator<OpendalGcs> =
                 OpendalEnumerator::new_gcs_source(*prop).unwrap();
             let reader = connector
                 .op
-                .reader_with(file_name)
-                .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
+                .reader_with(parquet_file_name)
+                .into_future()
                 .await
                 .unwrap()
                 .into_futures_async_read(..)
@@ -454,8 +471,8 @@ async fn get_total_row_nums_for_parquet_file(
                 OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role).unwrap();
             let reader = connector
                 .op
-                .reader_with(file_name)
-                .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
+                .reader_with(parquet_file_name)
+                .into_future()
                 .await
                 .unwrap()
                 .into_futures_async_read(..)
@@ -476,8 +493,8 @@ async fn get_total_row_nums_for_parquet_file(
                 OpendalEnumerator::new_posix_fs_source(*prop).unwrap();
             let reader = connector
                 .op
-                .reader_with(file_name)
-                .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
+                .reader_with(parquet_file_name)
+                .into_future()
                 .await
                 .unwrap()
                 .into_futures_async_read(..)
@@ -494,5 +511,5 @@ async fn get_total_row_nums_for_parquet_file(
         }
         other => bail!("Unsupported source: {:?}", other),
     };
-    Ok(num_rows as usize)
+    Ok(total_row_num as usize)
 }
