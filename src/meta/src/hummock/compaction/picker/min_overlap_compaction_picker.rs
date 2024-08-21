@@ -439,7 +439,11 @@ impl NonOverlapSubLevelPicker {
                 .then_with(|| a.total_file_size.cmp(&b.total_file_size))
         });
 
-        // For unexpected task the number of levels is as small as possible
+        // For unexpected tasks, We devised a separate algorithm to evaluate the priority of a task, based on the limit passed in,
+        // we set tasks close to the limit to be high priority, here have three attributes:
+        // 1. The number of levels selected is close to the limit
+        // 2. The number of files selected is close to the limit
+        // 3. The size of the selected file is close to the limit
         unexpected.sort_by(|a, b| {
             let a_select_count_offset =
                 (a.sstable_infos.len() as i64 - self.max_expected_level_count as i64).abs();
