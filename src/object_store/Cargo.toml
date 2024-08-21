@@ -63,3 +63,5 @@ tracing = "0.1"
 # [package.metadata.cargo-udeps.ignore]
 # normal = ["workspace-hack"]
 
+# [features]
+# hdfs-backend = ["opendal/services-hdfs", "dep:risingwave_jni_core"]
