@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::build_cdc_table_id;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::types::{
     DataType, Datum, DatumCow, Scalar, ScalarImpl, ScalarRefImpl, Timestamptz, ToDatumRef,
@@ -27,6 +26,7 @@ use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation
 use crate::parser::debezium::schema_change::{SchemaChangeEnvelope, TableSchemaChange};
 use crate::parser::schema_change::TableChangeType;
 use crate::parser::TransactionControl;
+use crate::source::cdc::build_cdc_table_id;
 use crate::source::cdc::external::mysql::{mysql_type_to_rw_type, type_name_to_mysql_type};
 use crate::source::{ConnectorProperties, SourceColumnDesc};
 

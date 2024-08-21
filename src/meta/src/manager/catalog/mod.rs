@@ -32,7 +32,8 @@ use risingwave_common::catalog::{
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::secret::LocalSecretManager;
-use risingwave_common::{bail, build_cdc_table_id, current_cluster_version, ensure};
+use risingwave_common::{bail, current_cluster_version, ensure};
+use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::{should_copy_to_format_encode_options, UPSTREAM_SOURCE_KEY};
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType};
