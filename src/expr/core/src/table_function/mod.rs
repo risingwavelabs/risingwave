@@ -127,16 +127,7 @@ pub fn build(
 ) -> Result<BoxedTableFunction> {
     use itertools::Itertools;
     let args = children.iter().map(|t| t.return_type()).collect_vec();
-    let desc = crate::sig::FUNCTION_REGISTRY
-        .get(func, &args, &return_type)
-        .ok_or_else(|| {
-            ExprError::UnsupportedFunction(format!(
-                "{}({}) -> setof {}",
-                func.as_str_name().to_ascii_lowercase(),
-                args.iter().format(", "),
-                return_type,
-            ))
-        })?;
+    let desc = crate::sig::FUNCTION_REGISTRY.get(func, &args, &return_type)?;
     desc.build_table(return_type, chunk_size, children)
 }
 

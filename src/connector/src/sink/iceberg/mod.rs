@@ -124,6 +124,13 @@ pub struct IcebergConfig {
     pub secret_key: String,
 
     #[serde(
+        rename = "s3.path.style.access",
+        default,
+        deserialize_with = "deserialize_bool_from_string"
+    )]
+    pub path_style_access: bool,
+
+    #[serde(
         rename = "primary_key",
         default,
         deserialize_with = "deserialize_optional_string_seq_from_string"
@@ -270,6 +277,10 @@ impl IcebergConfig {
             "iceberg.table.io.secret_access_key".to_string(),
             self.secret_key.clone().to_string(),
         );
+        iceberg_configs.insert(
+            "iceberg.table.io.enable_virtual_host_style".to_string(),
+            (!self.path_style_access).to_string(),
+        );
 
         let (bucket, root) = {
             let url = Url::parse(&self.path).map_err(|e| SinkError::Iceberg(anyhow!(e)))?;
@@ -409,7 +420,10 @@ impl IcebergConfig {
                 "s3.secret-access-key".to_string(),
                 self.secret_key.clone().to_string(),
             );
-
+            java_catalog_configs.insert(
+                "s3.path-style-access".to_string(),
+                self.path_style_access.to_string(),
+            );
             if matches!(self.catalog_type.as_deref(), Some("glue")) {
                 java_catalog_configs.insert(
                     "client.credentials-provider".to_string(),
@@ -501,7 +515,7 @@ impl IcebergConfig {
             .map_err(|e| SinkError::Iceberg(anyhow!(e)))
     }
 
-    async fn create_catalog_v2(&self) -> ConnectorResult<Arc<dyn CatalogV2>> {
+    fn create_catalog_v2(&self) -> ConnectorResult<Arc<dyn CatalogV2>> {
         match self.catalog_type() {
             "storage" => {
                 let config = StorageCatalogConfig::builder()
@@ -536,7 +550,7 @@ impl IcebergConfig {
                     })?)
                     .props(iceberg_configs)
                     .build();
-                let catalog = iceberg_catalog_rest::RestCatalog::new(config).await?;
+                let catalog = iceberg_catalog_rest::RestCatalog::new(config);
                 Ok(Arc::new(catalog))
             }
             catalog_type
@@ -570,7 +584,6 @@ impl IcebergConfig {
     pub async fn load_table_v2(&self) -> ConnectorResult<TableV2> {
         let catalog = self
             .create_catalog_v2()
-            .await
             .context("Unable to load iceberg catalog")?;
 
         let table_id = self
@@ -1287,6 +1300,7 @@ mod test {
             ("s3.endpoint", "http://127.0.0.1:9301"),
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
+            ("s3.path.style.access", "true"),
             ("s3.region", "us-east-1"),
             ("catalog.type", "jdbc"),
             ("catalog.name", "demo"),
@@ -1316,6 +1330,7 @@ mod test {
             endpoint: Some("http://127.0.0.1:9301".to_string()),
             access_key: "hummockadmin".to_string(),
             secret_key: "hummockadmin".to_string(),
+            path_style_access: true,
             primary_key: Some(vec!["v1".to_string()]),
             java_catalog_props: [("jdbc.user", "admin"), ("jdbc.password", "123456")]
                 .into_iter()
@@ -1351,6 +1366,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "storage"),
             ("warehouse.path", "s3://icebergdata/demo"),
@@ -1375,6 +1391,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "rest"),
             ("catalog.uri", "http://192.168.167.4:8181"),
@@ -1400,6 +1417,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "jdbc"),
             ("catalog.uri", "jdbc:postgresql://localhost:5432/iceberg"),
@@ -1427,6 +1445,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "hive"),
             ("catalog.uri", "thrift://localhost:9083"),

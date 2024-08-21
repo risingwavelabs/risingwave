@@ -296,7 +296,6 @@ pub fn start(
                 ),
             },
         };
-
         validate_config(&config);
 
         let total_memory_bytes = resource_util::memory::system_memory_available_bytes();
