@@ -57,6 +57,23 @@ pub enum EngineType {
     Fs,
 }
 
+impl EngineType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EngineType::Memory => "Memory",
+            EngineType::Hdfs => "Hdfs",
+            EngineType::Gcs => "Gcs",
+            EngineType::Minio => "Minio",
+            EngineType::S3 => "S3",
+            EngineType::Obs => "Obs",
+            EngineType::Oss => "Oss",
+            EngineType::Webhdfs => "Webhdfs",
+            EngineType::Azblob => "Azblob",
+            EngineType::Fs => "Fs",
+        }
+    }
+}
+
 impl OpendalObjectStore {
     /// create opendal memory engine, used for unit tests.
     pub fn test_new_memory_engine() -> ObjectResult<Self> {
@@ -248,18 +265,7 @@ impl ObjectStore for OpendalObjectStore {
     }
 
     fn store_media_type(&self) -> &'static str {
-        match self.engine_type {
-            EngineType::Memory => "Memory",
-            EngineType::Hdfs => "Hdfs",
-            EngineType::Minio => "Minio",
-            EngineType::S3 => "S3",
-            EngineType::Gcs => "Gcs",
-            EngineType::Obs => "Obs",
-            EngineType::Oss => "Oss",
-            EngineType::Webhdfs => "Webhdfs",
-            EngineType::Azblob => "Azblob",
-            EngineType::Fs => "Fs",
-        }
+        self.engine_type.as_str()
     }
 
     fn support_streaming_upload(&self) -> bool {
