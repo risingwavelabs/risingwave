@@ -842,6 +842,26 @@ impl HummockVersion {
         left_group_id: CompactionGroupId,
         right_group_id: CompactionGroupId,
     ) {
+        // Double check
+        let left_group_id_table_ids = self
+            .state_table_info
+            .compaction_group_member_table_ids(left_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec();
+
+        assert!(left_group_id_table_ids.is_sorted());
+        let right_group_id_table_ids = self
+            .state_table_info
+            .compaction_group_member_table_ids(right_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id)
+            .collect_vec();
+        assert!(right_group_id_table_ids.is_sorted());
+        assert!(
+            left_group_id_table_ids.last().unwrap() < right_group_id_table_ids.first().unwrap()
+        );
+
         let total_cg = self.levels.keys().cloned().collect::<Vec<_>>();
         let [left_levels, right_levels] = self
             .levels
