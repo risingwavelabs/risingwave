@@ -13,6 +13,12 @@ format plain encode protobuf (
   schema.location = 'file:///risingwave/src/connector/codec/tests/test_data/all-types.pb',
   message = 'all_types.AllTypes');
 
+system ok
+rpk topic create test-rw-sink-append-only-protobuf-csr-a
+
+system ok
+python3 e2e_test/sink/kafka/register_schema.py 'http://schemaregistry:8082' 'test-rw-sink-append-only-protobuf-csr-a-value' src/connector/src/test_data/test-index-array.proto
+
 statement ok
 create table from_kafka_csr_trivial with (
   connector = 'kafka',
@@ -21,6 +27,12 @@ create table from_kafka_csr_trivial with (
 format plain encode protobuf (
   schema.registry = 'http://schemaregistry:8082',
   message = 'test.package.MessageA');
+
+system ok
+rpk topic create test-rw-sink-append-only-protobuf-csr-hi
+
+system ok
+python3 e2e_test/sink/kafka/register_schema.py 'http://schemaregistry:8082' 'test-rw-sink-append-only-protobuf-csr-hi-value' src/connector/src/test_data/test-index-array.proto
 
 statement ok
 create table from_kafka_csr_nested with (
@@ -217,6 +229,15 @@ drop table from_kafka_raw cascade;
 
 statement ok
 drop table into_kafka cascade;
+
+system ok
+rpk topic delete test-rw-sink-append-only-protobuf
+
+system ok
+rpk topic delete test-rw-sink-append-only-protobuf-csr-a
+
+system ok
+rpk topic delete test-rw-sink-append-only-protobuf-csr-hi
 
 system ok
 rpk topic delete test-rw-sink-upsert-protobuf
