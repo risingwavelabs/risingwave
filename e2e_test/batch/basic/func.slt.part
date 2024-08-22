@@ -317,6 +317,11 @@ select count(current_database());
 ----
 1
 
+query I
+select count(current_catalog);
+----
+1
+
 query T
 select regexp_match('abc', 'bc');
 ----

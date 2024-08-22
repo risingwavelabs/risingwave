@@ -24,7 +24,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
-use foyer::{LfuConfig, LruConfig, S3FifoConfig};
+use foyer::{LfuConfig, LruConfig, RecoverMode, S3FifoConfig};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -863,6 +863,18 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::flush_buffer_threshold_mb")]
     pub flush_buffer_threshold_mb: Option<usize>,
 
+    /// Recover mode.
+    ///
+    /// Options:
+    ///
+    /// - "None": Do not recover disk cache.
+    /// - "Quiet": Recover disk cache and skip errors.
+    /// - "Strict": Recover disk cache and panic on errors.
+    ///
+    /// More details, see [`RecoverMode::None`], [`RecoverMode::Quiet`] and [`RecoverMode::Strict`],
+    #[serde(default = "default::file_cache::recover_mode")]
+    pub recover_mode: RecoverMode,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -1015,6 +1027,10 @@ pub struct StreamingDeveloperConfig {
     /// If not specified, the value of `server.connection_pool_size` will be used.
     #[serde(default = "default::developer::stream_exchange_connection_pool_size")]
     pub exchange_connection_pool_size: Option<u16>,
+
+    /// A flag to allow disabling the auto schema change handling
+    #[serde(default = "default::developer::stream_enable_auto_schema_change")]
+    pub enable_auto_schema_change: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1673,6 +1689,8 @@ pub mod default {
     }
 
     pub mod file_cache {
+        use foyer::RecoverMode;
+
         pub fn dir() -> String {
             "".to_string()
         }
@@ -1711,6 +1729,10 @@ pub mod default {
 
         pub fn flush_buffer_threshold_mb() -> Option<usize> {
             None
+        }
+
+        pub fn recover_mode() -> RecoverMode {
+            RecoverMode::None
         }
     }
 
@@ -1842,11 +1864,11 @@ pub mod default {
         }
 
         pub fn memory_controller_threshold_graceful() -> f64 {
-            0.8
+            0.81
         }
 
         pub fn memory_controller_threshold_stable() -> f64 {
-            0.7
+            0.72
         }
 
         pub fn memory_controller_eviction_factor_aggressive() -> f64 {
@@ -1884,6 +1906,10 @@ pub mod default {
 
         pub fn enable_actor_tokio_metrics() -> bool {
             false
+        }
+
+        pub fn stream_enable_auto_schema_change() -> bool {
+            true
         }
     }
 
@@ -1927,17 +1953,19 @@ pub mod default {
     }
 
     pub mod compaction_config {
-        const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
-        const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
-        const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * 1024 * 1024; // 512MB
+        const MB: u64 = 1024 * 1024;
+        const GB: u64 = 1024 * 1024 * 1024;
+        const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * GB; // 2GB
+        const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * MB; // 128MB
+        const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * MB; // 512MB
 
         // decrease this configure when the generation of checkpoint barrier is not frequent.
         const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 12;
-        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024;
+        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * MB;
         // 32MB
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
         const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
-        const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
+        const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * MB; // 512MB;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 300;
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 100;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
@@ -1946,6 +1974,7 @@ pub mod default {
         const DEFAULT_EMERGENCY_PICKER: bool = true;
         const DEFAULT_MAX_LEVEL: u32 = 6;
         const DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT: u32 = 42;
+        const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE: u64 = 4 * MB;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -2015,6 +2044,10 @@ pub mod default {
 
         pub fn max_l0_compact_level_count() -> u32 {
             DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT
+        }
+
+        pub fn sst_allowed_trivial_move_min_size() -> u64 {
+            DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE
         }
     }
 

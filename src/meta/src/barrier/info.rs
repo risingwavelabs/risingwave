@@ -40,8 +40,8 @@ pub struct InflightSubscriptionInfo {
 
 /// [`InflightGraphInfo`] resolves the actor info read from meta store for
 /// [`crate::barrier::GlobalBarrierManager`].
-#[derive(Default, Clone)]
-pub(super) struct InflightGraphInfo {
+#[derive(Default, Clone, Debug)]
+pub struct InflightGraphInfo {
     /// `node_id` => actors
     pub actor_map: HashMap<WorkerId, HashSet<ActorId>>,
 
@@ -82,7 +82,7 @@ impl InflightGraphInfo {
     }
 
     /// Update worker nodes snapshot. We need to support incremental updates for it in the future.
-    pub fn on_new_worker_node_map(&mut self, node_map: &HashMap<WorkerId, WorkerNode>) {
+    pub fn on_new_worker_node_map(&self, node_map: &HashMap<WorkerId, WorkerNode>) {
         for (node_id, actors) in &self.actor_map {
             if !node_map.contains_key(node_id) {
                 warn!(node_id, ?actors, "node with running actors is deleted");
@@ -90,11 +90,30 @@ impl InflightGraphInfo {
         }
     }
 
+    pub(crate) fn extend(&mut self, other: Self) {
+        self.apply_add(
+            other.fragment_infos.into_iter().map(|(fragment_id, info)| {
+                (fragment_id, CommandFragmentChanges::NewFragment(info))
+            }),
+        )
+    }
+
     /// Apply some actor changes before issuing a barrier command, if the command contains any new added actors, we should update
     /// the info correspondingly.
     pub(crate) fn pre_apply(
         &mut self,
         fragment_changes: &HashMap<FragmentId, CommandFragmentChanges>,
+    ) {
+        self.apply_add(
+            fragment_changes
+                .iter()
+                .map(|(fragment_id, change)| (*fragment_id, change.clone())),
+        )
+    }
+
+    fn apply_add(
+        &mut self,
+        fragment_changes: impl Iterator<Item = (FragmentId, CommandFragmentChanges)>,
     ) {
         {
             let mut to_add = HashMap::new();
@@ -104,18 +123,15 @@ impl InflightGraphInfo {
                         for (actor_id, node_id) in &info.actors {
                             assert!(to_add.insert(*actor_id, *node_id).is_none());
                         }
-                        assert!(self
-                            .fragment_infos
-                            .insert(*fragment_id, info.clone())
-                            .is_none());
+                        assert!(self.fragment_infos.insert(fragment_id, info).is_none());
                     }
                     CommandFragmentChanges::Reschedule { new_actors, .. } => {
                         let info = self
                             .fragment_infos
-                            .get_mut(fragment_id)
+                            .get_mut(&fragment_id)
                             .expect("should exist");
                         let actors = &mut info.actors;
-                        for (actor_id, node_id) in new_actors {
+                        for (actor_id, node_id) in &new_actors {
                             assert!(to_add.insert(*actor_id, *node_id).is_none());
                             assert!(actors.insert(*actor_id, *node_id).is_none());
                         }
@@ -241,24 +257,6 @@ impl InflightGraphInfo {
                     }
                 })
         })
-    }
-
-    /// Returns actor list to send in the target worker node.
-    pub fn actor_ids_to_send(&self, node_id: WorkerId) -> impl Iterator<Item = ActorId> + '_ {
-        self.fragment_infos
-            .values()
-            .filter(|info| info.is_injectable)
-            .flat_map(move |info| {
-                info.actors
-                    .iter()
-                    .filter_map(move |(actor_id, actor_node_id)| {
-                        if *actor_node_id == node_id {
-                            Some(*actor_id)
-                        } else {
-                            None
-                        }
-                    })
-            })
     }
 
     pub fn existing_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {

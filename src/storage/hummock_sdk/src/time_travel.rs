@@ -36,7 +36,7 @@ use crate::{CompactionGroupId, HummockSstableId, HummockVersionId};
 pub struct IncompleteHummockVersion {
     pub id: HummockVersionId,
     pub levels: HashMap<CompactionGroupId, Levels>,
-    pub max_committed_epoch: u64,
+    max_committed_epoch: u64,
     safe_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
     pub table_change_log: HashMap<TableId, TableChangeLog>,
@@ -212,7 +212,7 @@ impl From<(&HummockVersion, &HashSet<CompactionGroupId>)> for IncompleteHummockV
                     }
                 })
                 .collect(),
-            max_committed_epoch: version.max_committed_epoch,
+            max_committed_epoch: version.visible_table_committed_epoch(),
             safe_epoch: version.visible_table_safe_epoch(),
             table_watermarks: version.table_watermarks.clone(),
             // TODO: optimization: strip table change log
@@ -295,7 +295,7 @@ impl From<(&HummockVersionDelta, &HashSet<CompactionGroupId>)> for IncompleteHum
                     }
                 })
                 .collect(),
-            max_committed_epoch: delta.max_committed_epoch,
+            max_committed_epoch: delta.visible_table_committed_epoch(),
             safe_epoch: delta.visible_table_safe_epoch(),
             trivial_move: delta.trivial_move,
             new_table_watermarks: delta.new_table_watermarks.clone(),
@@ -339,7 +339,7 @@ impl IncompleteHummockVersionDelta {
             state_table_info_delta: self
                 .state_table_info_delta
                 .iter()
-                .map(|(table_id, delta)| (table_id.table_id, delta.clone()))
+                .map(|(table_id, delta)| (table_id.table_id, *delta))
                 .collect(),
         }
     }

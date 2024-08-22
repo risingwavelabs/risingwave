@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_pb::stream_plan::BarrierRecvNode;
-use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
 use crate::executor::BarrierRecvExecutor;
@@ -33,10 +32,10 @@ impl ExecutorBuilder for BarrierRecvExecutorBuilder {
             "barrier receiver should not have input"
         );
 
-        let (sender, barrier_receiver) = unbounded_channel();
-        params
-            .create_actor_context
-            .register_sender(params.actor_context.id, sender);
+        let barrier_receiver = params
+            .shared_context
+            .local_barrier_manager
+            .subscribe_barrier(params.actor_context.id);
 
         let exec = BarrierRecvExecutor::new(params.actor_context, barrier_receiver);
         Ok((params.info, exec).into())

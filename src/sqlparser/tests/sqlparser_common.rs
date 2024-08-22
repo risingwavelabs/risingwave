@@ -347,11 +347,10 @@ fn parse_select_count_wildcard() {
         &Expr::Function(Function {
             scalar_as_agg: false,
             name: ObjectName(vec![Ident::new_unchecked("COUNT")]),
-            args: vec![FunctionArg::Unnamed(FunctionArgExpr::Wildcard(None))],
-            variadic: false,
+            arg_list: FunctionArgList::args_only(vec![FunctionArg::Unnamed(
+                FunctionArgExpr::Wildcard(None)
+            )]),
             over: None,
-            distinct: false,
-            order_by: vec![],
             filter: None,
             within_group: None,
         }),
@@ -367,14 +366,15 @@ fn parse_select_count_distinct() {
         &Expr::Function(Function {
             scalar_as_agg: false,
             name: ObjectName(vec![Ident::new_unchecked("COUNT")]),
-            args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::UnaryOp {
-                op: UnaryOperator::Plus,
-                expr: Box::new(Expr::Identifier(Ident::new_unchecked("x"))),
-            }))],
-            variadic: false,
+            arg_list: FunctionArgList::for_agg(
+                true,
+                vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::UnaryOp {
+                    op: UnaryOperator::Plus,
+                    expr: Box::new(Expr::Identifier(Ident::new_unchecked("x"))),
+                }))],
+                vec![]
+            ),
             over: None,
-            distinct: true,
-            order_by: vec![],
             filter: None,
             within_group: None,
         }),
@@ -1166,11 +1166,10 @@ fn parse_select_having() {
             left: Box::new(Expr::Function(Function {
                 scalar_as_agg: false,
                 name: ObjectName(vec![Ident::new_unchecked("COUNT")]),
-                args: vec![FunctionArg::Unnamed(FunctionArgExpr::Wildcard(None))],
-                variadic: false,
+                arg_list: FunctionArgList::args_only(vec![FunctionArg::Unnamed(
+                    FunctionArgExpr::Wildcard(None)
+                )]),
                 over: None,
-                distinct: false,
-                order_by: vec![],
                 filter: None,
                 within_group: None,
             })),
@@ -1908,7 +1907,7 @@ fn parse_named_argument_function() {
         &Expr::Function(Function {
             scalar_as_agg: false,
             name: ObjectName(vec![Ident::new_unchecked("FUN")]),
-            args: vec![
+            arg_list: FunctionArgList::args_only(vec![
                 FunctionArg::Named {
                     name: Ident::new_unchecked("a"),
                     arg: FunctionArgExpr::Expr(Expr::Value(Value::SingleQuotedString(
@@ -1921,11 +1920,8 @@ fn parse_named_argument_function() {
                         "2".to_owned()
                     ))),
                 },
-            ],
-            variadic: false,
+            ]),
             over: None,
-            distinct: false,
-            order_by: vec![],
             filter: None,
             within_group: None,
         }),
@@ -1951,8 +1947,7 @@ fn parse_window_functions() {
         &Expr::Function(Function {
             scalar_as_agg: false,
             name: ObjectName(vec![Ident::new_unchecked("row_number")]),
-            args: vec![],
-            variadic: false,
+            arg_list: FunctionArgList::empty(),
             over: Some(WindowSpec {
                 partition_by: vec![],
                 order_by: vec![OrderByExpr {
@@ -1962,8 +1957,6 @@ fn parse_window_functions() {
                 }],
                 window_frame: None,
             }),
-            distinct: false,
-            order_by: vec![],
             filter: None,
             within_group: None,
         }),
@@ -1986,29 +1979,30 @@ fn parse_aggregate_with_order_by() {
         &Expr::Function(Function {
             scalar_as_agg: false,
             name: ObjectName(vec![Ident::new_unchecked("STRING_AGG")]),
-            args: vec![
-                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(
-                    Ident::new_unchecked("a")
-                ))),
-                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(
-                    Ident::new_unchecked("b")
-                ))),
-            ],
-            variadic: false,
+            arg_list: FunctionArgList::for_agg(
+                false,
+                vec![
+                    FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(
+                        Ident::new_unchecked("a")
+                    ))),
+                    FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(
+                        Ident::new_unchecked("b")
+                    ))),
+                ],
+                vec![
+                    OrderByExpr {
+                        expr: Expr::Identifier(Ident::new_unchecked("b")),
+                        asc: Some(true),
+                        nulls_first: None,
+                    },
+                    OrderByExpr {
+                        expr: Expr::Identifier(Ident::new_unchecked("a")),
+                        asc: Some(false),
+                        nulls_first: None,
+                    }
+                ]
+            ),
             over: None,
-            distinct: false,
-            order_by: vec![
-                OrderByExpr {
-                    expr: Expr::Identifier(Ident::new_unchecked("b")),
-                    asc: Some(true),
-                    nulls_first: None,
-                },
-                OrderByExpr {
-                    expr: Expr::Identifier(Ident::new_unchecked("a")),
-                    asc: Some(false),
-                    nulls_first: None,
-                }
-            ],
             filter: None,
             within_group: None,
         }),
@@ -2024,13 +2018,10 @@ fn parse_aggregate_with_filter() {
         &Expr::Function(Function {
             scalar_as_agg: false,
             name: ObjectName(vec![Ident::new_unchecked("sum")]),
-            args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(
-                Expr::Identifier(Ident::new_unchecked("a"))
-            )),],
-            variadic: false,
+            arg_list: FunctionArgList::args_only(vec![FunctionArg::Unnamed(
+                FunctionArgExpr::Expr(Expr::Identifier(Ident::new_unchecked("a")))
+            )]),
             over: None,
-            distinct: false,
-            order_by: vec![],
             filter: Some(Box::new(Expr::BinaryOp {
                 left: Box::new(Expr::Nested(Box::new(Expr::BinaryOp {
                     left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
@@ -2282,11 +2273,8 @@ fn parse_delimited_identifiers() {
         &Expr::Function(Function {
             scalar_as_agg: false,
             name: ObjectName(vec![Ident::with_quote_unchecked('"', "myfun")]),
-            args: vec![],
-            variadic: false,
+            arg_list: FunctionArgList::empty(),
             over: None,
-            distinct: false,
-            order_by: vec![],
             filter: None,
             within_group: None,
         }),

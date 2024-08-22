@@ -46,11 +46,16 @@ macro_rules! for_all_features {
             { TestPaid,             Paid,       "A dummy feature that's only available on paid tier for testing purposes." },
             { TimeTravel,           Paid,       "Query historical data within the retention period."},
             { GlueSchemaRegistry,   Paid,       "Use Schema Registry from AWS Glue rather than Confluent." },
+            { SnowflakeSink,        Paid,       "Delivering data to SnowFlake." },
+            { DynamoDbSink,         Paid,       "Delivering data to DynamoDb." },
+            { OpenSearchSink,       Paid,       "Delivering data to OpenSearch." },
+            { BigQuerySink,         Paid,       "Delivering data to BigQuery." },
             { ClickHouseSharedEngine,Paid,      "Delivering data to Shared tree on clickhouse cloud"},
             { SecretManagement,     Paid,       "Secret management." },
             { CdcTableSchemaMap,    Paid,       "Automatically map upstream schema to CDC Table."},
             { SqlServerSink,        Paid,       "Sink data from RisingWave to SQL Server." },
             { SqlServerCdcSource,   Paid,       "CDC source connector for Sql Server." },
+            { CdcAutoSchemaChange,  Paid,       "Auto replicate upstream DDL to CDC Table." },
         }
     };
 }

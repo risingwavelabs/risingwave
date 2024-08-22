@@ -78,6 +78,10 @@ impl CompactionTaskValidator {
             true
         }
     }
+
+    pub fn is_enable(&self) -> bool {
+        !self.validation_rules.is_empty()
+    }
 }
 
 pub trait CompactionTaskValidationRule {

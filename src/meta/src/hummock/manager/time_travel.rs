@@ -388,16 +388,24 @@ impl HummockManager {
             Ok(count)
         }
 
-        let epoch = delta.max_committed_epoch;
+        let epoch = delta.visible_table_committed_epoch();
         let version_id: u64 = delta.id.to_u64();
         let m = hummock_epoch_to_version::ActiveModel {
             epoch: Set(epoch.try_into().unwrap()),
             version_id: Set(version_id.try_into().unwrap()),
         };
         hummock_epoch_to_version::Entity::insert(m)
+            .on_conflict(
+                OnConflict::column(hummock_epoch_to_version::Column::Epoch)
+                    // The existing row must be inserted by the common committed epoch of created MVs.
+                    // While any duplicate row must be inserted by MVs still in creation.
+                    // So the row shouldn't be updated.
+                    .do_nothing()
+                    .to_owned(),
+            )
+            .do_nothing()
             .exec(txn)
             .await?;
-
         let mut version_sst_ids = None;
         let select_groups = group_parents
             .iter()
@@ -483,14 +491,8 @@ fn replay_archive(
     deltas: impl Iterator<Item = PbHummockVersionDelta>,
 ) -> HummockVersion {
     let mut last_version = HummockVersion::from_persisted_protobuf(&version);
-    let mut mce = last_version.max_committed_epoch;
     for d in deltas {
         let d = HummockVersionDelta::from_persisted_protobuf(&d);
-        assert!(
-            d.max_committed_epoch > mce,
-            "time travel expects delta from commit_epoch only"
-        );
-        mce = d.max_committed_epoch;
         // Need to work around the assertion in `apply_version_delta`.
         // Because compaction deltas are not included in time travel archive.
         while last_version.id < d.prev_id {
