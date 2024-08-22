@@ -1210,7 +1210,7 @@ async fn test_version_stats() {
                 },
                 file_size: 1024 * 1024 * 1024,
                 table_ids: table_ids.clone(),
-                estimated_sst_size: 1024 * 1024 * 1024,
+                sst_size: 1024 * 1024 * 1024,
                 ..Default::default()
             },
             table_stats: table_ids
@@ -2187,7 +2187,7 @@ async fn test_partition_level() {
     for epoch in 31..100 {
         let mut sst = gen_local_sstable_info(global_sst_id, 10, vec![100]);
         sst.sst_info.file_size = 10 * MB;
-        sst.sst_info.estimated_sst_size = 10 * MB;
+        sst.sst_info.sst_size = 10 * MB;
         sst.sst_info.uncompressed_file_size = 10 * MB;
 
         hummock_manager
@@ -2212,11 +2212,11 @@ async fn test_partition_level() {
                     level
                         .table_infos
                         .iter()
-                        .map(|sst| sst.estimated_sst_size)
+                        .map(|sst| sst.sst_size)
                         .sum::<u64>()
                 })
                 .sum::<u64>();
-            sst.estimated_sst_size = sst.file_size;
+            sst.sst_size = sst.file_size;
             global_sst_id += 1;
             let ret = hummock_manager
                 .report_compact_task(task.task_id, TaskStatus::Success, vec![sst], None)

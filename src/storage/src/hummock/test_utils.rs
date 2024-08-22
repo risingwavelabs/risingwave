@@ -123,7 +123,7 @@ pub fn gen_dummy_sst_info(
         uncompressed_file_size: file_size,
         min_epoch: epoch,
         max_epoch: epoch,
-        estimated_sst_size: file_size,
+        sst_size: file_size,
         ..Default::default()
     }
 }

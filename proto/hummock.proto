@@ -31,8 +31,8 @@ message SstableInfo {
   BloomFilterType bloom_filter_kind = 13;
 
   // In order to calculate more finely in the compaction strategy, we need to re-calculate the sst_size after split sst
-  // `estimated_sst_size` represents the size of the sst instead of the object size(usually used in the meta).
-  uint64 estimated_sst_size = 14;
+  // `sst_size` represents the size of the sst instead of the object size(usually used in the meta).
+  uint64 sst_size = 14;
 }
 
 enum LevelType {

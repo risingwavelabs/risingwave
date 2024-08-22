@@ -135,7 +135,7 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
                     range_tombstone_count: sst.range_tombstone_count as _,
                     bloom_filter_kind: sst.bloom_filter_kind as _,
                     table_ids: json!(sst.table_ids).into(),
-                    estimated_size: sst.estimated_sst_size as _,
+                    estimated_size: sst.sst_size as _,
                 });
             }
         }

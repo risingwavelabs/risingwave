@@ -528,7 +528,7 @@ pub mod tests {
         levels.levels[3].total_file_size = levels.levels[3]
             .table_infos
             .iter()
-            .map(|sst| sst.estimated_sst_size)
+            .map(|sst| sst.sst_size)
             .sum::<u64>();
 
         let ctx = selector.calculate_level_base_size(&levels);
@@ -555,7 +555,7 @@ pub mod tests {
         levels.levels[0].total_file_size = levels.levels[0]
             .table_infos
             .iter()
-            .map(|sst| sst.estimated_sst_size)
+            .map(|sst| sst.sst_size)
             .sum::<u64>();
 
         let ctx = selector.calculate_level_base_size(&levels);

@@ -167,7 +167,7 @@ async fn test_read_version_basic() {
                     stale_key_count: 1,
                     total_key_count: 1,
                     uncompressed_file_size: 1,
-                    estimated_sst_size: 1,
+                    sst_size: 1,
                     ..Default::default()
                 }),
                 LocalSstableInfo::for_test(SstableInfo {
@@ -186,7 +186,7 @@ async fn test_read_version_basic() {
                     stale_key_count: 1,
                     total_key_count: 1,
                     uncompressed_file_size: 1,
-                    estimated_sst_size: 1,
+                    sst_size: 1,
                     ..Default::default()
                 }),
             ],

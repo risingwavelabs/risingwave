@@ -84,10 +84,7 @@ impl SpaceReclaimCompactionPicker {
                 }
                 if !select_input_ssts.is_empty() {
                     return Some(CompactionInput {
-                        select_input_size: select_input_ssts
-                            .iter()
-                            .map(|sst| sst.estimated_sst_size)
-                            .sum(),
+                        select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size).sum(),
                         total_file_count: select_input_ssts.len() as u64,
                         input_levels: vec![
                             InputLevel {
@@ -143,10 +140,7 @@ impl SpaceReclaimCompactionPicker {
             // turn to next_round
             if !select_input_ssts.is_empty() {
                 return Some(CompactionInput {
-                    select_input_size: select_input_ssts
-                        .iter()
-                        .map(|sst| sst.estimated_sst_size)
-                        .sum(),
+                    select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size).sum(),
                     total_file_count: select_input_ssts.len() as u64,
                     input_levels: vec![
                         InputLevel {
@@ -317,7 +311,7 @@ mod test {
             let select_file_size: u64 = task.input.input_levels[0]
                 .table_infos
                 .iter()
-                .map(|sst| sst.estimated_sst_size)
+                .map(|sst| sst.sst_size)
                 .sum();
             assert!(select_file_size > max_space_reclaim_bytes);
         }
