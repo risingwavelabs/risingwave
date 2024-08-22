@@ -75,27 +75,6 @@ where
     })
 }
 
-pub(crate) fn deserialize_optional_u64_from_string<'de, D>(
-    deserializer: D,
-) -> Result<Option<u64>, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    let s: String = de::Deserialize::deserialize(deserializer)?;
-    if s.is_empty() {
-        Ok(None)
-    } else {
-        s.parse()
-            .map_err(|_| {
-                de::Error::invalid_value(
-                    de::Unexpected::Str(&s),
-                    &"integer greater than or equal to 0",
-                )
-            })
-            .map(Some)
-    }
-}
-
 pub(crate) fn deserialize_optional_string_seq_from_string<'de, D>(
     deserializer: D,
 ) -> std::result::Result<Option<Vec<String>>, D::Error>
