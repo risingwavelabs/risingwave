@@ -35,11 +35,6 @@ RUN rustup self update \
 
 RUN cargo install flamegraph
 RUN cargo install addr2line --features bin --bin addr2line
-RUN echo "Check addr2line is installed correctly." && \
-  [ "$(which addr2line)" = "/root/.cargo/bin/addr2line" ] || { \
-    echo "addr2line point to a wrong binary: $(which addr2line)"; \
-    exit 1; \
-  }
 
 # TODO: cargo-chef doesn't work well now, because we update Cargo.lock very often.
 # We may consider sccache instead.
@@ -144,6 +139,7 @@ COPY --from=rust-builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwa
 COPY --from=java-builder /risingwave/bin/connector-node /risingwave/bin/connector-node
 COPY --from=rust-builder /risingwave/bin/jeprof /usr/local/bin/jeprof
 COPY --from=rust-base /root/.cargo/bin/flamegraph /usr/local/bin/flamegraph
+COPY --from=rust-base /root/.cargo/bin/addr2line /usr/local/bin/addr2line
 
 # Set default playground mode to docker-playground profile
 ENV PLAYGROUND_PROFILE docker-playground
