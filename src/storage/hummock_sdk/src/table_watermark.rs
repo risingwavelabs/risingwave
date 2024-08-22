@@ -161,6 +161,7 @@ impl TableWatermarksIndex {
         let mut ret = Vec::with_capacity(watermarks.len());
         for watermark in watermarks.drain(..) {
             let mut regress_vnodes = None;
+            let vnode_count = watermark.vnode_bitmap.len();
             for vnode in watermark.vnode_bitmap.iter_vnodes() {
                 if let Some(prev_watermark) = self.latest_watermark(vnode) {
                     let is_regress = match self.direction() {
@@ -176,7 +177,7 @@ impl TableWatermarksIndex {
                             prev_watermark
                         );
                         regress_vnodes
-                            .get_or_insert_with(|| BitmapBuilder::zeroed(VirtualNode::count()))
+                            .get_or_insert_with(|| BitmapBuilder::zeroed(vnode_count))
                             .set(vnode.to_index(), true);
                     }
                 }
@@ -187,7 +188,7 @@ impl TableWatermarksIndex {
                     let vnode_index = vnode.to_index();
                     if !regress_vnodes.is_set(vnode_index) {
                         bitmap_builder
-                            .get_or_insert_with(|| BitmapBuilder::zeroed(VirtualNode::count()))
+                            .get_or_insert_with(|| BitmapBuilder::zeroed(vnode_count))
                             .set(vnode_index, true);
                     }
                 }

@@ -99,7 +99,7 @@ pub type AllVirtualNodeIter = std::iter::Map<std::ops::Range<usize>, fn(usize) -
 impl VirtualNode {
     /// Creates a virtual node from the `usize` index.
     pub fn from_index(index: usize) -> Self {
-        debug_assert!(index < Self::count());
+        assert!(index < Self::count());
         Self(index as _)
     }
 
@@ -120,7 +120,7 @@ impl VirtualNode {
 
     /// Creates a virtual node from the given scalar representation. Used by `VNODE` expression.
     pub fn from_scalar(scalar: i16) -> Self {
-        debug_assert!((scalar as usize) < Self::count());
+        assert!((scalar as usize) < Self::count());
         Self(scalar as _)
     }
 
@@ -152,6 +152,20 @@ impl VirtualNode {
     /// Iterates over all virtual nodes.
     pub fn all() -> AllVirtualNodeIter {
         (0..Self::count()).map(Self::from_index)
+    }
+
+    /// Returns the next virtual node.
+    ///
+    /// Panics if out of bounds.
+    pub fn next(self) -> Self {
+        Self::from_index(self.to_index() + 1)
+    }
+
+    /// Returns the previous virtual node.
+    ///
+    /// Panics if out of bounds.
+    pub fn prev(self) -> Self {
+        Self::from_index(self.to_index() - 1)
     }
 }
 

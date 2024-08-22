@@ -42,7 +42,6 @@ use risingwave_connector::source::{
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
-use risingwave_pb::common::Buffer;
 use risingwave_pb::plan_common::Field as PbField;
 use risingwave_sqlparser::ast::AsOf;
 use serde::ser::SerializeStruct;
@@ -426,7 +425,7 @@ impl TableScanInfo {
 
 #[derive(Clone, Debug)]
 pub struct TablePartitionInfo {
-    pub vnode_bitmap: Buffer,
+    pub vnode_bitmap: Bitmap,
     pub scan_ranges: Vec<ScanRangeProto>,
 }
 
@@ -909,8 +908,8 @@ impl BatchPlanFragmenter {
                                 .drain()
                                 .take(1)
                                 .update(|(_, info)| {
-                                    info.vnode_bitmap =
-                                        Bitmap::ones(VirtualNode::count()).to_protobuf();
+                                    let vnode_count = info.vnode_bitmap.len();
+                                    info.vnode_bitmap = Bitmap::ones(vnode_count);
                                 })
                                 .collect();
                         }
@@ -1228,7 +1227,7 @@ fn derive_partitions(
                 (
                     k,
                     TablePartitionInfo {
-                        vnode_bitmap: vnode_bitmap.to_protobuf(),
+                        vnode_bitmap,
                         scan_ranges: vec![],
                     },
                 )
@@ -1277,7 +1276,7 @@ fn derive_partitions(
             (
                 k,
                 TablePartitionInfo {
-                    vnode_bitmap: bitmap.finish().to_protobuf(),
+                    vnode_bitmap: bitmap.finish(),
                     scan_ranges,
                 },
             )

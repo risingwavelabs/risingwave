@@ -160,8 +160,9 @@ impl CoordinatorWorker {
     }
 
     async fn wait_for_writers(&mut self, first_vnode_bitmap: Bitmap) -> anyhow::Result<()> {
-        let mut remaining_count = VirtualNode::count();
-        let mut registered_vnode = HashSet::with_capacity(VirtualNode::count());
+        let vnode_count = first_vnode_bitmap.len();
+        let mut remaining_count = vnode_count;
+        let mut registered_vnode = HashSet::with_capacity(vnode_count);
 
         for vnode in first_vnode_bitmap.iter_vnodes() {
             remaining_count -= 1;

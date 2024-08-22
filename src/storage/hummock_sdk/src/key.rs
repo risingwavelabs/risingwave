@@ -1299,23 +1299,26 @@ mod tests {
                 Excluded(TableKey(concat(234, b"")))
             )
         );
-        let max_vnode = VirtualNode::count() - 1;
+        let max_vnode = VirtualNode::max();
         assert_eq!(
             prefixed_range_with_vnode(
                 (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
-                VirtualNode::from_index(max_vnode),
-            ),
-            (Included(TableKey(concat(max_vnode, b""))), Unbounded)
-        );
-        let second_max_vnode = max_vnode - 1;
-        assert_eq!(
-            prefixed_range_with_vnode(
-                (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
-                VirtualNode::from_index(second_max_vnode),
+                max_vnode,
             ),
             (
-                Included(TableKey(concat(second_max_vnode, b""))),
-                Excluded(TableKey(concat(max_vnode, b"")))
+                Included(TableKey(concat(max_vnode.to_index(), b""))),
+                Unbounded
+            )
+        );
+        let second_max_vnode = max_vnode.prev();
+        assert_eq!(
+            prefixed_range_with_vnode(
+                (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                second_max_vnode,
+            ),
+            (
+                Included(TableKey(concat(second_max_vnode.to_index(), b""))),
+                Excluded(TableKey(concat(max_vnode.to_index(), b"")))
             )
         );
     }
