@@ -1100,7 +1100,7 @@ mod tests {
     }
 
     async fn test_hash_dispatcher_complex_inner() {
-        // This test only works when VirtualNode::COUNT is 256.
+        // This test only works when VirtualNode::count() is 256.
         assert_eq!(VirtualNode::count(), 256);
 
         let num_outputs = 2; // actor id ranges from 1 to 2

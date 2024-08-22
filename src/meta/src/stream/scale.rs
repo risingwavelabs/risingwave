@@ -2239,8 +2239,8 @@ impl ScaleController {
                     FragmentDistributionType::Hash => match parallelism {
                         TableParallelism::Adaptive => {
                             if all_available_slots > VirtualNode::count() {
-                                tracing::warn!("available parallelism for table {table_id} is larger than VirtualNode::COUNT, force limit to VirtualNode::COUNT");
-                                // force limit to VirtualNode::COUNT
+                                tracing::warn!("available parallelism for table {table_id} is larger than VirtualNode::count(), force limit to VirtualNode::count()");
+                                // force limit to VirtualNode::count()
                                 let target_worker_slots = schedule_units_for_slots(
                                     &schedulable_worker_slots,
                                     VirtualNode::count(),
@@ -2267,7 +2267,7 @@ impl ScaleController {
                         TableParallelism::Fixed(mut n) => {
                             if n > VirtualNode::count() {
                                 // This should be unreachable, but we still intercept it to prevent accidental modifications.
-                                tracing::warn!("parallelism {n} for table {table_id} is larger than VirtualNode::COUNT, force limit to VirtualNode::COUNT");
+                                tracing::warn!("parallelism {n} for table {table_id} is larger than VirtualNode::count(), force limit to VirtualNode::count()");
                                 n = VirtualNode::count()
                             }
 

@@ -144,7 +144,7 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         Self::new_uniform(std::iter::once(item))
     }
 
-    /// The length of the vnode in this mapping, typically [`VirtualNode::COUNT`].
+    /// The length of the vnode in this mapping, typically [`VirtualNode::count`].
     pub fn len(&self) -> usize {
         self.original_indices
             .last()
@@ -241,7 +241,7 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         Self::from_expanded(&items)
     }
 
-    /// Create a vnode mapping from the expanded slice of items with length [`VirtualNode::COUNT`].
+    /// Create a vnode mapping from the expanded slice of items with length [`VirtualNode::count`].
     pub fn from_expanded(items: &[T::Item]) -> Self {
         assert_eq!(items.len(), VirtualNode::count());
         let (original_indices, data) = compress_data(items);
@@ -251,7 +251,7 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         }
     }
 
-    /// Convert this vnode mapping to a expanded vector of items with length [`VirtualNode::COUNT`].
+    /// Convert this vnode mapping to a expanded vector of items with length [`VirtualNode::count`].
     pub fn to_expanded(&self) -> ExpandedMapping<T> {
         self.iter().collect()
     }
@@ -403,16 +403,18 @@ mod tests {
     type TestMapping = VnodeMapping<Test>;
     type Test2Mapping = VnodeMapping<Test2>;
 
-    const COUNTS: &[usize] = &[1, 3, 12, 42, VirtualNode::count()];
+    fn counts() -> &[usize] {
+        &[1, 3, 12, 42, VirtualNode::count()]
+    }
 
     fn uniforms() -> impl Iterator<Item = TestMapping> {
-        COUNTS
+        counts()
             .iter()
             .map(|&count| TestMapping::new_uniform(0..count as u32))
     }
 
     fn randoms() -> impl Iterator<Item = TestMapping> {
-        COUNTS.iter().map(|&count| {
+        counts().iter().map(|&count| {
             let raw = repeat_with(|| rand::thread_rng().gen_range(0..count as u32))
                 .take(VirtualNode::count())
                 .collect_vec();

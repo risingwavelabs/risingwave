@@ -189,7 +189,7 @@ mod tests {
 
             let actors = build_fake_actors((0..parallelism as ActorId).collect_vec());
 
-            // add to VirtualNode::COUNT
+            // add to VirtualNode::count()
             let actors_to_add = (parallelism as ActorId..VirtualNode::count() as ActorId).collect();
             let result = rebalance_actor_vnode(&actors, &BTreeSet::new(), &actors_to_add);
             assert_eq!(result.len(), actors.len() + actors_to_add.len());
