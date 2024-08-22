@@ -30,7 +30,7 @@ use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::{PsqlError, PsqlResult};
-use crate::net::{AddressRef, Listener};
+use crate::net::{AddressRef, Listener, TcpKeepalive};
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_message::TransactionStatus;
 use crate::pg_protocol::{PgProtocol, TlsConfig};
@@ -265,6 +265,7 @@ impl UserAuthenticator {
 /// Returns when the `shutdown` token is triggered.
 pub async fn pg_serve(
     addr: &str,
+    tcp_keepalive: TcpKeepalive,
     session_mgr: Arc<impl SessionManager>,
     tls_config: Option<TlsConfig>,
     redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
@@ -291,7 +292,7 @@ pub async fn pg_serve(
     let session_mgr_clone = session_mgr.clone();
     let f = async move {
         loop {
-            let conn_ret = listener.accept().await;
+            let conn_ret = listener.accept(&tcp_keepalive).await;
             match conn_ret {
                 Ok((stream, peer_addr)) => {
                     tracing::info!(%peer_addr, "accept connection");
@@ -534,6 +535,7 @@ mod tests {
         tokio::spawn(async move {
             pg_serve(
                 &bind_addr,
+                socket2::TcpKeepalive::new(),
                 Arc::new(session_mgr),
                 None,
                 None,

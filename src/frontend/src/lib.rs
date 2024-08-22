@@ -44,6 +44,7 @@ risingwave_expr_impl::enable!();
 mod catalog;
 
 use std::collections::HashSet;
+use std::time::Duration;
 
 pub use catalog::TableCatalog;
 mod binder;
@@ -55,6 +56,7 @@ mod observer;
 pub mod optimizer;
 pub use optimizer::{Explain, OptimizerContext, OptimizerContextRef, PlanRef};
 mod planner;
+use pgwire::net::TcpKeepalive;
 pub use planner::Planner;
 mod scheduler;
 pub mod session;
@@ -96,6 +98,11 @@ pub struct FrontendOpts {
     /// Usually the localhost + desired port.
     #[clap(long, env = "RW_LISTEN_ADDR", default_value = "0.0.0.0:4566")]
     pub listen_addr: String,
+
+    /// The amount of time with no network activity after which the server will send a
+    /// TCP keepalive message to the client.
+    #[clap(long, env = "RW_TCP_KEEPALIVE_IDLE_SECS", default_value = "300")]
+    pub tcp_keepalive_idle_secs: usize,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
@@ -187,6 +194,9 @@ pub fn start(
     // slow compile in release mode.
     Box::pin(async move {
         let listen_addr = opts.listen_addr.clone();
+        let tcp_keepalive =
+            TcpKeepalive::new().with_time(Duration::from_secs(opts.tcp_keepalive_idle_secs as _));
+
         let session_mgr = Arc::new(SessionManagerImpl::new(opts).await.unwrap());
         SESSION_MANAGER.get_or_init(|| session_mgr.clone());
         let redact_sql_option_keywords = Arc::new(
@@ -201,6 +211,7 @@ pub fn start(
 
         pg_serve(
             &listen_addr,
+            tcp_keepalive,
             session_mgr.clone(),
             TlsConfig::new_default(),
             Some(redact_sql_option_keywords),
