@@ -1181,7 +1181,7 @@ where
     let retry_condition = RetryCondition::new(
         operation_type,
         object_store_metrics,
-        config.s3.developer.retry_unknown_service_error
+        (config.s3.developer.retry_unknown_service_error || config.s3.retry_unknown_service_error)
             && (media_type == opendal_engine::EngineType::S3.as_str()
                 || media_type == opendal_engine::EngineType::Minio.as_str()),
     );
