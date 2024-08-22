@@ -409,11 +409,17 @@ mod erase_upstream_mutation {
         upstream.map_ok(|msg| {
             msg.map_mutation(|mutation| {
                 if let Some(mutation) = mutation {
-                    // TODO: assert none mutation after we explicitly erase mutation
-                    warn!(
-                        ?mutation,
-                        "receive non-empty mutation from upstream. ignored"
-                    );
+                    if cfg!(debug_assertions) {
+                        unreachable!(
+                            "input of snapshot backfill should have erased mutation, but get {:?}",
+                            mutation
+                        );
+                    } else {
+                        warn!(
+                            ?mutation,
+                            "receive non-empty mutation from upstream. ignored"
+                        );
+                    }
                 };
             })
         })

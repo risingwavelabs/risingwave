@@ -33,7 +33,7 @@ use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::StreamNode;
+use risingwave_pb::stream_plan::{StreamNode, StreamScanType};
 use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
 use risingwave_pb::stream_service::{
     BuildActorInfo, StreamingControlStreamRequest, StreamingControlStreamResponse,
@@ -149,6 +149,8 @@ pub struct ExecutorParams {
     pub shared_context: Arc<SharedContext>,
 
     pub local_barrier_manager: LocalBarrierManager,
+
+    pub within_snapshot_backfill: bool,
 }
 
 impl Debug for ExecutorParams {
@@ -393,6 +395,7 @@ impl StreamActorManager {
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
         has_stateful: bool,
+        within_snapshot_backfill: bool,
         subtasks: &mut Vec<SubtaskHandle>,
         shared_context: &Arc<SharedContext>,
     ) -> StreamResult<Executor> {
@@ -414,6 +417,13 @@ impl StreamActorManager {
         }
         let is_stateful = is_stateful_executor(node);
 
+        fn is_snapshot_backfill_stream_scan(stream_node: &StreamNode) -> bool {
+            matches!(stream_node.get_node_body().unwrap(),
+                NodeBody::StreamScan(stream_scan) if stream_scan.stream_scan_type() == StreamScanType::SnapshotBackfill
+            )
+        }
+        let is_snapshot_backfill = is_snapshot_backfill_stream_scan(node);
+
         // Create the input executor before creating itself
         let mut input = Vec::with_capacity(node.input.iter().len());
         for input_stream_node in &node.input {
@@ -426,6 +436,7 @@ impl StreamActorManager {
                     actor_context,
                     vnode_bitmap.clone(),
                     has_stateful || is_stateful,
+                    within_snapshot_backfill || is_snapshot_backfill,
                     subtasks,
                     shared_context,
                 )
@@ -475,6 +486,7 @@ impl StreamActorManager {
             watermark_epoch: self.watermark_epoch.clone(),
             shared_context: shared_context.clone(),
             local_barrier_manager: shared_context.local_barrier_manager.clone(),
+            within_snapshot_backfill,
         };
 
         let executor = create_executor(executor_params, node, store).await?;
@@ -523,6 +535,7 @@ impl StreamActorManager {
                 store,
                 actor_context,
                 vnode_bitmap,
+                false,
                 false,
                 &mut subtasks,
                 shared_context,

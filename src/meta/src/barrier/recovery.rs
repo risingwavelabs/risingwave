@@ -244,201 +244,198 @@ impl GlobalBarrierManager {
 
         let new_state = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
-                let recovery_result: MetaResult<_> = try {
-                    if let Some(err) = &err {
+                let recovery_result: MetaResult<_> =
+                    try {
+                        if let Some(err) = &err {
+                            self.context
+                                .metadata_manager
+                                .notify_finish_failed(err)
+                                .await;
+                        }
+
                         self.context
-                            .metadata_manager
-                            .notify_finish_failed(err)
-                            .await;
-                    }
+                            .clean_dirty_streaming_jobs()
+                            .await
+                            .context("clean dirty streaming jobs")?;
 
-                    self.context
-                        .clean_dirty_streaming_jobs()
-                        .await
-                        .context("clean dirty streaming jobs")?;
+                        // Mview progress needs to be recovered.
+                        tracing::info!("recovering mview progress");
+                        let tracker = self
+                            .context
+                            .recover_background_mv_progress()
+                            .await
+                            .context("recover mview progress should not fail")?;
+                        tracing::info!("recovered mview progress");
 
-                    // Mview progress needs to be recovered.
-                    tracing::info!("recovering mview progress");
-                    let tracker = self
-                        .context
-                        .recover_background_mv_progress()
-                        .await
-                        .context("recover mview progress should not fail")?;
-                    tracing::info!("recovered mview progress");
+                        // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
+                        let _ = self
+                            .context
+                            .pre_apply_drop_cancel(&self.scheduled_barriers)
+                            .await?;
 
-                    // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
-                    let _ = self
-                        .context
-                        .pre_apply_drop_cancel(&self.scheduled_barriers)
+                        let mut active_streaming_nodes = ActiveStreamingWorkerNodes::new_snapshot(
+                            self.context.metadata_manager.clone(),
+                        )
                         .await?;
 
-                    let mut active_streaming_nodes = ActiveStreamingWorkerNodes::new_snapshot(
-                        self.context.metadata_manager.clone(),
-                    )
-                    .await?;
-
-                    let background_streaming_jobs = self
-                        .context
-                        .metadata_manager
-                        .list_background_creating_jobs()
-                        .await?;
-
-                    // Resolve actor info for recovery. If there's no actor to recover, most of the
-                    // following steps will be no-op, while the compute nodes will still be reset.
-                    // FIXME: Transactions should be used.
-                    // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
-                    let mut info = if !self.env.opts.disable_automatic_parallelism_control
-                        && background_streaming_jobs.is_empty()
-                    {
-                        self.context
-                            .scale_actors(&active_streaming_nodes)
-                            .await
-                            .inspect_err(|err| {
-                                warn!(error = %err.as_report(), "scale actors failed");
-                            })?;
-
-                        self.context.resolve_graph_info().await.inspect_err(|err| {
-                            warn!(error = %err.as_report(), "resolve actor info failed");
-                        })?
-                    } else {
-                        // Migrate actors in expired CN to newly joined one.
-                        self.context
-                            .migrate_actors(&mut active_streaming_nodes)
-                            .await
-                            .inspect_err(|err| {
-                                warn!(error = %err.as_report(), "migrate actors failed");
-                            })?
-                    };
-
-                    if self
-                        .context
-                        .pre_apply_drop_cancel(&self.scheduled_barriers)
-                        .await?
-                    {
-                        info = self.context.resolve_graph_info().await.inspect_err(|err| {
-                            warn!(error = %err.as_report(), "resolve actor info failed");
-                        })?
-                    }
-
-                    let info = info;
-
-                    self.context
-                        .purge_state_table_from_hummock(&info.existing_table_ids().collect())
-                        .await
-                        .context("purge state table from hummock")?;
-
-                    let (prev_epoch, version_id) = self
-                        .context
-                        .hummock_manager
-                        .on_current_version(|version| {
-                            let max_committed_epoch = version.visible_table_committed_epoch();
-                            for (table_id, info) in version.state_table_info.info() {
-                                assert_eq!(
-                                    info.committed_epoch, max_committed_epoch,
-                                    "table {} with invisible epoch is not purged",
-                                    table_id
-                                );
-                            }
-                            (
-                                TracedEpoch::new(Epoch::from(max_committed_epoch)),
-                                version.id,
-                            )
-                        })
-                        .await;
-
-                    let mut control_stream_manager =
-                        ControlStreamManager::new(self.context.clone());
-
-                    let reset_start_time = Instant::now();
-                    control_stream_manager
-                        .reset(version_id, active_streaming_nodes.current())
-                        .await
-                        .inspect_err(|err| {
-                            warn!(error = %err.as_report(), "reset compute nodes failed");
-                        })?;
-                    info!(elapsed=?reset_start_time.elapsed(), "control stream reset");
-
-                    self.context.sink_manager.reset().await;
-
-                    let subscription_info = InflightSubscriptionInfo {
-                        mv_depended_subscriptions: self
+                        let background_streaming_jobs = self
                             .context
                             .metadata_manager
-                            .get_mv_depended_subscriptions()
-                            .await?,
-                    };
+                            .list_background_creating_jobs()
+                            .await?;
 
-                    // update and build all actors.
-                    self.context
-                        .update_actors(&info, &subscription_info, &active_streaming_nodes)
-                        .await
-                        .inspect_err(|err| {
-                            warn!(error = %err.as_report(), "update actors failed");
-                        })?;
-                    self.context
-                        .build_actors(&info, &active_streaming_nodes)
-                        .await
-                        .inspect_err(|err| {
-                            warn!(error = %err.as_report(), "build_actors failed");
-                        })?;
+                        // Resolve actor info for recovery. If there's no actor to recover, most of the
+                        // following steps will be no-op, while the compute nodes will still be reset.
+                        // FIXME: Transactions should be used.
+                        // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
+                        let mut info = if !self.env.opts.disable_automatic_parallelism_control
+                            && background_streaming_jobs.is_empty()
+                        {
+                            self.context
+                                .scale_actors(&active_streaming_nodes)
+                                .await
+                                .inspect_err(|err| {
+                                    warn!(error = %err.as_report(), "scale actors failed");
+                                })?;
 
-                    // get split assignments for all actors
-                    let source_split_assignments =
-                        self.context.source_manager.list_assignments().await;
-                    let command = Command::Plain(Some(Mutation::Add(AddMutation {
-                        // Actors built during recovery is not treated as newly added actors.
-                        actor_dispatchers: Default::default(),
-                        added_actors: Default::default(),
-                        actor_splits: build_actor_connector_splits(&source_split_assignments),
-                        pause: paused_reason.is_some(),
-                        subscriptions_to_add: Default::default(),
-                    })));
+                            self.context.resolve_graph_info().await.inspect_err(|err| {
+                                warn!(error = %err.as_report(), "resolve actor info failed");
+                            })?
+                        } else {
+                            // Migrate actors in expired CN to newly joined one.
+                            self.context
+                                .migrate_actors(&mut active_streaming_nodes)
+                                .await
+                                .inspect_err(|err| {
+                                    warn!(error = %err.as_report(), "migrate actors failed");
+                                })?
+                        };
 
-                    // Use a different `curr_epoch` for each recovery attempt.
-                    let new_epoch = prev_epoch.next();
+                        if self
+                            .context
+                            .pre_apply_drop_cancel(&self.scheduled_barriers)
+                            .await?
+                        {
+                            info = self.context.resolve_graph_info().await.inspect_err(|err| {
+                                warn!(error = %err.as_report(), "resolve actor info failed");
+                            })?
+                        }
 
-                    // Inject the `Initial` barrier to initialize all executors.
-                    let command_ctx = Arc::new(CommandContext::new(
-                        active_streaming_nodes.current().clone(),
-                        subscription_info.clone(),
-                        prev_epoch.clone(),
-                        new_epoch.clone(),
-                        paused_reason,
-                        command,
-                        BarrierKind::Initial,
-                        self.context.clone(),
-                        tracing::Span::current(), // recovery span
-                    ));
+                        let info = info;
 
-                    let mut node_to_collect = control_stream_manager.inject_command_ctx_barrier(
-                        &command_ctx,
-                        &info,
-                        Some(&info),
-                        HashMap::new(),
-                    )?;
-                    debug!(?node_to_collect, "inject initial barrier");
-                    while !node_to_collect.is_empty() {
-                        let (worker_id, result) = control_stream_manager
-                            .next_complete_barrier_response()
+                        self.context
+                            .purge_state_table_from_hummock(&info.existing_table_ids().collect())
+                            .await
+                            .context("purge state table from hummock")?;
+
+                        let (prev_epoch, version_id) = self
+                            .context
+                            .hummock_manager
+                            .on_current_version(|version| {
+                                let max_committed_epoch = version.visible_table_committed_epoch();
+                                for (table_id, info) in version.state_table_info.info() {
+                                    assert_eq!(
+                                        info.committed_epoch, max_committed_epoch,
+                                        "table {} with invisible epoch is not purged",
+                                        table_id
+                                    );
+                                }
+                                (
+                                    TracedEpoch::new(Epoch::from(max_committed_epoch)),
+                                    version.id,
+                                )
+                            })
                             .await;
-                        let resp = result?;
-                        assert_eq!(resp.epoch, command_ctx.prev_epoch.value().0);
-                        assert!(node_to_collect.remove(&worker_id));
-                    }
-                    debug!("collected initial barrier");
 
-                    (
-                        BarrierManagerState::new(
-                            new_epoch,
-                            info,
-                            subscription_info,
-                            command_ctx.next_paused_reason(),
-                        ),
-                        active_streaming_nodes,
-                        control_stream_manager,
-                        tracker,
-                    )
-                };
+                        let mut control_stream_manager =
+                            ControlStreamManager::new(self.context.clone());
+
+                        let reset_start_time = Instant::now();
+                        control_stream_manager
+                            .reset(version_id, active_streaming_nodes.current())
+                            .await
+                            .inspect_err(|err| {
+                                warn!(error = %err.as_report(), "reset compute nodes failed");
+                            })?;
+                        info!(elapsed=?reset_start_time.elapsed(), "control stream reset");
+
+                        self.context.sink_manager.reset().await;
+
+                        let subscription_info = InflightSubscriptionInfo {
+                            mv_depended_subscriptions: self
+                                .context
+                                .metadata_manager
+                                .get_mv_depended_subscriptions()
+                                .await?,
+                        };
+
+                        // update and build all actors.
+                        self.context
+                            .update_actors(&info, &subscription_info, &active_streaming_nodes)
+                            .await
+                            .inspect_err(|err| {
+                                warn!(error = %err.as_report(), "update actors failed");
+                            })?;
+                        self.context
+                            .build_actors(&info, &active_streaming_nodes)
+                            .await
+                            .inspect_err(|err| {
+                                warn!(error = %err.as_report(), "build_actors failed");
+                            })?;
+
+                        // get split assignments for all actors
+                        let source_split_assignments =
+                            self.context.source_manager.list_assignments().await;
+                        let command = Command::Plain(Some(Mutation::Add(AddMutation {
+                            // Actors built during recovery is not treated as newly added actors.
+                            actor_dispatchers: Default::default(),
+                            added_actors: Default::default(),
+                            actor_splits: build_actor_connector_splits(&source_split_assignments),
+                            pause: paused_reason.is_some(),
+                            subscriptions_to_add: Default::default(),
+                        })));
+
+                        // Use a different `curr_epoch` for each recovery attempt.
+                        let new_epoch = prev_epoch.next();
+
+                        // Inject the `Initial` barrier to initialize all executors.
+                        let command_ctx = Arc::new(CommandContext::new(
+                            active_streaming_nodes.current().clone(),
+                            subscription_info.clone(),
+                            prev_epoch.clone(),
+                            new_epoch.clone(),
+                            paused_reason,
+                            command,
+                            BarrierKind::Initial,
+                            self.context.clone(),
+                            tracing::Span::current(), // recovery span
+                        ));
+
+                        let mut node_to_collect = control_stream_manager
+                            .inject_command_ctx_barrier(&command_ctx, &info, Some(&info))?;
+                        debug!(?node_to_collect, "inject initial barrier");
+                        while !node_to_collect.is_empty() {
+                            let (worker_id, result) = control_stream_manager
+                                .next_complete_barrier_response()
+                                .await;
+                            let resp = result?;
+                            assert_eq!(resp.epoch, command_ctx.prev_epoch.value().0);
+                            assert!(node_to_collect.remove(&worker_id));
+                        }
+                        debug!("collected initial barrier");
+
+                        (
+                            BarrierManagerState::new(
+                                new_epoch,
+                                info,
+                                subscription_info,
+                                command_ctx.next_paused_reason(),
+                            ),
+                            active_streaming_nodes,
+                            control_stream_manager,
+                            tracker,
+                        )
+                    };
                 if recovery_result.is_err() {
                     self.context.metrics.recovery_failure_cnt.inc();
                 }

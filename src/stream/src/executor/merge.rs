@@ -26,7 +26,9 @@ use tokio::time::Instant;
 use super::exchange::input::BoxedInput;
 use super::watermark::*;
 use super::*;
-use crate::executor::exchange::input::new_input;
+use crate::executor::exchange::input::{
+    assert_equal_dispatcher_barrier, new_input, process_dispatcher_msg,
+};
 use crate::executor::prelude::*;
 use crate::task::SharedContext;
 
@@ -50,6 +52,8 @@ pub struct MergeExecutor {
 
     /// Streaming metrics.
     metrics: Arc<StreamingMetrics>,
+
+    ignore_mutation: bool,
 }
 
 impl MergeExecutor {
@@ -62,6 +66,7 @@ impl MergeExecutor {
         context: Arc<SharedContext>,
         _receiver_id: u64,
         metrics: Arc<StreamingMetrics>,
+        ignore_mutation: bool,
     ) -> Self {
         Self {
             actor_context: ctx,
@@ -70,6 +75,7 @@ impl MergeExecutor {
             upstream_fragment_id,
             context,
             metrics,
+            ignore_mutation,
         }
     }
 
@@ -89,19 +95,12 @@ impl MergeExecutor {
             inputs
                 .into_iter()
                 .enumerate()
-                .map(|(idx, input)| {
-                    LocalInput::new(
-                        input,
-                        idx as ActorId,
-                        actor_id,
-                        shared_context.local_barrier_manager.clone(),
-                    )
-                    .boxed_input()
-                })
+                .map(|(idx, input)| LocalInput::new(input, idx as ActorId).boxed_input())
                 .collect(),
             shared_context,
             810,
             StreamingMetrics::unused().into(),
+            false,
         )
     }
 
@@ -118,6 +117,16 @@ impl MergeExecutor {
             )
         } else {
             None
+        };
+
+        let mut barrier_rx = if self.ignore_mutation {
+            None
+        } else {
+            Some(
+                self.context
+                    .local_barrier_manager
+                    .subscribe_barrier(self.actor_context.id),
+            )
         };
 
         // Futures of all active upstreams.
@@ -141,7 +150,12 @@ impl MergeExecutor {
             metrics
                 .actor_input_buffer_blocking_duration_ns
                 .inc_by(start_time.elapsed().as_nanos() as u64);
-            let mut msg: Message = msg?;
+            let msg: DispatcherMessage = msg?;
+            let mut msg: Message = if let Some(barrier_rx) = &mut barrier_rx {
+                process_dispatcher_msg(msg, barrier_rx).await?
+            } else {
+                msg.map_mutation(|_| None)
+            };
 
             match &mut msg {
                 Message::Watermark(_) => {
@@ -220,7 +234,7 @@ impl MergeExecutor {
                                 merge_barrier_align_duration.clone(),
                             );
                             let new_barrier = expect_first_barrier(&mut select_new).await?;
-                            assert_eq!(barrier, &new_barrier);
+                            assert_equal_dispatcher_barrier(barrier, &new_barrier);
 
                             // Add the new upstreams to select.
                             select_all.add_upstreams_from(select_new);
@@ -254,6 +268,11 @@ impl MergeExecutor {
 
                         select_all.update_actor_ids();
                     }
+
+                    if barrier.is_stop(actor_id) {
+                        yield msg;
+                        break;
+                    }
                 }
             }
 
@@ -272,7 +291,7 @@ impl Execute for MergeExecutor {
 /// A stream for merging messages from multiple upstreams.
 pub struct SelectReceivers {
     /// The barrier we're aligning to. If this is `None`, then `blocked_upstreams` is empty.
-    barrier: Option<Barrier>,
+    barrier: Option<DispatcherBarrier>,
     /// The upstreams that're blocked by the `barrier`.
     blocked: Vec<BoxedInput>,
     /// The upstreams that're not blocked and can be polled.
@@ -289,7 +308,7 @@ pub struct SelectReceivers {
 }
 
 impl Stream for SelectReceivers {
-    type Item = std::result::Result<Message, StreamExecutorError>;
+    type Item = DispatcherMessageStreamItem;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.active.is_terminated() {
@@ -309,19 +328,21 @@ impl Stream for SelectReceivers {
                 Some((Some(Ok(message)), remaining)) => {
                     let actor_id = remaining.actor_id();
                     match message {
-                        Message::Chunk(chunk) => {
+                        DispatcherMessage::Chunk(chunk) => {
                             // Continue polling this upstream by pushing it back to `active`.
                             self.active.push(remaining.into_future());
-                            return Poll::Ready(Some(Ok(Message::Chunk(chunk))));
+                            return Poll::Ready(Some(Ok(DispatcherMessage::Chunk(chunk))));
                         }
-                        Message::Watermark(watermark) => {
+                        DispatcherMessage::Watermark(watermark) => {
                             // Continue polling this upstream by pushing it back to `active`.
                             self.active.push(remaining.into_future());
                             if let Some(watermark) = self.handle_watermark(actor_id, watermark) {
-                                return Poll::Ready(Some(Ok(Message::Watermark(watermark))));
+                                return Poll::Ready(Some(Ok(DispatcherMessage::Watermark(
+                                    watermark,
+                                ))));
                             }
                         }
-                        Message::Barrier(barrier) => {
+                        DispatcherMessage::Barrier(barrier) => {
                             // Block this upstream by pushing it to `blocked`.
                             if self.blocked.is_empty()
                                 && self.merge_barrier_align_duration.is_some()
@@ -333,8 +354,8 @@ impl Stream for SelectReceivers {
                                 if current_barrier.epoch != barrier.epoch {
                                     return Poll::Ready(Some(Err(
                                         StreamExecutorError::align_barrier(
-                                            current_barrier.clone(),
-                                            barrier,
+                                            current_barrier.clone().map_mutation(|_| None),
+                                            barrier.map_mutation(|_| None),
                                         ),
                                     )));
                                 }
@@ -369,17 +390,11 @@ impl Stream for SelectReceivers {
         assert!(self.active.is_terminated());
         let barrier = self.barrier.take().unwrap();
 
-        // If this barrier asks the actor to stop, we do not reset the active upstreams so that the
-        // next call would return `Poll::Ready(None)` due to `is_terminated`.
         let upstreams = std::mem::take(&mut self.blocked);
-        if barrier.is_stop(self.actor_id) {
-            drop(upstreams);
-        } else {
-            self.extend_active(upstreams);
-            assert!(!self.active.is_terminated());
-        }
+        self.extend_active(upstreams);
+        assert!(!self.active.is_terminated());
 
-        Poll::Ready(Some(Ok(Message::Barrier(barrier))))
+        Poll::Ready(Some(Ok(DispatcherMessage::Barrier(barrier))))
     }
 }
 
@@ -642,6 +657,7 @@ mod tests {
             ctx.clone(),
             233,
             metrics.clone(),
+            false,
         )
         .boxed()
         .execute();
@@ -810,7 +826,6 @@ mod tests {
         let remote_input = {
             let pool = ComputeClientPool::for_test();
             RemoteInput::new(
-                test_env.shared_context.local_barrier_manager.clone(),
                 pool,
                 addr.into(),
                 (0, 0),

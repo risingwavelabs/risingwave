@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
 use std::mem::take;
 use std::sync::Arc;
 
@@ -25,8 +24,6 @@ use crate::barrier::command::CommandContext;
 use crate::barrier::info::InflightGraphInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::{BarrierKind, TracedEpoch};
-use crate::manager::WorkerId;
-use crate::model::ActorId;
 
 #[derive(Debug)]
 pub(super) enum CreatingStreamingJobStatus {
@@ -39,7 +36,6 @@ pub(super) enum CreatingStreamingJobStatus {
         backfill_epoch: u64,
         /// The `prev_epoch` of pending non checkpoint barriers
         pending_non_checkpoint_barriers: Vec<u64>,
-        snapshot_backfill_actors: HashMap<WorkerId, HashSet<ActorId>>,
         /// Mutation of the first barrier. Take the mutation out when injecting the first barrier
         initial_mutation: Option<Mutation>,
     },

@@ -17,8 +17,11 @@ use itertools::Itertools;
 use tokio::time::Instant;
 
 use super::exchange::input::BoxedInput;
-use crate::executor::exchange::input::new_input;
+use crate::executor::exchange::input::{
+    assert_equal_dispatcher_barrier, new_input, process_dispatcher_msg,
+};
 use crate::executor::prelude::*;
+use crate::executor::DispatcherMessage;
 use crate::task::{FragmentId, SharedContext};
 
 /// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
@@ -42,6 +45,8 @@ pub struct ReceiverExecutor {
 
     /// Metrics
     metrics: Arc<StreamingMetrics>,
+
+    ignore_mutation: bool,
 }
 
 impl std::fmt::Debug for ReceiverExecutor {
@@ -60,6 +65,7 @@ impl ReceiverExecutor {
         context: Arc<SharedContext>,
         _receiver_id: u64,
         metrics: Arc<StreamingMetrics>,
+        ignore_mutation: bool,
     ) -> Self {
         Self {
             input,
@@ -68,6 +74,7 @@ impl ReceiverExecutor {
             metrics,
             fragment_id,
             context,
+            ignore_mutation,
         }
     }
 
@@ -84,16 +91,11 @@ impl ReceiverExecutor {
             ActorContext::for_test(actor_id),
             514,
             1919,
-            LocalInput::new(
-                input,
-                0,
-                actor_id,
-                shared_context.local_barrier_manager.clone(),
-            )
-            .boxed_input(),
+            LocalInput::new(input, 0).boxed_input(),
             shared_context,
             810,
             StreamingMetrics::unused().into(),
+            false,
         )
     }
 }
@@ -108,6 +110,16 @@ impl Execute for ReceiverExecutor {
             self.upstream_fragment_id,
         );
 
+        let mut barrier_rx = if self.ignore_mutation {
+            None
+        } else {
+            Some(
+                self.context
+                    .local_barrier_manager
+                    .subscribe_barrier(actor_id),
+            )
+        };
+
         let stream = #[try_stream]
         async move {
             let mut start_time = Instant::now();
@@ -115,7 +127,12 @@ impl Execute for ReceiverExecutor {
                 metrics
                     .actor_input_buffer_blocking_duration_ns
                     .inc_by(start_time.elapsed().as_nanos() as u64);
-                let mut msg: Message = msg?;
+                let msg: DispatcherMessage = msg?;
+                let mut msg = if let Some(barrier_rx) = &mut barrier_rx {
+                    process_dispatcher_msg(msg, barrier_rx).await?
+                } else {
+                    msg.map_mutation(|_| None)
+                };
 
                 match &mut msg {
                     Message::Watermark(_) => {
@@ -171,7 +188,7 @@ impl Execute for ReceiverExecutor {
                             // Poll the first barrier from the new upstream. It must be the same as
                             // the one we polled from original upstream.
                             let new_barrier = expect_first_barrier(&mut new_upstream).await?;
-                            assert_eq!(barrier, &new_barrier);
+                            assert_equal_dispatcher_barrier(barrier, &new_barrier);
 
                             // Replace the input.
                             self.input = new_upstream;
@@ -249,6 +266,7 @@ mod tests {
             ctx.clone(),
             233,
             metrics.clone(),
+            false,
         )
         .boxed()
         .execute();

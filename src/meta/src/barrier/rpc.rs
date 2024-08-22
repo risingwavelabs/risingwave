@@ -253,7 +253,6 @@ impl ControlStreamManager {
         command_ctx: &CommandContext,
         pre_applied_graph_info: &InflightGraphInfo,
         applied_graph_info: Option<&InflightGraphInfo>,
-        actor_ids_to_pre_sync_mutation: HashMap<WorkerId, Vec<ActorId>>,
     ) -> MetaResult<HashSet<WorkerId>> {
         self.inject_barrier(
             None,
@@ -264,7 +263,6 @@ impl ControlStreamManager {
             &command_ctx.kind,
             pre_applied_graph_info,
             applied_graph_info,
-            actor_ids_to_pre_sync_mutation,
         )
     }
 
@@ -276,17 +274,13 @@ impl ControlStreamManager {
         kind: &BarrierKind,
         pre_applied_graph_info: &InflightGraphInfo,
         applied_graph_info: Option<&InflightGraphInfo>,
-        actor_ids_to_pre_sync_mutation: HashMap<WorkerId, Vec<ActorId>>,
     ) -> MetaResult<HashSet<WorkerId>> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
             "inject_barrier_err"
         ));
 
         let partial_graph_id = creating_table_id
-            .map(|table_id| {
-                assert!(actor_ids_to_pre_sync_mutation.is_empty());
-                table_id.table_id
-            })
+            .map(|table_id| table_id.table_id)
             .unwrap_or(u32::MAX);
 
         for worker_id in pre_applied_graph_info.worker_ids().chain(
@@ -339,13 +333,6 @@ impl ControlStreamManager {
                                         actor_ids_to_collect,
                                         table_ids_to_sync,
                                         partial_graph_id,
-                                        actor_ids_to_pre_sync_barrier_mutation:
-                                            actor_ids_to_pre_sync_mutation
-                                                .get(node_id)
-                                                .into_iter()
-                                                .flatten()
-                                                .cloned()
-                                                .collect(),
                                     },
                                 ),
                             ),

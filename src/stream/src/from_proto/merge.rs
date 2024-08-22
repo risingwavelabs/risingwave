@@ -65,6 +65,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
                 params.shared_context.clone(),
                 params.operator_id,
                 params.executor_stats.clone(),
+                params.within_snapshot_backfill,
             )
             .boxed()
         } else {
@@ -76,6 +77,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
                 params.shared_context.clone(),
                 params.operator_id,
                 params.executor_stats.clone(),
+                params.within_snapshot_backfill,
             )
             .boxed()
         };
