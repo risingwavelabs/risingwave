@@ -166,5 +166,6 @@ async fn test_sink_scale() -> Result<()> {
 
 #[tokio::test]
 async fn test_sink_decouple_scale() -> Result<()> {
+    init_logger();
     scale_test_inner(true).await
 }
