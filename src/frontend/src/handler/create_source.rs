@@ -1313,7 +1313,6 @@ pub async fn extract_iceberg_columns(
     let props = ConnectorProperties::extract(with_properties.clone(), true)?;
     if let ConnectorProperties::Iceberg(properties) = props {
         let iceberg_config: IcebergConfig = properties.to_iceberg_config();
-        let table = iceberg_config.load_table().await?;
         let table = iceberg_config.load_table_v2().await?;
         let iceberg_schema: arrow_schema_iceberg::Schema =
             iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
