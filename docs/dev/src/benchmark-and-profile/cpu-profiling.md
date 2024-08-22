@@ -35,7 +35,7 @@ pgrep compute-node
 Use `cargo flamegraph`:
 ```shell
 cargo install flamegraph
-sudo flamegraph -o flamegraph.svg --pid [pid]  
+sudo flamegraph -o flamegraph.svg --pid [pid]
 ```
 
 When you're satisfied, you can `Ctrl+C` to stop the profiler.
