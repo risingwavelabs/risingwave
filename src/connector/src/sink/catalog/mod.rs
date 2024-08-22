@@ -147,6 +147,7 @@ pub enum SinkEncode {
     Protobuf,
     Avro,
     Template,
+    Parquet,
     Text,
 }
 
@@ -202,6 +203,7 @@ impl SinkFormatDesc {
             SinkEncode::Protobuf => E::Protobuf,
             SinkEncode::Avro => E::Avro,
             SinkEncode::Template => E::Template,
+            SinkEncode::Parquet => E::Parquet,
             SinkEncode::Text => E::Text,
         };
 
@@ -250,13 +252,8 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             E::Protobuf => SinkEncode::Protobuf,
             E::Template => SinkEncode::Template,
             E::Avro => SinkEncode::Avro,
-            e @ (E::Unspecified
-            | E::Native
-            | E::Csv
-            | E::Bytes
-            | E::None
-            | E::Text
-            | E::Parquet) => {
+            E::Parquet => SinkEncode::Parquet,
+            e @ (E::Unspecified | E::Native | E::Csv | E::Bytes | E::None | E::Text) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink encode unsupported: {}",
                     e.as_str_name()
