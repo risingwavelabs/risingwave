@@ -2552,6 +2552,10 @@ impl FunctionArgList {
         }
     }
 
+    pub fn is_args_only(&self) -> bool {
+        !self.distinct && !self.variadic && self.order_by.is_empty() && !self.ignore_nulls
+    }
+
     pub fn for_agg(distinct: bool, args: Vec<FunctionArg>, order_by: Vec<OrderByExpr>) -> Self {
         Self {
             distinct,

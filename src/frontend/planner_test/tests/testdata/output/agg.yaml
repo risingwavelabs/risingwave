@@ -801,7 +801,7 @@
     Failed to bind expression: abs(a) FILTER (WHERE a > 0)
 
     Caused by:
-      Invalid input syntax: DISTINCT, ORDER BY or FILTER is only allowed in aggregation functions, but `abs` is not an aggregation function
+      Invalid input syntax: `FILTER` is not allowed in scalar/table function call
 - name: prune column before filter
   sql: |
     create table t(v1 int, v2 int);
