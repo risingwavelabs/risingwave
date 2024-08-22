@@ -338,6 +338,12 @@ enum HummockCommands {
         #[clap(long)]
         record_hybrid_fetch_threshold_ms: Option<u32>,
     },
+    MergeCompactionGroup {
+        #[clap(long)]
+        left_group_id: u64,
+        #[clap(long)]
+        right_group_id: u64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -782,6 +788,13 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 record_hybrid_fetch_threshold_ms,
             )
             .await?
+        }
+        Commands::Hummock(HummockCommands::MergeCompactionGroup {
+            left_group_id,
+            right_group_id,
+        }) => {
+            cmd_impl::hummock::merge_compaction_group(context, left_group_id, right_group_id)
+                .await?
         }
         Commands::Table(TableCommands::Scan {
             mv_name,

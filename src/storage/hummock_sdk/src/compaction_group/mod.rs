@@ -43,3 +43,112 @@ impl From<StaticCompactionGroupId> for CompactionGroupId {
         cg as CompactionGroupId
     }
 }
+
+pub mod group_split {
+    use std::cmp::Ordering;
+
+    use super::hummock_version_ext::{add_ssts_to_sub_level, insert_new_sub_level};
+    use crate::can_concat;
+    use crate::level::{Level, Levels};
+
+    pub fn merge_levels(left_levels: &mut Levels, right_levels: &mut Levels) {
+        let right_l0 = &right_levels.l0;
+
+        for right_sub_level in &right_l0.sub_levels {
+            let sub_level = right_sub_level.clone();
+            let insert_hint = get_sub_level_insert_hint(&left_levels.l0.sub_levels, &sub_level);
+
+            println!(
+                "sub_level: {:?} type {:?} insert_hint {:?}",
+                sub_level.sub_level_id, sub_level.level_type, insert_hint
+            );
+
+            match insert_hint {
+                Ok(insert_hint) => {
+                    add_ssts_to_sub_level(
+                        &mut left_levels.l0,
+                        insert_hint,
+                        sub_level.table_infos.clone(),
+                    );
+                }
+                Err(insert_hint) => {
+                    insert_new_sub_level(
+                        &mut left_levels.l0,
+                        sub_level.sub_level_id,
+                        sub_level.level_type,
+                        sub_level.table_infos.clone(),
+                        Some(insert_hint),
+                    );
+                }
+            }
+        }
+
+        left_levels
+            .l0
+            .sub_levels
+            .sort_by_key(|sub_level| sub_level.sub_level_id);
+
+        // Reinitialise `vnode_partition_count`` to avoid misaligned hierarchies
+        // caused by the merge of different compaction groups.(picker might reject the different `vnode_partition_count` sub_level to compact)
+        left_levels
+            .l0
+            .sub_levels
+            .iter_mut()
+            .for_each(|sub_level| sub_level.vnode_partition_count = 0);
+
+        for (idx, level) in right_levels.levels.iter_mut().enumerate() {
+            if level.table_infos.is_empty() {
+                continue;
+            }
+
+            let insert_table_infos = level.table_infos.clone();
+            left_levels.levels[idx].total_file_size += insert_table_infos
+                .iter()
+                // .map(|sst| sst.estimated_sst_size)
+                .map(|sst| sst.file_size)
+                .sum::<u64>();
+            left_levels.levels[idx].uncompressed_file_size += insert_table_infos
+                .iter()
+                .map(|sst| sst.uncompressed_file_size)
+                .sum::<u64>();
+
+            left_levels.levels[idx]
+                .table_infos
+                .extend(insert_table_infos);
+            left_levels.levels[idx]
+                .table_infos
+                .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
+            assert!(
+                can_concat(&left_levels.levels[idx].table_infos),
+                "{}",
+                format!(
+                    "left_levels.levels[{}].table_infos: {:?} level_idx {:?}",
+                    idx, left_levels.levels[idx].table_infos, left_levels.levels[idx].level_idx
+                )
+            );
+            level.table_infos.clear();
+        }
+    }
+
+    // When `insert_hint` is `Ok(idx)`, it means that the sub level `idx` in `target_l0`
+    // will extend these SSTs. When `insert_hint` is `Err(idx)`, it
+    // means that we will add a new sub level `idx` into `target_l0`.
+    pub fn get_sub_level_insert_hint(
+        target_levels: &Vec<Level>,
+        sub_level: &Level,
+    ) -> Result<usize, usize> {
+        for (idx, other) in target_levels.iter().enumerate() {
+            match other.sub_level_id.cmp(&sub_level.sub_level_id) {
+                Ordering::Less => {}
+                Ordering::Equal => {
+                    return Ok(idx);
+                }
+                Ordering::Greater => {
+                    return Err(idx);
+                }
+            }
+        }
+
+        Err(target_levels.len())
+    }
+}

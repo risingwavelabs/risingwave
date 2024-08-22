@@ -50,7 +50,6 @@ use crate::manager::{MetaSrvEnv, MetaStoreImpl, MetadataManager};
 use crate::model::{ClusterId, MetadataModel, MetadataModelError};
 use crate::rpc::metrics::MetaMetrics;
 
-mod compaction_group_manager;
 mod context;
 mod gc;
 mod tests;
@@ -59,7 +58,7 @@ pub use context::HummockVersionSafePoint;
 use versioning::*;
 pub(crate) mod checkpoint;
 mod commit_epoch;
-mod compaction;
+pub mod compaction;
 pub mod sequence;
 pub mod time_travel;
 mod timer_task;

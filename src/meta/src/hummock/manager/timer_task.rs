@@ -43,7 +43,7 @@ impl HummockManager {
             const COMPACTION_HEARTBEAT_PERIOD_SEC: u64 = 1;
 
             pub enum HummockTimerEvent {
-                GroupSplit,
+                GroupSchedule,
                 CheckDeadTask,
                 Report,
                 CompactionHeartBeatExpiredCheck,
@@ -158,7 +158,7 @@ impl HummockManager {
                     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
                 let split_group_trigger = IntervalStream::new(split_group_trigger_interval)
-                    .map(|_| HummockTimerEvent::GroupSplit);
+                    .map(|_| HummockTimerEvent::GroupSchedule);
                 triggers.push(Box::pin(split_group_trigger));
             }
 
@@ -189,12 +189,12 @@ impl HummockManager {
                                     hummock_manager.check_dead_task().await;
                                 }
 
-                                HummockTimerEvent::GroupSplit => {
+                                HummockTimerEvent::GroupSchedule => {
                                     if hummock_manager.env.opts.compaction_deterministic_test {
                                         continue;
                                     }
 
-                                    hummock_manager.on_handle_check_split_multi_group().await;
+                                    hummock_manager.on_handle_schedule_group().await;
                                 }
 
                                 HummockTimerEvent::Report => {
@@ -443,7 +443,7 @@ impl HummockManager {
     ///   throughput keep larger than `table_write_throughput_threshold` for a long time.
     /// * For state-table whose throughput less than `min_table_split_write_throughput`, do not
     ///   increase it size of base-level.
-    async fn on_handle_check_split_multi_group(&self) {
+    async fn on_handle_schedule_group(&self) {
         let params = self.env.system_params_reader().await;
         let barrier_interval_ms = params.barrier_interval_ms() as u64;
         let checkpoint_secs = std::cmp::max(
@@ -469,18 +469,13 @@ impl HummockManager {
                 continue;
             }
 
-            for (table_id, table_size) in &group.table_statistic {
-                self.try_move_table_to_dedicated_cg(
-                    &table_write_throughput,
-                    table_id,
-                    table_size,
-                    !created_tables.contains(table_id),
-                    checkpoint_secs,
-                    group.group_id,
-                    group.group_size,
-                )
-                .await;
-            }
+            self.try_split_compaction_group(
+                &table_write_throughput,
+                checkpoint_secs,
+                group,
+                &created_tables,
+            )
+            .await;
         }
     }
 
