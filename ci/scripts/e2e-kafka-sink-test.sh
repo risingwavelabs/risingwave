@@ -153,8 +153,4 @@ echo "testing protobuf"
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/protobuf.slt'
 
 echo "testing avro"
-python3 e2e_test/sink/kafka/register_schema.py 'http://schemaregistry:8082' 'test-rw-sink-upsert-avro-value' src/connector/src/test_data/all-types.avsc
-python3 e2e_test/sink/kafka/register_schema.py 'http://schemaregistry:8082' 'test-rw-sink-upsert-avro-key' src/connector/src/test_data/all-types.avsc 'string_field,int32_field'
-rpk topic create test-rw-sink-upsert-avro
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/avro.slt'
-rpk topic delete test-rw-sink-upsert-avro
