@@ -12,29 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::ops::Bound;
 
 use either::Either;
 use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use parquet::arrow::ParquetRecordBatchStreamBuilder;
-use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::ScalarRef;
-use risingwave_common::util::tokio_util::compat::FuturesAsyncReadCompatExt;
+use risingwave_connector::parser::parquet_parser::get_total_row_nums_for_parquet_file;
 use risingwave_connector::parser::EncodingProperties;
-use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use risingwave_connector::source::filesystem::opendal_source::{
     OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
 };
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
-    BoxChunkSourceStream, ConnectorProperties, SourceContext, SourceCtrlOpts, SplitImpl,
-    SplitMetaData,
+    BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
 use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
@@ -422,82 +417,4 @@ impl<S: StateStore, Src: OpendalSource> Debug for FsFetchExecutor<S, Src> {
             f.debug_struct("FsFetchExecutor").finish()
         }
     }
-}
-
-/// Retrieves the total number of rows in the specified Parquet file.
-///
-/// This function constructs an `OpenDAL` operator using the information
-/// from the provided `source_desc`. It then accesses the metadata of the
-/// Parquet file to determine and return the total row count.
-///
-/// # Arguments
-///
-/// * `file_name` - The parquet file name.
-/// * `source_desc` - A struct or type containing the necessary information
-///                   to construct the `OpenDAL` operator.
-///
-/// # Returns
-///
-/// Returns the total number of rows in the Parquet file as a `usize`.
-async fn get_total_row_nums_for_parquet_file(
-    parquet_file_name: &str,
-    source_desc: SourceDesc,
-) -> StreamExecutorResult<usize> {
-    let total_row_num = match source_desc.source.config {
-        ConnectorProperties::Gcs(prop) => {
-            let connector: OpendalEnumerator<OpendalGcs> =
-                OpendalEnumerator::new_gcs_source(*prop)?;
-            let reader = connector
-                .op
-                .reader_with(parquet_file_name)
-                .into_future()
-                .await?
-                .into_futures_async_read(..)
-                .await?
-                .compat();
-
-            ParquetRecordBatchStreamBuilder::new(reader)
-                .await?
-                .metadata()
-                .file_metadata()
-                .num_rows()
-        }
-        ConnectorProperties::OpendalS3(prop) => {
-            let connector: OpendalEnumerator<OpendalS3> =
-                OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
-            let reader = connector
-                .op
-                .reader_with(parquet_file_name)
-                .into_future()
-                .await?
-                .into_futures_async_read(..)
-                .await?
-                .compat();
-            ParquetRecordBatchStreamBuilder::new(reader)
-                .await?
-                .metadata()
-                .file_metadata()
-                .num_rows()
-        }
-
-        ConnectorProperties::PosixFs(prop) => {
-            let connector: OpendalEnumerator<OpendalPosixFs> =
-                OpendalEnumerator::new_posix_fs_source(*prop)?;
-            let reader = connector
-                .op
-                .reader_with(parquet_file_name)
-                .into_future()
-                .await?
-                .into_futures_async_read(..)
-                .await?
-                .compat();
-            ParquetRecordBatchStreamBuilder::new(reader)
-                .await?
-                .metadata()
-                .file_metadata()
-                .num_rows()
-        }
-        other => bail!("Unsupported source: {:?}", other),
-    };
-    Ok(total_row_num as usize)
 }
