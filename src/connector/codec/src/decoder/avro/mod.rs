@@ -344,7 +344,7 @@ impl<'a> AvroParseOptions<'a> {
                     );
                 }
                 let list = ListValue::new(builder.finish());
-                MapValue::from_list_entries(list).into()
+                MapValue::from_entries(list).into()
             }
 
             (_expected, _got) => Err(create_error())?,

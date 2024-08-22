@@ -549,7 +549,7 @@ async fn main() {
         println!("Start Sink Bench!, Wait {:?}s", BENCH_TIME);
         tokio::spawn(async move {
             dispatch_sink!(sink, sink, {
-                consume_log_stream(sink, mock_range_log_reader, sink_writer_param).boxed()
+                consume_log_stream(*sink, mock_range_log_reader, sink_writer_param).boxed()
             })
             .await
             .unwrap();
