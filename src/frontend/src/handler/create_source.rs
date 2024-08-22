@@ -1314,11 +1314,9 @@ pub async fn extract_iceberg_columns(
     if let ConnectorProperties::Iceberg(properties) = props {
         let iceberg_config: IcebergConfig = properties.to_iceberg_config();
         let table = iceberg_config.load_table().await?;
-        let iceberg_schema: arrow_schema_iceberg::Schema = table
-            .current_table_metadata()
-            .current_schema()?
-            .clone()
-            .try_into()?;
+        let table = iceberg_config.load_table_v2().await?;
+        let iceberg_schema: arrow_schema_iceberg::Schema =
+            iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 
         let columns = iceberg_schema
             .fields()
@@ -1368,13 +1366,9 @@ pub async fn check_iceberg_source(
             .collect(),
     };
 
-    let table = iceberg_config.load_table().await?;
+    let table = iceberg_config.load_table_v2().await?;
 
-    let iceberg_schema: arrow_schema_iceberg::Schema = table
-        .current_table_metadata()
-        .current_schema()?
-        .clone()
-        .try_into()?;
+    let iceberg_schema = iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 
     for f1 in schema.fields() {
         if !iceberg_schema.fields.iter().any(|f2| f2.name() == &f1.name) {
