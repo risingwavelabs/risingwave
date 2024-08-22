@@ -498,6 +498,7 @@ mod test {
                     frontend_opts: Some(
                         FrontendOpts {
                             listen_addr: "0.0.0.0:4566",
+                            tcp_keepalive_idle_secs: 300,
                             advertise_addr: None,
                             meta_addr: List(
                                 [
@@ -505,7 +506,7 @@ mod test {
                                 ],
                             ),
                             prometheus_listener_addr: "127.0.0.1:1234",
-                            health_check_listener_addr: "127.0.0.1:6786",
+                            frontend_rpc_listener_addr: "127.0.0.1:6786",
                             config_path: "src/config/test.toml",
                             metrics_level: None,
                             enable_barrier_read: None,

@@ -55,7 +55,6 @@ message DropActorsResponse {
 message InjectBarrierRequest {
   string request_id = 1;
   stream_plan.Barrier barrier = 2;
-  repeated uint32 actor_ids_to_send = 3;
   repeated uint32 actor_ids_to_collect = 4;
   repeated uint32 table_ids_to_sync = 5;
   uint32 partial_graph_id = 6;
