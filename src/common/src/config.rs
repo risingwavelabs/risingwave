@@ -1165,7 +1165,7 @@ pub struct S3ObjectStoreDeveloperConfig {
     )]
     pub retryable_service_error_codes: Vec<String>,
 
-    // TODO: the following field will be deprecated after opendal is stablized
+    // TODO: deprecate this config when we are completely deprecate aws sdk.
     #[serde(default = "default::object_store_config::s3::developer::use_opendal")]
     pub use_opendal: bool,
 }
@@ -2167,10 +2167,6 @@ pub mod default {
             }
 
             pub mod developer {
-                use crate::util::env_var::env_var_is_true_or;
-
-                const RW_USE_OPENDAL_FOR_S3: &str = "RW_USE_OPENDAL_FOR_S3";
-
                 pub fn retry_unknown_service_error() -> bool {
                     false
                 }
@@ -2180,11 +2176,7 @@ pub mod default {
                 }
 
                 pub fn use_opendal() -> bool {
-                    // TODO: deprecate this config when we are completely switch from aws sdk to opendal.
-                    // The reason why we use !env_var_is_false_or(RW_USE_OPENDAL_FOR_S3, false) here is
-                    // 1. Maintain compatibility so that there is no behavior change in cluster with RW_USE_OPENDAL_FOR_S3 set.
-                    // 2. Change the default behavior to use opendal for s3 if RW_USE_OPENDAL_FOR_S3 is not set.
-                    env_var_is_true_or(RW_USE_OPENDAL_FOR_S3, false)
+                    true
                 }
             }
         }
