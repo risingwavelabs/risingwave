@@ -824,6 +824,27 @@ impl Parser<'_> {
         };
         let name = self.parse_object_name()?;
         let arg_list = self.parse_argument_list()?;
+
+        let within_group = if self.parse_keywords(&[Keyword::WITHIN, Keyword::GROUP]) {
+            self.expect_token(&Token::LParen)?;
+            self.expect_keywords(&[Keyword::ORDER, Keyword::BY])?;
+            let order_by = self.parse_order_by_expr()?;
+            self.expect_token(&Token::RParen)?;
+            Some(Box::new(order_by.clone()))
+        } else {
+            None
+        };
+
+        let filter = if self.parse_keyword(Keyword::FILTER) {
+            self.expect_token(&Token::LParen)?;
+            self.expect_keyword(Keyword::WHERE)?;
+            let filter_expr = self.parse_expr()?;
+            self.expect_token(&Token::RParen)?;
+            Some(Box::new(filter_expr))
+        } else {
+            None
+        };
+
         let over = if self.parse_keyword(Keyword::OVER) {
             // TODO: support window names (`OVER mywin`) in place of inline specification
             self.expect_token(&Token::LParen)?;
@@ -855,33 +876,13 @@ impl Parser<'_> {
             None
         };
 
-        let filter = if self.parse_keyword(Keyword::FILTER) {
-            self.expect_token(&Token::LParen)?;
-            self.expect_keyword(Keyword::WHERE)?;
-            let filter_expr = self.parse_expr()?;
-            self.expect_token(&Token::RParen)?;
-            Some(Box::new(filter_expr))
-        } else {
-            None
-        };
-
-        let within_group = if self.parse_keywords(&[Keyword::WITHIN, Keyword::GROUP]) {
-            self.expect_token(&Token::LParen)?;
-            self.expect_keywords(&[Keyword::ORDER, Keyword::BY])?;
-            let order_by = self.parse_order_by_expr()?;
-            self.expect_token(&Token::RParen)?;
-            Some(Box::new(order_by.clone()))
-        } else {
-            None
-        };
-
         Ok(Expr::Function(Function {
             scalar_as_agg,
             name,
             arg_list,
-            over,
-            filter,
             within_group,
+            filter,
+            over,
         }))
     }
 

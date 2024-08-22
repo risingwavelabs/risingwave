@@ -34,7 +34,7 @@ use serde_json::json;
 use thiserror_ext::AsReport;
 
 use crate::hummock::HummockManagerRef;
-use crate::manager::event_log::EventLogMangerRef;
+use crate::manager::event_log::EventLogManagerRef;
 use crate::manager::{MetadataManager, MetadataManagerV2};
 use crate::MetaResult;
 
@@ -43,7 +43,7 @@ pub type DiagnoseCommandRef = Arc<DiagnoseCommand>;
 pub struct DiagnoseCommand {
     metadata_manager: MetadataManager,
     hummock_manger: HummockManagerRef,
-    event_log_manager: EventLogMangerRef,
+    event_log_manager: EventLogManagerRef,
     prometheus_client: Option<prometheus_http_query::Client>,
     prometheus_selector: String,
 }
@@ -52,7 +52,7 @@ impl DiagnoseCommand {
     pub fn new(
         metadata_manager: MetadataManager,
         hummock_manger: HummockManagerRef,
-        event_log_manager: EventLogMangerRef,
+        event_log_manager: EventLogManagerRef,
         prometheus_client: Option<prometheus_http_query::Client>,
         prometheus_selector: String,
     ) -> Self {

@@ -267,6 +267,8 @@ enum HummockCommands {
         compression_algorithm: Option<String>,
         #[clap(long)]
         max_l0_compact_level: Option<u32>,
+        #[clap(long)]
+        sst_allowed_trivial_move_min_size: Option<u64>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -667,6 +669,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             compression_level,
             compression_algorithm,
             max_l0_compact_level,
+            sst_allowed_trivial_move_min_size,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -697,6 +700,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                         None
                     },
                     max_l0_compact_level,
+                    sst_allowed_trivial_move_min_size,
                 ),
             )
             .await?
