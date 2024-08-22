@@ -21,7 +21,7 @@ use opendal::services::S3;
 use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
-use super::{EngineType, OpendalObjectStore};
+use super::{MediaType, OpendalObjectStore};
 use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::ObjectResult;
 
@@ -53,7 +53,7 @@ impl OpendalObjectStore {
 
         Ok(Self {
             op,
-            engine_type: EngineType::S3,
+            media_type: MediaType::S3,
             config,
             metrics,
         })
@@ -97,7 +97,7 @@ impl OpendalObjectStore {
 
         Ok(Self {
             op,
-            engine_type: EngineType::Minio,
+            media_type: MediaType::Minio,
             config,
             metrics,
         })
@@ -146,7 +146,7 @@ impl OpendalObjectStore {
 
         Ok(Self {
             op,
-            engine_type: EngineType::S3,
+            media_type: MediaType::S3,
             config,
             metrics,
         })
