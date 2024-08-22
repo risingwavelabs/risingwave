@@ -73,7 +73,7 @@ use thiserror_ext::AsReport;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::{DatabaseId, SchemaId};
+use crate::catalog::{CatalogError, DatabaseId, SchemaId};
 use crate::error::ErrorCode::{self, Deprecated, InvalidInputSyntax, NotSupported, ProtocolError};
 use crate::error::{Result, RwError};
 use crate::expr::Expr;
@@ -1663,6 +1663,15 @@ pub async fn handle_create_source(
         overwrite_options.source_rate_limit,
     )
     .await?;
+
+    // If it is a temporary source, put it into SessionImpl.
+    if stmt.temporary {
+        if session.get_temporary_source(&source_catalog.name).is_some() {
+            return Err(CatalogError::Duplicated("source", source_catalog.name.clone()).into());
+        }
+        session.create_temporary_source(source_catalog);
+        return Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE));
+    }
 
     let source = source_catalog.to_prost(schema_id, database_id);
 

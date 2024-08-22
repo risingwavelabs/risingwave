@@ -89,6 +89,7 @@ use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWrite
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::secret_catalog::SecretCatalog;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::{
     check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId,
@@ -652,6 +653,38 @@ pub struct SessionImpl {
     last_idle_instant: Arc<Mutex<Option<Instant>>>,
 
     cursor_manager: Arc<CursorManager>,
+
+    /// temporary sources for the current session
+    temporary_source_manager: Arc<Mutex<TemporarySourceManager>>,
+}
+
+#[derive(Default, Clone)]
+pub struct TemporarySourceManager {
+    sources: HashMap<String, SourceCatalog>,
+}
+
+impl TemporarySourceManager {
+    pub fn new() -> Self {
+        Self {
+            sources: HashMap::new(),
+        }
+    }
+
+    pub fn create_source(&mut self, name: String, source: SourceCatalog) {
+        self.sources.insert(name, source);
+    }
+
+    pub fn drop_source(&mut self, name: &str) {
+        self.sources.remove(name);
+    }
+
+    pub fn get_source(&self, name: &str) -> Option<&SourceCatalog> {
+        self.sources.get(name)
+    }
+
+    pub fn keys(&self) -> Vec<String> {
+        self.sources.keys().cloned().collect()
+    }
 }
 
 #[derive(Error, Debug)]
@@ -693,6 +726,7 @@ impl SessionImpl {
             exec_context: Mutex::new(None),
             last_idle_instant: Default::default(),
             cursor_manager: Arc::new(CursorManager::default()),
+            temporary_source_manager: Default::default(),
         }
     }
 
@@ -720,6 +754,7 @@ impl SessionImpl {
             .into(),
             last_idle_instant: Default::default(),
             cursor_manager: Arc::new(CursorManager::default()),
+            temporary_source_manager: Default::default(),
         }
     }
 
@@ -1129,6 +1164,27 @@ impl SessionImpl {
         } else {
             Duration::from_secs(self.config().statement_timeout() as u64)
         }
+    }
+
+    pub fn create_temporary_source(&self, source: SourceCatalog) {
+        self.temporary_source_manager
+            .lock()
+            .create_source(source.name.to_string(), source);
+    }
+
+    pub fn get_temporary_source(&self, name: &str) -> Option<SourceCatalog> {
+        self.temporary_source_manager
+            .lock()
+            .get_source(name)
+            .cloned()
+    }
+
+    pub fn drop_temporary_source(&self, name: &str) {
+        self.temporary_source_manager.lock().drop_source(name);
+    }
+
+    pub fn temporary_source_manager(&self) -> TemporarySourceManager {
+        self.temporary_source_manager.lock().clone()
     }
 }
 

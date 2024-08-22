@@ -319,6 +319,7 @@ pub async fn handle_show_object(
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_source()
             .map(|t| t.name.clone())
+            .chain(session.temporary_source_manager().keys())
             .collect(),
         ShowObject::Sink { schema } => catalog_reader
             .read_guard()
