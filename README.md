@@ -68,7 +68,7 @@ RisingWave is the ideal solution for building event-driven applications. Choose 
 * Perform complex queries (such as joins, aggregations, and time windowing) on the fly.
 * Interactively and concurrently explore consistent, up-to-the-moment results.
 * Seamlessly send results to downstream systems.
-* Processing streaming and batch data using the same codebase.
+* Process streaming and batch data using the same codebase.
 
 
 ## In what use cases does RisingWave excel?
