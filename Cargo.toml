@@ -222,7 +222,6 @@ risingwave_hummock_sdk = { path = "./src/storage/hummock_sdk" }
 risingwave_hummock_test = { path = "./src/storage/hummock_test" }
 risingwave_hummock_trace = { path = "./src/storage/hummock_trace" }
 risingwave_license = { path = "./src/license" }
-risingwave_telemetry_event = { path = "./src/common/telemetry_event" }
 risingwave_mem_table_spill_test = { path = "./src/stream/spill_test" }
 risingwave_meta = { path = "./src/meta" }
 risingwave_meta_dashboard = { path = "./src/meta/dashboard" }
@@ -243,6 +242,7 @@ risingwave_udf = { path = "./src/expr/udf" }
 risingwave_variables = { path = "./src/utils/variables" }
 risingwave_java_binding = { path = "./src/java_binding" }
 risingwave_jni_core = { path = "src/jni_core" }
+risingwave_telemetry_event = { path = "./src/common/telemetry_event" }
 rw_futures_util = { path = "src/utils/futures_util" }
 rw_resource_util = { path = "src/utils/resource_util" }
 rw_iter_util = { path = "src/utils/iter_util" }
