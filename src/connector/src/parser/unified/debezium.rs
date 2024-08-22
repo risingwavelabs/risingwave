@@ -157,7 +157,7 @@ macro_rules! jsonb_access_field {
 
 /// Parse the schema change message from Debezium.
 /// The layout of MySQL schema change message can refer to
-/// https://debezium.io/documentation/reference/2.6/connectors/mysql.html#mysql-schema-change-topic
+/// <https://debezium.io/documentation/reference/2.6/connectors/mysql.html#mysql-schema-change-topic>
 pub fn parse_schema_change(
     accessor: &impl Access,
     source_id: u32,
