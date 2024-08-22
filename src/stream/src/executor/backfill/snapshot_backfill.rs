@@ -32,14 +32,16 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::ChangeLogRow;
 use risingwave_storage::StateStore;
 use tokio::select;
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::backfill::utils::{create_builder, mapping_chunk};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::prelude::{try_stream, StreamExt};
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BackfillExecutor, Barrier, BoxedMessageStream, Execute,
-    Executor, Message, Mutation, StreamExecutorError, StreamExecutorResult,
+    expect_first_barrier, ActorContextRef, BackfillExecutor, Barrier, BoxedMessageStream,
+    DispatcherBarrier, DispatcherMessage, Execute, Executor, Message, Mutation,
+    StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::CreateMviewProgress;
 
@@ -99,7 +101,8 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         debug!("snapshot backfill executor start");
-        let mut upstream = self.upstream.execute();
+        let upstream = erase_upstream_mutation(self.upstream.execute());
+        pin_mut!(upstream);
         let upstream_table_id = self.upstream_table.table_id();
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         debug!(epoch = ?first_barrier.epoch, "get first upstream barrier");
@@ -109,7 +112,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
 
         {
             if should_backfill {
-                let subscriber_ids = first_barrier
+                let subscriber_ids = first_recv_barrier
                     .added_subscriber_on_mv_table(upstream_table_id)
                     .collect_vec();
                 let snapshot_backfill_table_fragment_id = match subscriber_ids.as_slice() {
@@ -183,12 +186,16 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
 
                     let recv_barrier = self.barrier_rx.recv().await.expect("should exist");
                     assert_eq!(first_barrier.epoch, recv_barrier.epoch);
-                    yield Message::Barrier(first_barrier);
+                    yield Message::Barrier(recv_barrier);
                 }
+
+                let mut upstream_buffer = upstream_buffer
+                    .start_consuming_log_store(&mut self.barrier_rx)
+                    .await?;
 
                 let mut barrier_epoch = first_barrier_epoch;
 
-                let initial_pending_barrier = upstream_buffer.barrier.len();
+                let initial_pending_barrier = upstream_buffer.state.barriers.len();
                 info!(
                     ?barrier_epoch,
                     table_id = self.upstream_table.table_id().table_id,
@@ -207,8 +214,6 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
 
                 // Phase 2: consume upstream log store
                 while let Some(barrier) = upstream_buffer.take_buffered_barrier().await? {
-                    let recv_barrier = receive_next_barrier(&mut self.barrier_rx).await?;
-                    assert_eq!(barrier.epoch, recv_barrier.epoch);
                     assert_eq!(barrier_epoch.curr, barrier.epoch.prev);
                     barrier_epoch = barrier.epoch;
 
@@ -254,16 +259,20 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                 );
                 let first_recv_barrier = receive_next_barrier(&mut self.barrier_rx).await?;
                 assert_eq!(first_barrier.epoch, first_recv_barrier.epoch);
-                yield Message::Barrier(first_barrier);
+                yield Message::Barrier(first_recv_barrier);
             }
         }
         // Phase 3: consume upstream
         while let Some(msg) = upstream.try_next().await? {
-            if let Message::Barrier(barrier) = &msg {
-                let recv_barrier = receive_next_barrier(&mut self.barrier_rx).await?;
-                assert_eq!(barrier.epoch, recv_barrier.epoch);
-            }
-            yield msg;
+            yield match msg {
+                DispatcherMessage::Chunk(chunk) => Message::Chunk(chunk),
+                DispatcherMessage::Watermark(watermark) => Message::Watermark(watermark),
+                DispatcherMessage::Barrier(barrier) => {
+                    let recv_barrier = receive_next_barrier(&mut self.barrier_rx).await?;
+                    assert_eq!(barrier.epoch, recv_barrier.epoch);
+                    Message::Barrier(recv_barrier)
+                }
+            };
         }
     }
 }
@@ -324,35 +333,159 @@ async fn read_change_log(
     }
 }
 
-struct UpstreamBuffer<'a> {
-    upstream: &'a mut BoxedMessageStream,
+trait UpstreamBufferState {
+    fn is_finished(&self) -> bool;
+    async fn on_upstream_barrier(
+        &mut self,
+        upstream_barrier: DispatcherBarrier,
+    ) -> StreamExecutorResult<()>;
+}
+
+struct StateOfConsumingSnapshot {
+    pending_barriers: Vec<DispatcherBarrier>,
+}
+
+impl UpstreamBufferState for StateOfConsumingSnapshot {
+    fn is_finished(&self) -> bool {
+        // never finish when consuming snapshot
+        false
+    }
+
+    async fn on_upstream_barrier(
+        &mut self,
+        upstream_barrier: DispatcherBarrier,
+    ) -> StreamExecutorResult<()> {
+        self.pending_barriers.push(upstream_barrier);
+        Ok(())
+    }
+}
+
+struct StateOfConsumingLogStore<'a> {
+    barrier_rx: &'a mut mpsc::UnboundedReceiver<Barrier>,
     // newer barrier at the front
-    barrier: VecDeque<Barrier>,
-    consume_upstream_row_count: LabelGuardedIntCounter<3>,
+    barriers: VecDeque<Barrier>,
     is_finished: bool,
+    current_subscriber_id: u32,
+    upstream_table_id: TableId,
+}
+
+impl<'a> StateOfConsumingLogStore<'a> {
+    async fn recv_barrier(
+        &mut self,
+        upstream_barrier: DispatcherBarrier,
+    ) -> StreamExecutorResult<Barrier> {
+        assert!(!self.is_finished);
+        let barrier = receive_next_barrier(self.barrier_rx).await?;
+        assert_eq!(upstream_barrier.epoch, barrier.epoch);
+        if is_finish_barrier(&barrier, self.current_subscriber_id, self.upstream_table_id) {
+            self.is_finished = true;
+        }
+        Ok(barrier)
+    }
+}
+
+impl<'a> UpstreamBufferState for StateOfConsumingLogStore<'a> {
+    fn is_finished(&self) -> bool {
+        self.is_finished
+    }
+
+    async fn on_upstream_barrier(
+        &mut self,
+        upstream_barrier: DispatcherBarrier,
+    ) -> StreamExecutorResult<()> {
+        let barrier = self.recv_barrier(upstream_barrier).await?;
+        self.barriers.push_front(barrier);
+        Ok(())
+    }
+}
+
+mod erase_upstream_mutation {
+    use futures::TryStreamExt;
+
+    use crate::executor::prelude::Stream;
+    use crate::executor::{BoxedMessageStream, DispatcherMessageStreamItem};
+
+    pub(super) fn erase_upstream_mutation(upstream: BoxedMessageStream) -> UpstreamStream {
+        upstream.map_ok(|msg| {
+            msg.map_mutation(|mutation| {
+                if let Some(mutation) = mutation {
+                    // TODO: assert none mutation after we explicitly erase mutation
+                    warn!(
+                        ?mutation,
+                        "receive non-empty mutation from upstream. ignored"
+                    );
+                };
+            })
+        })
+    }
+
+    pub(super) type UpstreamStream = impl Stream<Item = DispatcherMessageStreamItem> + Unpin;
+}
+
+use erase_upstream_mutation::*;
+
+struct UpstreamBuffer<'a, S> {
+    upstream: &'a mut UpstreamStream,
+    state: S,
+    consume_upstream_row_count: LabelGuardedIntCounter<3>,
     upstream_table_id: TableId,
     current_subscriber_id: u32,
 }
 
-impl<'a> UpstreamBuffer<'a> {
+impl<'a> UpstreamBuffer<'a, StateOfConsumingSnapshot> {
     fn new(
-        upstream: &'a mut BoxedMessageStream,
+        upstream: &'a mut UpstreamStream,
         upstream_table_id: TableId,
         current_subscriber_id: u32,
         consume_upstream_row_count: LabelGuardedIntCounter<3>,
     ) -> Self {
         Self {
             upstream,
-            barrier: Default::default(),
+            state: StateOfConsumingSnapshot {
+                pending_barriers: vec![],
+            },
             consume_upstream_row_count,
-            is_finished: false,
             upstream_table_id,
             current_subscriber_id,
         }
     }
 
+    async fn start_consuming_log_store<'s>(
+        self,
+        barrier_rx: &'s mut UnboundedReceiver<Barrier>,
+    ) -> StreamExecutorResult<UpstreamBuffer<'a, StateOfConsumingLogStore<'s>>> {
+        let StateOfConsumingSnapshot { pending_barriers } = self.state;
+        let mut barriers = VecDeque::with_capacity(pending_barriers.len());
+        for pending_barrier in pending_barriers {
+            let barrier = receive_next_barrier(barrier_rx).await?;
+            assert!(barrier.epoch.prev <= pending_barrier.epoch.prev);
+            assert!(!is_finish_barrier(
+                &barrier,
+                self.current_subscriber_id,
+                self.upstream_table_id
+            ));
+            barriers.push_front(barrier);
+        }
+        let ret = UpstreamBuffer {
+            upstream: self.upstream,
+            state: StateOfConsumingLogStore {
+                barrier_rx,
+                barriers,
+                is_finished: false,
+                current_subscriber_id: self.current_subscriber_id,
+                upstream_table_id: self.upstream_table_id,
+            },
+            consume_upstream_row_count: self.consume_upstream_row_count,
+            upstream_table_id: self.upstream_table_id,
+            current_subscriber_id: self.current_subscriber_id,
+        };
+        Ok(ret)
+    }
+}
+
+impl<'a, S: UpstreamBufferState> UpstreamBuffer<'a, S> {
     async fn concurrently_consume_upstream(&mut self) -> StreamExecutorError {
-        while !self.is_finished {
+        while !self.state.is_finished() {
             let result = self.consume_until_next_barrier().await;
             let barrier = match result {
                 Ok(barrier) => barrier,
@@ -360,65 +493,75 @@ impl<'a> UpstreamBuffer<'a> {
                     return e;
                 }
             };
-            self.barrier.push_front(barrier);
+            if let Err(e) = self.state.on_upstream_barrier(barrier).await {
+                return e;
+            }
         }
         pending().await
     }
 
-    async fn consume_until_next_barrier(&mut self) -> StreamExecutorResult<Barrier> {
-        assert!(!self.is_finished);
+    async fn consume_until_next_barrier(&mut self) -> StreamExecutorResult<DispatcherBarrier> {
         loop {
-            let msg: Message = self
+            let msg: DispatcherMessage = self
                 .upstream
                 .try_next()
                 .await?
                 .ok_or_else(|| anyhow!("end of upstream"))?;
             match msg {
-                Message::Chunk(chunk) => {
+                DispatcherMessage::Chunk(chunk) => {
                     self.consume_upstream_row_count
                         .inc_by(chunk.cardinality() as _);
                 }
-                Message::Barrier(barrier) => {
-                    self.is_finished = self.is_finish_barrier(&barrier);
+                DispatcherMessage::Barrier(barrier) => {
                     break Ok(barrier);
                 }
-                Message::Watermark(_) => {}
+                DispatcherMessage::Watermark(_) => {}
             }
         }
     }
+}
 
+impl<'a, 's> UpstreamBuffer<'a, StateOfConsumingLogStore<'s>> {
     async fn take_buffered_barrier(&mut self) -> StreamExecutorResult<Option<Barrier>> {
-        Ok(if let Some(barrier) = self.barrier.pop_back() {
+        Ok(if let Some(barrier) = self.state.barriers.pop_back() {
             Some(barrier)
-        } else if self.is_finished {
+        } else if self.state.is_finished {
             None
         } else {
-            Some(self.consume_until_next_barrier().await?)
+            let upstream_barrier = self.consume_until_next_barrier().await?;
+            let barrier = self.state.recv_barrier(upstream_barrier).await?;
+            Some(barrier)
         })
     }
+}
 
-    fn is_finish_barrier(&self, barrier: &Barrier) -> bool {
-        if let Some(Mutation::DropSubscriptions {
-            subscriptions_to_drop,
-        }) = barrier.mutation.as_deref()
-        {
-            let is_finished = subscriptions_to_drop
-                .iter()
-                .any(|(subscriber_id, _)| *subscriber_id == self.current_subscriber_id);
-            if is_finished {
-                assert!(subscriptions_to_drop.iter().any(
-                    |(subscriber_id, subscribed_upstream_table_id)| {
-                        *subscriber_id == self.current_subscriber_id
-                            && self.upstream_table_id == *subscribed_upstream_table_id
-                    }
-                ))
-            }
-            is_finished
-        } else {
-            false
+fn is_finish_barrier(
+    barrier: &Barrier,
+    current_subscriber_id: u32,
+    upstream_table_id: TableId,
+) -> bool {
+    if let Some(Mutation::DropSubscriptions {
+        subscriptions_to_drop,
+    }) = barrier.mutation.as_deref()
+    {
+        let is_finished = subscriptions_to_drop
+            .iter()
+            .any(|(subscriber_id, _)| *subscriber_id == current_subscriber_id);
+        if is_finished {
+            assert!(subscriptions_to_drop.iter().any(
+                |(subscriber_id, subscribed_upstream_table_id)| {
+                    *subscriber_id == current_subscriber_id
+                        && upstream_table_id == *subscribed_upstream_table_id
+                }
+            ))
         }
+        is_finished
+    } else {
+        false
     }
+}
 
+impl<'a, S: UpstreamBufferState> UpstreamBuffer<'a, S> {
     /// Run a future while concurrently polling the upstream so that the upstream
     /// won't be back-pressured.
     async fn run_future<T, E: Into<StreamExecutorError>>(

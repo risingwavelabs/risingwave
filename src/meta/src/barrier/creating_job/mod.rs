@@ -27,6 +27,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{debug, info};
 
@@ -64,6 +65,7 @@ impl CreatingStreamingJobControl {
         backfill_epoch: u64,
         version_stat: &HummockVersionStats,
         metrics: &MetaMetrics,
+        initial_mutation: Mutation,
     ) -> Self {
         info!(
             table_id = info.table_fragments.table_id().table_id,
@@ -103,6 +105,7 @@ impl CreatingStreamingJobControl {
                 backfill_epoch,
                 pending_non_checkpoint_barriers: vec![],
                 snapshot_backfill_actors,
+                initial_mutation: Some(initial_mutation),
             },
             upstream_lag: metrics
                 .snapshot_backfill_lag
@@ -256,10 +259,10 @@ impl CreatingStreamingJobControl {
                 .active_graph_info()
                 .expect("must exist when having barriers to inject");
             let table_id = self.info.table_fragments.table_id();
-            for (curr_epoch, prev_epoch, kind) in barriers_to_inject {
+            for (curr_epoch, prev_epoch, kind, mutation) in barriers_to_inject {
                 let node_to_collect = control_stream_manager.inject_barrier(
                     Some(table_id),
-                    None,
+                    mutation,
                     (&curr_epoch, &prev_epoch),
                     &kind,
                     graph_info,
@@ -320,7 +323,9 @@ impl CreatingStreamingJobControl {
                     Some(table_id),
                     if start_consume_upstream {
                         // erase the mutation on upstream except the last command
-                        command_ctx.to_mutation()
+                        command_ctx
+                            .command
+                            .to_mutation(command_ctx.current_paused_reason.as_ref())
                     } else {
                         None
                     },
