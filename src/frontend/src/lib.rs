@@ -73,6 +73,7 @@ mod user;
 pub mod health_service;
 mod monitor;
 
+pub mod rpc;
 mod telemetry;
 
 use std::ffi::OsString;
@@ -118,10 +119,11 @@ pub struct FrontendOpts {
 
     #[clap(
         long,
+        alias = "health-check-listener-addr",
         env = "RW_HEALTH_CHECK_LISTENER_ADDR",
         default_value = "127.0.0.1:6786"
     )]
-    pub health_check_listener_addr: String,
+    pub frontend_rpc_listener_addr: String,
 
     /// The path of `risingwave.toml` configuration file.
     ///
@@ -174,6 +176,8 @@ use std::pin::Pin;
 
 use pgwire::pg_protocol::TlsConfig;
 
+use crate::session::SESSION_MANAGER;
+
 /// Start frontend
 pub fn start(
     opts: FrontendOpts,
@@ -183,7 +187,8 @@ pub fn start(
     // slow compile in release mode.
     Box::pin(async move {
         let listen_addr = opts.listen_addr.clone();
-        let session_mgr = SessionManagerImpl::new(opts).await.unwrap();
+        let session_mgr = Arc::new(SessionManagerImpl::new(opts).await.unwrap());
+        SESSION_MANAGER.get_or_init(|| session_mgr.clone());
         let redact_sql_option_keywords = Arc::new(
             session_mgr
                 .env()
@@ -196,7 +201,7 @@ pub fn start(
 
         pg_serve(
             &listen_addr,
-            session_mgr,
+            session_mgr.clone(),
             TlsConfig::new_default(),
             Some(redact_sql_option_keywords),
             shutdown,

@@ -208,9 +208,9 @@ impl Encode {
             "PROTOBUF" => Encode::Protobuf,
             "JSON" => Encode::Json,
             "TEMPLATE" => Encode::Template,
+            "PARQUET" => Encode::Parquet,
             "NATIVE" => Encode::Native,
             "NONE" => Encode::None,
-            "PARQUET" => Encode::Parquet,
             _ => parser_err!(
                 "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE | PARQUET | NONE after Encode"
             ),

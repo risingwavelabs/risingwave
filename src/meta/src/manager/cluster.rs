@@ -491,11 +491,12 @@ impl ClusterManager {
         worker_type: WorkerType,
         worker_property: AddNodeProperty,
     ) -> Option<Property> {
-        if worker_type == WorkerType::ComputeNode {
+        if worker_type == WorkerType::ComputeNode || worker_type == WorkerType::Frontend {
             Some(Property {
                 is_streaming: worker_property.is_streaming,
                 is_serving: worker_property.is_serving,
                 is_unschedulable: worker_property.is_unschedulable,
+                internal_rpc_host_addr: worker_property.internal_rpc_host_addr,
             })
         } else {
             None
@@ -807,6 +808,7 @@ mod tests {
                         is_streaming: true,
                         is_serving: true,
                         is_unschedulable: false,
+                        internal_rpc_host_addr: "".to_string(),
                     },
                     Default::default(),
                 )
@@ -848,6 +850,7 @@ mod tests {
                     is_streaming: true,
                     is_serving: true,
                     is_unschedulable: false,
+                    internal_rpc_host_addr: "".to_string(),
                 },
                 Default::default(),
             )
@@ -870,6 +873,7 @@ mod tests {
                     is_streaming: true,
                     is_serving: true,
                     is_unschedulable: false,
+                    internal_rpc_host_addr: "".to_string(),
                 },
                 Default::default(),
             )
@@ -919,6 +923,7 @@ mod tests {
                     is_streaming: true,
                     is_serving: true,
                     is_unschedulable: false,
+                    internal_rpc_host_addr: "".to_string(),
                 },
                 Default::default(),
             )
@@ -977,6 +982,7 @@ mod tests {
                     is_streaming: true,
                     is_serving: true,
                     is_unschedulable: false,
+                    internal_rpc_host_addr: "".to_string(),
                 },
                 Default::default(),
             )
