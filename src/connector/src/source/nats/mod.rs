@@ -17,21 +17,54 @@ pub mod source;
 pub mod split;
 
 use std::collections::HashMap;
+use std::time::Duration;
 
+use async_nats::jetstream::consumer::pull::Config;
+use async_nats::jetstream::consumer::{AckPolicy, ReplayPolicy};
 use serde::Deserialize;
+use serde_with::{serde_as, DisplayFromStr, DurationSeconds};
 use with_options::WithOptions;
 
 use crate::connector_common::NatsCommon;
 use crate::source::nats::enumerator::NatsSplitEnumerator;
 use crate::source::nats::source::{NatsSplit, NatsSplitReader};
 use crate::source::SourceProperties;
+use crate::{deserialize_duration_seq_from_string, deserialize_optional_string_seq_from_string};
 
 pub const NATS_CONNECTOR: &str = "nats";
+
+pub struct AckPolicyWrapper;
+
+impl AckPolicyWrapper {
+    pub fn parse_str(s: &str) -> AckPolicy {
+        match s {
+            "none" => AckPolicy::None,
+            "all" => AckPolicy::All,
+            "explicit" => AckPolicy::Explicit,
+            _ => AckPolicy::None,
+        }
+    }
+}
+
+pub struct ReplayPolicyWrapper;
+
+impl ReplayPolicyWrapper {
+    pub fn parse_str(s: &str) -> ReplayPolicy {
+        match s {
+            "instant" => ReplayPolicy::Instant,
+            "original" => ReplayPolicy::Original,
+            _ => ReplayPolicy::Instant,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct NatsProperties {
     #[serde(flatten)]
     pub common: NatsCommon,
+
+    #[serde(flatten)]
+    pub nats_properties_consumer: NatsPropertiesConsumer,
 
     #[serde(rename = "scan.startup.mode")]
     pub scan_startup_mode: Option<String>,
@@ -45,106 +78,175 @@ pub struct NatsProperties {
     #[serde(rename = "stream")]
     pub stream: String,
 
-    /// Setting `durable_name` to `Some(...)` will cause this consumer
-    /// to be "durable". This may be a good choice for workloads that
-    /// benefit from the `JetStream` server or cluster remembering the
-    /// progress of consumers for fault tolerance purposes. If a consumer
-    /// crashes, the `JetStream` server or cluster will remember which
-    /// messages the consumer acknowledged. When the consumer recovers,
-    /// this information will allow the consumer to resume processing
-    /// where it left off. If you're unsure, set this to `Some(...)`.
-    ///
-    /// Setting `durable_name` to `None` will cause this consumer to
-    /// be "ephemeral". This may be a good choice for workloads where
-    /// you don't need the `JetStream` server to remember the consumer's
-    /// progress in the case of a crash, such as certain "high churn"
-    /// workloads or workloads where a crashed instance is not required
-    /// to recover.
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
+}
+
+impl NatsProperties {
+    pub fn set_config(&self, c: &mut Config) {
+        self.nats_properties_consumer.set_config(c);
+    }
+}
+
+/// Properties for the async-nats library.
+/// See <https://docs.rs/async-nats/latest/async_nats/jetstream/consumer/struct.Config.html>
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
+pub struct NatsPropertiesConsumer {
+    #[serde(rename = "consumer.deliver_subject")]
+    pub deliver_subject: Option<String>,
+
     #[serde(rename = "consumer.durable_name")]
     pub durable_name: Option<String>,
 
-    /// A short description of the purpose of this consumer.
+    #[serde(rename = "consumer.name")]
+    pub name: Option<String>,
+
     #[serde(rename = "consumer.description")]
     pub description: Option<String>,
 
-    /// How messages should be acknowledged
+    #[serde(rename = "consumer.deliver_policy")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub deliver_policy: Option<String>,
+
     #[serde(rename = "consumer.ack_policy")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub ack_policy: Option<String>,
 
-    /// How long to allow messages to remain un-acknowledged before attempting redelivery
     #[serde(rename = "consumer.ack_wait")]
-    pub ack_wait: Option<String>,
+    #[serde_as(as = "Option<DurationSeconds<String>>")]
+    pub ack_wait: Option<Duration>,
 
-    /// Maximum number of times a specific message will be delivered. Use this to avoid poison pill messages that repeatedly crash your consumer processes forever.
     #[serde(rename = "consumer.max_deliver")]
-    pub max_deliver: Option<String>,
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub max_deliver: Option<i64>,
 
-    /// When consuming from a Stream with many subjects, or wildcards, this selects only specific incoming subjects. Supports wildcards.
     #[serde(rename = "consumer.filter_subject")]
     pub filter_subject: Option<String>,
 
-    /// Fulfills the same role as [Config::filter_subject], but allows filtering by many subjects.
     #[serde(rename = "consumer.filter_subjects")]
-    pub filter_subjects: Option<String>,
+    #[serde(deserialize_with = "deserialize_optional_string_seq_from_string")]
+    pub filter_subjects: Option<Vec<String>>,
 
-    /// Whether messages are sent as quickly as possible or at the rate of receipt
     #[serde(rename = "consumer.replay_policy")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub replay_policy: Option<String>,
 
-    /// The rate of message delivery in bits per second
     #[serde(rename = "consumer.rate_limit")]
-    pub rate_limit: Option<String>,
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub rate_limit: Option<u64>,
 
-    /// What percentage of acknowledgments should be samples for observability, 0-100
     #[serde(rename = "consumer.sample_frequency")]
-    pub sample_frequency: Option<String>,
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub sample_frequency: Option<u8>,
 
-    /// The maximum number of waiting consumers.
     #[serde(rename = "consumer.max_waiting")]
-    pub max_waiting: Option<String>,
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub max_waiting: Option<i64>,
 
-    /// The maximum number of unacknowledged messages that may be
-    /// in-flight before pausing sending additional messages to
-    /// this consumer.
     #[serde(rename = "consumer.max_ack_pending")]
-    pub max_ack_pending: Option<String>,
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub max_ack_pending: Option<i64>,
 
-    /// The maximum number of unacknowledged messages that may be
-    /// in-flight before pausing sending additional messages to
-    /// this consumer.
-    #[serde(rename = "consumer.idle_heartbeat")]
-    pub idle_heartbeat: Option<String>,
+    #[serde(rename = "consumer.headers_only")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub headers_only: Option<bool>,
 
-    /// Maximum size of a request batch
     #[serde(rename = "consumer.max_batch")]
-    pub max_batch: Option<String>,
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub max_batch: Option<i64>,
 
-    // / Maximum value of request max_bytes
     #[serde(rename = "consumer.max_bytes")]
-    pub max_bytes: Option<String>,
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub max_bytes: Option<i64>,
 
-    /// Maximum value for request expiration
     #[serde(rename = "consumer.max_expires")]
-    pub max_expires: Option<String>,
+    #[serde_as(as = "Option<DurationSeconds<String>>")]
+    pub max_expires: Option<Duration>,
 
-    /// Threshold for consumer inactivity
     #[serde(rename = "consumer.inactive_threshold")]
-    pub inactive_threshold: Option<String>,
+    #[serde_as(as = "Option<DurationSeconds<String>>")]
+    pub inactive_threshold: Option<Duration>,
 
-    /// Number of consumer replicas
     #[serde(rename = "consumer.num.replicas", alias = "consumer.num_replicas")]
-    pub num_replicas: Option<String>,
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub num_replicas: Option<usize>,
 
-    /// Force consumer to use memory storage.
     #[serde(rename = "consumer.memory_storage")]
-    pub memory_storage: Option<String>,
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub memory_storage: Option<bool>,
 
-    /// Custom backoff for missed acknowledgments.
     #[serde(rename = "consumer.backoff")]
-    pub backoff: Option<String>,
+    #[serde(deserialize_with = "deserialize_duration_seq_from_string")]
+    pub backoff: Option<Vec<Duration>>,
+}
 
-    #[serde(flatten)]
-    pub unknown_fields: HashMap<String, String>,
+impl NatsPropertiesConsumer {
+    pub fn set_config(&self, c: &mut Config) {
+        if let Some(v) = &self.name {
+            c.name = Some(v.clone())
+        }
+        if let Some(v) = &self.durable_name {
+            c.durable_name = Some(v.clone())
+        }
+        if let Some(v) = &self.description {
+            c.description = Some(v.clone())
+        }
+        if let Some(v) = &self.ack_policy {
+            c.ack_policy = AckPolicyWrapper::parse_str(v)
+        }
+        if let Some(v) = &self.ack_wait {
+            c.ack_wait = *v
+        }
+        if let Some(v) = &self.max_deliver {
+            c.max_deliver = *v
+        }
+        if let Some(v) = &self.filter_subject {
+            c.filter_subject = v.clone()
+        }
+        if let Some(v) = &self.filter_subjects {
+            c.filter_subjects = v.clone()
+        }
+        if let Some(v) = &self.replay_policy {
+            c.replay_policy = ReplayPolicyWrapper::parse_str(v)
+        }
+        if let Some(v) = &self.rate_limit {
+            c.rate_limit = *v
+        }
+        if let Some(v) = &self.sample_frequency {
+            c.sample_frequency = *v
+        }
+        if let Some(v) = &self.max_waiting {
+            c.max_waiting = *v
+        }
+        if let Some(v) = &self.max_ack_pending {
+            c.max_ack_pending = *v
+        }
+        if let Some(v) = &self.headers_only {
+            c.headers_only = *v
+        }
+        if let Some(v) = &self.max_batch {
+            c.max_batch = *v
+        }
+        if let Some(v) = &self.max_bytes {
+            c.max_bytes = *v
+        }
+        if let Some(v) = &self.max_expires {
+            c.max_expires = *v
+        }
+        if let Some(v) = &self.inactive_threshold {
+            c.inactive_threshold = *v
+        }
+        if let Some(v) = &self.num_replicas {
+            c.num_replicas = *v
+        }
+        if let Some(v) = &self.memory_storage {
+            c.memory_storage = *v
+        }
+        if let Some(v) = &self.backoff {
+            c.backoff = v.clone()
+        }
+    }
 }
 
 impl SourceProperties for NatsProperties {
@@ -158,5 +260,108 @@ impl SourceProperties for NatsProperties {
 impl crate::source::UnknownFields for NatsProperties {
     fn unknown_fields(&self) -> HashMap<String, String> {
         self.unknown_fields.clone()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::collections::BTreeMap;
+
+    use maplit::btreemap;
+
+    use super::*;
+
+    #[test]
+    fn test_parse_config_consumer() {
+        let config: BTreeMap<String, String> = btreemap! {
+            "stream".to_string() => "risingwave".to_string(),
+
+            // NATS common
+            "subject".to_string() => "subject1".to_string(),
+            "server_url".to_string() => "nats-server:4222".to_string(),
+            "connect_mode".to_string() => "plain".to_string(),
+            "type".to_string() => "append-only".to_string(),
+
+            // NATS properties consumer
+            "consumer.name".to_string() => "foobar".to_string(),
+            "consumer.durable_name".to_string() => "durable_foobar".to_string(),
+            "consumer.description".to_string() => "A description".to_string(),
+            "consumer.ack_policy".to_string() => "all".to_string(),
+            "consumer.ack_wait".to_string() => "10".to_string(),
+            "consumer.max_deliver".to_string() => "10".to_string(),
+            "consumer.filter_subject".to_string() => "subject".to_string(),
+            "consumer.filter_subjects".to_string() => "subject1,subject2".to_string(),
+            "consumer.replay_policy".to_string() => "instant".to_string(),
+            "consumer.rate_limit".to_string() => "100".to_string(),
+            "consumer.sample_frequency".to_string() => "1".to_string(),
+            "consumer.max_waiting".to_string() => "5".to_string(),
+            "consumer.max_ack_pending".to_string() => "100".to_string(),
+            "consumer.headers_only".to_string() => "true".to_string(),
+            "consumer.max_batch".to_string() => "10".to_string(),
+            "consumer.max_bytes".to_string() => "1024".to_string(),
+            "consumer.max_expires".to_string() => "24".to_string(),
+            "consumer.inactive_threshold".to_string() => "10".to_string(),
+            "consumer.num_replicas".to_string() => "3".to_string(),
+            "consumer.memory_storage".to_string() => "true".to_string(),
+            "consumer.backoff".to_string() => "2,10,15".to_string(),
+
+        };
+
+        let props: NatsProperties =
+            serde_json::from_value(serde_json::to_value(config).unwrap()).unwrap();
+
+        assert_eq!(
+            props.nats_properties_consumer.name,
+            Some("foobar".to_string())
+        );
+        assert_eq!(
+            props.nats_properties_consumer.durable_name,
+            Some("durable_foobar".to_string())
+        );
+        assert_eq!(
+            props.nats_properties_consumer.description,
+            Some("A description".to_string())
+        );
+        assert_eq!(
+            props.nats_properties_consumer.ack_policy,
+            Some("all".to_string())
+        );
+        assert_eq!(
+            props.nats_properties_consumer.ack_wait,
+            Some(Duration::from_secs(10))
+        );
+        assert_eq!(
+            props.nats_properties_consumer.filter_subjects,
+            Some(vec!["subject1".to_string(), "subject2".to_string()])
+        );
+        assert_eq!(
+            props.nats_properties_consumer.replay_policy,
+            Some("instant".to_string())
+        );
+        assert_eq!(props.nats_properties_consumer.rate_limit, Some(100));
+        assert_eq!(props.nats_properties_consumer.sample_frequency, Some(1));
+        assert_eq!(props.nats_properties_consumer.max_waiting, Some(5));
+        assert_eq!(props.nats_properties_consumer.max_ack_pending, Some(100));
+        assert_eq!(props.nats_properties_consumer.headers_only, Some(true));
+        assert_eq!(props.nats_properties_consumer.max_batch, Some(10));
+        assert_eq!(props.nats_properties_consumer.max_bytes, Some(1024));
+        assert_eq!(
+            props.nats_properties_consumer.max_expires,
+            Some(Duration::from_secs(24))
+        );
+        assert_eq!(
+            props.nats_properties_consumer.inactive_threshold,
+            Some(Duration::from_secs(10))
+        );
+        assert_eq!(props.nats_properties_consumer.num_replicas, Some(3));
+        assert_eq!(props.nats_properties_consumer.memory_storage, Some(true));
+        assert_eq!(
+            props.nats_properties_consumer.backoff,
+            Some(vec![
+                Duration::from_secs(2),
+                Duration::from_secs(10),
+                Duration::from_secs(15)
+            ])
+        );
     }
 }

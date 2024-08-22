@@ -507,6 +507,77 @@ NatsProperties:
   - name: max_message_size
     field_type: i32
     required: false
+  - name: consumer.deliver_subject
+    field_type: String
+    required: false
+  - name: consumer.durable_name
+    field_type: String
+    required: false
+  - name: consumer.name
+    field_type: String
+    required: false
+  - name: consumer.description
+    field_type: String
+    required: false
+  - name: consumer.deliver_policy
+    field_type: String
+    required: false
+  - name: consumer.ack_policy
+    field_type: String
+    required: false
+  - name: consumer.ack_wait
+    field_type: Duration
+    required: false
+  - name: consumer.max_deliver
+    field_type: i64
+    required: false
+  - name: consumer.filter_subject
+    field_type: String
+    required: false
+  - name: consumer.filter_subjects
+    field_type: Vec<String>
+    required: false
+  - name: consumer.replay_policy
+    field_type: String
+    required: false
+  - name: consumer.rate_limit
+    field_type: u64
+    required: false
+  - name: consumer.sample_frequency
+    field_type: u8
+    required: false
+  - name: consumer.max_waiting
+    field_type: i64
+    required: false
+  - name: consumer.max_ack_pending
+    field_type: i64
+    required: false
+  - name: consumer.headers_only
+    field_type: bool
+    required: false
+  - name: consumer.max_batch
+    field_type: i64
+    required: false
+  - name: consumer.max_bytes
+    field_type: i64
+    required: false
+  - name: consumer.max_expires
+    field_type: Duration
+    required: false
+  - name: consumer.inactive_threshold
+    field_type: Duration
+    required: false
+  - name: consumer.num.replicas
+    field_type: usize
+    required: false
+    alias:
+    - consumer.num_replicas
+  - name: consumer.memory_storage
+    field_type: bool
+    required: false
+  - name: consumer.backoff
+    field_type: Vec<Duration>
+    required: false
   - name: scan.startup.mode
     field_type: String
     required: false
