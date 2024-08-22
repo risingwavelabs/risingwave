@@ -446,19 +446,17 @@ impl HummockManager {
                     .iter()
                     .map(|id| {
                         let stat = sst.table_stats.get(id).unwrap();
-                        stat.compressed_size_in_sstable
+                        stat.total_compressed_size
                     })
                     .sum();
 
-                let mut branch_sst = split_sst(
+                let branch_sst = split_sst(
                     &mut sst.sst_info,
                     &mut new_sst_id,
                     origin_sst_size - new_sst_size,
                     new_sst_size,
+                    match_ids,
                 );
-
-                // FIXME(li0k): We would change table_ids inside the `split_sst` function
-                branch_sst.table_ids = match_ids;
 
                 commit_sstables
                     .entry(group_id)

@@ -1018,6 +1018,7 @@ fn split_sst_info_for_level(
                 new_sst_id,
                 sst_info.file_size / 2,
                 sst_info.file_size / 2,
+                member_table_ids.iter().cloned().collect_vec(),
             );
             insert_table_infos.push(branch_sst);
         }
@@ -1337,6 +1338,7 @@ pub fn split_sst(
     new_sst_id: &mut u64,
     old_sst_size: u64,
     new_sst_size: u64,
+    new_sst_table_ids: Vec<u32>,
 ) -> SstableInfo {
     let mut branch_table_info = sst_info.clone();
     branch_table_info.sst_id = *new_sst_id;
@@ -1344,6 +1346,21 @@ pub fn split_sst(
 
     sst_info.sst_id = *new_sst_id + 1;
     sst_info.file_size = old_sst_size;
+
+    {
+        // related github.com/risingwavelabs/risingwave/pull/17898/
+        // This is a temporary implementation that will update `table_ids`` based on the new split rule after PR 17898
+
+        let set1: HashSet<_> = sst_info.table_ids.iter().cloned().collect();
+        let set2: HashSet<_> = new_sst_table_ids.iter().cloned().collect();
+        let intersection: Vec<_> = set1.intersection(&set2).cloned().collect();
+
+        // Update table_ids
+        branch_table_info.table_ids = intersection;
+        sst_info
+            .table_ids
+            .retain(|table_id| !branch_table_info.table_ids.contains(table_id));
+    }
 
     *new_sst_id += 1;
 

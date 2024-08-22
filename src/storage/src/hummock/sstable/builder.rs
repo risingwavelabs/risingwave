@@ -205,8 +205,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 while iter.is_valid() {
                     let value = HummockValue::from_slice(iter.value()).unwrap_or_else(|_| {
                         panic!(
-                            "decode failed for fast compact sst_id {} block_idx {} last_table_id {:?}",
-                            self.sstable_id, self.block_metas.len(), self.last_table_id
+                            "decode failed for fast compact sst_id {} block_idx {} last_table_id {:?} table_id {}",
+                            self.sstable_id, self.block_metas.len(), self.last_table_id, table_id
                         )
                     });
                     self.add_impl(iter.key(), value, false).await?;
@@ -220,23 +220,17 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         assert_eq!(
             meta.len as usize,
             buf.len(),
-            "meta {} buf {} last_table_id {:?}",
+            "meta {} buf {} last_table_id {:?} table_id {}",
             meta.len,
             buf.len(),
-            self.last_table_id
+            self.last_table_id,
+            table_id
         );
         meta.offset = self.writer.data_len() as u32;
         self.block_metas.push(meta);
         self.filter_builder.add_raw_data(filter_data);
         let block_meta = self.block_metas.last_mut().unwrap();
         self.writer.write_block_bytes(buf, block_meta).await?;
-
-        self.last_table_stats.compressed_size_in_sstable = self
-            .block_metas
-            .iter()
-            .filter(|block_meta| block_meta.table_id().table_id() == self.last_table_id.unwrap())
-            .map(|block_meta| block_meta.len as u64)
-            .sum::<u64>();
 
         if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
             self.table_ids.insert(table_id);
@@ -310,15 +304,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 self.build_block().await?;
             }
 
-            self.last_table_stats.compressed_size_in_sstable = self
-                .block_metas
-                .iter()
-                .filter(|block_meta| {
-                    block_meta.table_id().table_id() == self.last_table_id.unwrap()
-                })
-                .map(|block_meta| block_meta.len as u64)
-                .sum::<u64>();
-
             self.table_ids.insert(table_id);
             self.finalize_last_table_stats();
             self.last_table_id = Some(table_id);
@@ -388,13 +373,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         };
         let largest_key = self.last_full_key.clone();
         self.build_block().await?;
-
-        self.last_table_stats.compressed_size_in_sstable = self
-            .block_metas
-            .iter()
-            .filter(|block_meta| block_meta.table_id().table_id() == self.last_table_id.unwrap())
-            .map(|block_meta| block_meta.len as u64)
-            .sum::<u64>();
 
         self.finalize_last_table_stats();
         let right_exclusive = false;
@@ -636,6 +614,13 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         if self.table_ids.is_empty() || self.last_table_id.is_none() {
             return;
         }
+
+        self.last_table_stats.total_compressed_size = self
+            .block_metas
+            .iter()
+            .filter(|block_meta| block_meta.table_id().table_id() == self.last_table_id.unwrap())
+            .map(|block_meta| block_meta.len as u64)
+            .sum::<u64>();
 
         self.table_stats.insert(
             self.last_table_id.unwrap(),
