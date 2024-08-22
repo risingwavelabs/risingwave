@@ -143,9 +143,11 @@ impl CatalogController {
             .columns([table::Column::TableId, table::Column::Definition])
             .columns([source::Column::SourceId])
             .filter(
-                table::Column::CdcTableId
-                    .is_null()
-                    .or(table::Column::CdcTableId.eq("")),
+                table::Column::TableType.eq(TableType::Table).and(
+                    table::Column::CdcTableId
+                        .is_null()
+                        .or(table::Column::CdcTableId.eq("")),
+                ),
             )
             .into_tuple()
             .all(&txn)

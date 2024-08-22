@@ -1153,10 +1153,11 @@ pub fn extract_external_table_name_from_definition(table_definition: &str) -> Op
         .unwrap()
         .try_into()
         .unwrap();
-    let SqlStatement::CreateTable { cdc_table_info, .. } = &mut definition else {
-        panic!("unexpected statement: {:?}", definition);
-    };
-    cdc_table_info
-        .clone()
-        .map(|cdc_table_info| cdc_table_info.external_table_name)
+    if let SqlStatement::CreateTable { cdc_table_info, .. } = &mut definition {
+        cdc_table_info
+            .clone()
+            .map(|cdc_table_info| cdc_table_info.external_table_name)
+    } else {
+        None
+    }
 }

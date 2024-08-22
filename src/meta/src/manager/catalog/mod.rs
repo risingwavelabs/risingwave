@@ -370,6 +370,7 @@ impl CatalogManager {
             .filter(|(_, table)| {
                 if let Some(rel_id) = table.dependent_relations.first()
                     && sources.contains_key(rel_id)
+                    && table.table_type == TableType::Table as i32
                     && table.cdc_table_id.is_none()
                 {
                     true
