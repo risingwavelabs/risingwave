@@ -153,11 +153,12 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        info!(table_and_source_id = ?table_and_source_id, "cdc table with empty cdc_table_id");
         // return directly if the result set is empty.
         if table_and_source_id.is_empty() {
             return Ok(());
         }
+
+        info!(table_and_source_id = ?table_and_source_id, "cdc table with empty cdc_table_id");
 
         let mut cdc_table_ids = HashMap::new();
         for (table_id, definition, source_id) in table_and_source_id {
