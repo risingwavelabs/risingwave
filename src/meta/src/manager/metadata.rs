@@ -567,7 +567,7 @@ impl MetadataManager {
 
     pub async fn get_table_catalog_by_cdc_table_id(
         &self,
-        cdc_table_id: String,
+        cdc_table_id: &String,
     ) -> MetaResult<Vec<PbTable>> {
         match &self {
             MetadataManager::V1(mgr) => Ok(mgr
