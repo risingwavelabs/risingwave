@@ -10245,6 +10245,7 @@ dependencies = [
  "risingwave_error",
  "risingwave_license",
  "risingwave_pb",
+ "risingwave_telemetry_event",
  "rust_decimal",
  "rusty-fork",
  "rw_iter_util",
@@ -11724,6 +11725,21 @@ dependencies = [
  "tracing",
  "tracing-test",
  "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_telemetry_event"
+version = "2.1.0-alpha"
+dependencies = [
+ "jsonbb",
+ "madsim-tokio",
+ "prost 0.13.1",
+ "reqwest 0.12.4",
+ "risingwave_pb",
+ "thiserror",
+ "thiserror-ext",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
