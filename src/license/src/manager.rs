@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::num::NonZeroU64;
 use std::sync::{LazyLock, RwLock};
 
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
@@ -76,6 +77,9 @@ pub(super) struct License {
     /// Tier of the license.
     pub tier: Tier,
 
+    /// Maximum number of compute-node CPU cores allowed to use. Typically used for the paid tier.
+    pub cpu_core_limit: Option<NonZeroU64>,
+
     /// Expiration time in seconds since UNIX epoch.
     ///
     /// See <https://tools.ietf.org/html/rfc7519#section-4.1.4>.
@@ -91,6 +95,7 @@ impl Default for License {
             sub: "default".to_owned(),
             tier: Tier::Free,
             iss: Issuer::Prod,
+            cpu_core_limit: None,
             exp: u64::MAX,
         }
     }
@@ -117,7 +122,7 @@ static PUBLIC_KEY: LazyLock<DecodingKey> = LazyLock::new(|| {
 
 impl LicenseManager {
     /// Create a new license manager with the default license.
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             inner: RwLock::new(Inner {
                 license: Ok(License::default()),
@@ -208,6 +213,7 @@ mod tests {
                     sub: "rw-test",
                     iss: Test,
                     tier: Paid,
+                    cpu_core_limit: None,
                     exp: 9999999999,
                 }
             "#]],
@@ -228,6 +234,7 @@ mod tests {
                     sub: "rw-test",
                     iss: Test,
                     tier: Free,
+                    cpu_core_limit: None,
                     exp: 9999999999,
                 }
             "#]],
@@ -244,6 +251,7 @@ mod tests {
                     sub: "default",
                     iss: Prod,
                     tier: Free,
+                    cpu_core_limit: None,
                     exp: 18446744073709551615,
                 }
             "#]],
