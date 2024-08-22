@@ -204,12 +204,13 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
     /// Convert this vnode mapping to a mapping from items to bitmaps, where each bitmap represents
     /// the vnodes mapped to the item.
     pub fn to_bitmaps(&self) -> HashMap<T::Item, Bitmap> {
+        let len = self.len();
         let mut vnode_bitmaps = HashMap::new();
 
         for (vnode, item) in self.iter_with_vnode() {
             vnode_bitmaps
                 .entry(item)
-                .or_insert_with(|| BitmapBuilder::zeroed(VirtualNode::count()))
+                .or_insert_with(|| BitmapBuilder::zeroed(len))
                 .set(vnode.to_index(), true);
         }
 
@@ -222,10 +223,11 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
     /// Create a vnode mapping from the given mapping from items to bitmaps, where each bitmap
     /// represents the vnodes mapped to the item.
     pub fn from_bitmaps(bitmaps: &HashMap<T::Item, Bitmap>) -> Self {
-        let mut items = vec![None; VirtualNode::count()];
+        let len = bitmaps.values().next().expect("no bitmap").len();
+        let mut items = vec![None; len];
 
         for (&item, bitmap) in bitmaps {
-            assert_eq!(bitmap.len(), VirtualNode::count());
+            assert_eq!(bitmap.len(), len);
             for idx in bitmap.iter_ones() {
                 if let Some(prev) = items[idx].replace(item) {
                     panic!("mapping at index `{idx}` is set to both `{prev:?}` and `{item:?}`");
@@ -243,7 +245,6 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
 
     /// Create a vnode mapping from the expanded slice of items with length [`VirtualNode::count`].
     pub fn from_expanded(items: &[T::Item]) -> Self {
-        assert_eq!(items.len(), VirtualNode::count());
         let (original_indices, data) = compress_data(items);
         Self {
             original_indices,
