@@ -68,7 +68,6 @@ macro_rules! reject_syntax {
         }
     };
 }
-pub(self) use reject_syntax;
 
 impl Binder {
     pub(in crate::binder) fn bind_function(
@@ -537,12 +536,12 @@ impl Binder {
             return bind_result;
         }
 
-        return Err(ErrorCode::InvalidInputSyntax(
+        Err(ErrorCode::InvalidInputSyntax(
             "failed to parse the input query and extract the udf expression,
                 please recheck the syntax"
                 .to_string(),
         )
-        .into());
+        .into())
     }
 
     pub(in crate::binder) fn bind_function_expr_arg(

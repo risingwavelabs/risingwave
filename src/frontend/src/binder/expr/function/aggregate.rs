@@ -140,7 +140,7 @@ impl Binder {
         match (kind, direct_args.len(), args.as_mut_slice()) {
             (AggKind::Builtin(PbAggKind::PercentileCont | PbAggKind::PercentileDisc), 1, [arg]) => {
                 let fraction = &mut direct_args[0];
-                decimal_to_float64(fraction, &kind)?;
+                decimal_to_float64(fraction, kind)?;
                 if matches!(&kind, AggKind::Builtin(PbAggKind::PercentileCont)) {
                     arg.cast_implicit_mut(DataType::Float64).map_err(|_| {
                         ErrorCode::InvalidInputSyntax(format!(
@@ -153,11 +153,11 @@ impl Binder {
             (AggKind::Builtin(PbAggKind::Mode), 0, [_arg]) => {}
             (AggKind::Builtin(PbAggKind::ApproxPercentile), 1..=2, [_percentile_col]) => {
                 let percentile = &mut direct_args[0];
-                decimal_to_float64(percentile, &kind)?;
+                decimal_to_float64(percentile, kind)?;
                 match direct_args.len() {
                     2 => {
                         let relative_error = &mut direct_args[1];
-                        decimal_to_float64(relative_error, &kind)?;
+                        decimal_to_float64(relative_error, kind)?;
                     }
                     1 => {
                         let relative_error: ExprImpl = Literal::new(
