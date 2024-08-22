@@ -93,21 +93,12 @@ async fn recovery_test_inner(is_decouple: bool) -> Result<()> {
     Ok(())
 }
 
-fn init_logger() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .with_ansi(false)
-        .try_init();
-}
-
 #[tokio::test]
 async fn test_sink_recovery() -> Result<()> {
-    init_logger();
     recovery_test_inner(false).await
 }
 
 #[tokio::test]
 async fn test_sink_decouple_recovery() -> Result<()> {
-    init_logger();
     recovery_test_inner(true).await
 }

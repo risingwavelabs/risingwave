@@ -73,7 +73,6 @@ const BEFORE: &str = "before";
 const AFTER: &str = "after";
 
 const UPSTREAM_DDL: &str = "ddl";
-const CDC_SOURCE_NAME_PREFIX: &str = "RW_CDC_";
 const SOURCE: &str = "source";
 const SOURCE_TS_MS: &str = "ts_ms";
 const SOURCE_DB: &str = "db";
@@ -156,8 +155,12 @@ macro_rules! jsonb_access_field {
     };
 }
 
+/// Parse the schema change message from Debezium.
+/// The layout of MySQL schema change message can refer to
+/// https://debezium.io/documentation/reference/2.6/connectors/mysql.html#mysql-schema-change-topic
 pub fn parse_schema_change(
     accessor: &impl Access,
+    source_id: u32,
     connector_props: &ConnectorProperties,
 ) -> AccessResult<SchemaChangeEnvelope> {
     let mut schema_changes = vec![];
@@ -168,16 +171,6 @@ pub fn parse_schema_change(
         .unwrap()
         .as_utf8()
         .to_string();
-
-    let source_id = if let Some(ScalarRefImpl::Jsonb(source_field)) =
-        accessor.access(&[SOURCE], &DataType::Jsonb)?.to_datum_ref()
-    {
-        let name: String = jsonb_access_field!(source_field, "name", string);
-        let id = name.strip_prefix(CDC_SOURCE_NAME_PREFIX).unwrap_or("0");
-        id.parse::<u32>().unwrap_or_default()
-    } else {
-        0
-    };
 
     if let Some(ScalarRefImpl::List(table_changes)) = accessor
         .access(&[TABLE_CHANGES], &DataType::List(Box::new(DataType::Jsonb)))?

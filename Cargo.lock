@@ -11159,7 +11159,6 @@ dependencies = [
  "prometheus-http-query",
  "prost 0.13.1",
  "rand",
- "regex",
  "risingwave_backup",
  "risingwave_common",
  "risingwave_common_heap_profiling",
