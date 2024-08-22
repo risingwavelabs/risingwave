@@ -15,7 +15,7 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use anyhow::Context as _;
+use anyhow::{anyhow, Context as _};
 use futures::{pin_mut, Stream};
 use futures_async_stream::try_stream;
 use pin_project::pin_project;
@@ -150,6 +150,7 @@ impl RemoteInput {
         metrics: Arc<StreamingMetrics>,
         batched_permits_limit: usize,
     ) {
+        let self_actor_id = up_down_ids.1;
         let client = client_pool.get_by_addr(upstream_addr).await?;
         let (stream, permits_tx) = client
             .get_stream(up_down_ids.0, up_down_ids.1, up_down_frag.0, up_down_frag.1)
@@ -162,6 +163,7 @@ impl RemoteInput {
         let span: await_tree::Span = format!("RemoteInput (actor {up_actor_id})").into();
 
         let mut batched_permits_accumulated = 0;
+        let mut mutation_subscriber = None;
 
         pin_mut!(stream);
         while let Some(data_res) = stream.next().verbose_instrument_await(span.clone()).await {
@@ -206,10 +208,22 @@ impl RemoteInput {
                                 barrier.mutation.is_none(),
                                 "Mutation should be erased in remote side"
                             );
-                            let mutation = local_barrier_manager
-                                .read_barrier_mutation(barrier)
+                            let mutation_subscriber =
+                                mutation_subscriber.get_or_insert_with(|| {
+                                    local_barrier_manager
+                                        .subscribe_barrier_mutation(self_actor_id, barrier)
+                                });
+
+                            let mutation = mutation_subscriber
+                                .recv()
                                 .await
-                                .context("Read barrier mutation error")?;
+                                .ok_or_else(|| {
+                                    anyhow!("failed to receive mutation of barrier {:?}", barrier)
+                                })
+                                .map(|(prev_epoch, mutation)| {
+                                    assert_eq!(prev_epoch, barrier.epoch.prev);
+                                    mutation
+                                })?;
                             barrier.mutation = mutation;
                         }
                     }

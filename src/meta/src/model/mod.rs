@@ -23,8 +23,8 @@ mod user;
 use std::collections::btree_map::{Entry, VacantEntry};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
-use std::marker::PhantomData;
 use std::io::{Read, Write};
+use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
 use anyhow::Context as _;
