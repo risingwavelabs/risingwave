@@ -46,7 +46,6 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
-use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;

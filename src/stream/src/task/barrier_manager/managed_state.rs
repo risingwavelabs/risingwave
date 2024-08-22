@@ -14,7 +14,7 @@
 
 use std::assert_matches::assert_matches;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
 use std::mem::replace;
 use std::sync::Arc;
@@ -135,10 +135,8 @@ fn sync_epoch(
 
 #[derive(Debug)]
 pub(super) struct ManagedBarrierStateDebugInfo<'a> {
-    #[expect(dead_code)]
     epoch_barrier_state_map: &'a BTreeMap<u64, BarrierState>,
 
-    #[expect(dead_code)]
     create_mview_progress: &'a HashMap<u64, HashMap<ActorId, BackfillState>>,
 }
 
@@ -149,7 +147,11 @@ impl Display for ManagedBarrierStateDebugInfo<'_> {
             write!(f, "> Epoch {}: ", epoch)?;
             match &barrier_state.inner {
                 ManagedBarrierStateInner::Issued(state) => {
-                    write!(f, "Issued [{:?}]. Remaining actors: [", state.kind)?;
+                    write!(
+                        f,
+                        "Issued [{:?}]. Remaining actors: [",
+                        state.remaining_actors
+                    )?;
                     let mut is_prev_epoch_issued = false;
                     if prev_epoch != 0 {
                         let bs = &self.epoch_barrier_state_map[&prev_epoch];
@@ -196,7 +198,7 @@ impl Display for ManagedBarrierStateDebugInfo<'_> {
             for (epoch, progress) in self.create_mview_progress {
                 write!(f, "> Epoch {}:", epoch)?;
                 for (actor_id, state) in progress {
-                    write!(f, ">> Actor {}: {}, ", actor_id, state)?;
+                    write!(f, ">> Actor {}: {:?}, ", actor_id, state)?;
                 }
             }
         }
