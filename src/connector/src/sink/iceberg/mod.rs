@@ -197,7 +197,7 @@ impl IcebergConfig {
         Ok(config)
     }
 
-    fn catalog_type(&self) -> &str {
+    pub fn catalog_type(&self) -> &str {
         self.catalog_type.as_deref().unwrap_or("storage")
     }
 
@@ -724,6 +724,11 @@ impl Sink for IcebergSink {
     }
 
     async fn validate(&self) -> Result<()> {
+        if "glue".eq_ignore_ascii_case(self.config.catalog_type()) {
+            risingwave_common::license::Feature::IcebergSinkWithGlue
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
         let _ = self.create_and_validate_table().await?;
         Ok(())
     }
