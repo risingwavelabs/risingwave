@@ -605,16 +605,6 @@ impl HummockManager {
         drop(compaction_guard);
         self.report_compact_tasks(canceled_tasks).await?;
 
-        // Don't trigger compactions if we enable deterministic compaction
-        if !self.env.opts.compaction_deterministic_test {
-            // commit_epoch may contains SSTs from any compaction group
-            self.try_send_compaction_request(parent_group_id, compact_task::TaskType::SpaceReclaim);
-            self.try_send_compaction_request(
-                target_compaction_group_id,
-                compact_task::TaskType::SpaceReclaim,
-            );
-        }
-
         self.metrics
             .move_state_table_count
             .with_label_values(&[&parent_group_id.to_string()])
