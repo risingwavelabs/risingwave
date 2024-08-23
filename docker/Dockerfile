@@ -21,7 +21,7 @@ ENV PATH $NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
 SHELL ["/bin/bash", "-c"]
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
-ENV PATH /root/.cargo/bin/:$PATH
+ENV PATH /root/.cargo/bin:$PATH
 ENV CARGO_INCREMENTAL=0
 
 COPY rust-toolchain rust-toolchain
@@ -34,6 +34,8 @@ RUN rustup self update \
   && rustup target add wasm32-wasi
 
 RUN cargo install flamegraph
+RUN cargo install addr2line --features bin --bin addr2line
+
 # TODO: cargo-chef doesn't work well now, because we update Cargo.lock very often.
 # We may consider sccache instead.
 
@@ -137,6 +139,7 @@ COPY --from=rust-builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwa
 COPY --from=java-builder /risingwave/bin/connector-node /risingwave/bin/connector-node
 COPY --from=rust-builder /risingwave/bin/jeprof /usr/local/bin/jeprof
 COPY --from=rust-base /root/.cargo/bin/flamegraph /usr/local/bin/flamegraph
+COPY --from=rust-base /root/.cargo/bin/addr2line /usr/local/bin/addr2line
 
 # Set default playground mode to docker-playground profile
 ENV PLAYGROUND_PROFILE docker-playground
