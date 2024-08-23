@@ -80,7 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".stream_plan.SourceBackfillNode",
         ".stream_plan.StreamSource",
         ".batch_plan.SourceNode",
-        ".batch_plan.IcebergSourceNode",
+        ".batch_plan.IcebergScanNode",
     ];
 
     // Build protobuf structs.

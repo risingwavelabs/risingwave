@@ -554,12 +554,10 @@ impl LocalQueryExecution {
                     node_body: Some(node_body),
                 })
             }
-            PlanNodeType::BatchSource
-            | PlanNodeType::BatchKafkaScan
-            | PlanNodeType::BatchIcebergScan => {
-                let node_body = execution_plan_node.node.clone();
-                match node_body {
-                    NodeBody::Source(mut source_node) => {
+            PlanNodeType::BatchSource | PlanNodeType::BatchKafkaScan => {
+                let mut node_body = execution_plan_node.node.clone();
+                match &mut node_body {
+                    NodeBody::Source(ref mut source_node) => {
                         if let Some(partition) = partition {
                             let partition = partition
                                 .into_source()
@@ -569,13 +567,20 @@ impl LocalQueryExecution {
                                 .map(|split| split.encode_to_bytes().into())
                                 .collect_vec();
                         }
-                        Ok(PbPlanNode {
-                            children: vec![],
-                            identity,
-                            node_body: Some(NodeBody::Source(source_node)),
-                        })
                     }
-                    NodeBody::IcebergSource(mut iceberg_source_node) => {
+                    _ => unreachable!(),
+                }
+
+                Ok(PbPlanNode {
+                    children: vec![],
+                    identity,
+                    node_body: Some(node_body),
+                })
+            }
+            PlanNodeType::BatchIcebergScan => {
+                let mut node_body = execution_plan_node.node.clone();
+                match &mut node_body {
+                    NodeBody::IcebergScan(ref mut iceberg_source_node) => {
                         if let Some(partition) = partition {
                             let partition = partition
                                 .into_source()
@@ -585,15 +590,15 @@ impl LocalQueryExecution {
                                 .map(|split| split.encode_to_bytes().into())
                                 .collect_vec();
                         }
-
-                        Ok(PbPlanNode {
-                            children: vec![],
-                            identity,
-                            node_body: Some(NodeBody::IcebergSource(iceberg_source_node)),
-                        })
                     }
                     _ => unreachable!(),
                 }
+
+                Ok(PbPlanNode {
+                    children: vec![],
+                    identity,
+                    node_body: Some(node_body),
+                })
             }
             PlanNodeType::BatchLookupJoin => {
                 let mut node_body = execution_plan_node.node.clone();
