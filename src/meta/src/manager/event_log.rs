@@ -21,7 +21,7 @@ use risingwave_pb::meta::event_log::{Event as PbEvent, Event};
 use risingwave_pb::meta::EventLog as PbEventLog;
 use tokio::task::JoinHandle;
 
-pub type EventLogMangerRef = Arc<EventLogManger>;
+pub type EventLogManagerRef = Arc<EventLogManger>;
 type EventLogSender = tokio::sync::mpsc::Sender<EventLog>;
 type ShutdownSender = tokio::sync::oneshot::Sender<()>;
 
@@ -171,6 +171,7 @@ impl From<&EventLog> for ChannelId {
             Event::InjectBarrierFail(_) => 5,
             Event::CollectBarrierFail(_) => 6,
             Event::WorkerNodePanic(_) => 7,
+            Event::AutoSchemaChangeFail(_) => 8,
         }
     }
 }

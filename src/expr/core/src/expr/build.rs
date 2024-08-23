@@ -30,7 +30,7 @@ use crate::expr::{
     BoxedExpression, Expression, ExpressionBoxExt, InputRefExpression, LiteralExpression,
 };
 use crate::sig::FUNCTION_REGISTRY;
-use crate::{bail, ExprError, Result};
+use crate::{bail, Result};
 
 /// Build an expression from protobuf.
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
@@ -188,16 +188,7 @@ pub fn build_func(
     children: Vec<BoxedExpression>,
 ) -> Result<BoxedExpression> {
     let args = children.iter().map(|c| c.return_type()).collect_vec();
-    let desc = FUNCTION_REGISTRY
-        .get(func, &args, &ret_type)
-        .ok_or_else(|| {
-            ExprError::UnsupportedFunction(format!(
-                "{}({}) -> {}",
-                func.as_str_name().to_ascii_lowercase(),
-                args.iter().format(", "),
-                ret_type,
-            ))
-        })?;
+    let desc = FUNCTION_REGISTRY.get(func, &args, &ret_type)?;
     desc.build_scalar(ret_type, children)
 }
 

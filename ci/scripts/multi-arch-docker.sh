@@ -25,6 +25,8 @@ if [ "${SKIP_TARGET_AARCH64:-false}" != "true" ]; then
   arches+=("aarch64")
 fi
 
+echo "--- arches: ${arches[*]}"
+
 # push images to gchr
 function pushGchr() {
   GHCRTAG="${ghcraddr}:$1"

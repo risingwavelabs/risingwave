@@ -816,8 +816,6 @@ mod tests {
                                                 order_by: [],
                                                 ignore_nulls: false,
                                             },
-                                            over: None,
-                                            filter: None,
                                             within_group: Some(
                                                 OrderByExpr {
                                                     expr: Identifier(
@@ -830,6 +828,8 @@ mod tests {
                                                     nulls_first: None,
                                                 },
                                             ),
+                                            filter: None,
+                                            over: None,
                                         },
                                     ),
                                 ),

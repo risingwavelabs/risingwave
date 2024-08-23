@@ -498,6 +498,7 @@ mod test {
                     frontend_opts: Some(
                         FrontendOpts {
                             listen_addr: "0.0.0.0:4566",
+                            tcp_keepalive_idle_secs: 300,
                             advertise_addr: None,
                             meta_addr: List(
                                 [

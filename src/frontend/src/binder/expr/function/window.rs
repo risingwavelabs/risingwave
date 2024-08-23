@@ -57,7 +57,9 @@ impl Binder {
     pub(super) fn bind_window_function(
         &mut self,
         kind: WindowFuncKind,
-        inputs: Vec<ExprImpl>,
+        args: Vec<ExprImpl>,
+        ignore_nulls: bool,
+        filter: Option<Box<ast::Expr>>,
         WindowSpec {
             partition_by,
             order_by,
@@ -65,6 +67,15 @@ impl Binder {
         }: WindowSpec,
     ) -> Result<ExprImpl> {
         self.ensure_window_function_allowed()?;
+
+        if ignore_nulls {
+            bail_not_implemented!("`IGNORE NULLS` is not supported yet");
+        }
+
+        if filter.is_some() {
+            bail_not_implemented!("`FILTER` is not supported yet");
+        }
+
         let partition_by = partition_by
             .into_iter()
             .map(|arg| self.bind_expr_inner(arg))
@@ -181,7 +192,7 @@ impl Binder {
         } else {
             None
         };
-        Ok(WindowFunction::new(kind, partition_by, order_by, inputs, frame)?.into())
+        Ok(WindowFunction::new(kind, partition_by, order_by, args, frame)?.into())
     }
 
     fn bind_window_frame_usize_bounds(

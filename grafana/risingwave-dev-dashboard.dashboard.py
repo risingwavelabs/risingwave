@@ -283,7 +283,7 @@ def section_compaction(outer_panels):
                                 f"histogram_quantile({quantile}, sum(rate({metric('storage_compact_task_size_bucket')}[$__rate_interval])) by (le, group, type))",
                                 f"p{legend}" + " - cg{{group}}@{{type}}",
                             ),
-                            [90, "max"],
+                            [50, 90, "max"],
                         ),
                     ],
                 ),
@@ -570,14 +570,15 @@ def section_compaction(outer_panels):
 
 def section_object_storage(outer_panels):
     panels = outer_panels.sub_panel()
-    operation_rate_blacklist = (
-        "type!~'streaming_upload_write_bytes|streaming_read_read_bytes|streaming_read'"
-    )
-    operation_duration_blacklist = "type!~'streaming_upload_write_bytes|streaming_read'"
-    write_op_filter = "type=~'upload|delete'"
-    read_op_filter = "type=~'read|readv|list|metadata'"
-    s3_request_cost_op1 = "type=~'read|streaming_read_start|streaming_read_init'"
-    s3_request_cost_op2 = "type=~'upload|streaming_upload|streaming_upload_start|s3_upload_part|streaming_upload_finish|list'"
+    operation_rate_blacklist = "type!~'streaming_read'"
+    operation_duration_blacklist = "type!~'streaming_read'"
+    put_op_types = ["upload", "streaming_upload"]
+    post_op_types = ["streaming_upload_init", "streaming_upload_finish", "delete_objects"]
+    list_op_types = ["list"]
+    delete_op_types = ["delete"]
+    read_op_types = ["read", "streaming_read_init", "metadata"]
+    write_op_filter = f"type=~'({'|'.join(put_op_types + post_op_types + list_op_types + delete_op_types)})'"
+    read_op_filter = f"type=~'({'|'.join(read_op_types)})'"
     return [
         outer_panels.row_collapsed(
             "Object Storage",
@@ -685,11 +686,11 @@ def section_object_storage(outer_panels):
                             True,
                         ),
                         panels.target(
-                            f"sum({metric('object_store_operation_latency_count', s3_request_cost_op1)}) * 0.0004 / 1000",
+                            f"sum({metric('object_store_operation_latency_count', read_op_filter)}) * 0.0004 / 1000",
                             "GET, SELECT, and all other Requests Cost",
                         ),
                         panels.target(
-                            f"sum({metric('object_store_operation_latency_count', s3_request_cost_op2)}) * 0.005 / 1000",
+                            f"sum({metric('object_store_operation_latency_count', write_op_filter)}) * 0.005 / 1000",
                             "PUT, COPY, POST, LIST Requests Cost",
                         ),
                     ],
