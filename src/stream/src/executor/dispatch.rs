@@ -50,7 +50,6 @@ pub struct DispatchExecutor {
 struct DispatcherWithMetrics {
     dispatcher: DispatcherImpl,
     actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter<3>,
-    fragment_output_buffer_blocking_duration_ns: LabelGuardedIntCounter<2>,
     dispatcher_count: LabelGuardedIntGauge<2>,
 }
 
@@ -58,7 +57,6 @@ impl DispatcherWithMetrics {
     pub fn record_output_buffer_blocking_duration(&self, duration: Duration) {
         let ns = duration.as_nanos() as u64;
         self.actor_output_buffer_blocking_duration_ns.inc_by(ns);
-        self.fragment_output_buffer_blocking_duration_ns.inc_by(ns);
     }
 }
 
@@ -107,15 +105,8 @@ impl DispatchExecutorMetrics {
             actor_output_buffer_blocking_duration_ns: self
                 .metrics
                 .actor_output_buffer_blocking_duration_ns
-                .with_guarded_label_values(&[
+                .with_label_values(&[
                     &self.actor_id_str,
-                    &self.fragment_id_str,
-                    dispatcher.dispatcher_id_str(),
-                ]),
-            fragment_output_buffer_blocking_duration_ns: self
-                .metrics
-                .fragment_output_buffer_blocking_duration_ns
-                .with_guarded_label_values(&[
                     &self.fragment_id_str,
                     dispatcher.dispatcher_id_str(),
                 ]),

@@ -83,8 +83,7 @@ pub struct StreamingMetrics {
     pub merge_barrier_align_duration: RelabeledGuardedHistogramVec<2>,
 
     // Backpressure
-    pub actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
-    pub fragment_output_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<2>,
+    pub actor_output_buffer_blocking_duration_ns: RelabeledGuardedIntCounterVec<3>,
     actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
     pub dispatcher_count: LabelGuardedIntGaugeVec<2>,
 
@@ -289,15 +288,13 @@ impl StreamingMetrics {
                 registry
             )
             .unwrap();
-
-        let fragment_output_buffer_blocking_duration_ns =
-            register_guarded_int_counter_vec_with_registry!(
-                "stream_fragment_output_buffer_blocking_duration_ns",
-                "Total blocking duration (ns) of output buffer",
-                &["fragment_id", "downstream_fragment_id"],
-                registry
-            )
-            .unwrap();
+        let actor_output_buffer_blocking_duration_ns =
+            RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
+                MetricLevel::Debug,
+                actor_output_buffer_blocking_duration_ns,
+                level,
+                1, // mask the first label `actor_id` if the level is less verbose than `Debug`
+            );
 
         let actor_input_buffer_blocking_duration_ns =
             register_guarded_int_counter_vec_with_registry!(
@@ -439,7 +436,6 @@ impl StreamingMetrics {
             registry
         )
         .unwrap();
-
         let merge_barrier_align_duration =
             RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
                 MetricLevel::Debug,
@@ -495,7 +491,6 @@ impl StreamingMetrics {
             registry
         )
         .unwrap();
-
         let barrier_align_duration = RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
             MetricLevel::Debug,
             barrier_align_duration,
@@ -523,7 +518,6 @@ impl StreamingMetrics {
             registry
         )
         .unwrap();
-
         let join_matched_join_keys = RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
             MetricLevel::Debug,
             join_matched_join_keys,
@@ -1156,7 +1150,6 @@ impl StreamingMetrics {
             exchange_frag_recv_size,
             merge_barrier_align_duration,
             actor_output_buffer_blocking_duration_ns,
-            fragment_output_buffer_blocking_duration_ns,
             actor_input_buffer_blocking_duration_ns,
             dispatcher_count,
             join_lookup_miss_count,
