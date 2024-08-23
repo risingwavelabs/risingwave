@@ -19,7 +19,7 @@ use opendal::services::Hdfs;
 use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
-use super::{EngineType, OpendalObjectStore};
+use super::{MediaType, OpendalObjectStore};
 // use crate::object::opendal_engine::ATOMIC_WRITE_DIR;
 use crate::object::ObjectResult;
 
@@ -53,7 +53,7 @@ impl OpendalObjectStore {
             .finish();
         Ok(Self {
             op,
-            engine_type: EngineType::Hdfs,
+            media_type: MediaType::Hdfs,
             config,
             metrics,
         })

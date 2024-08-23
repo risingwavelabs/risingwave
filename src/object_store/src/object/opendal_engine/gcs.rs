@@ -19,7 +19,7 @@ use opendal::services::Gcs;
 use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
-use super::{EngineType, OpendalObjectStore};
+use super::{MediaType, OpendalObjectStore};
 use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::ObjectResult;
 
@@ -49,7 +49,7 @@ impl OpendalObjectStore {
             .finish();
         Ok(Self {
             op,
-            engine_type: EngineType::Gcs,
+            media_type: MediaType::Gcs,
             config,
             metrics,
         })
