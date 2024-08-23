@@ -77,7 +77,6 @@ pub enum Components {
     ExternalUdf,
     WasmUdf,
     JsUdf,
-    DenoUdf,
     PythonUdf,
 }
 
@@ -103,7 +102,6 @@ impl Components {
             Self::ExternalUdf => "[Build] Enable external UDF",
             Self::WasmUdf => "[Build] Enable Wasm UDF",
             Self::JsUdf => "[Build] Enable JS UDF",
-            Self::DenoUdf => "[Build] Enable Deno UDF",
             Self::PythonUdf => "[Build] Enable Python UDF",
         }
         .into()
@@ -205,7 +203,6 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             Self::ExternalUdf => "Required if you want to support external UDF.",
             Self::WasmUdf => "Required if you want to support WASM UDF.",
             Self::JsUdf => "Required if you want to support JS UDF.",
-            Self::DenoUdf => "Required if you want to support Deno UDF.",
             Self::PythonUdf => "Required if you want to support Python UDF.",
         }
         .into()
@@ -232,7 +229,6 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             "ENABLE_EXTERNAL_UDF" => Some(Self::ExternalUdf),
             "ENABLE_WASM_UDF" => Some(Self::WasmUdf),
             "ENABLE_JS_UDF" => Some(Self::JsUdf),
-            "ENABLE_DENO_UDF" => Some(Self::DenoUdf),
             "ENABLE_PYTHON_UDF" => Some(Self::PythonUdf),
             _ => None,
         }
@@ -259,7 +255,6 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             Self::ExternalUdf => "ENABLE_EXTERNAL_UDF",
             Self::WasmUdf => "ENABLE_WASM_UDF",
             Self::JsUdf => "ENABLE_JS_UDF",
-            Self::DenoUdf => "ENABLE_DENO_UDF",
             Self::PythonUdf => "ENABLE_PYTHON_UDF",
         }
         .into()

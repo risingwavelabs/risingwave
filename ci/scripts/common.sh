@@ -15,6 +15,8 @@ export MCLI_DOWNLOAD_BIN=https://rw-ci-deps-dist.s3.amazonaws.com/mc
 export GCLOUD_DOWNLOAD_TGZ=https://rw-ci-deps-dist.s3.amazonaws.com/google-cloud-cli-475.0.0-linux-x86_64.tar.gz
 export NEXTEST_HIDE_PROGRESS_BAR=true
 export RW_TELEMETRY_TYPE=test
+export RW_SECRET_STORE_PRIVATE_KEY_HEX="0123456789abcdef"
+
 unset LANG
 if [ -n "${BUILDKITE_COMMIT:-}" ]; then
   export GIT_SHA=$BUILDKITE_COMMIT
@@ -95,7 +97,6 @@ function filter_stack_trace() {
   touch tmp
   cat "$1" \
   | sed -E '/  [1-9][0-9]+:/d' \
-  | sed -E '/  [3-9]+:/d' \
   | sed -E '/  at .rustc/d' \
   | sed -E '/  at ...cargo/d' > tmp
   cp tmp "$1"
@@ -112,5 +113,18 @@ get_latest_kafka_version() {
 get_latest_kafka_download_url() {
     local latest_version=$(get_latest_kafka_version)
     local download_url="https://downloads.apache.org/kafka/${latest_version}/kafka_2.13-${latest_version}.tgz"
+    echo "$download_url"
+}
+
+get_latest_cassandra_version() {
+    local versions=$(curl -s https://downloads.apache.org/cassandra/ | grep -Eo 'href="[0-9]+\.[0-9]+\.[0-9]+/"' | grep -Eo "[0-9]+\.[0-9]+\.[0-9]+")
+    # Sort the version numbers and get the latest one
+    local latest_version=$(echo "$versions" | sort -V | tail -n1)
+    echo "$latest_version"
+}
+
+get_latest_cassandra_download_url() {
+    local latest_version=$(get_latest_cassandra_version)
+    local download_url="https://downloads.apache.org/cassandra/${latest_version}/apache-cassandra-${latest_version}-bin.tar.gz"
     echo "$download_url"
 }

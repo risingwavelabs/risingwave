@@ -28,6 +28,7 @@ message AddMutation {
   // We may embed a pause mutation here.
   // TODO: we may allow multiple mutations in a single barrier.
   bool pause = 4;
+  repeated SubscriptionUpstreamInfo subscriptions_to_add = 5;
 }
 
 message StopMutation {
@@ -95,14 +96,14 @@ message CombinedMutation {
   repeated BarrierMutation mutations = 1;
 }
 
-message CreateSubscriptionMutation {
-  uint32 subscription_id = 1;
+message SubscriptionUpstreamInfo {
+  // can either be subscription_id or table_id of creating TableFragments
+  uint32 subscriber_id = 1;
   uint32 upstream_mv_table_id = 2;
 }
 
-message DropSubscriptionMutation {
-  uint32 subscription_id = 1;
-  uint32 upstream_mv_table_id = 2;
+message DropSubscriptionsMutation {
+  repeated SubscriptionUpstreamInfo info = 1;
 }
 
 message BarrierMutation {
@@ -122,10 +123,8 @@ message BarrierMutation {
     ResumeMutation resume = 8;
     // Throttle specific source exec or chain exec.
     ThrottleMutation throttle = 10;
-    // Create subscription on mv
-    CreateSubscriptionMutation create_subscription = 11;
     // Drop subscription on mv
-    DropSubscriptionMutation drop_subscription = 12;
+    DropSubscriptionsMutation drop_subscriptions = 12;
     // Combined mutation.
     CombinedMutation combined = 100;
   }
@@ -480,7 +479,7 @@ message DynamicFilterNode {
   // When the condition changes, we will tell downstream to insert the LHS records which now match the condition.
   // If this is false, we need to store RHS records which match the condition in the internal table.
   // When the condition changes, we will tell downstream to delete the LHS records which now no longer match the condition.
-  bool condition_always_relax = 5;
+  bool condition_always_relax = 5 [deprecated = true];
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta
@@ -545,6 +544,9 @@ enum StreamScanType {
 
   // ArrangementBackfillExecutor
   STREAM_SCAN_TYPE_ARRANGEMENT_BACKFILL = 5;
+
+  // SnapshotBackfillExecutor
+  STREAM_SCAN_TYPE_SNAPSHOT_BACKFILL = 6;
 }
 
 // StreamScanNode reads data from upstream table first, and then pass all events to downstream.
@@ -790,6 +792,23 @@ message OverWindowNode {
   OverWindowCachePolicy cache_policy = 5;
 }
 
+message LocalApproxPercentileNode {
+  double base = 1;
+  uint32 percentile_index = 2;
+}
+
+message GlobalApproxPercentileNode {
+  double base = 1;
+  double quantile = 2;
+  catalog.Table bucket_state_table = 3;
+  catalog.Table count_state_table = 4;
+}
+
+message RowMergeNode {
+  catalog.ColIndexMapping lhs_mapping = 1;
+  catalog.ColIndexMapping rhs_mapping = 2;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -835,6 +854,9 @@ message StreamNode {
     CdcFilterNode cdc_filter = 140;
     SourceBackfillNode source_backfill = 142;
     ChangeLogNode changelog = 143;
+    LocalApproxPercentileNode local_approx_percentile = 144;
+    GlobalApproxPercentileNode global_approx_percentile = 145;
+    RowMergeNode row_merge = 146;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -931,6 +953,7 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_DML = 128;
   FRAGMENT_TYPE_FLAG_CDC_FILTER = 256;
   FRAGMENT_TYPE_FLAG_SOURCE_SCAN = 1024;
+  FRAGMENT_TYPE_FLAG_SNAPSHOT_BACKFILL_STREAM_SCAN = 2048;
 }
 
 // The streaming context associated with a stream plan

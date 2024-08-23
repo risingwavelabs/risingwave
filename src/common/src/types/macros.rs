@@ -39,6 +39,7 @@ macro_rules! for_all_variants {
     ($macro:ident $(, $x:tt)*) => {
         $macro! {
             $($x, )*
+            //data_type     variant_name  suffix_name   scalar                      scalar_ref                          array                               builder
             { Int16,        Int16,        int16,        i16,                        i16,                                $crate::array::I16Array,            $crate::array::I16ArrayBuilder          },
             { Int32,        Int32,        int32,        i32,                        i32,                                $crate::array::I32Array,            $crate::array::I32ArrayBuilder          },
             { Int64,        Int64,        int64,        i64,                        i64,                                $crate::array::I64Array,            $crate::array::I64ArrayBuilder          },
@@ -57,64 +58,8 @@ macro_rules! for_all_variants {
             { Serial,       Serial,       serial,       $crate::types::Serial,      $crate::types::Serial,              $crate::array::SerialArray,         $crate::array::SerialArrayBuilder       },
             { Struct,       Struct,       struct,       $crate::types::StructValue, $crate::types::StructRef<'scalar>,  $crate::array::StructArray,         $crate::array::StructArrayBuilder       },
             { List,         List,         list,         $crate::types::ListValue,   $crate::types::ListRef<'scalar>,    $crate::array::ListArray,           $crate::array::ListArrayBuilder         },
+            { Map,          Map,          map,          $crate::types::MapValue,    $crate::types::MapRef<'scalar>,     $crate::array::MapArray,            $crate::array::MapArrayBuilder         },
             { Bytea,        Bytea,        bytea,        Box<[u8]>,                  &'scalar [u8],                      $crate::array::BytesArray,          $crate::array::BytesArrayBuilder        }
-        }
-    };
-}
-
-/// The projected version of `for_all_variants` for handling scalar variants.
-///
-/// Arguments are `$variant_name`, `$suffix_name`, `$scalar`, `$scalar_ref`.
-#[macro_export(local_inner_macros)]
-macro_rules! for_all_scalar_variants {
-    ($macro:ident $(, $x:tt)*) => {
-        for_all_variants! { project_scalar_variants, $macro, [ $($x, )* ] }
-    };
-}
-#[macro_export]
-macro_rules! project_scalar_variants {
-    ($macro:ident, [ $($x:tt, )* ], $( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
-        $macro! {
-            $($x, )*
-            $( { $variant_name, $suffix_name, $scalar, $scalar_ref } ),*
-        }
-    };
-}
-
-/// The projected version of `for_all_variants` for handling array variants.
-///
-/// Arguments are `$variant_name`, `$suffix_name`, `$array`, `$builder`.
-#[macro_export(local_inner_macros)]
-macro_rules! for_all_array_variants {
-    ($macro:ident $(, $x:tt)*) => {
-        for_all_variants! { project_array_variants, $macro, [ $($x, )* ] }
-    };
-}
-#[macro_export]
-macro_rules! project_array_variants {
-    ($macro:ident, [ $($x:tt, )* ], $( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
-        $macro! {
-            $($x, )*
-            $( { $variant_name, $suffix_name, $array, $builder } ),*
-        }
-    };
-}
-
-/// The projected version of `for_all_variants` for handling mapping of data types and array types.
-///
-/// Arguments are `$data_type`, `$variant_name`.
-#[macro_export(local_inner_macros)]
-macro_rules! for_all_type_pairs {
-    ($macro:ident $(, $x:tt)*) => {
-        for_all_variants! { project_type_pairs, $macro, [ $($x, )* ] }
-    };
-}
-#[macro_export]
-macro_rules! project_type_pairs {
-    ($macro:ident, [ $($x:tt, )* ], $( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
-        $macro! {
-            $($x, )*
-            $( { $data_type, $variant_name } ),*
         }
     };
 }

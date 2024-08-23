@@ -20,7 +20,6 @@
 #![feature(extract_if)]
 #![feature(hash_extract_if)]
 #![feature(btree_extract_if)]
-#![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
 #![feature(assert_matches)]
@@ -31,6 +30,8 @@
 #![feature(is_sorted)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(const_option)]
+#![feature(anonymous_lifetime_in_impl_trait)]
+#![feature(duration_millis_float)]
 
 pub mod backup_restore;
 pub mod barrier;

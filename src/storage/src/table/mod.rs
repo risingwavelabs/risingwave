@@ -17,19 +17,17 @@ pub mod merge_sort;
 
 use std::ops::Deref;
 
-use bytes::Bytes;
 use futures::{Stream, StreamExt};
-use futures_async_stream::try_stream;
-use risingwave_common::array::{DataChunk, Op};
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 pub use risingwave_common::hash::table_distribution::*;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_hummock_sdk::key::TableKey;
 
-use crate::error::{StorageError, StorageResult};
+use crate::error::StorageResult;
 use crate::row_serde::value_serde::ValueRowSerde;
 use crate::store::{ChangeLogValue, StateStoreIterExt, StateStoreReadLogItem};
 use crate::StateStoreIter;
@@ -40,20 +38,21 @@ pub trait TableIter: Send {
     async fn next_row(&mut self) -> StorageResult<Option<OwnedRow>>;
 }
 
-pub async fn collect_data_chunk<E, S>(
+pub async fn collect_data_chunk<E, S, R>(
     stream: &mut S,
     schema: &Schema,
     chunk_size: Option<usize>,
 ) -> Result<Option<DataChunk>, E>
 where
-    S: Stream<Item = Result<KeyedRow<Bytes>, E>> + Unpin,
+    S: Stream<Item = Result<R, E>> + Unpin,
+    R: Row,
 {
     let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
     let mut row_count = 0;
     for _ in 0..chunk_size.unwrap_or(usize::MAX) {
         match stream.next().await.transpose()? {
             Some(row) => {
-                for (datum, builder) in row.iter().zip_eq_fast(builders.iter_mut()) {
+                for (datum, builder) in row.iter().zip_eq_debug(builders.iter_mut()) {
                     builder.append(datum);
                 }
             }
@@ -151,30 +150,13 @@ impl<T: AsRef<[u8]>> Deref for KeyedRow<T> {
     }
 }
 
-#[try_stream(ok = (Op, OwnedRow), error = StorageError)]
-pub async fn deserialize_log_stream<'a>(
+pub type ChangeLogRow = ChangeLogValue<OwnedRow>;
+
+pub fn deserialize_log_stream<'a>(
     iter: impl StateStoreIter<StateStoreReadLogItem> + 'a,
     deserializer: &'a impl ValueRowSerde,
-) {
-    let stream = iter.into_stream(|(_key, log_value)| {
+) -> impl Stream<Item = StorageResult<ChangeLogRow>> + 'a {
+    iter.into_stream(|(_key, log_value)| {
         log_value.try_map(|slice| Ok(OwnedRow::new(deserializer.deserialize(slice)?)))
-    });
-    #[for_await]
-    for log_value in stream {
-        match log_value? {
-            ChangeLogValue::Insert(row) => {
-                yield (Op::Insert, row);
-            }
-            ChangeLogValue::Delete(row) => {
-                yield (Op::Delete, row);
-            }
-            ChangeLogValue::Update {
-                new_value,
-                old_value,
-            } => {
-                yield (Op::UpdateDelete, old_value);
-                yield (Op::UpdateInsert, new_value);
-            }
-        }
-    }
+    })
 }

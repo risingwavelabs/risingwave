@@ -25,10 +25,13 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
     HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
-use risingwave_common::metrics::LabelGuardedIntGaugeVec;
+use risingwave_common::metrics::{LabelGuardedHistogramVec, LabelGuardedIntGaugeVec};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
-use risingwave_common::register_guarded_int_gauge_vec_with_registry;
+use risingwave_common::{
+    register_guarded_histogram_vec_with_registry, register_guarded_int_gauge_vec_with_registry,
+};
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
+use risingwave_meta_model_v2::WorkerId;
 use risingwave_object_store::object::object_metrics::{
     ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
 };
@@ -72,6 +75,19 @@ pub struct MetaMetrics {
     pub in_flight_barrier_nums: IntGauge,
     /// The timestamp (UNIX epoch seconds) of the last committed barrier's epoch time.
     pub last_committed_barrier_time: IntGauge,
+
+    // ********************************** Snapshot Backfill ***************************
+    /// The barrier latency in second of `table_id` and snapshto backfill `barrier_type`
+    pub snapshot_backfill_barrier_latency: LabelGuardedHistogramVec<2>, // (table_id, barrier_type)
+    /// The latency of commit epoch of `table_id`
+    pub snapshot_backfill_wait_commit_latency: LabelGuardedHistogramVec<1>, // (table_id, )
+    /// The latency that the upstream waits on the snapshot backfill progress after the upstream
+    /// has collected the barrier.
+    pub snapshot_backfill_upstream_wait_progress_latency: LabelGuardedHistogramVec<1>, /* (table_id, ) */
+    /// The lags between the upstream epoch and the downstream epoch.
+    pub snapshot_backfill_lag: LabelGuardedIntGaugeVec<1>, // (table_id, )
+    /// The number of inflight barriers of `table_id`
+    pub snapshot_backfill_inflight_barrier_num: LabelGuardedIntGaugeVec<1>, // (table_id, _)
 
     // ********************************** Recovery ************************************
     pub recovery_failure_cnt: IntCounter,
@@ -231,6 +247,47 @@ impl MetaMetrics {
         let last_committed_barrier_time = register_int_gauge_with_registry!(
             "last_committed_barrier_time",
             "The timestamp (UNIX epoch seconds) of the last committed barrier's epoch time.",
+            registry
+        )
+        .unwrap();
+
+        // snapshot backfill metrics
+        let opts = histogram_opts!(
+            "meta_snapshot_backfill_barrier_duration_seconds",
+            "snapshot backfill barrier latency",
+            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
+        );
+        let snapshot_backfill_barrier_latency = register_guarded_histogram_vec_with_registry!(
+            opts,
+            &["table_id", "barrier_type"],
+            registry
+        )
+        .unwrap();
+        let opts = histogram_opts!(
+            "meta_snapshot_backfill_barrier_wait_commit_duration_seconds",
+            "snapshot backfill barrier_wait_commit_latency",
+            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
+        );
+        let snapshot_backfill_wait_commit_latency =
+            register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let opts = histogram_opts!(
+            "meta_snapshot_backfill_upstream_wait_progress_latency",
+            "snapshot backfill upstream_wait_progress_latency",
+            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
+        );
+        let snapshot_backfill_upstream_wait_progress_latency =
+            register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let snapshot_backfill_lag = register_guarded_int_gauge_vec_with_registry!(
+            "meta_snapshot_backfill_upstream_lag",
+            "snapshot backfill upstream_lag",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+        let snapshot_backfill_inflight_barrier_num = register_guarded_int_gauge_vec_with_registry!(
+            "meta_snapshot_backfill_inflight_barrier_num",
+            "snapshot backfill inflight_barrier_num",
+            &["table_id"],
             registry
         )
         .unwrap();
@@ -644,6 +701,11 @@ impl MetaMetrics {
             all_barrier_nums,
             in_flight_barrier_nums,
             last_committed_barrier_time,
+            snapshot_backfill_barrier_latency,
+            snapshot_backfill_wait_commit_latency,
+            snapshot_backfill_upstream_wait_progress_latency,
+            snapshot_backfill_lag,
+            snapshot_backfill_inflight_barrier_num,
             recovery_failure_cnt,
             recovery_latency,
 
@@ -717,7 +779,7 @@ impl Default for MetaMetrics {
 
 pub fn start_worker_info_monitor(
     metadata_manager: MetadataManager,
-    election_client: Option<ElectionClientRef>,
+    election_client: ElectionClientRef,
     interval: Duration,
     meta_metrics: Arc<MetaMetrics>,
 ) -> (JoinHandle<()>, Sender<()>) {
@@ -754,9 +816,7 @@ pub fn start_worker_info_monitor(
                     .with_label_values(&[(worker_type.as_str_name())])
                     .set(worker_num as i64);
             }
-            if let Some(client) = &election_client
-                && let Ok(meta_members) = client.get_members().await
-            {
+            if let Ok(meta_members) = election_client.get_members().await {
                 meta_metrics
                     .worker_num
                     .with_label_values(&[WorkerType::Meta.as_str_name()])
@@ -820,17 +880,14 @@ pub async fn refresh_fragment_info_metrics_v2(
         }
     };
 
-    let pu_addr_mapping: HashMap<u32, String> = worker_nodes
+    let worker_addr_mapping: HashMap<WorkerId, String> = worker_nodes
         .into_iter()
-        .flat_map(|worker_node| {
+        .map(|worker_node| {
             let addr = match worker_node.host {
                 Some(host) => format!("{}:{}", host.host, host.port),
                 None => "".to_owned(),
             };
-            worker_node
-                .parallel_units
-                .into_iter()
-                .map(move |pu| (pu.id, addr.clone()))
+            (worker_node.id as WorkerId, addr)
         })
         .collect();
     let table_compaction_group_id_mapping = hummock_manager
@@ -847,7 +904,7 @@ pub async fn refresh_fragment_info_metrics_v2(
         let fragment_id_str = actor_location.fragment_id.to_string();
         // Report a dummy gauge metrics with (fragment id, actor id, node
         // address) as its label
-        if let Some(address) = pu_addr_mapping.get(&(actor_location.parallel_unit_id as u32)) {
+        if let Some(address) = worker_addr_mapping.get(&actor_location.worker_id) {
             meta_metrics
                 .actor_info
                 .with_label_values(&[&actor_id_str, &fragment_id_str, address])
@@ -970,17 +1027,11 @@ pub fn start_fragment_info_monitor(
                         if let Some(actor_status) =
                             table_fragments.actor_status.get(&actor.actor_id)
                         {
-                            if let Some(pu) = &actor_status.parallel_unit {
-                                if let Some(address) = workers.get(&pu.worker_node_id) {
-                                    meta_metrics
-                                        .actor_info
-                                        .with_label_values(&[
-                                            &actor_id_str,
-                                            &fragment_id_str,
-                                            address,
-                                        ])
-                                        .set(1);
-                                }
+                            if let Some(address) = workers.get(&actor_status.worker_id()) {
+                                meta_metrics
+                                    .actor_info
+                                    .with_label_values(&[&actor_id_str, &fragment_id_str, address])
+                                    .set(1);
                             }
                         }
 

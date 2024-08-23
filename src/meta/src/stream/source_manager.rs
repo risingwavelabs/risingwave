@@ -23,12 +23,12 @@ use std::time::Duration;
 use anyhow::Context;
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
-use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SourceProperties,
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
 };
+use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::Dispatcher;
@@ -81,12 +81,16 @@ struct ConnectorSourceWorker<P: SourceProperties> {
 }
 
 fn extract_prop_from_existing_source(source: &Source) -> ConnectorResult<ConnectorProperties> {
-    let mut properties = ConnectorProperties::extract(source.with_properties.clone(), false)?;
+    let options_with_secret =
+        WithOptionsSecResolved::new(source.with_properties.clone(), source.secret_refs.clone());
+    let mut properties = ConnectorProperties::extract(options_with_secret, false)?;
     properties.init_from_pb_source(source);
     Ok(properties)
 }
 fn extract_prop_from_new_source(source: &Source) -> ConnectorResult<ConnectorProperties> {
-    let mut properties = ConnectorProperties::extract(source.with_properties.clone(), true)?;
+    let options_with_secret =
+        WithOptionsSecResolved::new(source.with_properties.clone(), source.secret_refs.clone());
+    let mut properties = ConnectorProperties::extract(options_with_secret, true)?;
     properties.init_from_pb_source(source);
     Ok(properties)
 }
@@ -582,6 +586,32 @@ where
             .map(|ActorSplitsAssignment { actor_id, splits }| (actor_id, splits))
             .collect(),
     )
+}
+
+pub fn validate_assignment(assignment: &mut HashMap<ActorId, Vec<SplitImpl>>) {
+    // check if one split is assign to multiple actors
+    let mut split_to_actor = HashMap::new();
+    for (actor_id, splits) in &mut *assignment {
+        let _ = splits.iter().map(|split| {
+            split_to_actor
+                .entry(split.id())
+                .or_insert_with(Vec::new)
+                .push(*actor_id)
+        });
+    }
+
+    for (split_id, actor_ids) in &mut split_to_actor {
+        if actor_ids.len() > 1 {
+            tracing::warn!(split_id = ?split_id, actor_ids = ?actor_ids, "split is assigned to multiple actors");
+        }
+        // keep the first actor and remove the rest from the assignment
+        for actor_id in actor_ids.iter().skip(1) {
+            assignment
+                .get_mut(actor_id)
+                .unwrap()
+                .retain(|split| split.id() != *split_id);
+        }
+    }
 }
 
 fn align_backfill_splits(
@@ -1139,11 +1169,14 @@ mod tests {
 
     use risingwave_common::types::JsonbVal;
     use risingwave_connector::error::ConnectorResult;
-    use risingwave_connector::source::{SplitId, SplitMetaData};
+    use risingwave_connector::source::test_source::TestSourceSplit;
+    use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
     use serde::{Deserialize, Serialize};
 
+    use super::validate_assignment;
     use crate::model::{ActorId, FragmentId};
     use crate::stream::source_manager::{reassign_splits, SplitDiffOptions};
+    use crate::stream::SplitAssignment;
 
     #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
     struct TestSplit {
@@ -1262,6 +1295,49 @@ mod tests {
         .unwrap();
 
         assert!(!diff.is_empty())
+    }
+
+    #[test]
+    fn test_validate_assignment() {
+        let mut fragment_assignment: SplitAssignment;
+        let test_assignment: HashMap<ActorId, Vec<SplitImpl>> = maplit::hashmap! {
+            0 => vec![SplitImpl::Test(
+                TestSourceSplit {id: "1".into(), properties: Default::default(), offset: Default::default()}
+            ), SplitImpl::Test(
+                TestSourceSplit {id: "2".into(), properties: Default::default(), offset: Default::default()}
+            )],
+            1 => vec![SplitImpl::Test(
+                TestSourceSplit {id: "3".into(), properties: Default::default(), offset: Default::default()}
+            )],
+            2 => vec![SplitImpl::Test(
+                TestSourceSplit {id: "1".into(), properties: Default::default(), offset: Default::default()}
+            )],
+        };
+        fragment_assignment = maplit::hashmap! {
+            1 => test_assignment,
+        };
+
+        fragment_assignment.iter_mut().for_each(|(_, assignment)| {
+            validate_assignment(assignment);
+        });
+
+        {
+            let mut split_to_actor = HashMap::new();
+            for actor_to_splits in fragment_assignment.values() {
+                for (actor_id, splits) in actor_to_splits {
+                    let _ = splits.iter().map(|split| {
+                        split_to_actor
+                            .entry(split.id())
+                            .or_insert_with(Vec::new)
+                            .push(*actor_id)
+                    });
+                }
+            }
+
+            for actor_ids in split_to_actor.values() {
+                assert_eq!(actor_ids.len(), 1);
+            }
+        }
     }
 
     #[test]

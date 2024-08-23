@@ -2,10 +2,10 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-create table t1 (v1 int, v2 int);
+create table t1 (v1 int, v2 int, v4 int);
 
 statement ok
-create table t2 (v1 int, v3 int);
+create table t2 (v1 int, v3 int, v4 int);
 
 statement ok
 create materialized view v as select * from t1 union all select * from t2;
@@ -13,6 +13,12 @@ create materialized view v as select * from t1 union all select * from t2;
 statement ok
 create materialized view v2 as select * from t1 union select * from t2;
 
+statement ok
+create materialized view v3 as select * from t1 union all corresponding select * from t2;
+
+statement ok
+create materialized view v4 as select * from t1 union corresponding by (v4, v1) select * from t2;
+
 query II
 select * from v;
 ----
@@ -22,55 +28,94 @@ select * from v2;
 ----
 
 statement ok
-insert into t1 values(1, 2);
+insert into t1 values(1, 2, 3);
 
-query II
+query III
 select * from v;
 ----
-1 2
+1 2 3
 
-query II
+query III
 select * from v2;
 ----
-1 2
+1 2 3
+
+query II
+select * from v3;
+----
+1 3
+
+query II
+select * from v4;
+----
+3 1
 
 statement ok
-insert into t2 values(1, 2);
+insert into t2 values(1, 2, 3);
 
 
-query II
+query III
 select * from v;
 ----
-1 2
-1 2
+1 2 3
+1 2 3
 
-query II
+query III
 select * from v2;
 ----
-1 2
+1 2 3
+
+query II
+select * from v3;
+----
+1 3
+1 3
+
+query II
+select * from v4;
+----
+3 1
 
 statement ok
 delete from t1 where v1 = 1;
 
-query II
+query III
 select * from v;
 ----
-1 2
+1 2 3
 
-query II
+query III
 select * from v2;
 ----
-1 2
+1 2 3
+
+query II
+select * from v3;
+----
+1 3
+
+query II
+select * from v4;
+----
+3 1
 
 statement ok
 delete from t2 where v1 = 1;
 
-query II
+query III
 select * from v;
 ----
 
-query II
+query III
 select * from v2;
+----
+
+query II
+select * from v3;
+----
+
+query II
+select * from v4;
 ----
 
 
@@ -79,6 +124,36 @@ drop materialized view v;
 
 statement ok
 drop materialized view v2;
+
+statement ok
+drop materialized view v3;
+
+statement ok
+drop materialized view v4;
+
+statement error
+create materialized view v5 as select * from t1 union corresponding by (vxx, v1) select * from t2
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Column name `vxx` in CORRESPONDING BY is not found in a side of the UNION operation. It shall be included in both sides.
+
+
+statement ok
+create table txx (vxx int);
+
+statement error
+create materialized view v5 as select * from t1 union corresponding select * from txx
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: When CORRESPONDING is specified, at least one column of the left side shall have a column name that is the column name of some column of the right side in a UNION operation. Left side query column list: ("v1", "v2", "v4"). Right side query column list: ("vxx").
+
+
+statement ok
+drop table txx;
 
 statement ok
 drop table t1;

@@ -26,6 +26,7 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
+use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::iceberg::ICEBERG_SINK;
 use risingwave_connector::sink::trivial::TABLE_SINK;
 use risingwave_connector::sink::{
@@ -49,7 +50,8 @@ use crate::optimizer::plan_node::utils::plan_has_backfill_leaf_nodes;
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::{TableCatalog, WithOptions};
+use crate::utils::WithOptionsSecResolved;
+use crate::TableCatalog;
 
 const DOWNSTREAM_PK_KEY: &str = "primary_key";
 
@@ -205,7 +207,7 @@ impl StreamSink {
         user_cols: FixedBitSet,
         out_names: Vec<String>,
         definition: String,
-        properties: WithOptions,
+        properties: WithOptionsSecResolved,
         format_desc: Option<SinkFormatDesc>,
         partition_info: Option<PartitionComputeInfo>,
     ) -> Result<Self> {
@@ -308,7 +310,7 @@ impl StreamSink {
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
         definition: String,
-        properties: WithOptions,
+        properties: WithOptionsSecResolved,
         format_desc: Option<SinkFormatDesc>,
         partition_info: Option<PartitionComputeInfo>,
     ) -> Result<(PlanRef, SinkDesc)> {
@@ -381,6 +383,7 @@ impl StreamSink {
         } else {
             CreateType::Foreground
         };
+        let (properties, secret_refs) = properties.into_parts();
         let sink_desc = SinkDesc {
             id: SinkId::placeholder(),
             name,
@@ -391,7 +394,8 @@ impl StreamSink {
             plan_pk: pk,
             downstream_pk,
             distribution_key,
-            properties: properties.into_inner(),
+            properties,
+            secret_refs,
             sink_type,
             format_desc,
             target_table,
@@ -401,7 +405,7 @@ impl StreamSink {
         Ok((input, sink_desc))
     }
 
-    fn is_user_defined_append_only(properties: &WithOptions) -> Result<bool> {
+    fn is_user_defined_append_only(properties: &WithOptionsSecResolved) -> Result<bool> {
         if let Some(sink_type) = properties.get(SINK_TYPE_OPTION) {
             if sink_type != SINK_TYPE_APPEND_ONLY
                 && sink_type != SINK_TYPE_DEBEZIUM
@@ -423,7 +427,7 @@ impl StreamSink {
         Ok(properties.value_eq_ignore_case(SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY))
     }
 
-    fn is_user_force_append_only(properties: &WithOptions) -> Result<bool> {
+    fn is_user_force_append_only(properties: &WithOptionsSecResolved) -> Result<bool> {
         if properties.contains_key(SINK_USER_FORCE_APPEND_ONLY_OPTION)
             && !properties.value_eq_ignore_case(SINK_USER_FORCE_APPEND_ONLY_OPTION, "true")
             && !properties.value_eq_ignore_case(SINK_USER_FORCE_APPEND_ONLY_OPTION, "false")
@@ -442,14 +446,16 @@ impl StreamSink {
 
     fn derive_sink_type(
         input_append_only: bool,
-        properties: &WithOptions,
+        properties: &WithOptionsSecResolved,
         format_desc: Option<&SinkFormatDesc>,
     ) -> Result<SinkType> {
         let frontend_derived_append_only = input_append_only;
         let (user_defined_append_only, user_force_append_only, syntax_legacy) = match format_desc {
             Some(f) => (
                 f.format == SinkFormat::AppendOnly,
-                Self::is_user_force_append_only(&WithOptions::new(f.options.clone()))?,
+                Self::is_user_force_append_only(&WithOptionsSecResolved::without_secrets(
+                    f.options.clone(),
+                ))?,
                 false,
             ),
             None => (

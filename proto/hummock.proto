@@ -104,7 +104,7 @@ message GroupDelta {
     IntraLevelDelta intra_level = 1;
     GroupConstruct group_construct = 2;
     GroupDestroy group_destroy = 3;
-    GroupMetaChange group_meta_change = 4;
+    GroupMetaChange group_meta_change = 4 [deprecated = true];
     GroupTableChange group_table_change = 5 [deprecated = true];
   }
 }
@@ -384,6 +384,7 @@ message CompactTask {
     TTL = 5;
     TOMBSTONE = 6;
     EMERGENCY = 7;
+    VNODE_WATERMARK = 8;
   }
 
   // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
@@ -571,6 +572,7 @@ message VacuumTask {
 // Scan object store to get candidate orphan SSTs.
 message FullScanTask {
   uint64 sst_retention_time_sec = 1;
+  optional string prefix = 2;
 }
 
 // Cancel compact task
@@ -614,6 +616,7 @@ message ReportFullScanTaskResponse {
 
 message TriggerFullGCRequest {
   uint64 sst_retention_time_sec = 1;
+  optional string prefix = 2;
 }
 
 message TriggerFullGCResponse {
@@ -713,6 +716,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 tombstone_reclaim_ratio = 16;
       CompressionAlgorithm compression_algorithm = 17;
       uint32 max_l0_compact_level_count = 18;
+      uint64 sst_allowed_trivial_move_min_size = 19;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -821,6 +825,14 @@ message CancelCompactTaskResponse {
   bool ret = 1;
 }
 
+message GetVersionByEpochRequest {
+  uint64 epoch = 1;
+}
+
+message GetVersionByEpochResponse {
+  HummockVersion version = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -861,6 +873,7 @@ service HummockManagerService {
   rpc ListCompactTaskProgress(ListCompactTaskProgressRequest) returns (ListCompactTaskProgressResponse);
   rpc CancelCompactTask(CancelCompactTaskRequest) returns (CancelCompactTaskResponse);
   rpc ListChangeLogEpochs(ListChangeLogEpochsRequest) returns (ListChangeLogEpochsResponse);
+  rpc GetVersionByEpoch(GetVersionByEpochRequest) returns (GetVersionByEpochResponse);
 }
 
 message CompactionConfig {
@@ -894,7 +907,10 @@ message CompactionConfig {
   bool enable_emergency_picker = 20;
 
   // The limitation of the level count of l0 compaction
-  uint32 max_l0_compact_level_count = 21;
+  optional uint32 max_l0_compact_level_count = 21;
+
+  // The limitation of base level trivial move sst size
+  optional uint64 sst_allowed_trivial_move_min_size = 22;
 }
 
 message TableStats {

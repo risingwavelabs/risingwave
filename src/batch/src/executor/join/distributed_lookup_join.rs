@@ -36,8 +36,8 @@ use risingwave_storage::{dispatch_state_store, StateStore};
 use crate::error::Result;
 use crate::executor::join::JoinType;
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, BufferChunkExecutor, Executor,
-    ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase,
+    unix_timestamp_sec_to_epoch, AsOf, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
+    BufferChunkExecutor, Executor, ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase,
 };
 use crate::task::{BatchTaskContext, ShutdownToken};
 
@@ -92,6 +92,24 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
             source.plan_node().get_node_body().unwrap(),
             NodeBody::DistributedLookupJoin
         )?;
+
+        // as_of takes precedence
+        let as_of = distributed_lookup_join_node
+            .as_of
+            .as_ref()
+            .map(AsOf::try_from)
+            .transpose()?;
+        let query_epoch = as_of
+            .map(|a| {
+                let epoch = unix_timestamp_sec_to_epoch(a.timestamp).0;
+                tracing::debug!(epoch, "time travel");
+                risingwave_pb::common::BatchQueryEpoch {
+                    epoch: Some(risingwave_pb::common::batch_query_epoch::Epoch::TimeTravel(
+                        epoch,
+                    )),
+                }
+            })
+            .unwrap_or_else(|| source.epoch());
 
         let join_type = JoinType::from_prost(distributed_lookup_join_node.get_join_type()?);
         let condition = match distributed_lookup_join_node.get_condition() {
@@ -179,12 +197,11 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
         let vnodes = Some(TableDistribution::all_vnodes());
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = StorageTable::new_partial(state_store, column_ids, vnodes, table_desc);
-
             let inner_side_builder = InnerSideExecutorBuilder::new(
                 outer_side_key_types,
                 inner_side_key_types.clone(),
                 lookup_prefix_len,
-                source.epoch(),
+                query_epoch,
                 vec![],
                 table,
                 chunk_size,
@@ -337,10 +354,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
         let pk_prefix = OwnedRow::new(scan_range.eq_conds);
 
         if self.lookup_prefix_len == self.table.pk_indices().len() {
-            let row = self
-                .table
-                .get_row(&pk_prefix, self.epoch.clone().into())
-                .await?;
+            let row = self.table.get_row(&pk_prefix, self.epoch.into()).await?;
 
             if let Some(row) = row {
                 self.row_list.push(row);
@@ -349,7 +363,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
             let iter = self
                 .table
                 .batch_iter_with_pk_bounds(
-                    self.epoch.clone().into(),
+                    self.epoch.into(),
                     &pk_prefix,
                     ..,
                     false,

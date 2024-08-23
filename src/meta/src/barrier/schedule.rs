@@ -183,11 +183,10 @@ impl BarrierScheduler {
     /// Try to cancel scheduled cmd for create streaming job, return true if cancelled.
     pub fn try_cancel_scheduled_create(&self, table_id: TableId) -> bool {
         let queue = &mut self.inner.queue.lock();
+
         if let Some(idx) = queue.queue.iter().position(|scheduled| {
-            if let Command::CreateStreamingJob {
-                table_fragments, ..
-            } = &scheduled.command
-                && table_fragments.table_id() == table_id
+            if let Command::CreateStreamingJob { info, .. } = &scheduled.command
+                && info.table_fragments.table_id() == table_id
             {
                 true
             } else {
@@ -259,16 +258,14 @@ impl BarrierScheduler {
         for command in commands {
             let (started_tx, started_rx) = oneshot::channel();
             let (collect_tx, collect_rx) = oneshot::channel();
-            let (finish_tx, finish_rx) = oneshot::channel();
 
-            contexts.push((started_rx, collect_rx, finish_rx));
+            contexts.push((started_rx, collect_rx));
             scheduleds.push(self.inner.new_scheduled(
                 command.need_checkpoint(),
                 command,
                 once(Notifier {
                     started: Some(started_tx),
                     collected: Some(collect_tx),
-                    finished: Some(finish_tx),
                 }),
             ));
         }
@@ -277,10 +274,13 @@ impl BarrierScheduler {
 
         let mut infos = Vec::with_capacity(contexts.len());
 
-        for (injected_rx, collect_rx, finish_rx) in contexts {
+        for (injected_rx, collect_rx) in contexts {
             // Wait for this command to be injected, and record the result.
             tracing::trace!("waiting for injected_rx");
-            let info = injected_rx.await.ok().context("failed to inject barrier")?;
+            let info = injected_rx
+                .await
+                .ok()
+                .context("failed to inject barrier")??;
             infos.push(info);
 
             tracing::trace!("waiting for collect_rx");
@@ -289,10 +289,6 @@ impl BarrierScheduler {
                 .await
                 .ok()
                 .context("failed to collect barrier")??;
-
-            tracing::trace!("waiting for finish_rx");
-            // Wait for this command to be finished.
-            finish_rx.await.ok().context("failed to finish command")??;
         }
 
         Ok(infos)
@@ -448,9 +444,8 @@ impl ScheduledBarriers {
                     unreachable!("only drop and cancel streaming jobs should be buffered");
                 }
             }
-            notifiers.into_iter().for_each(|mut notify| {
+            notifiers.into_iter().for_each(|notify| {
                 notify.notify_collected();
-                notify.notify_finished();
             });
         }
         (dropped_actors, cancel_table_ids)

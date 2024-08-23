@@ -65,7 +65,7 @@ impl ReadSnapshot {
         match self.batch_query_epoch().epoch.unwrap() {
             batch_query_epoch::Epoch::Committed(epoch)
             | batch_query_epoch::Epoch::Current(epoch) => Some(epoch.into()),
-            batch_query_epoch::Epoch::Backup(_) => None,
+            batch_query_epoch::Epoch::Backup(_) | batch_query_epoch::Epoch::TimeTravel(_) => None,
         }
     }
 
@@ -74,7 +74,8 @@ impl ReadSnapshot {
         match self.batch_query_epoch().epoch.unwrap() {
             batch_query_epoch::Epoch::Committed(epoch)
             | batch_query_epoch::Epoch::Current(epoch)
-            | batch_query_epoch::Epoch::Backup(epoch) => epoch.into(),
+            | batch_query_epoch::Epoch::Backup(epoch)
+            | batch_query_epoch::Epoch::TimeTravel(epoch) => epoch.into(),
         }
     }
 
@@ -120,7 +121,7 @@ impl PinnedSnapshot {
 
 impl Drop for PinnedSnapshot {
     fn drop(&mut self) {
-        let _ = self.unpin_sender.send(Operation::Unpin(self.value.clone()));
+        let _ = self.unpin_sender.send(Operation::Unpin(self.value));
     }
 }
 
@@ -201,9 +202,7 @@ impl HummockSnapshotManager {
                 false
             } else {
                 // First tell the worker that a new snapshot is going to be pinned.
-                self.worker_sender
-                    .send(Operation::Pin(snapshot.clone()))
-                    .unwrap();
+                self.worker_sender.send(Operation::Pin(snapshot)).unwrap();
                 // Then set the latest snapshot.
                 *old_snapshot = Arc::new(PinnedSnapshot {
                     value: snapshot,

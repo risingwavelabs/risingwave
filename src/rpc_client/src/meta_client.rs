@@ -14,6 +14,8 @@
 
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime};
@@ -34,6 +36,8 @@ use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::RW_VERSION;
+use risingwave_error::bail;
+use risingwave_error::tonic::ErrorIsFromTonicServerImpl;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
@@ -51,6 +55,7 @@ use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
+use risingwave_pb::ddl_service::create_materialized_view_request::PbBackfillType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
@@ -114,6 +119,8 @@ pub struct MetaClient {
     host_addr: HostAddr,
     inner: GrpcMetaClient,
     meta_config: MetaConfig,
+    cluster_id: String,
+    shutting_down: Arc<AtomicBool>,
 }
 
 impl MetaClient {
@@ -127,6 +134,10 @@ impl MetaClient {
 
     pub fn worker_type(&self) -> WorkerType {
         self.worker_type
+    }
+
+    pub fn cluster_id(&self) -> &str {
+        &self.cluster_id
     }
 
     /// Subscribe to notification from meta.
@@ -211,7 +222,28 @@ impl MetaClient {
     }
 
     /// Register the current node to the cluster and set the corresponding worker id.
+    ///
+    /// Retry if there's connection issue with the meta node. Exit the process if the registration fails.
     pub async fn register_new(
+        addr_strategy: MetaAddressStrategy,
+        worker_type: WorkerType,
+        addr: &HostAddr,
+        property: Property,
+        meta_config: &MetaConfig,
+    ) -> (Self, SystemParamsReader) {
+        let ret =
+            Self::register_new_inner(addr_strategy, worker_type, addr, property, meta_config).await;
+
+        match ret {
+            Ok(ret) => ret,
+            Err(err) => {
+                tracing::error!(error = %err.as_report(), "failed to register worker, exiting...");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    async fn register_new_inner(
         addr_strategy: MetaAddressStrategy,
         worker_type: WorkerType,
         addr: &HostAddr,
@@ -229,34 +261,37 @@ impl MetaClient {
         if property.is_unschedulable {
             tracing::warn!("worker {:?} registered as unschedulable", addr.clone());
         }
-        let init_result: Result<_> = tokio_retry::Retry::spawn(retry_strategy, || async {
-            let grpc_meta_client = GrpcMetaClient::new(&addr_strategy, meta_config.clone()).await?;
+        let init_result: Result<_> = tokio_retry::RetryIf::spawn(
+            retry_strategy,
+            || async {
+                let grpc_meta_client =
+                    GrpcMetaClient::new(&addr_strategy, meta_config.clone()).await?;
 
-            let add_worker_resp = grpc_meta_client
-                .add_worker_node(AddWorkerNodeRequest {
-                    worker_type: worker_type as i32,
-                    host: Some(addr.to_protobuf()),
-                    property: Some(property.clone()),
-                    resource: Some(risingwave_pb::common::worker_node::Resource {
-                        rw_version: RW_VERSION.to_string(),
-                        total_memory_bytes: system_memory_available_bytes() as _,
-                        total_cpu_cores: total_cpu_available() as _,
-                    }),
-                })
-                .await?;
-            if let Some(status) = &add_worker_resp.status
-                && status.code() == risingwave_pb::common::status::Code::UnknownWorker
-            {
-                tracing::error!("invalid worker: {}", status.message);
-                std::process::exit(1);
-            }
+                let add_worker_resp = grpc_meta_client
+                    .add_worker_node(AddWorkerNodeRequest {
+                        worker_type: worker_type as i32,
+                        host: Some(addr.to_protobuf()),
+                        property: Some(property.clone()),
+                        resource: Some(risingwave_pb::common::worker_node::Resource {
+                            rw_version: RW_VERSION.to_string(),
+                            total_memory_bytes: system_memory_available_bytes() as _,
+                            total_cpu_cores: total_cpu_available() as _,
+                        }),
+                    })
+                    .await
+                    .context("failed to add worker node")?;
 
-            let system_params_resp = grpc_meta_client
-                .get_system_params(GetSystemParamsRequest {})
-                .await?;
+                let system_params_resp = grpc_meta_client
+                    .get_system_params(GetSystemParamsRequest {})
+                    .await
+                    .context("failed to get initial system params")?;
 
-            Ok((add_worker_resp, system_params_resp, grpc_meta_client))
-        })
+                Ok((add_worker_resp, system_params_resp, grpc_meta_client))
+            },
+            // Only retry if there's any transient connection issue.
+            // If the error is from our implementation or business, do not retry it.
+            |e: &RpcError| !e.is_from_tonic_server_impl(),
+        )
         .await;
 
         let (add_worker_resp, system_params_resp, grpc_meta_client) = init_result?;
@@ -270,6 +305,8 @@ impl MetaClient {
             host_addr: addr.clone(),
             inner: grpc_meta_client,
             meta_config: meta_config.to_owned(),
+            cluster_id: add_worker_resp.cluster_id,
+            shutting_down: Arc::new(false.into()),
         };
 
         static REPORT_PANIC: std::sync::Once = std::sync::Once::new();
@@ -316,8 +353,12 @@ impl MetaClient {
         let resp = self.inner.heartbeat(request).await?;
         if let Some(status) = resp.status {
             if status.code() == risingwave_pb::common::status::Code::UnknownWorker {
-                tracing::error!("worker expired: {}", status.message);
-                std::process::exit(1);
+                // Ignore the error if we're already shutting down.
+                // Otherwise, exit the process.
+                if !self.shutting_down.load(Relaxed) {
+                    tracing::error!(message = status.message, "worker expired");
+                    std::process::exit(1);
+                }
             }
         }
         Ok(())
@@ -347,6 +388,7 @@ impl MetaClient {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
+            backfill: PbBackfillType::Regular as _,
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -541,6 +583,14 @@ impl MetaClient {
         let resp = self.inner.replace_table_plan(request).await?;
         // TODO: handle error in `resp.status` here
         Ok(resp.version)
+    }
+
+    pub async fn auto_schema_change(&self, schema_change: SchemaChangeEnvelope) -> Result<()> {
+        let request = AutoSchemaChangeRequest {
+            schema_change: Some(schema_change),
+        };
+        let _ = self.inner.auto_schema_change(request).await?;
+        Ok(())
     }
 
     pub async fn create_view(&self, view: PbView) -> Result<CatalogVersion> {
@@ -739,6 +789,7 @@ impl MetaClient {
             host: Some(self.host_addr.to_protobuf()),
         };
         self.inner.delete_worker_node(request).await?;
+        self.shutting_down.store(true, Relaxed);
         Ok(())
     }
 
@@ -940,6 +991,14 @@ impl MetaClient {
         Ok(resp)
     }
 
+    pub async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {
+        let resp = self
+            .inner
+            .get_cluster_recovery_status(GetClusterRecoveryStatusRequest {})
+            .await?;
+        Ok(resp.get_status().unwrap())
+    }
+
     pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
         let request = GetClusterInfoRequest {};
         let resp = self.inner.get_cluster_info(request).await?;
@@ -948,14 +1007,14 @@ impl MetaClient {
 
     pub async fn reschedule(
         &self,
-        reschedules: HashMap<u32, PbReschedule>,
+        worker_reschedules: HashMap<u32, PbWorkerReschedule>,
         revision: u64,
         resolve_no_shuffle_upstream: bool,
     ) -> Result<(bool, u64)> {
         let request = RescheduleRequest {
-            reschedules,
             revision,
             resolve_no_shuffle_upstream,
+            worker_reschedules,
         };
         let resp = self.inner.reschedule(request).await?;
         Ok((resp.success, resp.revision))
@@ -1018,7 +1077,7 @@ impl MetaClient {
         version_delta: HummockVersionDelta,
     ) -> Result<(HummockVersion, Vec<CompactionGroupId>)> {
         let req = ReplayVersionDeltaRequest {
-            version_delta: Some(version_delta.to_protobuf()),
+            version_delta: Some(version_delta.into()),
         };
         let resp = self.inner.replay_version_delta(req).await?;
         Ok((
@@ -1029,12 +1088,12 @@ impl MetaClient {
 
     pub async fn list_version_deltas(
         &self,
-        start_id: u64,
+        start_id: HummockVersionId,
         num_limit: u32,
         committed_epoch_limit: HummockEpoch,
     ) -> Result<Vec<HummockVersionDelta>> {
         let req = ListVersionDeltasRequest {
-            start_id,
+            start_id: start_id.to_u64(),
             num_limit,
             committed_epoch_limit,
         };
@@ -1056,7 +1115,7 @@ impl MetaClient {
         compaction_groups: Vec<CompactionGroupId>,
     ) -> Result<()> {
         let req = TriggerCompactionDeterministicRequest {
-            version_id,
+            version_id: version_id.to_u64(),
             compaction_groups,
         };
         self.inner.trigger_compaction_deterministic(req).await?;
@@ -1371,6 +1430,12 @@ impl MetaClient {
         let resp = self.inner.cancel_compact_task(req).await?;
         Ok(resp.ret)
     }
+
+    pub async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion> {
+        let req = GetVersionByEpochRequest { epoch };
+        let resp = self.inner.get_version_by_epoch(req).await?;
+        Ok(resp.version.unwrap())
+    }
 }
 
 #[async_trait]
@@ -1378,7 +1443,7 @@ impl HummockMetaClient for MetaClient {
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
         let req = UnpinVersionBeforeRequest {
             context_id: self.worker_id(),
-            unpin_version_before,
+            unpin_version_before: unpin_version_before.to_u64(),
         };
         self.inner.unpin_version_before(req).await?;
         Ok(())
@@ -1492,10 +1557,15 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()> {
+    async fn trigger_full_gc(
+        &self,
+        sst_retention_time_sec: u64,
+        prefix: Option<String>,
+    ) -> Result<()> {
         self.inner
             .trigger_full_gc(TriggerFullGcRequest {
                 sst_retention_time_sec,
+                prefix,
             })
             .await?;
         Ok(())
@@ -1531,6 +1601,10 @@ impl HummockMetaClient for MetaClient {
             .await?;
 
         Ok((request_sender, Box::pin(stream)))
+    }
+
+    async fn get_version_by_epoch(&self, epoch: HummockEpoch) -> Result<PbHummockVersion> {
+        self.get_version_by_epoch(epoch).await
     }
 }
 
@@ -1668,38 +1742,40 @@ impl MetaMemberManagement {
                 let mut fetched_members = None;
 
                 for (addr, client) in &mut member_group.members {
-                    let client: Result<MetaMemberClient> = try {
-                        match client {
+                    let members: Result<_> = try {
+                        let mut client = match client {
                             Some(cached_client) => cached_client.to_owned(),
                             None => {
                                 let endpoint = GrpcMetaClient::addr_to_endpoint(addr.clone());
-                                let channel = GrpcMetaClient::connect_to_endpoint(endpoint).await?;
+                                let channel = GrpcMetaClient::connect_to_endpoint(endpoint)
+                                    .await
+                                    .context("failed to create client")?;
                                 let new_client: MetaMemberClient =
                                     MetaMemberServiceClient::new(channel);
                                 *client = Some(new_client.clone());
 
                                 new_client
                             }
-                        }
+                        };
+
+                        let resp = client
+                            .members(MembersRequest {})
+                            .await
+                            .context("failed to fetch members")?;
+
+                        resp.into_inner().members
                     };
-                    if let Err(err) = client {
-                        tracing::warn!(%addr, error = %err.as_report(), "failed to create client");
-                        continue;
-                    }
-                    match client.unwrap().members(MembersRequest {}).await {
-                        Err(err) => {
-                            tracing::warn!(%addr, error = %err.as_report(), "failed to fetch members");
-                            continue;
-                        }
-                        Ok(resp) => {
-                            fetched_members = Some(resp.into_inner().members);
-                            break;
-                        }
+
+                    let fetched = members.is_ok();
+                    fetched_members = Some(members);
+                    if fetched {
+                        break;
                     }
                 }
 
-                let members =
-                    fetched_members.ok_or_else(|| anyhow!("could not refresh members"))?;
+                let members = fetched_members
+                    .context("no member available in the list")?
+                    .context("could not refresh members")?;
 
                 // find new leader
                 let mut leader = None;
@@ -1752,9 +1828,9 @@ impl GrpcMetaClient {
     // See `Endpoint::keep_alive_timeout`
     const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
     // Retry base interval in ms for connecting to meta server.
-    const INIT_RETRY_BASE_INTERVAL_MS: u64 = 50;
+    const INIT_RETRY_BASE_INTERVAL_MS: u64 = 10;
     // Max retry times for connecting to meta server.
-    const INIT_RETRY_MAX_INTERVAL_MS: u64 = 5000;
+    const INIT_RETRY_MAX_INTERVAL_MS: u64 = 2000;
 
     fn start_meta_member_monitor(
         &self,
@@ -1876,7 +1952,7 @@ impl GrpcMetaClient {
             .map(|addr| (Self::addr_to_endpoint(addr.clone()), addr))
             .collect();
 
-        let endpoints = endpoints.clone();
+        let mut last_error = None;
 
         for (endpoint, addr) in endpoints {
             match Self::connect_to_endpoint(endpoint).await {
@@ -1889,14 +1965,19 @@ impl GrpcMetaClient {
                         error = %e.as_report(),
                         "Failed to connect to meta server {}, trying again",
                         addr,
-                    )
+                    );
+                    last_error = Some(e);
                 }
             }
         }
 
-        Err(RpcError::Internal(anyhow!(
-            "Failed to connect to meta server"
-        )))
+        if let Some(last_error) = last_error {
+            Err(anyhow::anyhow!(last_error)
+                .context("failed to connect to all meta servers")
+                .into())
+        } else {
+            bail!("no meta server address provided")
+        }
     }
 
     async fn connect_to_endpoint(endpoint: Endpoint) -> Result<Channel> {
@@ -1941,6 +2022,7 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
             ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
+            ,{ cluster_client, get_cluster_recovery_status, GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, pause, PauseRequest, PauseResponse }
@@ -1989,6 +2071,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, comment_on, CommentOnRequest, CommentOnResponse }
             ,{ ddl_client, get_tables, GetTablesRequest, GetTablesResponse }
             ,{ ddl_client, wait, WaitRequest, WaitResponse }
+            ,{ ddl_client, auto_schema_change, AutoSchemaChangeRequest, AutoSchemaChangeResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
@@ -2026,6 +2109,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, list_compact_task_progress, ListCompactTaskProgressRequest, ListCompactTaskProgressResponse }
             ,{ hummock_client, cancel_compact_task, CancelCompactTaskRequest, CancelCompactTaskResponse}
             ,{ hummock_client, list_change_log_epochs, ListChangeLogEpochsRequest, ListChangeLogEpochsResponse }
+            ,{ hummock_client, get_version_by_epoch, GetVersionByEpochRequest, GetVersionByEpochResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

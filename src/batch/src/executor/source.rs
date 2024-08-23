@@ -27,13 +27,12 @@ use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
     ConnectorProperties, SourceColumnDesc, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
+use risingwave_connector::WithOptionsSecResolved;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::Executor;
 use crate::error::{BatchError, Result};
-use crate::executor::{
-    BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder, FileSelector, IcebergScanExecutor,
-};
+use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder, IcebergScanExecutor};
 use crate::task::BatchTaskContext;
 
 pub struct SourceExecutor {
@@ -64,12 +63,15 @@ impl BoxedExecutorBuilder for SourceExecutor {
         )?;
 
         // prepare connector source
-        let source_props = source_node.with_properties.clone();
-        let config =
-            ConnectorProperties::extract(source_props, false).map_err(BatchError::connector)?;
+        let options_with_secret = WithOptionsSecResolved::new(
+            source_node.with_properties.clone(),
+            source_node.secret_refs.clone(),
+        );
+        let config = ConnectorProperties::extract(options_with_secret.clone(), false)
+            .map_err(BatchError::connector)?;
 
         let info = source_node.get_info().unwrap();
-        let parser_config = SpecificParserConfig::new(info, &source_node.with_properties)?;
+        let parser_config = SpecificParserConfig::new(info, &options_with_secret)?;
 
         let columns: Vec<_> = source_node
             .columns
@@ -109,7 +111,8 @@ impl BoxedExecutorBuilder for SourceExecutor {
                 Ok(Box::new(IcebergScanExecutor::new(
                     iceberg_properties.to_iceberg_config(),
                     Some(split.snapshot_id),
-                    FileSelector::FileList(split.files),
+                    split.table_meta.deserialize(),
+                    split.files.into_iter().map(|x| x.deserialize()).collect(),
                     source.context.get_config().developer.chunk_size,
                     schema,
                     source.plan_node().get_identity().clone(),
@@ -171,6 +174,7 @@ impl SourceExecutor {
                 rate_limit: None,
             },
             ConnectorProperties::default(),
+            None,
         ));
         let stream = self
             .source

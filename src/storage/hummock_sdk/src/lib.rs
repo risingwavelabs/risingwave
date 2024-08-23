@@ -22,29 +22,34 @@
 #![feature(is_sorted)]
 #![feature(let_chains)]
 #![feature(btree_cursors)]
-#![feature(lazy_cell)]
 
 mod key_cmp;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
+use std::ops::{Add, Sub};
 
 pub use key_cmp::*;
 use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
-use risingwave_pb::hummock::SstableInfo;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use sstable_info::SstableInfo;
 
-use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
-use crate::table_stats::{to_prost_table_stats_map, PbTableStatsMap, TableStatsMap};
+use crate::table_stats::TableStatsMap;
 
 pub mod change_log;
 pub mod compact;
+pub mod compact_task;
 pub mod compaction_group;
 pub mod key;
 pub mod key_range;
+pub mod level;
 pub mod prost_key_range;
+pub mod sstable_info;
 pub mod table_stats;
 pub mod table_watermark;
+pub mod time_travel;
 pub mod version;
 
 pub use compact::*;
@@ -55,13 +60,72 @@ use crate::table_watermark::TableWatermarks;
 pub type HummockSstableObjectId = u64;
 pub type HummockSstableId = u64;
 pub type HummockRefCount = u64;
-pub type HummockVersionId = u64;
 pub type HummockContextId = u32;
 pub type HummockEpoch = u64;
 pub type HummockCompactionTaskId = u64;
 pub type CompactionGroupId = u64;
-pub const INVALID_VERSION_ID: HummockVersionId = 0;
-pub const FIRST_VERSION_ID: HummockVersionId = 1;
+
+#[derive(Debug, Clone, PartialEq, Copy, Ord, PartialOrd, Eq, Hash)]
+pub struct HummockVersionId(u64);
+
+impl Display for HummockVersionId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl Serialize for HummockVersionId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u64(self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for HummockVersionId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Self(<u64 as Deserialize>::deserialize(deserializer)?))
+    }
+}
+
+impl HummockVersionId {
+    pub const MAX: Self = Self(u64::MAX);
+
+    pub const fn new(id: u64) -> Self {
+        Self(id)
+    }
+
+    pub fn next(&self) -> Self {
+        Self(self.0 + 1)
+    }
+
+    pub fn to_u64(self) -> u64 {
+        self.0
+    }
+}
+
+impl Add<u64> for HummockVersionId {
+    type Output = Self;
+
+    fn add(self, rhs: u64) -> Self::Output {
+        Self(self.0 + rhs)
+    }
+}
+
+impl Sub for HummockVersionId {
+    type Output = u64;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        self.0 - rhs.0
+    }
+}
+
+pub const INVALID_VERSION_ID: HummockVersionId = HummockVersionId(0);
+pub const FIRST_VERSION_ID: HummockVersionId = HummockVersionId(1);
 pub const SPLIT_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 1u64 << 56;
 pub const SINGLE_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 2u64 << 56;
 pub const OBJECT_SUFFIX: &str = "data";
@@ -106,42 +170,20 @@ pub struct SyncResult {
 
 #[derive(Debug, Clone)]
 pub struct LocalSstableInfo {
-    pub compaction_group_id: CompactionGroupId,
     pub sst_info: SstableInfo,
     pub table_stats: TableStatsMap,
 }
 
 impl LocalSstableInfo {
-    pub fn new(
-        compaction_group_id: CompactionGroupId,
-        sst_info: SstableInfo,
-        table_stats: TableStatsMap,
-    ) -> Self {
+    pub fn new(sst_info: SstableInfo, table_stats: TableStatsMap) -> Self {
         Self {
-            compaction_group_id,
             sst_info,
             table_stats,
         }
     }
 
-    pub fn with_compaction_group(
-        compaction_group_id: CompactionGroupId,
-        sst_info: SstableInfo,
-    ) -> Self {
-        Self::new(compaction_group_id, sst_info, TableStatsMap::default())
-    }
-
-    pub fn with_stats(sst_info: SstableInfo, table_stats: TableStatsMap) -> Self {
-        Self::new(
-            StaticCompactionGroupId::StateDefault as CompactionGroupId,
-            sst_info,
-            table_stats,
-        )
-    }
-
     pub fn for_test(sst_info: SstableInfo) -> Self {
         Self {
-            compaction_group_id: StaticCompactionGroupId::StateDefault as CompactionGroupId,
             sst_info,
             table_stats: Default::default(),
         }
@@ -152,47 +194,9 @@ impl LocalSstableInfo {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ExtendedSstableInfo {
-    pub compaction_group_id: CompactionGroupId,
-    pub sst_info: SstableInfo,
-    pub table_stats: PbTableStatsMap,
-}
-
-impl ExtendedSstableInfo {
-    pub fn new(
-        compaction_group_id: CompactionGroupId,
-        sst_info: SstableInfo,
-        table_stats: PbTableStatsMap,
-    ) -> Self {
-        Self {
-            compaction_group_id,
-            sst_info,
-            table_stats,
-        }
-    }
-
-    pub fn with_compaction_group(
-        compaction_group_id: CompactionGroupId,
-        sst_info: SstableInfo,
-    ) -> Self {
-        Self::new(compaction_group_id, sst_info, PbTableStatsMap::default())
-    }
-}
-
-impl From<LocalSstableInfo> for ExtendedSstableInfo {
-    fn from(value: LocalSstableInfo) -> Self {
-        Self {
-            compaction_group_id: value.compaction_group_id,
-            sst_info: value.sst_info,
-            table_stats: to_prost_table_stats_map(value.table_stats),
-        }
-    }
-}
-
 impl PartialEq for LocalSstableInfo {
     fn eq(&self, other: &Self) -> bool {
-        self.compaction_group_id == other.compaction_group_id && self.sst_info == other.sst_info
+        self.sst_info == other.sst_info
     }
 }
 
@@ -207,6 +211,7 @@ pub enum HummockReadEpoch {
     NoWait(HummockEpoch),
     /// We don't need to wait epoch.
     Backup(HummockEpoch),
+    TimeTravel(HummockEpoch),
 }
 
 impl From<BatchQueryEpoch> for HummockReadEpoch {
@@ -215,6 +220,7 @@ impl From<BatchQueryEpoch> for HummockReadEpoch {
             batch_query_epoch::Epoch::Committed(epoch) => HummockReadEpoch::Committed(epoch),
             batch_query_epoch::Epoch::Current(epoch) => HummockReadEpoch::Current(epoch),
             batch_query_epoch::Epoch::Backup(epoch) => HummockReadEpoch::Backup(epoch),
+            batch_query_epoch::Epoch::TimeTravel(epoch) => HummockReadEpoch::TimeTravel(epoch),
         }
     }
 }
@@ -232,6 +238,7 @@ impl HummockReadEpoch {
             HummockReadEpoch::Current(epoch) => epoch,
             HummockReadEpoch::NoWait(epoch) => epoch,
             HummockReadEpoch::Backup(epoch) => epoch,
+            HummockReadEpoch::TimeTravel(epoch) => epoch,
         }
     }
 }
@@ -267,9 +274,7 @@ pub fn can_concat(ssts: &[SstableInfo]) -> bool {
     for i in 1..len {
         if ssts[i - 1]
             .key_range
-            .as_ref()
-            .unwrap()
-            .compare_right_with(&ssts[i].key_range.as_ref().unwrap().left)
+            .compare_right_with(&ssts[i].key_range.left)
             != Ordering::Less
         {
             return false;

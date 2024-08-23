@@ -198,41 +198,23 @@ pub fn place_vnode(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
 
     use risingwave_common::hash::WorkerSlotMapping;
     use risingwave_pb::common::worker_node::Property;
-    use risingwave_pb::common::{ParallelUnit, WorkerNode};
+    use risingwave_pb::common::WorkerNode;
 
-    use crate::hash::{ParallelUnitId, VirtualNode};
+    use crate::hash::VirtualNode;
     use crate::vnode_mapping::vnode_placement::place_vnode;
     #[test]
     fn test_place_vnode() {
         assert_eq!(VirtualNode::COUNT, 256);
 
-        let mut pu_id_counter: ParallelUnitId = 0;
-        let mut pu_to_worker: HashMap<ParallelUnitId, u32> = Default::default();
         let serving_property = Property {
             is_unschedulable: false,
             is_serving: true,
             is_streaming: false,
+            internal_rpc_host_addr: "".to_string(),
         };
-
-        let mut gen_pus_for_worker =
-            |worker_node_id: u32, number: u32, pu_to_worker: &mut HashMap<ParallelUnitId, u32>| {
-                let mut results = vec![];
-                for i in 0..number {
-                    results.push(ParallelUnit {
-                        id: pu_id_counter + i,
-                        worker_node_id,
-                    })
-                }
-                pu_id_counter += number;
-                for pu in &results {
-                    pu_to_worker.insert(pu.id, pu.worker_node_id);
-                }
-                results
-            };
 
         let count_same_vnode_mapping = |wm1: &WorkerSlotMapping, wm2: &WorkerSlotMapping| {
             assert_eq!(wm1.len(), 256);
@@ -249,7 +231,7 @@ mod tests {
 
         let worker_1 = WorkerNode {
             id: 1,
-            parallel_units: gen_pus_for_worker(1, 1, &mut pu_to_worker),
+            parallelism: 1,
             property: Some(serving_property.clone()),
             ..Default::default()
         };
@@ -264,7 +246,7 @@ mod tests {
 
         let worker_2 = WorkerNode {
             id: 2,
-            parallel_units: gen_pus_for_worker(2, 50, &mut pu_to_worker),
+            parallelism: 50,
             property: Some(serving_property.clone()),
             ..Default::default()
         };
@@ -283,8 +265,8 @@ mod tests {
 
         let worker_3 = WorkerNode {
             id: 3,
-            parallel_units: gen_pus_for_worker(3, 60, &mut pu_to_worker),
-            property: Some(serving_property),
+            parallelism: 60,
+            property: Some(serving_property.clone()),
             ..Default::default()
         };
         let re_pu_mapping_2 = place_vnode(

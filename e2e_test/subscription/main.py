@@ -249,6 +249,8 @@ def test_cursor_with_table_alter():
     row = execute_query("fetch next from cur",conn)
     check_rows_data([1,2],row[0],1)
     row = execute_query("fetch next from cur",conn)
+    assert(row == [])
+    row = execute_query("fetch next from cur",conn)
     check_rows_data([4,4,4],row[0],1)
     execute_insert("insert into t1 values(5,5,5)",conn)
     execute_insert("flush",conn)
@@ -258,11 +260,13 @@ def test_cursor_with_table_alter():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
+    assert(row == [])
+    row = execute_query("fetch next from cur",conn)
     check_rows_data([6,6],row[0],1)
     drop_table_subscription()
 
 def test_cursor_fetch_n():
-    print(f"test_cursor_with_table_alter")
+    print(f"test_cursor_fetch_n")
     create_table_subscription()
     conn = psycopg2.connect(
         host="localhost",
@@ -304,6 +308,28 @@ def test_cursor_fetch_n():
     check_rows_data([10,100],row[3],3)
     drop_table_subscription()
 
+def test_rebuild_table():
+    print(f"test_rebuild_table")
+    create_table_subscription()
+    conn = psycopg2.connect(
+        host="localhost",
+        port="4566",
+        user="root",
+        database="dev"
+    )
+
+    execute_insert("declare cur subscription cursor for sub2",conn)
+    execute_insert("insert into t2 values(1,1)",conn)
+    execute_insert("flush",conn)
+    execute_insert("update t2 set v2 = 100 where v1 = 1",conn)
+    execute_insert("flush",conn)
+    row = execute_query("fetch 4 from cur",conn)
+    assert len(row) == 3
+    check_rows_data([1,1],row[0],1)
+    check_rows_data([1,1],row[1],4)
+    check_rows_data([1,100],row[2],3)
+    drop_table_subscription()
+
 if __name__ == "__main__":
     test_cursor_snapshot()
     test_cursor_op()
@@ -313,3 +339,4 @@ if __name__ == "__main__":
     test_cursor_since_begin()
     test_cursor_with_table_alter()
     test_cursor_fetch_n()
+    test_rebuild_table()

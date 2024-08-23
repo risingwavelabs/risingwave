@@ -26,13 +26,14 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::data::DataType;
 use risingwave_pb::user::grant_privilege::PbObject;
+use tokio::sync::oneshot::Sender;
 
 use super::utils::{get_refed_secret_ids_from_sink, get_refed_secret_ids_from_source};
 use super::{
     ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SecretId, SinkId, SourceId,
     SubscriptionId, ViewId,
 };
-use crate::manager::{IndexId, MetaSrvEnv, TableId, UserId};
+use crate::manager::{IndexId, MetaSrvEnv, NotificationVersion, TableId, UserId};
 use crate::model::MetadataModel;
 use crate::{MetaError, MetaResult};
 
@@ -95,6 +96,13 @@ pub struct DatabaseManager {
     pub(super) in_progress_creation_streaming_job: HashMap<TableId, RelationKey>,
     // In-progress creating tables, including internal tables.
     pub(super) in_progress_creating_tables: HashMap<TableId, Table>,
+
+    /// Registered finish notifiers for creating tables.
+    ///
+    /// `DdlController` will update this map, and pass the `tx` side to `CatalogController`.
+    /// On notifying, we can remove the entry from this map.
+    pub creating_table_finish_notifier:
+        HashMap<TableId, Vec<Sender<MetaResult<NotificationVersion>>>>,
 }
 
 impl DatabaseManager {
@@ -187,6 +195,7 @@ impl DatabaseManager {
             in_progress_creation_tracker: HashSet::default(),
             in_progress_creation_streaming_job: HashMap::default(),
             in_progress_creating_tables: HashMap::default(),
+            creating_table_finish_notifier: Default::default(),
         })
     }
 
@@ -239,6 +248,15 @@ impl DatabaseManager {
             .collect()
     }
 
+    pub fn get_table_by_cdc_table_id(&self, cdc_table_id: &String) -> Vec<Table> {
+        let cdc_table_id = Some(cdc_table_id);
+        self.tables
+            .values()
+            .filter(|t| t.cdc_table_id.as_ref() == cdc_table_id)
+            .cloned()
+            .collect()
+    }
+
     pub fn check_relation_name_duplicated(&self, relation_key: &RelationKey) -> MetaResult<()> {
         if let Some(t) = self.tables.values().find(|x| {
             x.database_id == relation_key.0
@@ -246,7 +264,7 @@ impl DatabaseManager {
                 && x.name.eq(&relation_key.2)
         }) {
             if t.stream_job_status == StreamJobStatus::Creating as i32 {
-                bail!("table is in creating procedure, table id: {}", t.id);
+                bail!("The table is being created, table id: {}", t.id);
             } else {
                 Err(MetaError::catalog_duplicated("table", &relation_key.2))
             }
@@ -567,6 +585,16 @@ impl DatabaseManager {
 
     pub fn unmark_creating_streaming_job(&mut self, table_id: TableId) {
         self.in_progress_creation_streaming_job.remove(&table_id);
+        for tx in self
+            .creating_table_finish_notifier
+            .remove(&table_id)
+            .into_iter()
+            .flatten()
+        {
+            let _ = tx.send(Err(MetaError::cancelled(format!(
+                "streaing_job {table_id} has been cancelled"
+            ))));
+        }
     }
 
     pub fn find_creating_streaming_job_id(&self, key: &RelationKey) -> Option<TableId> {

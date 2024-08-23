@@ -135,6 +135,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::Cot
             | Type::Asin
             | Type::Acos
+            | Type::Acosd
             | Type::Atan
             | Type::Atan2
             | Type::Sqrt
@@ -248,7 +249,18 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::InetNtoa
             | Type::InetAton
             | Type::QuoteLiteral
-            | Type::QuoteNullable =>
+            | Type::QuoteNullable
+            | Type::MapFromEntries
+            | Type::MapAccess
+            | Type::MapKeys
+            | Type::MapValues
+            | Type::MapEntries
+            | Type::MapFromKeyValues
+            | Type::MapCat
+            | Type::MapContains
+            | Type::MapDelete
+            | Type::MapInsert
+            | Type::MapLength =>
             // expression output is deterministic(same result for the same input)
             {
                 func_call
@@ -275,7 +287,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::HasTablePrivilege
             | Type::HasAnyColumnPrivilege
             | Type::HasSchemaPrivilege
-            | Type::MakeTimestamptz => self.impure = true,
+            | Type::MakeTimestamptz
+            | Type::PgIsInRecovery
+            | Type::RwRecoveryStatus => self.impure = true,
         }
     }
 }

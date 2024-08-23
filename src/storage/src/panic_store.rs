@@ -20,6 +20,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 
@@ -162,6 +163,10 @@ impl LocalStateStore for PanicStateStore {
     fn update_vnode_bitmap(&mut self, _vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
         panic!("should not operate on the panic state store!");
     }
+
+    fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
+        panic!("should not operate on the panic state store!");
+    }
 }
 
 impl StateStore for PanicStateStore {
@@ -179,11 +184,6 @@ impl StateStore for PanicStateStore {
 
     fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {
         panic!("should not update current epoch from the panic state store!");
-    }
-
-    #[allow(clippy::unused_async)]
-    async fn clear_shared_buffer(&self, _prev_epoch: u64) {
-        panic!("should not clear shared buffer from the panic state store!");
     }
 
     #[allow(clippy::unused_async)]

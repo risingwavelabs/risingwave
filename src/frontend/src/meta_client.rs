@@ -18,6 +18,7 @@ use anyhow::Context;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::WorkerNode;
@@ -33,7 +34,7 @@ use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistributi
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::{EventLog, PbThrottleTarget};
+use risingwave_pb::meta::{EventLog, PbThrottleTarget, RecoveryStatus};
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
@@ -133,6 +134,8 @@ pub trait FrontendMetaClient: Send + Sync {
         min_epoch: u64,
         max_count: u32,
     ) -> Result<Vec<u64>>;
+
+    async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -279,7 +282,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_version_deltas(&self) -> Result<Vec<HummockVersionDelta>> {
         // FIXME #8612: there can be lots of version deltas, so better to fetch them by pages and refactor `SysRowSeqScanExecutor` to yield multiple chunks.
-        self.0.list_version_deltas(0, u32::MAX, u64::MAX).await
+        self.0
+            .list_version_deltas(HummockVersionId::new(0), u32::MAX, u64::MAX)
+            .await
     }
 
     async fn list_branched_objects(&self) -> Result<Vec<BranchedObject>> {
@@ -335,5 +340,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0
             .list_change_log_epochs(table_id, min_epoch, max_count)
             .await
+    }
+
+    async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {
+        self.0.get_cluster_recovery_status().await
     }
 }

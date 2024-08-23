@@ -21,7 +21,7 @@ use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
 use itertools::Itertools;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
@@ -210,14 +210,16 @@ enum HummockCommands {
         #[clap(short, long = "level", default_value_t = 1)]
         level: u32,
 
-        #[clap(short, long = "sst-ids")]
+        #[clap(short, long = "sst-ids", value_delimiter = ',')]
         sst_ids: Vec<u64>,
     },
-    /// trigger a full GC for SSTs that is not in version and with timestamp <= now -
-    /// `sst_retention_time_sec`.
+    /// Trigger a full GC for SSTs that is not pinned, with timestamp <= now -
+    /// `sst_retention_time_sec`, and with `prefix` in path.
     TriggerFullGc {
         #[clap(short, long = "sst_retention_time_sec", default_value_t = 259200)]
         sst_retention_time_sec: u64,
+        #[clap(short, long = "prefix", required = false)]
+        prefix: Option<String>,
     },
     /// List pinned versions of each worker.
     ListPinnedVersions {},
@@ -227,7 +229,7 @@ enum HummockCommands {
     ListCompactionGroup,
     /// Update compaction config for compaction groups.
     UpdateCompactionConfig {
-        #[clap(long)]
+        #[clap(long, value_delimiter = ',')]
         compaction_group_ids: Vec<u64>,
         #[clap(long)]
         max_bytes_for_level_base: Option<u64>,
@@ -265,12 +267,14 @@ enum HummockCommands {
         compression_algorithm: Option<String>,
         #[clap(long)]
         max_l0_compact_level: Option<u32>,
+        #[clap(long)]
+        sst_allowed_trivial_move_min_size: Option<u64>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
         #[clap(long)]
         compaction_group_id: u64,
-        #[clap(long)]
+        #[clap(long, value_delimiter = ',')]
         table_ids: Vec<u32>,
     },
     /// Pause version checkpoint, which subsequently pauses GC of delta log and SST object.
@@ -401,18 +405,18 @@ enum MetaCommands {
     ClusterInfo,
     /// get source split info
     SourceSplitInfo,
-    /// Reschedule the parallel unit in the stream graph
+    /// Reschedule the actors in the stream graph
     ///
-    /// The format is `fragment_id-[removed]+[added]`
-    /// You can provide either `removed` only or `added` only, but `removed` should be preceded by
+    /// The format is `fragment_id-[worker_id:count]+[worker_id:count]`
+    /// You can provide either decreased `worker_ids` only or increased only, but decreased should be preceded by
     /// `added` when both are provided.
     ///
-    /// For example, for plan `100-[1,2,3]+[4,5]` the follow request will be generated:
+    /// For example, for plan `100-[1:1]+[4:1]` the follow request will be generated:
     /// ```text
     /// {
-    ///     100: Reschedule {
-    ///         added_parallel_units: [4,5],
-    ///         removed_parallel_units: [1,2,3],
+    ///     100: WorkerReschedule {
+    ///         increased_actor_count: { 1: 1 },
+    ///         decreased_actor_count: { 4: 1 },
     ///     }
     /// }
     /// ```
@@ -447,12 +451,15 @@ enum MetaCommands {
         opts: RestoreOpts,
     },
     /// delete meta snapshots
-    DeleteMetaSnapshots { snapshot_ids: Vec<u64> },
+    DeleteMetaSnapshots {
+        #[clap(long, value_delimiter = ',')]
+        snapshot_ids: Vec<u64>,
+    },
 
     /// List all existing connections in the catalog
     ListConnections,
 
-    /// List fragment to parallel units mapping for serving
+    /// List fragment mapping for serving
     ListServingFragmentMapping,
 
     /// Unregister workers from the cluster
@@ -589,7 +596,12 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             start_id,
             num_epochs,
         }) => {
-            cmd_impl::hummock::list_version_deltas(context, start_id, num_epochs).await?;
+            cmd_impl::hummock::list_version_deltas(
+                context,
+                HummockVersionId::new(start_id),
+                num_epochs,
+            )
+            .await?;
         }
         Commands::Hummock(HummockCommands::ListKv {
             epoch,
@@ -626,7 +638,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Hummock(HummockCommands::TriggerFullGc {
             sst_retention_time_sec,
-        }) => cmd_impl::hummock::trigger_full_gc(context, sst_retention_time_sec).await?,
+            prefix,
+        }) => cmd_impl::hummock::trigger_full_gc(context, sst_retention_time_sec, prefix).await?,
         Commands::Hummock(HummockCommands::ListPinnedVersions {}) => {
             list_pinned_versions(context).await?
         }
@@ -656,6 +669,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             compression_level,
             compression_algorithm,
             max_l0_compact_level,
+            sst_allowed_trivial_move_min_size,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -686,6 +700,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                         None
                     },
                     max_l0_compact_level,
+                    sst_allowed_trivial_move_min_size,
                 ),
             )
             .await?
@@ -731,7 +746,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => {
             cmd_impl::hummock::print_version_delta_in_archive(
                 context,
-                archive_ids,
+                archive_ids.into_iter().map(HummockVersionId::new),
                 data_dir,
                 sst_id,
                 use_new_object_prefix_strategy,
@@ -746,7 +761,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => {
             cmd_impl::hummock::print_user_key_in_archive(
                 context,
-                archive_ids,
+                archive_ids.into_iter().map(HummockVersionId::new),
                 data_dir,
                 user_key,
                 use_new_object_prefix_strategy,

@@ -12,27 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Range;
-use std::sync::Arc;
-
 use anyhow::anyhow;
-use bytes::Bytes;
 use futures_async_stream::try_stream;
-use futures_util::future::BoxFuture;
 use futures_util::stream::StreamExt;
-use futures_util::TryFutureExt;
-use hashbrown::HashMap;
-use iceberg::io::{
-    FileIOBuilder, FileMetadata, FileRead, S3_ACCESS_KEY_ID, S3_REGION, S3_SECRET_ACCESS_KEY,
-};
-use parquet::arrow::async_reader::{AsyncFileReader, MetadataLoader};
-use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask};
-use parquet::file::metadata::ParquetMetaData;
+use parquet::arrow::ProjectionMask;
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_connector::source::iceberg::parquet_file_reader::create_parquet_stream_builder;
+use risingwave_pb::batch_plan::file_scan_node;
+use risingwave_pb::batch_plan::file_scan_node::StorageType;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::BatchError;
-use crate::executor::{DataChunk, Executor};
+use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, DataChunk, Executor, ExecutorBuilder};
+use crate::task::BatchTaskContext;
 
 #[derive(PartialEq, Debug)]
 pub enum FileFormat {
@@ -42,7 +35,7 @@ pub enum FileFormat {
 /// S3 file scan executor. Currently only support parquet file format.
 pub struct S3FileScanExecutor {
     file_format: FileFormat,
-    location: String,
+    file_location: Vec<String>,
     s3_region: String,
     s3_access_key: String,
     s3_secret_key: String,
@@ -66,10 +59,9 @@ impl Executor for S3FileScanExecutor {
 }
 
 impl S3FileScanExecutor {
-    #![expect(dead_code)]
     pub fn new(
         file_format: FileFormat,
-        location: String,
+        file_location: Vec<String>,
         s3_region: String,
         s3_access_key: String,
         s3_secret_key: String,
@@ -79,7 +71,7 @@ impl S3FileScanExecutor {
     ) -> Self {
         Self {
             file_format,
-            location,
+            file_location,
             s3_region,
             s3_access_key,
             s3_secret_key,
@@ -92,72 +84,67 @@ impl S3FileScanExecutor {
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         assert_eq!(self.file_format, FileFormat::Parquet);
+        for file in self.file_location {
+            let mut batch_stream_builder = create_parquet_stream_builder(
+                self.s3_region.clone(),
+                self.s3_access_key.clone(),
+                self.s3_secret_key.clone(),
+                file,
+            )
+            .await?;
 
-        let mut props = HashMap::new();
-        props.insert(S3_REGION, self.s3_region.clone());
-        props.insert(S3_ACCESS_KEY_ID, self.s3_access_key.clone());
-        props.insert(S3_SECRET_ACCESS_KEY, self.s3_secret_key.clone());
+            let arrow_schema = batch_stream_builder.schema();
+            assert_eq!(arrow_schema.fields.len(), self.schema.fields.len());
+            for (field, arrow_field) in self.schema.fields.iter().zip(arrow_schema.fields.iter()) {
+                assert_eq!(*field.name, *arrow_field.name());
+            }
 
-        let file_io_builder = FileIOBuilder::new("s3");
-        let file_io = file_io_builder.with_props(props.into_iter()).build()?;
-        let parquet_file = file_io.new_input(&self.location)?;
+            batch_stream_builder = batch_stream_builder.with_projection(ProjectionMask::all());
 
-        let parquet_metadata = parquet_file.metadata().await?;
-        let parquet_reader = parquet_file.reader().await?;
-        let arrow_file_reader = ArrowFileReader::new(parquet_metadata, parquet_reader);
+            batch_stream_builder = batch_stream_builder.with_batch_size(self.batch_size);
 
-        let mut batch_stream_builder = ParquetRecordBatchStreamBuilder::new(arrow_file_reader)
-            .await
-            .map_err(|e| anyhow!(e))?;
+            let record_batch_stream = batch_stream_builder
+                .build()
+                .map_err(|e| anyhow!(e).context("fail to build arrow stream builder"))?;
 
-        let arrow_schema = batch_stream_builder.schema();
-        assert_eq!(arrow_schema.fields.len(), self.schema.fields.len());
-        for (field, arrow_field) in self.schema.fields.iter().zip(arrow_schema.fields.iter()) {
-            assert_eq!(*field.name, *arrow_field.name());
-        }
-
-        batch_stream_builder = batch_stream_builder.with_projection(ProjectionMask::all());
-
-        batch_stream_builder = batch_stream_builder.with_batch_size(self.batch_size);
-
-        let record_batch_stream = batch_stream_builder.build().map_err(|e| anyhow!(e))?;
-
-        #[for_await]
-        for record_batch in record_batch_stream {
-            let record_batch = record_batch.map_err(BatchError::Parquet)?;
-            let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
-            debug_assert_eq!(chunk.data_types(), self.schema.data_types());
-            yield chunk;
+            #[for_await]
+            for record_batch in record_batch_stream {
+                let record_batch = record_batch.map_err(BatchError::Parquet)?;
+                let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+                debug_assert_eq!(chunk.data_types(), self.schema.data_types());
+                yield chunk;
+            }
         }
     }
 }
 
-struct ArrowFileReader<R: FileRead> {
-    meta: FileMetadata,
-    r: R,
-}
+pub struct FileScanExecutorBuilder {}
 
-impl<R: FileRead> ArrowFileReader<R> {
-    fn new(meta: FileMetadata, r: R) -> Self {
-        Self { meta, r }
-    }
-}
+#[async_trait::async_trait]
+impl BoxedExecutorBuilder for FileScanExecutorBuilder {
+    async fn new_boxed_executor<C: BatchTaskContext>(
+        source: &ExecutorBuilder<'_, C>,
+        _inputs: Vec<BoxedExecutor>,
+    ) -> crate::error::Result<BoxedExecutor> {
+        let file_scan_node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::FileScan
+        )?;
 
-impl<R: FileRead> AsyncFileReader for ArrowFileReader<R> {
-    fn get_bytes(&mut self, range: Range<usize>) -> BoxFuture<'_, parquet::errors::Result<Bytes>> {
-        Box::pin(
-            self.r
-                .read(range.start as _..range.end as _)
-                .map_err(|err| parquet::errors::ParquetError::External(Box::new(err))),
-        )
-    }
+        assert_eq!(file_scan_node.storage_type, StorageType::S3 as i32);
 
-    fn get_metadata(&mut self) -> BoxFuture<'_, parquet::errors::Result<Arc<ParquetMetaData>>> {
-        Box::pin(async move {
-            let file_size = self.meta.size;
-            let mut loader = MetadataLoader::load(self, file_size as usize, None).await?;
-            loader.load_page_index(false, false).await?;
-            Ok(Arc::new(loader.finish()))
-        })
+        Ok(Box::new(S3FileScanExecutor::new(
+            match file_scan_node::FileFormat::try_from(file_scan_node.file_format).unwrap() {
+                file_scan_node::FileFormat::Parquet => FileFormat::Parquet,
+                file_scan_node::FileFormat::Unspecified => unreachable!(),
+            },
+            file_scan_node.file_location.clone(),
+            file_scan_node.s3_region.clone(),
+            file_scan_node.s3_access_key.clone(),
+            file_scan_node.s3_secret_key.clone(),
+            source.context.get_config().developer.chunk_size,
+            Schema::from_iter(file_scan_node.columns.iter().map(Field::from)),
+            source.plan_node().get_identity().clone(),
+        )))
     }
 }

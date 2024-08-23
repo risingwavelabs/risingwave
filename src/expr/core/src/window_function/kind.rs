@@ -19,7 +19,7 @@ use crate::aggregate::AggKind;
 use crate::Result;
 
 /// Kind of window functions.
-#[derive(Debug, Display, FromStr, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Display, FromStr /* for builtin */, Clone, PartialEq, Eq, Hash)]
 #[display(style = "snake_case")]
 pub enum WindowFuncKind {
     // General-purpose window functions.
@@ -52,7 +52,8 @@ impl WindowFuncKind {
                 Err(_) => bail!("no such window function type"),
             },
             PbType::Aggregate(agg_type) => match PbAggType::try_from(*agg_type) {
-                Ok(agg_type) => Self::Aggregate(AggKind::from_protobuf(agg_type)?),
+                // TODO(runji): support UDAF and wrapped scalar functions
+                Ok(agg_type) => Self::Aggregate(AggKind::from_protobuf(agg_type, None, None)?),
                 Err(_) => bail!("no such aggregate function type"),
             },
         };

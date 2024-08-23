@@ -15,7 +15,10 @@
 use bytes::{Bytes, BytesMut};
 use postgres_types::{ToSql, Type};
 
-use super::{DataType, DatumRef, ScalarRefImpl, F32, F64};
+use super::{
+    DataType, Date, Decimal, Interval, ScalarRefImpl, Serial, Time, Timestamp, Timestamptz, F32,
+    F64,
+};
 use crate::error::NotImplemented;
 
 /// Error type for [`ToBinary`] trait.
@@ -30,14 +33,15 @@ pub enum ToBinaryError {
 
 pub type Result<T> = std::result::Result<T, ToBinaryError>;
 
-// Used to convert ScalarRef to text format
+/// Converts `ScalarRef` to pgwire "BINARY" format.
+///
+/// [`postgres_types::ToSql`] has similar functionality, and most of our types implement
+/// that trait and forward `ToBinary` to it directly.
 pub trait ToBinary {
     fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>>;
 }
-
-// implement use to_sql
 macro_rules! implement_using_to_sql {
-    ($({ $scalar_type:ty, $data_type:ident, $accessor:expr } ),*) => {
+    ($({ $scalar_type:ty, $data_type:ident, $accessor:expr } ),* $(,)?) => {
         $(
             impl ToBinary for $scalar_type {
                 fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>> {
@@ -64,7 +68,14 @@ implement_using_to_sql! {
     { F32, Float32, |x: &F32| x.0 },
     { F64, Float64, |x: &F64| x.0 },
     { bool, Boolean, |x| x },
-    { &[u8], Bytea, |x| x }
+    { &[u8], Bytea, |x| x },
+    { Time, Time, |x: &Time| x.0 },
+    { Date, Date, |x: &Date| x.0 },
+    { Timestamp, Timestamp, |x: &Timestamp| x.0 },
+    { Decimal, Decimal, |x| x },
+    { Interval, Interval, |x| x },
+    { Serial, Serial, |x: &Serial| x.0 },
+    { Timestamptz, Timestamptz, |x: &Timestamptz| x.to_datetime_utc() }
 }
 
 impl ToBinary for ScalarRefImpl<'_> {
@@ -91,15 +102,7 @@ impl ToBinary for ScalarRefImpl<'_> {
                 issue = 7949,
                 "the pgwire extended-mode encoding for {ty} is unsupported"
             ),
-        }
-    }
-}
-
-impl ToBinary for DatumRef<'_> {
-    fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>> {
-        match self {
-            Some(scalar) => scalar.to_binary_with_type(ty),
-            None => Ok(None),
+            ScalarRefImpl::Map(_) => todo!(),
         }
     }
 }

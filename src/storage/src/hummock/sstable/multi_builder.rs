@@ -278,36 +278,7 @@ where
                 if let Some(progress) = &self.task_progress {
                     progress.inc_ssts_sealed();
                 }
-
-                if builder_output.bloom_filter_size != 0 {
-                    self.compactor_metrics
-                        .sstable_bloom_filter_size
-                        .observe(builder_output.bloom_filter_size as _);
-                }
-
-                if builder_output.sst_info.file_size() != 0 {
-                    self.compactor_metrics
-                        .sstable_file_size
-                        .observe(builder_output.sst_info.file_size() as _);
-                }
-
-                if builder_output.avg_key_size != 0 {
-                    self.compactor_metrics
-                        .sstable_avg_key_size
-                        .observe(builder_output.avg_key_size as _);
-                }
-
-                if builder_output.avg_value_size != 0 {
-                    self.compactor_metrics
-                        .sstable_avg_value_size
-                        .observe(builder_output.avg_value_size as _);
-                }
-
-                if builder_output.epoch_count != 0 {
-                    self.compactor_metrics
-                        .sstable_distinct_epoch_count
-                        .observe(builder_output.epoch_count as _);
-                }
+                builder_output.stats.report_stats(&self.compactor_metrics);
             }
 
             self.concurrent_upload_join_handle
@@ -335,7 +306,10 @@ where
         self.seal_current().await?;
         try_join_all(self.concurrent_upload_join_handle.into_iter())
             .await
-            .map_err(HummockError::sstable_upload_error)?;
+            .map_err(HummockError::sstable_upload_error)?
+            .into_iter()
+            .collect::<HummockResult<Vec<()>>>()?;
+
         Ok(self.sst_outputs)
     }
 }

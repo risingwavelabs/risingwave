@@ -158,6 +158,7 @@ async fn compaction_test(
         incoming_sinks: vec![],
         initialized_at_cluster_version: None,
         created_at_cluster_version: None,
+        cdc_table_id: None,
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -288,7 +289,7 @@ async fn compaction_test(
         version.id, remote_version.id
     );
     for (group, levels) in &version.levels {
-        let l0 = levels.l0.as_ref().unwrap();
+        let l0 = &levels.l0;
         println!(
             "group-{}: l0 sz: {}, count: {}",
             group,

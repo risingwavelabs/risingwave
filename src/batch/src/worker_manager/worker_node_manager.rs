@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use rand::seq::SliceRandom;
 use risingwave_common::bail;
+use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
@@ -213,10 +214,20 @@ impl WorkerNodeManager {
 
     pub fn remove_streaming_fragment_mapping(&self, fragment_id: &FragmentId) {
         let mut guard = self.inner.write().unwrap();
-        guard
-            .streaming_fragment_vnode_mapping
-            .remove(fragment_id)
-            .unwrap();
+
+        let res = guard.streaming_fragment_vnode_mapping.remove(fragment_id);
+        match &res {
+            Some(_) => {}
+            None if OBJECT_ID_PLACEHOLDER == *fragment_id => {
+                // Do nothing for placeholder fragment.
+            }
+            None => {
+                panic!(
+                    "Streaming vnode mapping not found for fragment_id: {}",
+                    fragment_id
+                )
+            }
+        };
     }
 
     /// Returns fragment's vnode mapping for serving.
@@ -414,11 +425,12 @@ mod tests {
                 r#type: WorkerType::ComputeNode as i32,
                 host: Some(HostAddr::try_from("127.0.0.1:1234").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
-                parallel_units: vec![],
+                parallelism: 0,
                 property: Some(Property {
                     is_unschedulable: false,
                     is_serving: true,
                     is_streaming: true,
+                    internal_rpc_host_addr: "".to_string(),
                 }),
                 transactional_id: Some(1),
                 ..Default::default()
@@ -428,11 +440,12 @@ mod tests {
                 r#type: WorkerType::ComputeNode as i32,
                 host: Some(HostAddr::try_from("127.0.0.1:1235").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
-                parallel_units: vec![],
+                parallelism: 0,
                 property: Some(Property {
                     is_unschedulable: false,
                     is_serving: true,
                     is_streaming: false,
+                    internal_rpc_host_addr: "".to_string(),
                 }),
                 transactional_id: Some(2),
                 ..Default::default()

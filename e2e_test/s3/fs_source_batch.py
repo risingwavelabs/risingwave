@@ -69,7 +69,7 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt):
         sex int,
         mark int,
     ) WITH (
-        connector = 's3_v2',
+        connector = 's3',
         match_pattern = '{prefix}*.{fmt}',
         s3.region_name = '{config['S3_REGION']}',
         s3.bucket_name = '{config['S3_BUCKET']}',
@@ -109,6 +109,59 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt):
     cur.close()
     conn.close()
 
+def test_empty_source(config, prefix, fmt):
+    conn = psycopg2.connect(
+        host="localhost",
+        port="4566",
+        user="root",
+        database="dev"
+    )
+
+    # Open a cursor to execute SQL statements
+    cur = conn.cursor()
+
+    def _source():
+        return f's3_test_empty_{fmt}'
+
+    def _encode():
+        if fmt == 'json':
+            return 'JSON'
+        else:
+            return f"CSV (delimiter = ',', without_header = {str('without' in fmt).lower()})"
+
+    # Execute a SELECT statement
+    cur.execute(f'''CREATE SOURCE {_source()}(
+        id int,
+        name TEXT,
+        sex int,
+        mark int,
+    ) WITH (
+        connector = 's3',
+        match_pattern = '{prefix}*.{fmt}',
+        s3.region_name = '{config['S3_REGION']}',
+        s3.bucket_name = '{config['S3_BUCKET']}',
+        s3.credentials.access = '{config['S3_ACCESS_KEY']}',
+        s3.credentials.secret = '{config['S3_SECRET_KEY']}',
+        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
+    ) FORMAT PLAIN ENCODE {_encode()};''')
+
+    stmt = f'select count(*), sum(id), sum(sex), sum(mark) from {_source()}'
+    print(f'Execute {stmt}')
+    cur.execute(stmt)
+    result = cur.fetchone()
+
+    print('Got:', result)
+
+    def _assert_eq(field, got, expect):
+        assert got == expect, f'{field} assertion failed: got {got}, expect {expect}.'
+
+    _assert_eq('count(*)', result[0], 0)
+
+    print('Empty source test pass')
+
+    cur.execute(f'drop source {_source()}')
+    cur.close()
+    conn.close()
 
 if __name__ == "__main__":
     FILE_NUM = 4001
@@ -153,3 +206,5 @@ if __name__ == "__main__":
     # clean up s3 files
     for idx, _ in enumerate(formatted_files):
         client.remove_object(config["S3_BUCKET"], _s3(idx))
+
+    test_empty_source(config, run_id, fmt)

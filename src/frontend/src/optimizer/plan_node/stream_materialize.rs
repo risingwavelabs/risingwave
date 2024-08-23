@@ -59,6 +59,7 @@ impl StreamMaterialize {
             input.append_only(),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
+            input.columns_monotonicity().clone(),
         );
         Self { base, input, table }
     }
@@ -132,10 +133,11 @@ impl StreamMaterialize {
         row_id_index: Option<usize>,
         version: Option<TableVersion>,
         retention_seconds: Option<NonZeroU32>,
+        cdc_table_id: Option<String>,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
-        let table = Self::derive_table_catalog(
+        let mut table = Self::derive_table_catalog(
             input.clone(),
             name,
             user_order_by,
@@ -151,6 +153,8 @@ impl StreamMaterialize {
             retention_seconds,
             CreateType::Foreground,
         )?;
+
+        table.cdc_table_id = cdc_table_id;
 
         Ok(Self::new(input, table))
     }
@@ -278,6 +282,7 @@ impl StreamMaterialize {
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             retention_seconds: retention_seconds.map(|i| i.into()),
+            cdc_table_id: None,
         })
     }
 

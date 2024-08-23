@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![expect(
+    unexpected_cfgs,
+    reason = "feature(hdfs-backend) is banned https://github.com/risingwavelabs/risingwave/pull/7875"
+)]
+
 pub mod sim;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
@@ -390,12 +395,11 @@ impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
         let operation_type_str = operation_type.as_str();
         let data_len = data.len();
 
-        let res =
-            // TODO: we should avoid this special case after fully migrating to opeandal for s3.
-            self.inner
-                .write_bytes(data)
-                .verbose_instrument_await(operation_type_str)
-                .await;
+        let res = self
+            .inner
+            .write_bytes(data)
+            .verbose_instrument_await(operation_type_str)
+            .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
 
@@ -563,6 +567,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         let operation_type = OperationType::Upload;
         let operation_type_str = operation_type.as_str();
+        let media_type = self.media_type();
 
         self.object_store_metrics
             .write_bytes
@@ -574,7 +579,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type_str])
+            .with_label_values(&[media_type, operation_type_str])
             .start_timer();
 
         let builder = || async {
@@ -589,6 +594,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             &self.config,
             operation_type,
             self.object_store_metrics.clone(),
+            media_type,
         )
         .await;
 
@@ -626,10 +632,12 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         let operation_type = OperationType::Read;
         let operation_type_str = operation_type.as_str();
+        let media_type = self.media_type();
+
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type_str])
+            .with_label_values(&[media_type, operation_type_str])
             .start_timer();
 
         let builder = || async {
@@ -644,6 +652,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             &self.config,
             operation_type,
             self.object_store_metrics.clone(),
+            media_type,
         )
         .await;
 
@@ -697,6 +706,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             &self.config,
             operation_type,
             self.object_store_metrics.clone(),
+            media_type,
         )
         .await;
 
@@ -715,10 +725,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
         let operation_type = OperationType::Metadata;
         let operation_type_str = operation_type.as_str();
+        let media_type = self.media_type();
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type_str])
+            .with_label_values(&[media_type, operation_type_str])
             .start_timer();
 
         let builder = || async {
@@ -733,6 +744,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             &self.config,
             operation_type,
             self.object_store_metrics.clone(),
+            media_type,
         )
         .await;
 
@@ -743,10 +755,12 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub async fn delete(&self, path: &str) -> ObjectResult<()> {
         let operation_type = OperationType::Delete;
         let operation_type_str = operation_type.as_str();
+        let media_type = self.media_type();
+
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type_str])
+            .with_label_values(&[media_type, operation_type_str])
             .start_timer();
 
         let builder = || async {
@@ -761,6 +775,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             &self.config,
             operation_type,
             self.object_store_metrics.clone(),
+            media_type,
         )
         .await;
 
@@ -771,6 +786,8 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
         let operation_type = OperationType::DeleteObjects;
         let operation_type_str = operation_type.as_str();
+        let media_type = self.media_type();
+
         let _timer = self
             .object_store_metrics
             .operation_latency
@@ -789,6 +806,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             &self.config,
             operation_type,
             self.object_store_metrics.clone(),
+            media_type,
         )
         .await;
 
@@ -799,11 +817,12 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
         let operation_type = OperationType::List;
         let operation_type_str = operation_type.as_str();
+        let media_type = self.media_type();
 
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type_str])
+            .with_label_values(&[media_type, operation_type_str])
             .start_timer();
 
         let builder = || async {
@@ -818,6 +837,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             &self.config,
             operation_type,
             self.object_store_metrics.clone(),
+            media_type,
         )
         .await;
 
@@ -1097,20 +1117,26 @@ struct RetryCondition {
     operation_type: OperationType,
     retry_count: usize,
     metrics: Arc<ObjectStoreMetrics>,
+    retry_opendal_s3_unknown_error: bool,
 }
 
 impl RetryCondition {
-    fn new(operation_type: OperationType, metrics: Arc<ObjectStoreMetrics>) -> Self {
+    fn new(
+        operation_type: OperationType,
+        metrics: Arc<ObjectStoreMetrics>,
+        retry_opendal_s3_unknown_error: bool,
+    ) -> Self {
         Self {
             operation_type,
             retry_count: 0,
             metrics,
+            retry_opendal_s3_unknown_error,
         }
     }
 
     #[inline(always)]
     fn should_retry_inner(&mut self, err: &ObjectError) -> bool {
-        let should_retry = err.should_retry();
+        let should_retry = err.should_retry(self.retry_opendal_s3_unknown_error);
         if should_retry {
             self.retry_count += 1;
         }
@@ -1141,6 +1167,7 @@ async fn retry_request<F, T, B>(
     config: &ObjectStoreConfig,
     operation_type: OperationType,
     object_store_metrics: Arc<ObjectStoreMetrics>,
+    media_type: &'static str,
 ) -> ObjectResult<T>
 where
     B: Fn() -> F,
@@ -1151,7 +1178,13 @@ where
         Duration::from_millis(get_attempt_timeout_by_type(config, operation_type));
     let operation_type_str = operation_type.as_str();
 
-    let retry_condition = RetryCondition::new(operation_type, object_store_metrics);
+    let retry_condition = RetryCondition::new(
+        operation_type,
+        object_store_metrics,
+        (config.s3.developer.retry_unknown_service_error || config.s3.retry_unknown_service_error)
+            && (media_type == opendal_engine::MediaType::S3.as_str()
+                || media_type == opendal_engine::MediaType::Minio.as_str()),
+    );
 
     let f = || async {
         let future = builder();

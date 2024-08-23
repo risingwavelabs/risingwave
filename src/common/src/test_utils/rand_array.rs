@@ -24,10 +24,10 @@ use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
-use crate::array::{Array, ArrayBuilder, ArrayRef, ListValue, StructValue};
+use crate::array::{Array, ArrayBuilder, ArrayRef, ListValue, MapValue, StructValue};
 use crate::types::{
-    Date, Decimal, Int256, Interval, JsonbVal, NativeType, Scalar, Serial, Time, Timestamp,
-    Timestamptz,
+    DataType, Date, Decimal, Int256, Interval, JsonbVal, MapType, NativeType, Scalar, Serial, Time,
+    Timestamp, Timestamptz,
 };
 
 pub trait RandValue {
@@ -86,7 +86,7 @@ impl RandValue for Date {
         let max_day = chrono::NaiveDate::MAX.num_days_from_ce();
         let min_day = chrono::NaiveDate::MIN.num_days_from_ce();
         let days = rand.gen_range(min_day..=max_day);
-        Date::with_days(days).unwrap()
+        Date::with_days_since_ce(days).unwrap()
     }
 }
 
@@ -151,6 +151,15 @@ impl RandValue for ListValue {
     }
 }
 
+impl RandValue for MapValue {
+    fn rand_value<R: Rng>(_rand: &mut R) -> Self {
+        // dummy value
+        MapValue::from_entries(ListValue::empty(&DataType::Struct(
+            MapType::struct_type_for_map(DataType::Varchar, DataType::Varchar),
+        )))
+    }
+}
+
 pub fn rand_array<A, R>(rand: &mut R, size: usize, null_ratio: f64) -> A
 where
     A: Array,
@@ -192,12 +201,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::for_all_array_variants;
+    use crate::for_all_variants;
 
     #[test]
     fn test_create_array() {
         macro_rules! gen_rand_array {
-            ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+            ($( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
             $(
                 {
                     let array = seed_rand_array::<$array>(10, 1024, 0.5);
@@ -207,6 +216,6 @@ mod tests {
         };
     }
 
-        for_all_array_variants! { gen_rand_array }
+        for_all_variants! { gen_rand_array }
     }
 }

@@ -21,6 +21,7 @@ use bytes::Bytes;
 use futures::{Future, TryFutureExt};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use thiserror_ext::AsReport;
@@ -285,6 +286,10 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
     fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
         self.inner.update_vnode_bitmap(vnodes)
     }
+
+    fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+        self.inner.get_table_watermark(vnode)
+    }
 }
 
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
@@ -328,12 +333,6 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         _storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> MonitoredStateStore<Self> {
         panic!("the state store is already monitored")
-    }
-
-    fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_ {
-        self.inner
-            .clear_shared_buffer(prev_epoch)
-            .verbose_instrument_await("store_clear_shared_buffer")
     }
 
     async fn new_local(&self, option: NewLocalOptions) -> Self::Local {

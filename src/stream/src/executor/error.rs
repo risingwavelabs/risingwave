@@ -66,12 +66,8 @@ pub enum ErrorKind {
         BoxedError,
     ),
 
-    #[error("Sink error: {0}")]
-    SinkError(
-        #[from]
-        #[backtrace]
-        SinkError,
-    ),
+    #[error("Sink error: sink_id={1}, error: {0}")]
+    SinkError(SinkError, u32),
 
     #[error(transparent)]
     RpcError(
@@ -94,11 +90,7 @@ pub enum ErrorKind {
     AlignBarrier(Box<Barrier>, Box<Barrier>),
 
     #[error("Connector error: {0}")]
-    ConnectorError(
-        #[source]
-        #[backtrace]
-        BoxedError,
-    ),
+    ConnectorError(BoxedError),
 
     #[error(transparent)]
     DmlError(
@@ -149,6 +141,12 @@ impl From<PbFieldNotFound> for StreamExecutorError {
 impl From<String> for StreamExecutorError {
     fn from(s: String) -> Self {
         ErrorKind::Uncategorized(anyhow::anyhow!(s)).into()
+    }
+}
+
+impl From<(SinkError, u32)> for StreamExecutorError {
+    fn from((err, sink_id): (SinkError, u32)) -> Self {
+        ErrorKind::SinkError(err, sink_id).into()
     }
 }
 

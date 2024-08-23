@@ -102,8 +102,12 @@ pub enum AlterTableOperation {
         deferred: bool,
     },
     RefreshSchema,
-    /// `SET STREAMING_RATE_LIMIT TO <rate_limit>`
-    SetStreamingRateLimit {
+    /// `SET SOURCE_RATE_LIMIT TO <rate_limit>`
+    SetSourceRateLimit {
+        rate_limit: i32,
+    },
+    /// SET BACKFILL_RATE_LIMIT TO <rate_limit>
+    SetBackfillRateLimit {
         rate_limit: i32,
     },
 }
@@ -138,8 +142,8 @@ pub enum AlterViewOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
-    /// `SET STREAMING_RATE_LIMIT TO <rate_limit>`
-    SetStreamingRateLimit {
+    /// `SET BACKFILL_RATE_LIMIT TO <rate_limit>`
+    SetBackfillRateLimit {
         rate_limit: i32,
     },
 }
@@ -180,7 +184,7 @@ pub enum AlterSourceOperation {
     SetSchema { new_schema_name: ObjectName },
     FormatEncode { connector_schema: ConnectorSchema },
     RefreshSchema,
-    SetStreamingRateLimit { rate_limit: i32 },
+    SetSourceRateLimit { rate_limit: i32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -290,8 +294,11 @@ impl fmt::Display for AlterTableOperation {
             AlterTableOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
             }
-            AlterTableOperation::SetStreamingRateLimit { rate_limit } => {
-                write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
+            AlterTableOperation::SetSourceRateLimit { rate_limit } => {
+                write!(f, "SET SOURCE_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterTableOperation::SetBackfillRateLimit { rate_limit } => {
+                write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
             }
         }
     }
@@ -341,8 +348,8 @@ impl fmt::Display for AlterViewOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
-            AlterViewOperation::SetStreamingRateLimit { rate_limit } => {
-                write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
+            AlterViewOperation::SetBackfillRateLimit { rate_limit } => {
+                write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
             }
         }
     }
@@ -412,8 +419,8 @@ impl fmt::Display for AlterSourceOperation {
             AlterSourceOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
             }
-            AlterSourceOperation::SetStreamingRateLimit { rate_limit } => {
-                write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
+            AlterSourceOperation::SetSourceRateLimit { rate_limit } => {
+                write!(f, "SET SOURCE_RATE_LIMIT TO {}", rate_limit)
             }
         }
     }

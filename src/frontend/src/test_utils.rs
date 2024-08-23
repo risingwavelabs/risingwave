@@ -55,7 +55,9 @@ use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistributi
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::{EventLog, PbTableParallelism, PbThrottleTarget, SystemParams};
+use risingwave_pb::meta::{
+    EventLog, PbTableParallelism, PbThrottleTarget, RecoveryStatus, SystemParams,
+};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -82,6 +84,14 @@ pub struct LocalFrontend {
 
 impl SessionManager for LocalFrontend {
     type Session = SessionImpl;
+
+    fn create_dummy_session(
+        &self,
+        _database_id: u32,
+        _user_name: u32,
+    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+        unreachable!()
+    }
 
     fn connect(
         &self,
@@ -1082,6 +1092,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _rate_limit: Option<u32>,
     ) -> RpcResult<()> {
         unimplemented!()
+    }
+
+    async fn get_cluster_recovery_status(&self) -> RpcResult<RecoveryStatus> {
+        Ok(RecoveryStatus::StatusRunning)
     }
 
     async fn list_change_log_epochs(

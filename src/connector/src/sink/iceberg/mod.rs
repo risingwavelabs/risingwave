@@ -29,6 +29,7 @@ use arrow_schema_iceberg::{
 };
 use async_trait::async_trait;
 use iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
+use iceberg::spec::TableMetadata;
 use iceberg::table::Table as TableV2;
 use iceberg::{Catalog as CatalogV2, TableIdent};
 use icelake::catalog::{
@@ -123,6 +124,13 @@ pub struct IcebergConfig {
     pub secret_key: String,
 
     #[serde(
+        rename = "s3.path.style.access",
+        default,
+        deserialize_with = "deserialize_bool_from_string"
+    )]
+    pub path_style_access: bool,
+
+    #[serde(
         rename = "primary_key",
         default,
         deserialize_with = "deserialize_optional_string_seq_from_string"
@@ -196,7 +204,7 @@ impl IcebergConfig {
         Ok(config)
     }
 
-    fn catalog_type(&self) -> &str {
+    pub fn catalog_type(&self) -> &str {
         self.catalog_type.as_deref().unwrap_or("storage")
     }
 
@@ -268,6 +276,10 @@ impl IcebergConfig {
         iceberg_configs.insert(
             "iceberg.table.io.secret_access_key".to_string(),
             self.secret_key.clone().to_string(),
+        );
+        iceberg_configs.insert(
+            "iceberg.table.io.enable_virtual_host_style".to_string(),
+            (!self.path_style_access).to_string(),
         );
 
         let (bucket, root) = {
@@ -408,7 +420,10 @@ impl IcebergConfig {
                 "s3.secret-access-key".to_string(),
                 self.secret_key.clone().to_string(),
             );
-
+            java_catalog_configs.insert(
+                "s3.path-style-access".to_string(),
+                self.path_style_access.to_string(),
+            );
             if matches!(self.catalog_type.as_deref(), Some("glue")) {
                 java_catalog_configs.insert(
                     "client.credentials-provider".to_string(),
@@ -500,7 +515,7 @@ impl IcebergConfig {
             .map_err(|e| SinkError::Iceberg(anyhow!(e)))
     }
 
-    async fn create_catalog_v2(&self) -> ConnectorResult<Arc<dyn CatalogV2>> {
+    fn create_catalog_v2(&self) -> ConnectorResult<Arc<dyn CatalogV2>> {
         match self.catalog_type() {
             "storage" => {
                 let config = StorageCatalogConfig::builder()
@@ -514,12 +529,28 @@ impl IcebergConfig {
                 Ok(Arc::new(catalog))
             }
             "rest" => {
+                let mut iceberg_configs = HashMap::new();
+                if let Some(region) = &self.region {
+                    iceberg_configs.insert(S3_REGION.to_string(), region.clone().to_string());
+                }
+                if let Some(endpoint) = &self.endpoint {
+                    iceberg_configs.insert(S3_ENDPOINT.to_string(), endpoint.clone().to_string());
+                }
+                iceberg_configs.insert(
+                    S3_ACCESS_KEY_ID.to_string(),
+                    self.access_key.clone().to_string(),
+                );
+                iceberg_configs.insert(
+                    S3_SECRET_ACCESS_KEY.to_string(),
+                    self.secret_key.clone().to_string(),
+                );
                 let config = iceberg_catalog_rest::RestCatalogConfig::builder()
                     .uri(self.uri.clone().ok_or_else(|| {
                         SinkError::Iceberg(anyhow!("`catalog.uri` must be set in rest catalog"))
                     })?)
+                    .props(iceberg_configs)
                     .build();
-                let catalog = iceberg_catalog_rest::RestCatalog::new(config).await?;
+                let catalog = iceberg_catalog_rest::RestCatalog::new(config);
                 Ok(Arc::new(catalog))
             }
             catalog_type
@@ -553,7 +584,6 @@ impl IcebergConfig {
     pub async fn load_table_v2(&self) -> ConnectorResult<TableV2> {
         let catalog = self
             .create_catalog_v2()
-            .await
             .context("Unable to load iceberg catalog")?;
 
         let table_id = self
@@ -561,6 +591,37 @@ impl IcebergConfig {
             .context("Unable to parse table name")?;
 
         catalog.load_table(&table_id).await.map_err(Into::into)
+    }
+
+    pub async fn load_table_v2_with_metadata(
+        &self,
+        metadata: TableMetadata,
+    ) -> ConnectorResult<TableV2> {
+        match self.catalog_type() {
+            "storage" => {
+                let config = StorageCatalogConfig::builder()
+                    .warehouse(self.path.clone())
+                    .access_key(self.access_key.clone())
+                    .secret_key(self.secret_key.clone())
+                    .region(self.region.clone())
+                    .endpoint(self.endpoint.clone())
+                    .build();
+                let storage_catalog = storage_catalog::StorageCatalog::new(config)?;
+
+                let table_id = self
+                    .full_table_name_v2()
+                    .context("Unable to parse table name")?;
+
+                Ok(iceberg::table::Table::builder()
+                    .metadata(metadata)
+                    .identifier(table_id)
+                    .file_io(storage_catalog.file_io().clone())
+                    // Only support readonly table for storage catalog now.
+                    .readonly(true)
+                    .build())
+            }
+            _ => self.load_table_v2().await,
+        }
     }
 }
 
@@ -676,6 +737,11 @@ impl Sink for IcebergSink {
     }
 
     async fn validate(&self) -> Result<()> {
+        if "glue".eq_ignore_ascii_case(self.config.catalog_type()) {
+            risingwave_common::license::Feature::IcebergSinkWithGlue
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
         let _ = self.create_and_validate_table().await?;
         Ok(())
     }
@@ -696,7 +762,7 @@ impl Sink for IcebergSink {
             self.param.clone(),
             writer_param.vnode_bitmap.ok_or_else(|| {
                 SinkError::Remote(anyhow!(
-                    "sink needs coordination should not have singleton input"
+                    "sink needs coordination and should not have singleton input"
                 ))
             })?,
             inner,
@@ -716,10 +782,12 @@ impl Sink for IcebergSink {
     }
 
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+        let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
         let partition_type = table.current_partition_type()?;
 
         Ok(IcebergSinkCommitter {
+            catalog,
             table,
             partition_type,
         })
@@ -1012,7 +1080,7 @@ impl WriteResult {
             {
                 v
             } else {
-                bail!("iceberg sink metadata should be a object");
+                bail!("iceberg sink metadata should be an object");
             };
 
             let data_files: Vec<DataFile>;
@@ -1039,7 +1107,7 @@ impl WriteResult {
                     .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
                     .context("Failed to parse data file from json")?;
             } else {
-                bail!("icberg sink metadata should have data_files object");
+                bail!("Iceberg sink metadata should have data_files object");
             }
             Ok(Self {
                 data_files,
@@ -1091,6 +1159,7 @@ impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
 }
 
 pub struct IcebergSinkCommitter {
+    catalog: CatalogRef,
     table: Table,
     partition_type: Any,
 }
@@ -1117,6 +1186,12 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             tracing::debug!(?epoch, "no data to commit");
             return Ok(());
         }
+        // Load the latest table to avoid concurrent modification with the best effort.
+        self.table = self
+            .catalog
+            .clone()
+            .load_table(self.table.table_name())
+            .await?;
         let mut txn = Transaction::new(&mut self.table);
         write_results.into_iter().for_each(|s| {
             txn.append_data_file(s.data_files);
@@ -1139,7 +1214,7 @@ pub fn try_matches_arrow_schema(
 ) -> anyhow::Result<()> {
     if rw_schema.fields.len() != arrow_schema.fields().len() {
         bail!(
-            "Schema length not match, risingwave is {}, and iceberg is {}",
+            "Schema length mismatch, risingwave is {}, and iceberg is {}",
             rw_schema.fields.len(),
             arrow_schema.fields.len()
         );
@@ -1230,6 +1305,7 @@ mod test {
             ("s3.endpoint", "http://127.0.0.1:9301"),
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
+            ("s3.path.style.access", "true"),
             ("s3.region", "us-east-1"),
             ("catalog.type", "jdbc"),
             ("catalog.name", "demo"),
@@ -1259,6 +1335,7 @@ mod test {
             endpoint: Some("http://127.0.0.1:9301".to_string()),
             access_key: "hummockadmin".to_string(),
             secret_key: "hummockadmin".to_string(),
+            path_style_access: true,
             primary_key: Some(vec!["v1".to_string()]),
             java_catalog_props: [("jdbc.user", "admin"), ("jdbc.password", "123456")]
                 .into_iter()
@@ -1294,6 +1371,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "storage"),
             ("warehouse.path", "s3://icebergdata/demo"),
@@ -1318,6 +1396,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "rest"),
             ("catalog.uri", "http://192.168.167.4:8181"),
@@ -1343,6 +1422,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "jdbc"),
             ("catalog.uri", "jdbc:postgresql://localhost:5432/iceberg"),
@@ -1370,6 +1450,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "hive"),
             ("catalog.uri", "thrift://localhost:9083"),

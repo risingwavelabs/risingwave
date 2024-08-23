@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -26,12 +26,14 @@ use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, TableId, TableVersionId, DEFAULT_SCHEMA_NAME,
     INITIAL_TABLE_VERSION_ID,
 };
+use risingwave_common::license::Feature;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
-use risingwave_connector::source;
+use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
     ExternalTableConfig, ExternalTableImpl, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
+use risingwave_connector::{source, WithOptionsSecResolved};
 use risingwave_pb::catalog::{PbSource, PbTable, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
@@ -45,6 +47,7 @@ use risingwave_sqlparser::ast::{
     ExplainOptions, Format, ObjectName, OnConflict, SourceWatermark, TableConstraint,
 };
 use risingwave_sqlparser::parser::IncludeOption;
+use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field, Clause};
@@ -65,6 +68,7 @@ use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
+use crate::utils::OverwriteOptions;
 use crate::{Binder, TableCatalog, WithOptions};
 
 /// Column ID generator for a new table or a new version of an existing table to alter.
@@ -185,7 +189,7 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
                 _ => {
                     return Err(ErrorCode::NotSupported(
                         format!("{} is not a collatable data type", data_type),
-                        "The only built-in collatable data types are `varchar`, please check your type".into()
+                        "The only built-in collatable data types are `varchar`, please check your type".into(),
                     ).into());
                 }
             }
@@ -288,7 +292,12 @@ pub fn bind_sql_column_constraints(
                     binder.set_clause(Some(Clause::GeneratedColumn));
                     let idx = binder
                         .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
-                    let expr_impl = binder.bind_expr(expr)?;
+                    let expr_impl = binder.bind_expr(expr).with_context(|| {
+                        format!(
+                            "fail to bind expression in generated column \"{}\"",
+                            column.name.real_value()
+                        )
+                    })?;
 
                     check_generated_column_constraints(
                         &column.name.real_value(),
@@ -327,12 +336,12 @@ pub fn bind_sql_column_constraints(
                     if let Some(snapshot_value) = rewritten_expr_impl.try_fold_const() {
                         let snapshot_value = snapshot_value?;
 
-                        column_catalogs[idx].column_desc.generated_or_default_column = Some(
-                            GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {
+                        column_catalogs[idx].column_desc.generated_or_default_column =
+                            Some(GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {
                                 snapshot_value: Some(snapshot_value.to_protobuf()),
-                                expr: Some(expr_impl.to_expr_proto()), /* persist the original expression */
-                            }),
-                        );
+                                expr: Some(expr_impl.to_expr_proto()),
+                                // persist the original expression
+                            }));
                     } else {
                         return Err(ErrorCode::BindError(format!(
                             "Default expression used in column `{}` cannot be evaluated. \
@@ -452,7 +461,7 @@ pub fn bind_pk_and_row_id_on_relation(
 /// stream source.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn gen_create_table_plan_with_source(
-    handler_args: HandlerArgs,
+    mut handler_args: HandlerArgs,
     explain_options: ExplainOptions,
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
@@ -481,8 +490,10 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let with_properties = bind_connector_props(&handler_args, &source_schema, false)?;
 
     let (columns_from_resolve_source, source_info) =
-        bind_columns_from_source(session, &source_schema, &with_properties).await?;
+        bind_columns_from_source(session, &source_schema, Either::Left(&with_properties)).await?;
 
+    let overwrite_options = OverwriteOptions::new(&mut handler_args);
+    let rate_limit = overwrite_options.source_rate_limit;
     let (source_catalog, database_id, schema_id) = bind_create_source_or_table_with_connector(
         handler_args.clone(),
         table_name,
@@ -497,6 +508,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         include_column_options,
         &mut col_id_gen,
         false,
+        rate_limit,
     )
     .await?;
 
@@ -536,6 +548,12 @@ pub(crate) fn gen_create_table_plan(
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
+
+    let (_, secret_refs) = context.with_options().clone().into_parts();
+    if !secret_refs.is_empty() {
+        return Err(crate::error::ErrorCode::InvalidParameterValue("Secret reference is not allowed in options when creating table without external source".to_string()).into());
+    }
+
     gen_create_table_plan_without_source(
         context,
         table_name,
@@ -660,6 +678,7 @@ fn gen_table_plan_inner(
     let session = context.session_ctx().clone();
     let retention_seconds = context.with_options().retention_seconds();
     let is_external_source = source_catalog.is_some();
+
     let source_node: PlanRef = LogicalSource::new(
         source_catalog.map(|source| Rc::new(source.clone())),
         columns.clone(),
@@ -716,6 +735,7 @@ fn gen_table_plan_inner(
         version,
         is_external_source,
         retention_seconds,
+        None,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -735,7 +755,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     external_table_name: String,
     mut columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
-    connect_properties: BTreeMap<String, String>,
+    connect_properties: WithOptionsSecResolved,
     mut col_id_gen: ColumnIdGenerator,
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
@@ -781,6 +801,8 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
         .collect();
 
+    let (options, secret_refs) = connect_properties.into_parts();
+
     let cdc_table_desc = CdcTableDesc {
         table_id,
         source_id: source.id.into(), // id of cdc source streaming job
@@ -788,7 +810,8 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         pk: table_pk,
         columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
         stream_key: pk_column_indices,
-        connect_properties: connect_properties.into_iter().collect(),
+        connect_properties: options,
+        secret_refs,
     };
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
@@ -796,7 +819,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     let options = CdcScanOptions::from_with_options(context.with_options())?;
 
     let logical_scan = LogicalCdcScan::create(
-        external_table_name,
+        external_table_name.clone(),
         Rc::new(cdc_table_desc),
         context.clone(),
         options,
@@ -812,6 +835,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         vec![],
     );
 
+    let cdc_table_id = build_cdc_table_id(source.id, &external_table_name);
     let materialize = plan_root.gen_table_plan(
         context,
         resolved_table_name,
@@ -826,6 +850,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         Some(col_id_gen.into_version()),
         true,
         None,
+        Some(cdc_table_id),
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -836,10 +861,10 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 }
 
 fn derive_connect_properties(
-    source_with_properties: &BTreeMap<String, String>,
+    source_with_properties: &WithOptionsSecResolved,
     external_table_name: String,
-) -> Result<BTreeMap<String, String>> {
-    use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR};
+) -> Result<WithOptionsSecResolved> {
+    use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR};
     // we should remove the prefix from `full_table_name`
     let mut connect_properties = source_with_properties.clone();
     if let Some(connector) = source_with_properties.get(UPSTREAM_SOURCE_KEY) {
@@ -858,6 +883,16 @@ fn derive_connect_properties(
                 let (schema_name, table_name) = external_table_name
                     .split_once('.')
                     .ok_or_else(|| anyhow!("The upstream table name must contain schema name prefix, e.g. 'public.table'"))?;
+
+                // insert 'schema.name' into connect properties
+                connect_properties.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
+
+                table_name
+            }
+            SQL_SERVER_CDC_CONNECTOR => {
+                let (schema_name, table_name) = external_table_name
+                    .split_once('.')
+                    .ok_or_else(|| anyhow!("The upstream table name must contain schema name prefix, e.g. 'dbo.table'"))?;
 
                 // insert 'schema.name' into connect properties
                 connect_properties.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
@@ -1086,12 +1121,21 @@ fn sanity_check_for_cdc_table(
 async fn derive_schema_for_cdc_table(
     column_defs: &Vec<ColumnDef>,
     constraints: &Vec<TableConstraint>,
-    connect_properties: BTreeMap<String, String>,
+    connect_properties: WithOptionsSecResolved,
     need_auto_schema_map: bool,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
     if need_auto_schema_map {
-        let config = ExternalTableConfig::try_from_btreemap(connect_properties)
+        Feature::CdcTableSchemaMap
+            .check_available()
+            .map_err(|err| {
+                ErrorCode::NotSupported(
+                    err.to_report_string(),
+                    "Please define the schema manually".to_owned(),
+                )
+            })?;
+        let (options, secret_refs) = connect_properties.into_parts();
+        let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
             .context("failed to extract external table config")?;
 
         let table = ExternalTableImpl::connect(config)
@@ -1200,7 +1244,7 @@ pub fn check_create_table_with_source(
     if cdc_table_info.is_some() {
         return Ok(source_schema);
     }
-    let defined_source = with_options.inner().contains_key(UPSTREAM_SOURCE_KEY);
+    let defined_source = with_options.contains_key(UPSTREAM_SOURCE_KEY);
     if !include_column_options.is_empty() && !defined_source {
         return Err(ErrorCode::InvalidInputSyntax(
             "INCLUDE should be used with a connector".to_owned(),
@@ -1313,7 +1357,7 @@ pub async fn generate_stream_graph_for_table(
                     .into(),
                 "Remove the FORMAT and ENCODE specification".into(),
             )
-            .into())
+            .into());
         }
     };
 

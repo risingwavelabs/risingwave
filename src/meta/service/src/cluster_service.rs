@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::common::worker_node::State;
@@ -19,11 +20,11 @@ use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
-    AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, ListAllNodesRequest,
+    AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse,
+    GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse, ListAllNodesRequest,
     ListAllNodesResponse, UpdateWorkerNodeSchedulabilityRequest,
     UpdateWorkerNodeSchedulabilityResponse,
 };
-use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 use crate::MetaError;
@@ -31,11 +32,15 @@ use crate::MetaError;
 #[derive(Clone)]
 pub struct ClusterServiceImpl {
     metadata_manager: MetadataManager,
+    barrier_manager: BarrierManagerRef,
 }
 
 impl ClusterServiceImpl {
-    pub fn new(metadata_manager: MetadataManager) -> Self {
-        ClusterServiceImpl { metadata_manager }
+    pub fn new(metadata_manager: MetadataManager, barrier_manager: BarrierManagerRef) -> Self {
+        ClusterServiceImpl {
+            metadata_manager,
+            barrier_manager,
+        }
     }
 }
 
@@ -52,28 +57,16 @@ impl ClusterService for ClusterServiceImpl {
             .property
             .ok_or_else(|| MetaError::invalid_parameter("worker node property is not provided"))?;
         let resource = req.resource.unwrap_or_default();
-        let result = self
+        let worker_id = self
             .metadata_manager
             .add_worker_node(worker_type, host, property, resource)
-            .await;
-        match result {
-            Ok(worker_id) => Ok(Response::new(AddWorkerNodeResponse {
-                status: None,
-                node_id: Some(worker_id),
-            })),
-            Err(e) => {
-                if e.is_invalid_worker() {
-                    return Ok(Response::new(AddWorkerNodeResponse {
-                        status: Some(risingwave_pb::common::Status {
-                            code: risingwave_pb::common::status::Code::UnknownWorker as i32,
-                            message: e.to_report_string(),
-                        }),
-                        node_id: None,
-                    }));
-                }
-                Err(e.into())
-            }
-        }
+            .await?;
+        let cluster_id = self.metadata_manager.cluster_id().to_string();
+
+        Ok(Response::new(AddWorkerNodeResponse {
+            node_id: Some(worker_id),
+            cluster_id,
+        }))
     }
 
     /// Update schedulability of a compute node. Will not affect actors which are already running on
@@ -174,6 +167,15 @@ impl ClusterService for ClusterServiceImpl {
         Ok(Response::new(ListAllNodesResponse {
             status: None,
             nodes: node_list,
+        }))
+    }
+
+    async fn get_cluster_recovery_status(
+        &self,
+        _request: Request<GetClusterRecoveryStatusRequest>,
+    ) -> Result<Response<GetClusterRecoveryStatusResponse>, Status> {
+        Ok(Response::new(GetClusterRecoveryStatusResponse {
+            status: self.barrier_manager.get_recovery_status() as _,
         }))
     }
 }
