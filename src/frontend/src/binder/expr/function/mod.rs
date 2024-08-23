@@ -491,10 +491,10 @@ impl Binder {
         let mut udf_context = HashMap::new();
         for (i, arg) in args.into_iter().enumerate() {
             if func.arg_names[i].is_empty() {
+                // unnamed argument, use `$1`, `$2` as the name
                 udf_context.insert(format!("${}", i + 1), arg);
             } else {
-                // The index mapping here is accurate
-                // So that we could directly use the index
+                // named argument
                 udf_context.insert(func.arg_names[i].clone(), arg);
             }
         }
