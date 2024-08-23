@@ -341,9 +341,9 @@ impl std::fmt::Debug for data::DataType {
             field_type,
             field_names,
             type_name,
-            is_nullable,
+            // currently all data types are nullable
+            is_nullable: _,
         } = self;
-        debug_assert!(is_nullable, "Currently is_nullable should be always true");
 
         let type_name = data::data_type::TypeName::try_from(*type_name)
             .map(|t| t.as_str_name())
