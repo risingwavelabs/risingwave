@@ -160,7 +160,7 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         test_timestamp timestamp,
         test_timestamptz timestamptz,
     ) WITH (
-        connector = 's3_v2',
+        connector = 's3',
         match_pattern = '*.parquet',
         s3.region_name = '{config['S3_REGION']}',
         s3.bucket_name = '{config['S3_BUCKET']}',
