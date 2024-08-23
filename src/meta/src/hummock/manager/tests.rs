@@ -75,6 +75,8 @@ fn gen_sstable_info(sst_id: u64, idx: usize, table_ids: Vec<u32>) -> SstableInfo
         object_id: sst_id,
         min_epoch: 20,
         max_epoch: 20,
+        file_size: 100,
+        sst_size: 100,
         ..Default::default()
     }
 }
@@ -1322,6 +1324,8 @@ async fn test_split_compaction_group_on_commit() {
             table_ids: vec![100, 101],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -1414,6 +1418,8 @@ async fn test_split_compaction_group_on_demand_basic() {
             table_ids: vec![100],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -1430,6 +1436,8 @@ async fn test_split_compaction_group_on_demand_basic() {
             table_ids: vec![100, 101],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -1508,6 +1516,8 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
             table_ids: vec![100, 101],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -1597,6 +1607,8 @@ async fn test_split_compaction_group_trivial_expired() {
             table_ids: vec![100],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -1613,6 +1625,8 @@ async fn test_split_compaction_group_trivial_expired() {
                 right: iterator_test_key_of_epoch(101, 100, 20).into(),
                 right_exclusive: false,
             },
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -1704,6 +1718,8 @@ async fn test_split_compaction_group_trivial_expired() {
                 table_ids: vec![100],
                 min_epoch: 20,
                 max_epoch: 20,
+                file_size: 100,
+                sst_size: 100,
                 ..Default::default()
             }],
             None,
@@ -1763,6 +1779,8 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
             table_ids: vec![100, 101],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -1791,6 +1809,8 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
                         right: iterator_test_key_of_epoch(1, 1, 1).into(),
                         right_exclusive: false,
                     },
+                    file_size: 100,
+                    sst_size: 100,
                     ..Default::default()
                 },
                 SstableInfo {
@@ -1802,6 +1822,8 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
                         right: iterator_test_key_of_epoch(1, 2, 2).into(),
                         right_exclusive: false,
                     },
+                    file_size: 100,
+                    sst_size: 100,
                     ..Default::default()
                 },
             ],
@@ -1896,6 +1918,8 @@ async fn test_compaction_task_expiration_due_to_split_group() {
             table_ids: vec![100, 101],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -1912,6 +1936,8 @@ async fn test_compaction_task_expiration_due_to_split_group() {
             table_ids: vec![101],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -2279,6 +2305,8 @@ async fn test_unregister_moved_table() {
             table_ids: vec![100],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -2295,6 +2323,8 @@ async fn test_unregister_moved_table() {
             table_ids: vec![100, 101],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
