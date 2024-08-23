@@ -112,28 +112,52 @@ function convertToBackPressureMetrics(
   return bpMetrics
 }
 
-export function calculateBPRate(
-  backPressureNew: BackPressureInfo[],
-  backPressureOld: BackPressureInfo[],
-  intervalMs: number
-): BackPressuresMetrics {
+export function calculateCumulativeBp(
+    backPressureCumulative: BackPressureInfo[],
+    backPressureCurrent: BackPressureInfo[],
+    backPressureNew: BackPressureInfo[],
+): BackPressureInfo[] {
+  let mapCumulative = convertToMapAndAgg(backPressureCumulative)
+  let mapCurrent = convertToMapAndAgg(backPressureCurrent)
   let mapNew = convertToMapAndAgg(backPressureNew)
-  let mapOld = convertToMapAndAgg(backPressureOld)
-  let result = new Map<string, number>()
-  mapNew.forEach((value, key) => {
-    if (mapOld.has(key)) {
-      result.set(
-        key,
-        // The *100 in end of the formular is to convert the BP rate to the value used in web UI drawing
-        ((value - (mapOld.get(key) || 0)) /
-          ((intervalMs / 1000) * 1000000000)) *
-          100
-      )
-    } else {
-      result.set(key, 0)
-    }
+  let mapResult = new Map<string, number>()
+  let keys = new Set([...mapCumulative.keys(), ...mapCurrent.keys(), ...mapNew.keys()])
+  keys.forEach((key) => {
+    let backpressureCumulativeValue = mapCumulative.get(key) || 0
+    let backpressureCurrentValue = mapCurrent.get(key) || 0
+    let backpressureNewValue = mapNew.get(key) || 0
+    let increment = backpressureNewValue - backpressureCurrentValue
+    mapResult.set(key, backpressureCumulativeValue + increment)
   })
+  const result: BackPressureInfo[] = []
+  mapResult.forEach((value, key) => {
+    const [fragmentId, downstreamFragmentId] = key.split("-").map(Number)
+    const backPressureInfo: BackPressureInfo = {
+      actorId: 0,
+      fragmentId,
+      downstreamFragmentId,
+      value,
+    }
+    result.push(backPressureInfo)
+  })
+  return result
+}
 
+export function calculateBPRate(
+  backPressureCumulative: BackPressureInfo[],
+  totalDurationNs: number,
+): BackPressuresMetrics {
+  let map = convertToMapAndAgg(backPressureCumulative)
+  let result = new Map<string, number>()
+  map.forEach((backpressureNs, key) => {
+    console.log("backpressureNs", backpressureNs)
+    let backpressureRateRatio = backpressureNs / totalDurationNs
+    let backpressureRatePercent = backpressureRateRatio * 100
+    result.set(
+      key,
+      backpressureRatePercent
+    )
+  })
   return convertToBackPressureMetrics(convertFromMapAndAgg(result))
 }
 
