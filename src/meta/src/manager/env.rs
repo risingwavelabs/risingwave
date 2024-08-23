@@ -38,7 +38,7 @@ use crate::controller::session_params::{SessionParamsController, SessionParamsCo
 use crate::controller::system_param::{SystemParamsController, SystemParamsControllerRef};
 use crate::controller::SqlMetaStore;
 use crate::hummock::sequence::SequenceGenerator;
-use crate::manager::event_log::{start_event_log_manager, EventLogMangerRef};
+use crate::manager::event_log::{start_event_log_manager, EventLogManagerRef};
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
     NotificationManagerRef,
@@ -131,7 +131,7 @@ pub struct MetaSrvEnv {
     /// idle status manager.
     idle_manager: IdleManagerRef,
 
-    event_log_manager: EventLogMangerRef,
+    event_log_manager: EventLogManagerRef,
 
     /// Unique identifier of the cluster.
     cluster_id: ClusterId,
@@ -575,7 +575,7 @@ impl MetaSrvEnv {
         &self.cluster_id
     }
 
-    pub fn event_log_manager_ref(&self) -> EventLogMangerRef {
+    pub fn event_log_manager_ref(&self) -> EventLogManagerRef {
         self.event_log_manager.clone()
     }
 }

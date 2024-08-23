@@ -283,7 +283,7 @@ def section_compaction(outer_panels):
                                 f"histogram_quantile({quantile}, sum(rate({metric('storage_compact_task_size_bucket')}[$__rate_interval])) by (le, group, type))",
                                 f"p{legend}" + " - cg{{group}}@{{type}}",
                             ),
-                            [90, "max"],
+                            [50, 90, "max"],
                         ),
                     ],
                 ),
