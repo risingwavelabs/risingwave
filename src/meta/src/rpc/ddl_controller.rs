@@ -803,6 +803,8 @@ impl DdlController {
         }
     }
 
+    /// For [`CreateType::Foreground`], the function will only return after backfilling finishes
+    /// ([`MetadataManager::wait_streaming_job_finished`]).
     async fn create_streaming_job(
         &self,
         mut stream_job: StreamingJob,
