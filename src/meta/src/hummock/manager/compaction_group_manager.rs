@@ -30,8 +30,8 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    compact_task, CompactionConfig, CompactionGroupInfo, CompatibilityVersion, PbGroupConstruct,
-    PbGroupDestroy, PbStateTableInfoDelta,
+    CompactionConfig, CompactionGroupInfo, CompatibilityVersion, PbGroupConstruct, PbGroupDestroy,
+    PbStateTableInfoDelta,
 };
 use tokio::sync::OnceCell;
 
