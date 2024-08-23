@@ -136,6 +136,7 @@ impl From<&PbSstableInfo> for SstableInfo {
 
 impl From<SstableInfo> for PbSstableInfo {
     fn from(sstable_info: SstableInfo) -> Self {
+        assert_ne!(0, sstable_info.sst_size);
         PbSstableInfo {
             object_id: sstable_info.object_id,
             sst_id: sstable_info.sst_id,
@@ -166,17 +167,14 @@ impl From<SstableInfo> for PbSstableInfo {
             uncompressed_file_size: sstable_info.uncompressed_file_size,
             range_tombstone_count: sstable_info.range_tombstone_count,
             bloom_filter_kind: sstable_info.bloom_filter_kind.into(),
-            sst_size: if sstable_info.sst_size == 0 {
-                sstable_info.file_size
-            } else {
-                sstable_info.sst_size
-            },
+            sst_size: sstable_info.sst_size,
         }
     }
 }
 
 impl From<&SstableInfo> for PbSstableInfo {
     fn from(sstable_info: &SstableInfo) -> Self {
+        assert_ne!(0, sstable_info.sst_size);
         PbSstableInfo {
             object_id: sstable_info.object_id,
             sst_id: sstable_info.sst_id,
@@ -204,11 +202,7 @@ impl From<&SstableInfo> for PbSstableInfo {
             uncompressed_file_size: sstable_info.uncompressed_file_size,
             range_tombstone_count: sstable_info.range_tombstone_count,
             bloom_filter_kind: sstable_info.bloom_filter_kind.into(),
-            sst_size: if sstable_info.sst_size == 0 {
-                sstable_info.file_size
-            } else {
-                sstable_info.sst_size
-            },
+            sst_size: sstable_info.sst_size,
         }
     }
 }

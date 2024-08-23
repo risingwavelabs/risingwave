@@ -55,7 +55,7 @@ struct RwHummockSstable {
     range_tombstone_count: i64,
     bloom_filter_kind: i32,
     table_ids: JsonbVal,
-    estimated_size: i64,
+    sst_size: i64,
 }
 
 #[system_catalog(table, "rw_catalog.rw_hummock_current_version")]
@@ -135,7 +135,7 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
                     range_tombstone_count: sst.range_tombstone_count as _,
                     bloom_filter_kind: sst.bloom_filter_kind as _,
                     table_ids: json!(sst.table_ids).into(),
-                    estimated_size: sst.sst_size as _,
+                    sst_size: sst.sst_size as _,
                 });
             }
         }
