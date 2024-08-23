@@ -39,7 +39,6 @@ import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
 import useFetch from "../lib/api/fetch"
 import {
-  BackPressureInfo,
   calculateBPRate,
   fetchEmbeddedBackPressure,
   fetchPrometheusBackPressure,
@@ -47,6 +46,7 @@ import {
 import { getFragments, getStreamingJobs } from "../lib/api/streaming"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
+import { BackPressureInfo } from "../proto/gen/monitor_service"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 
 interface DispatcherNode {

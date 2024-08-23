@@ -1099,7 +1099,7 @@ def section_streaming_actors(outer_panels):
                     "on average. Then we divide this duration by 1 second and show it as a percentage.",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_fragment_output_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, downstream_fragment_id) \
+                            f"sum(rate({metric('stream_actor_output_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, downstream_fragment_id) \
                             / sum({metric('stream_dispatcher_count')}) by (fragment_id, downstream_fragment_id) \
                             / 1000000000",
                             "fragment {{fragment_id}}->{{downstream_fragment_id}}",

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ffi::CString;
 use std::fs;
 use std::path::Path;
@@ -291,17 +291,47 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         _request: Request<GetBackPressureRequest>,
     ) -> Result<Response<GetBackPressureResponse>, Status> {
-        let metric_family = global_streaming_metrics(MetricLevel::Info)
+        let metrics = global_streaming_metrics(MetricLevel::Info);
+        let actor_output_buffer_blocking_duration_ns = metrics
             .actor_output_buffer_blocking_duration_ns
+            .collect()
+            .get(0)
+            .unwrap()
+            .get_metric();
+        let dispatcher_count = metrics
+            .dispatcher_count
+            .collect()
+            .get(0)
+            .unwrap()
+            .get_metric();
+
+        let dispatcher_count: HashMap<_, _> = dispatcher_count
+            .iter()
+            .filter_map(|m| {
+                let fragment_id = m
+                    .get_label()
+                    .iter()
+                    .find(|lp| lp.get_name() == "fragment_id")?
+                    .get_value()
+                    .parse::<u32>()
+                    .unwrap();
+                let downstream_fragment_id = m
+                    .get_label()
+                    .iter()
+                    .find(|lp| lp.get_name() == "downstream_fragment_id")?
+                    .get_value()
+                    .parse::<u32>()
+                    .unwrap();
+                let count = m.get_gauge().get_value() as u32;
+                Some(((fragment_id, downstream_fragment_id), count))
+            })
             .collect();
-        let metrics = metric_family.get(0).unwrap().get_metric();
+
         let mut back_pressure_infos: Vec<BackPressureInfo> = Vec::new();
-        for label_pairs in metrics {
+
+        for label_pairs in actor_output_buffer_blocking_duration_ns {
             let mut back_pressure_info = BackPressureInfo::default();
             for label_pair in label_pairs.get_label() {
-                if label_pair.get_name() == "actor_id" {
-                    back_pressure_info.actor_id = label_pair.get_value().parse::<u32>().unwrap();
-                }
                 if label_pair.get_name() == "fragment_id" {
                     back_pressure_info.fragment_id = label_pair.get_value().parse::<u32>().unwrap();
                 }
@@ -311,6 +341,12 @@ impl MonitorService for MonitorServiceImpl {
                 }
             }
             back_pressure_info.value = label_pairs.get_counter().get_value();
+            back_pressure_info.dispatcher_count = dispatcher_count
+                .get(&(
+                    back_pressure_info.fragment_id,
+                    back_pressure_info.downstream_fragment_id,
+                ))
+                .unwrap_or_default();
             back_pressure_infos.push(back_pressure_info);
         }
 
