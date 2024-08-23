@@ -177,6 +177,16 @@ pub enum Relation {
         on_delete = "NoAction"
     )]
     Source,
+
+    // To join object_dependency on the used_by column
+    #[sea_orm(
+        belongs_to = "super::object_dependency::Entity",
+        from = "Column::TableId",
+        to = "super::object_dependency::Column::UsedBy",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    ObjectDependency,
 }
 
 impl Related<super::object::Entity> for Entity {

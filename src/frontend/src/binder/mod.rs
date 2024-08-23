@@ -68,7 +68,7 @@ use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, TableId, ViewId};
 use crate::error::ErrorCode;
 use crate::expr::ExprImpl;
-use crate::session::{AuthContext, SessionImpl};
+use crate::session::{AuthContext, SessionImpl, TemporarySourceManager};
 
 pub type ShareId = usize;
 
@@ -127,6 +127,9 @@ pub struct Binder {
 
     /// The sql udf context that will be used during binding phase
     udf_context: UdfContext,
+
+    /// The temporary sources that will be used during binding phase
+    temporary_source_manager: TemporarySourceManager,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -360,6 +363,7 @@ impl Binder {
             included_relations: HashSet::new(),
             param_types: ParameterTypes::new(param_types),
             udf_context: UdfContext::new(),
+            temporary_source_manager: session.temporary_source_manager(),
         }
     }
 
@@ -816,8 +820,6 @@ mod tests {
                                                 order_by: [],
                                                 ignore_nulls: false,
                                             },
-                                            over: None,
-                                            filter: None,
                                             within_group: Some(
                                                 OrderByExpr {
                                                     expr: Identifier(
@@ -830,6 +832,8 @@ mod tests {
                                                     nulls_first: None,
                                                 },
                                             ),
+                                            filter: None,
+                                            over: None,
                                         },
                                     ),
                                 ),

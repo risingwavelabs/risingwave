@@ -120,6 +120,11 @@ impl Binder {
                                 table_name
                             );
                         }
+                    } else if let Some(source_catalog) =
+                        self.temporary_source_manager.get_source(table_name)
+                    // don't care about the database and schema
+                    {
+                        self.resolve_source_relation(&source_catalog.clone(), as_of)
                     } else if let Ok((table_catalog, schema_name)) = self
                         .catalog
                         .get_created_table_by_name(&self.db_name, schema_path, table_name)
@@ -163,7 +168,13 @@ impl Binder {
                             if let Ok(schema) =
                                 self.catalog.get_schema_by_name(&self.db_name, schema_name)
                             {
-                                if let Some(table_catalog) =
+                                if let Some(source_catalog) =
+                                    self.temporary_source_manager.get_source(table_name)
+                                // don't care about the database and schema
+                                {
+                                    return Ok(self
+                                        .resolve_source_relation(&source_catalog.clone(), as_of));
+                                } else if let Some(table_catalog) =
                                     schema.get_created_table_by_name(table_name)
                                 {
                                     return self.resolve_table_relation(

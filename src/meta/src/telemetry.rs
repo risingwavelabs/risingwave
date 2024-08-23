@@ -15,12 +15,10 @@
 use prost::Message;
 use risingwave_common::config::MetaBackend;
 use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
-use risingwave_common::telemetry::report::{
-    report_event_common, TelemetryInfoFetcher, TelemetryReportCreator,
-};
+use risingwave_common::telemetry::report::{TelemetryInfoFetcher, TelemetryReportCreator};
 use risingwave_common::telemetry::{
-    current_timestamp, telemetry_cluster_type_from_env_var, SystemData, TelemetryNodeType,
-    TelemetryReportBase, TelemetryResult,
+    current_timestamp, report_event_common, telemetry_cluster_type_from_env_var, SystemData,
+    TelemetryNodeType, TelemetryReportBase, TelemetryResult,
 };
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_pb::common::WorkerType;
