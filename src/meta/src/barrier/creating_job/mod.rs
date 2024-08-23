@@ -323,9 +323,7 @@ impl CreatingStreamingJobControl {
                     Some(table_id),
                     if start_consume_upstream {
                         // erase the mutation on upstream except the last command
-                        command_ctx
-                            .command
-                            .to_mutation(command_ctx.current_paused_reason.as_ref())
+                        command_ctx.to_mutation()
                     } else {
                         None
                     },

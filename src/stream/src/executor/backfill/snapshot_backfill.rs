@@ -101,8 +101,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         debug!("snapshot backfill executor start");
-        let upstream = erase_upstream_mutation(self.upstream.execute());
-        pin_mut!(upstream);
+        let mut upstream = erase_upstream_mutation(self.upstream.execute());
         let upstream_table_id = self.upstream_table.table_id();
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         debug!(epoch = ?first_barrier.epoch, "get first upstream barrier");

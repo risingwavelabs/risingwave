@@ -880,6 +880,11 @@ impl Command {
 }
 
 impl CommandContext {
+    pub fn to_mutation(&self) -> Option<Mutation> {
+        self.command
+            .to_mutation(self.current_paused_reason.as_ref())
+    }
+
     /// Returns the paused reason after executing the current command.
     pub fn next_paused_reason(&self) -> Option<PausedReason> {
         match &self.command {

@@ -257,9 +257,7 @@ impl ControlStreamManager {
     ) -> MetaResult<HashSet<WorkerId>> {
         self.inject_barrier(
             None,
-            command_ctx
-                .command
-                .to_mutation(command_ctx.current_paused_reason.as_ref()),
+            command_ctx.to_mutation(),
             (&command_ctx.curr_epoch, &command_ctx.prev_epoch),
             &command_ctx.kind,
             pre_applied_graph_info,
