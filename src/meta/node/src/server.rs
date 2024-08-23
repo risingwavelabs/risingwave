@@ -619,6 +619,7 @@ pub async fn start_service_as_election_leader(
         source_manager.clone(),
         barrier_manager.context().clone(),
         sink_manager.clone(),
+        meta_metrics.clone(),
     )
     .await;
 
