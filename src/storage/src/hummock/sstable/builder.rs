@@ -196,6 +196,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         mut meta: BlockMeta,
     ) -> HummockResult<bool> {
         let table_id = smallest_key.user_key.table_id.table_id;
+        if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
+            self.table_ids.insert(table_id);
+            self.finalize_last_table_stats();
+            self.last_table_id = Some(table_id);
+        }
         if !self.block_builder.is_empty() {
             let min_block_size = std::cmp::min(MIN_BLOCK_SIZE, self.options.block_capacity / 4);
             if self.block_builder.approximate_len() < min_block_size {
@@ -230,12 +235,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.filter_builder.add_raw_data(filter_data);
         let block_meta = self.block_metas.last_mut().unwrap();
         self.writer.write_block_bytes(buf, block_meta).await?;
-
-        if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
-            self.table_ids.insert(table_id);
-            self.finalize_last_table_stats();
-            self.last_table_id = Some(table_id);
-        }
 
         Ok(true)
     }
