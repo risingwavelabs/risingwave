@@ -1056,22 +1056,32 @@ impl StageRunner {
             | PlanNodeType::BatchKafkaScan
             | PlanNodeType::BatchIcebergScan => {
                 let node_body = execution_plan_node.node.clone();
-                let NodeBody::Source(mut source_node) = node_body else {
-                    unreachable!();
-                };
-
                 let partition = partition
                     .expect("no partition info for seq scan")
                     .into_source()
                     .expect("PartitionInfo should be SourcePartitionInfo");
-                source_node.split = partition
-                    .into_iter()
-                    .map(|split| split.encode_to_bytes().into())
-                    .collect_vec();
-                PbPlanNode {
-                    children: vec![],
-                    identity,
-                    node_body: Some(NodeBody::Source(source_node)),
+                if let NodeBody::Source(mut source_node) = node_body {
+                    source_node.split = partition
+                        .into_iter()
+                        .map(|split| split.encode_to_bytes().into())
+                        .collect_vec();
+                    PbPlanNode {
+                        children: vec![],
+                        identity,
+                        node_body: Some(NodeBody::Source(source_node)),
+                    }
+                } else if let NodeBody::IcebergSource(mut source_node) = node_body {
+                    source_node.split = partition
+                        .into_iter()
+                        .map(|split| split.encode_to_bytes().into())
+                        .collect_vec();
+                    PbPlanNode {
+                        children: vec![],
+                        identity,
+                        node_body: Some(NodeBody::IcebergSource(source_node)),
+                    }
+                } else {
+                    unreachable!();
                 }
             }
             _ => {

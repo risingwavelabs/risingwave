@@ -20,19 +20,18 @@ use iceberg::scan::FileScanTask;
 use iceberg::spec::TableMetadata;
 use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::iceberg::{IcebergProperties, IcebergSplit};
 use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
 use risingwave_connector::WithOptionsSecResolved;
-use risingwave_common::catalog::Field;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+
+use super::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
 use crate::error::BatchError;
 use crate::executor::{DataChunk, Executor};
 use crate::task::BatchTaskContext;
-
-use super::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
 
 pub struct IcebergScanExecutor {
     iceberg_config: IcebergConfig,
@@ -126,7 +125,10 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
         source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> crate::error::Result<BoxedExecutor> {
-        ensure!(inputs.is_empty(), "Iceberg source should not have input executor!");
+        ensure!(
+            inputs.is_empty(),
+            "Iceberg source should not have input executor!"
+        );
         let source_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::IcebergSource
@@ -159,20 +161,22 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
             .collect();
         let schema = Schema::new(fields);
 
-        if let ConnectorProperties::Iceberg(iceberg_properties) = config && let SplitImpl::Iceberg(split) = &split_list[0] {
+        if let ConnectorProperties::Iceberg(iceberg_properties) = config
+            && let SplitImpl::Iceberg(split) = &split_list[0]
+        {
             let iceberg_properties: IcebergProperties = *iceberg_properties;
-                let split: IcebergSplit = split.clone();
-                Ok(Box::new(IcebergScanExecutor::new(
-                    iceberg_properties.to_iceberg_config(),
-                    Some(split.snapshot_id),
-                    split.table_meta.deserialize(),
-                    split.files.into_iter().map(|x| x.deserialize()).collect(),
-                    source.context.get_config().developer.chunk_size,
-                    schema,
-                    source.plan_node().get_identity().clone(),
-                )))
-            } else {
-                unreachable!()
-            }
+            let split: IcebergSplit = split.clone();
+            Ok(Box::new(IcebergScanExecutor::new(
+                iceberg_properties.to_iceberg_config(),
+                Some(split.snapshot_id),
+                split.table_meta.deserialize(),
+                split.files.into_iter().map(|x| x.deserialize()).collect(),
+                source.context.get_config().developer.chunk_size,
+                schema,
+                source.plan_node().get_identity().clone(),
+            )))
+        } else {
+            unreachable!()
+        }
     }
 }

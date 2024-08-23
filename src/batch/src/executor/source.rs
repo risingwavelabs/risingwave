@@ -101,29 +101,29 @@ impl BoxedExecutorBuilder for SourceExecutor {
             })
             .collect();
         let schema = Schema::new(fields);
-        
-        assert!(!matches!(config, ConnectorProperties::Iceberg(_)));
-            let source_reader = SourceReader {
-                config,
-                columns,
-                parser_config,
-                connector_message_buffer_size: source
-                    .context()
-                    .get_config()
-                    .developer
-                    .connector_message_buffer_size,
-            };
 
-            Ok(Box::new(SourceExecutor {
-                source: source_reader,
-                column_ids,
-                metrics: source.context().source_metrics(),
-                source_id: TableId::new(source_node.source_id),
-                split_list,
-                schema,
-                identity: source.plan_node().get_identity().clone(),
-                chunk_size: source.context().get_config().developer.chunk_size,
-            }))
+        assert!(!matches!(config, ConnectorProperties::Iceberg(_)));
+        let source_reader = SourceReader {
+            config,
+            columns,
+            parser_config,
+            connector_message_buffer_size: source
+                .context()
+                .get_config()
+                .developer
+                .connector_message_buffer_size,
+        };
+
+        Ok(Box::new(SourceExecutor {
+            source: source_reader,
+            column_ids,
+            metrics: source.context().source_metrics(),
+            source_id: TableId::new(source_node.source_id),
+            split_list,
+            schema,
+            identity: source.plan_node().get_identity().clone(),
+            chunk_size: source.context().get_config().developer.chunk_size,
+        }))
     }
 }
 
