@@ -248,11 +248,11 @@ impl DatabaseManager {
             .collect()
     }
 
-    pub fn get_table_by_cdc_table_id(&self, cdc_table_id: String) -> Vec<Table> {
+    pub fn get_table_by_cdc_table_id(&self, cdc_table_id: &String) -> Vec<Table> {
         let cdc_table_id = Some(cdc_table_id);
         self.tables
             .values()
-            .filter(|t| t.cdc_table_id == cdc_table_id)
+            .filter(|t| t.cdc_table_id.as_ref() == cdc_table_id)
             .cloned()
             .collect()
     }
