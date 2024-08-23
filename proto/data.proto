@@ -61,9 +61,7 @@ message DataType {
   uint32 precision = 2;
   // Scale for decimal.
   uint32 scale = 3;
-  // Currently all types are nullable. There's no need to have this field.
-  reserved 4;
-  reserved "is_nullable";
+  bool is_nullable = 4;
   IntervalType interval_type = 5;
   // For struct type, it represents all the fields in the struct.
   // For list type it only contains 1 element which is the inner item type of the List.

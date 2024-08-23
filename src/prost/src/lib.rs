@@ -19,8 +19,8 @@
 
 use std::str::FromStr;
 
-pub use prost::Message;
 use plan_common::AdditionalColumn;
+pub use prost::Message;
 use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
@@ -304,7 +304,7 @@ impl stream_plan::StreamNode {
 }
 
 impl catalog::StreamSourceInfo {
-    /// er to [`Self::cdc_source_job`] for details.
+    /// Refer to [`Self::cdc_source_job`] for details.
     pub fn is_shared(&self) -> bool {
         self.cdc_source_job
     }
@@ -341,7 +341,9 @@ impl std::fmt::Debug for data::DataType {
             field_type,
             field_names,
             type_name,
+            is_nullable,
         } = self;
+        debug_assert!(is_nullable, "Currently is_nullable should be always true");
 
         let type_name = data::data_type::TypeName::try_from(*type_name)
             .map(|t| t.as_str_name())
@@ -428,6 +430,18 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
 #[cfg(test)]
 mod tests {
     use crate::data::{data_type, DataType};
+    use crate::plan_common::Field;
+
+    #[test]
+    fn test_getter() {
+        let mut data_type: DataType = DataType::default();
+        data_type.is_nullable = true;
+        let field = Field {
+            data_type: Some(data_type),
+            name: "".to_string(),
+        };
+        assert!(field.get_data_type().unwrap().is_nullable);
+    }
 
     #[test]
     fn test_enum_getter() {
@@ -444,5 +458,15 @@ mod tests {
         let mut data_type: DataType = DataType::default();
         data_type.type_name = data_type::TypeName::TypeUnspecified as i32;
         assert!(data_type.get_type_name().is_err());
+    }
+
+    #[test]
+    fn test_primitive_getter() {
+        let data_type: DataType = DataType::default();
+        let new_data_type = DataType {
+            is_nullable: data_type.get_is_nullable(),
+            ..Default::default()
+        };
+        assert!(!new_data_type.is_nullable);
     }
 }
