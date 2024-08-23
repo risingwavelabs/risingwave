@@ -150,7 +150,6 @@ export function calculateBPRate(
   let map = convertToMapAndAgg(backPressureCumulative)
   let result = new Map<string, number>()
   map.forEach((backpressureNs, key) => {
-    console.log("backpressureNs", backpressureNs)
     let backpressureRateRatio = backpressureNs / totalDurationNs
     let backpressureRatePercent = backpressureRateRatio * 100
     result.set(
