@@ -40,7 +40,8 @@ import useErrorToast from "../hook/useErrorToast"
 import useFetch from "../lib/api/fetch"
 import {
   BackPressureInfo,
-  calculateBPRate, calculateCumulativeBp,
+  calculateBPRate,
+  calculateCumulativeBp,
   fetchEmbeddedBackPressure,
   fetchPrometheusBackPressure,
 } from "../lib/api/metric"
@@ -187,8 +188,8 @@ const backPressureDataSources: BackPressureDataSource[] = [
 interface EmbeddedBackPressureInfo {
   previous: BackPressureInfo[]
   current: BackPressureInfo[]
-  totalBackpressureNs: BackPressureInfo[],
-  totalDurationNs: number,
+  totalBackpressureNs: BackPressureInfo[]
+  totalDurationNs: number
 }
 
 export default function Streaming() {
@@ -314,8 +315,13 @@ export default function Streaming() {
                 ? {
                     previous: prev.current,
                     current: newBP,
-                    totalBackpressureNs: calculateCumulativeBp(prev.totalBackpressureNs, prev.current, newBP),
-                    totalDurationNs: prev.totalDurationNs + INTERVAL_MS * 1000 * 1000,
+                    totalBackpressureNs: calculateCumulativeBp(
+                      prev.totalBackpressureNs,
+                      prev.current,
+                      newBP
+                    ),
+                    totalDurationNs:
+                      prev.totalDurationNs + INTERVAL_MS * 1000 * 1000,
                   }
                 : {
                     previous: newBP, // Use current value to show zero rate, but it's fine
@@ -344,7 +350,7 @@ export default function Streaming() {
       if (backPressureDataSource === "Embedded" && embeddedBackPressureInfo) {
         const metrics = calculateBPRate(
           embeddedBackPressureInfo.totalBackpressureNs,
-          embeddedBackPressureInfo.totalDurationNs,
+          embeddedBackPressureInfo.totalDurationNs
         )
         for (const m of metrics.outputBufferBlockingDuration) {
           map.set(
