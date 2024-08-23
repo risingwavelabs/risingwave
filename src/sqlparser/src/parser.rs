@@ -4485,6 +4485,19 @@ impl Parser<'_> {
                     self.expect_keywords(&[Keyword::ISOLATION, Keyword::LEVEL])?;
                     return Ok(Statement::ShowTransactionIsolationLevel);
                 }
+                Keyword::CURSORS => {
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Cursor,
+                        filter: None,
+                    });
+                }
+                Keyword::SUBSCRIPTION => {
+                    self.expect_keyword(Keyword::CURSORS)?;
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::SubscriptionCursor,
+                        filter: None,
+                    });
+                }
                 _ => {}
             }
         }

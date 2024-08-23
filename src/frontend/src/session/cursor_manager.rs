@@ -750,4 +750,64 @@ impl CursorManager {
             Err(ErrorCode::ItemNotFound(format!("Cannot find cursor `{}`", cursor_name)).into())
         }
     }
+
+    pub async fn get_all_query_cursors(&self) -> (Vec<Row>, Vec<PgFieldDescriptor>) {
+        let cursor_names = self
+            .cursor_map
+            .lock()
+            .await
+            .iter()
+            .filter_map(|(currsor_name, cursor)| {
+                if let Cursor::Query(_cursor) = cursor {
+                    let cursor_name = vec![Some(Bytes::from(currsor_name.clone().into_bytes()))];
+                    Some(Row::new(cursor_name))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        (
+            cursor_names,
+            vec![PgFieldDescriptor::new(
+                "Name".to_string(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            )],
+        )
+    }
+
+    pub async fn get_all_subscription_cursors(&self) -> (Vec<Row>, Vec<PgFieldDescriptor>) {
+        let cursors = self
+            .cursor_map
+            .lock()
+            .await
+            .iter()
+            .filter_map(|(cursor_name, cursor)| {
+                if let Cursor::Subscription(cursor) = cursor {
+                    let cursors = vec![
+                        Some(Bytes::from(cursor_name.clone().into_bytes())),
+                        Some(Bytes::from(cursor.subscription.name.clone().into_bytes())),
+                    ];
+                    Some(Row::new(cursors))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        (
+            cursors,
+            vec![
+                PgFieldDescriptor::new(
+                    "Name".to_string(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+                PgFieldDescriptor::new(
+                    "SubscriptionName".to_string(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+            ],
+        )
+    }
 }

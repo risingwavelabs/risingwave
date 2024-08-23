@@ -90,13 +90,14 @@ impl Op {
         }
     }
 
-    pub fn to_varchar(self) -> String{
+    pub fn to_varchar(self) -> String {
         match self {
             Op::Insert => "Insert",
             Op::Delete => "Delete",
             Op::UpdateInsert => "UpdateInsert",
             Op::UpdateDelete => "UpdateDelete",
-        }.to_string()
+        }
+        .to_string()
     }
 }
 
