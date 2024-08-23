@@ -555,8 +555,8 @@ impl SubscriptionCursor {
         } else {
             let op_formats = formats.get(row_len).unwrap_or(&Format::Text);
             let op = pg_value_format(
-                &DataType::Int16,
-                risingwave_common::types::ScalarRefImpl::Int16(1_i16),
+                &DataType::Varchar,
+                risingwave_common::types::ScalarRefImpl::Utf8("Insert"),
                 *op_formats,
                 session_data,
             )?;
@@ -568,7 +568,7 @@ impl SubscriptionCursor {
 
     pub fn build_desc(mut descs: Vec<Field>, from_snapshot: bool) -> Vec<Field> {
         if from_snapshot {
-            descs.push(Field::with_name(DataType::Int16, "op"));
+            descs.push(Field::with_name(DataType::Varchar, "op"));
         }
         descs.push(Field::with_name(DataType::Int64, "rw_timestamp"));
         descs
