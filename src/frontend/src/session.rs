@@ -658,6 +658,14 @@ pub struct SessionImpl {
     temporary_source_manager: Arc<Mutex<TemporarySourceManager>>,
 }
 
+/// If TEMPORARY or TEMP is specified, the source is created as a temporary source.
+/// Temporary sources are automatically dropped at the end of a session
+/// Temporary sources are expected to be selected by batch queries, not streaming queries.
+/// Temporary sources currently are only used by cloud portal to preview the data during table and
+/// source creation, so it is a internal feature and not exposed to users.
+/// The current PR supports temporary source with minimum effort,
+/// so we don't care about the database name and schema name, but only care about the source name.
+/// Temporary sources can only be shown via `show sources` command but not other system tables.
 #[derive(Default, Clone)]
 pub struct TemporarySourceManager {
     sources: HashMap<String, SourceCatalog>,
