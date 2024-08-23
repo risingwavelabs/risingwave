@@ -295,15 +295,17 @@ impl MonitorService for MonitorServiceImpl {
         let actor_output_buffer_blocking_duration_ns = metrics
             .actor_output_buffer_blocking_duration_ns
             .collect()
-            .get(0)
+            .into_iter()
+            .next()
             .unwrap()
-            .get_metric();
+            .take_metric();
         let dispatcher_count = metrics
             .dispatcher_count
             .collect()
-            .get(0)
+            .into_iter()
+            .next()
             .unwrap()
-            .get_metric();
+            .take_metric();
 
         let dispatcher_count: HashMap<_, _> = dispatcher_count
             .iter()
@@ -346,6 +348,7 @@ impl MonitorService for MonitorServiceImpl {
                     back_pressure_info.fragment_id,
                     back_pressure_info.downstream_fragment_id,
                 ))
+                .copied()
                 .unwrap_or_default();
             back_pressure_infos.push(back_pressure_info);
         }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::{MetricVec, MetricVecBuilder};
+use prometheus::core::{Collector, MetricVec, MetricVecBuilder};
 use prometheus::{HistogramVec, IntCounterVec};
 
 use crate::{
@@ -100,6 +100,16 @@ impl<T: MetricVecBuilder, const N: usize> RelabeledMetricVec<LabelGuardedMetricV
             return self.metric.with_guarded_label_values(&relabeled_vals);
         }
         self.metric.with_guarded_label_values(vals)
+    }
+}
+
+impl<T: Collector> Collector for RelabeledMetricVec<T> {
+    fn desc(&self) -> Vec<&prometheus::core::Desc> {
+        self.metric.desc()
+    }
+
+    fn collect(&self) -> Vec<prometheus::proto::MetricFamily> {
+        self.metric.collect()
     }
 }
 
