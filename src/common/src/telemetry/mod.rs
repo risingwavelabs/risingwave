@@ -17,17 +17,21 @@ pub mod pb_compatible;
 pub mod report;
 
 use std::env;
-use std::time::SystemTime;
 
 use risingwave_pb::telemetry::PbTelemetryClusterType;
+pub use risingwave_telemetry_event::{
+    current_timestamp, post_telemetry_report_pb, report_event_common, request_to_telemetry_event,
+    TelemetryError, TelemetryResult,
+};
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
-use thiserror_ext::AsReport;
 
 use crate::util::env_var::env_var_is_true_or;
 use crate::util::resource_util::cpu::total_cpu_available;
 use crate::util::resource_util::memory::{system_memory_available_bytes, total_memory_used_bytes};
 use crate::RW_VERSION;
+
+type Result<T> = core::result::Result<T, TelemetryError>;
 
 pub const TELEMETRY_CLUSTER_TYPE: &str = "RW_TELEMETRY_TYPE";
 pub const TELEMETRY_CLUSTER_TYPE_HOSTED: &str = "hosted"; // hosted on RisingWave Cloud
@@ -50,20 +54,12 @@ pub fn telemetry_cluster_type_from_env_var() -> PbTelemetryClusterType {
 }
 
 /// Url of telemetry backend
-pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v2/report";
-
+pub use risingwave_telemetry_event::TELEMETRY_REPORT_URL;
 /// Telemetry reporting interval in seconds, 6 hours
 pub const TELEMETRY_REPORT_INTERVAL: u64 = 6 * 60 * 60;
 
 /// Environment Variable that is default to be true
 const TELEMETRY_ENV_ENABLE: &str = "ENABLE_TELEMETRY";
-
-pub type TelemetryResult<T> = core::result::Result<T, TelemetryError>;
-
-/// Telemetry errors are generally recoverable/ignorable. `String` is good enough.
-pub type TelemetryError = String;
-
-type Result<T> = core::result::Result<T, TelemetryError>;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TelemetryNodeType {
@@ -148,38 +144,10 @@ impl Default for SystemData {
     }
 }
 
-/// Sends a `POST` request of the telemetry reporting to a URL.
-pub async fn post_telemetry_report_pb(url: &str, report_body: Vec<u8>) -> Result<()> {
-    let client = reqwest::Client::new();
-    let res = client
-        .post(url)
-        .header(reqwest::header::CONTENT_TYPE, "application/x-protobuf")
-        .body(report_body)
-        .send()
-        .await
-        .map_err(|err| format!("failed to send telemetry report, err: {}", err.as_report()))?;
-    if res.status().is_success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "telemetry response is error, url {}, status {}",
-            url,
-            res.status()
-        ))
-    }
-}
-
 /// check whether telemetry is enabled in environment variable
 pub fn telemetry_env_enabled() -> bool {
     // default to be true
     env_var_is_true_or(TELEMETRY_ENV_ENABLE, true)
-}
-
-pub fn current_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .expect("Clock might go backward")
-        .as_secs()
 }
 
 pub fn report_scarf_enabled() -> bool {
