@@ -19,6 +19,7 @@ pub mod posix_fs_source;
 pub mod s3_source;
 
 use serde::Deserialize;
+use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
 pub mod opendal_enumerator;
 pub mod opendal_reader;
@@ -38,9 +39,11 @@ pub const POSIX_FS_CONNECTOR: &str = "posix_fs";
 
 pub const DEFAULT_REFRESH_INTERVAL_SEC: u64 = 60;
 
+#[serde_as]
 #[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
 pub struct FsSourceCommon {
     #[serde(rename = "refresh.interval.sec")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub refresh_interval_sec: Option<u64>,
 }
 
