@@ -49,6 +49,7 @@ pub struct DashboardService {
 pub type Service = Arc<DashboardService>;
 
 pub(super) mod handlers {
+    use std::collections::{HashMap, HashSet};
     use anyhow::Context;
     use axum::Json;
     use futures::future::join_all;
@@ -208,6 +209,31 @@ pub(super) mod handlers {
                 .values()
                 .cloned()
                 .collect_vec(),
+        };
+
+        Ok(Json(table_fragments))
+    }
+
+    pub async fn list_fragment_ids(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<HashMap<u32, HashSet<u32>>>> {
+        let table_fragments = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => mgr
+                .fragment_manager
+                .get_fragment_read_guard()
+                .await
+                .table_fragments()
+                .iter()
+                .map(|(id, tf)| (id.table_id, tf.fragments.keys().copied().collect::<HashSet<u32>>()))
+                .collect(),
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .table_fragments()
+                .await
+                .map_err(err)?
+                .iter()
+                .map(|(id, tf)| (*id as u32, tf.fragments.keys().copied().collect::<HashSet<u32>>()))
+                .collect(),
         };
 
         Ok(Json(table_fragments))
@@ -466,6 +492,7 @@ impl DashboardService {
             .route("/clusters/:ty", get(list_clusters))
             .route("/fragments2", get(list_fragments))
             .route("/fragments/job_id/:job_id", get(list_fragments_by_job_id))
+            .route("/fragments/ids", get(list_fragment_ids))
             .route("/views", get(list_views))
             .route("/materialized_views", get(list_materialized_views))
             .route("/tables", get(list_tables))

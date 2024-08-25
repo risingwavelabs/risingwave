@@ -45,7 +45,7 @@ import {
   fetchEmbeddedBackPressure,
   fetchPrometheusBackPressure,
 } from "../lib/api/metric"
-import { getFragments, getFragmentsByJobId, getStreamingJobs } from "../lib/api/streaming"
+import { getFragments, getFragmentIds, getFragmentsByJobId, getStreamingJobs } from "../lib/api/streaming"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
@@ -194,28 +194,34 @@ interface EmbeddedBackPressureInfo {
 
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
+  // const { response: fragmentList } = useFetch(getFragments)
   const { response: fragmentList } = useFetch(getFragments)
+  const { response: relationIdToFragmentIds } = useFetch(getFragmentIds)
 
   const [relationId, setRelationId] = useQueryState("id", parseAsInteger)
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
+  const [tableFragments, setTableFragments] = useState<TableFragments>()
 
   const toast = useErrorToast()
 
+  useEffect(() => {
+    if (relationId) {
+      getFragmentsByJobId(relationId).then(tf => {
+        setTableFragments(tf)
+      })
+    }
+  }, [relationId])
+
   const fragmentDependencyCallback = useCallback(() => {
-    if (fragmentList) {
-      if (relationId) {
-        const fragments = fragmentList.find((x) => x.tableId === relationId)
-        if (fragments) {
-          const fragmentDep = buildFragmentDependencyAsEdges(fragments)
-          return {
-            fragments,
-            fragmentDep,
-            fragmentDepDag: dagStratify()(fragmentDep),
-          }
-        }
+    if (tableFragments) {
+      const fragmentDep = buildFragmentDependencyAsEdges(tableFragments)
+      return {
+        fragments: tableFragments,
+        fragmentDep,
+        fragmentDepDag: dagStratify()(fragmentDep),
       }
     }
-  }, [fragmentList, relationId])
+  }, [tableFragments])
 
   useEffect(() => {
     if (relationList) {
@@ -258,9 +264,10 @@ export default function Streaming() {
     if (fragmentList) {
       for (const tf of fragmentList) {
         for (const fragmentId in tf.fragments) {
-          if (tf.fragments[fragmentId].fragmentId == searchFragIdInt) {
+          const fragment = tf.fragments[fragmentId]
+          if (fragment.fragmentId == searchFragIdInt) {
             setRelationId(tf.tableId)
-            setSelectedFragmentId(searchFragIdInt)
+            setSelectedFragmentId(fragment.fragmentId)
             return
           }
         }
