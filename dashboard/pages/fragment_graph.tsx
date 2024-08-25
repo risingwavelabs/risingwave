@@ -45,7 +45,7 @@ import {
   fetchEmbeddedBackPressure,
   fetchPrometheusBackPressure,
 } from "../lib/api/metric"
-import { getFragments, getStreamingJobs } from "../lib/api/streaming"
+import { getFragments, getFragmentsByJobId, getStreamingJobs } from "../lib/api/streaming"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"

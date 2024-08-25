@@ -34,6 +34,13 @@ import { ColumnCatalog, Field } from "../../proto/gen/plan_common"
 import { UserInfo } from "../../proto/gen/user"
 import api from "./api"
 
+export async function getFragmentsByJobId(jobId: number): Promise<TableFragments> {
+  let route = "/fragments/job_id/" + jobId.toString()
+  console.log("route: ", route)
+  let tableFragments: TableFragments = TableFragments.fromJSON(await api.get(route))
+  return tableFragments
+}
+
 export async function getFragments(): Promise<TableFragments[]> {
   let fragmentList: TableFragments[] = (await api.get("/fragments2")).map(
     TableFragments.fromJSON
