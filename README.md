@@ -33,7 +33,7 @@
     <img alt="Slack" src="https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack" />
   </a>
   <a
-    href="https://twitter.com/risingwavelabs"
+    href="https://x.com/risingwavelabs"
     target="_blank"
   >
     <img alt="X" src="https://img.shields.io/twitter/follow/risingwavelabs" />
