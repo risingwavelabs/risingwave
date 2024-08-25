@@ -53,6 +53,8 @@ pub(super) mod handlers {
     use axum::Json;
     use futures::future::join_all;
     use itertools::Itertools;
+    use risingwave_common::bail;
+    use risingwave_common::catalog::TableId;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{PbDatabase, PbSchema, Sink, Source, Subscription, Table, View};
@@ -206,6 +208,41 @@ pub(super) mod handlers {
                 .values()
                 .cloned()
                 .collect_vec(),
+        };
+
+        Ok(Json(table_fragments))
+    }
+
+    pub async fn list_fragments_by_job_id(
+        Extension(srv): Extension<Service>,
+        Path(job_id): Path<u32>,
+    ) -> Result<Json<PbTableFragments>> {
+        let table_fragments = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                if let Some(tf) = mgr
+                    .fragment_manager
+                    .get_fragment_read_guard()
+                    .await
+                    .table_fragments()
+                    .get(&TableId::new(job_id))
+                {
+                    tf.to_protobuf()
+                } else {
+                    bail!("job_id {} not found", job_id)
+                }
+            }
+            MetadataManager::V2(mgr) => {
+                let mut table_fragments = mgr
+                    .catalog_controller
+                    .table_fragments()
+                    .await
+                    .map_err(err)?;
+                if let Some(tf) = table_fragments.remove(&(job_id as i32)) {
+                    tf
+                } else {
+                    bail!("job_id {} not found", job_id)
+                }
+            }
         };
 
         Ok(Json(table_fragments))
@@ -428,6 +465,7 @@ impl DashboardService {
         let api_router = Router::new()
             .route("/clusters/:ty", get(list_clusters))
             .route("/fragments2", get(list_fragments))
+            .route("/fragments/job_id/:job_id", get(list_fragments_by_job_id))
             .route("/views", get(list_views))
             .route("/materialized_views", get(list_materialized_views))
             .route("/tables", get(list_tables))
