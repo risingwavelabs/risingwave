@@ -36,12 +36,12 @@ pub const NATS_CONNECTOR: &str = "nats";
 pub struct AckPolicyWrapper;
 
 impl AckPolicyWrapper {
-    pub fn parse_str(s: &str) -> AckPolicy {
+    pub fn parse_str(s: &str) -> Result<AckPolicy, String> {
         match s {
-            "none" => AckPolicy::None,
-            "all" => AckPolicy::All,
-            "explicit" => AckPolicy::Explicit,
-            _ => AckPolicy::None,
+            "none" => Ok(AckPolicy::None),
+            "all" => Ok(AckPolicy::All),
+            "explicit" => Ok(AckPolicy::Explicit),
+            _ => Err(format!("Invalid AckPolicy '{}'", s)),
         }
     }
 }
@@ -49,11 +49,11 @@ impl AckPolicyWrapper {
 pub struct ReplayPolicyWrapper;
 
 impl ReplayPolicyWrapper {
-    pub fn parse_str(s: &str) -> ReplayPolicy {
+    pub fn parse_str(s: &str) -> Result<ReplayPolicy, String> {
         match s {
-            "instant" => ReplayPolicy::Instant,
-            "original" => ReplayPolicy::Original,
-            _ => ReplayPolicy::Instant,
+            "instant" => Ok(ReplayPolicy::Instant),
+            "original" => Ok(ReplayPolicy::Original),
+            _ => Err(format!("Invalid ReplayPolicy '{}'", s)),
         }
     }
 }
@@ -193,7 +193,7 @@ impl NatsPropertiesConsumer {
             c.description = Some(v.clone())
         }
         if let Some(v) = &self.ack_policy {
-            c.ack_policy = AckPolicyWrapper::parse_str(v)
+            c.ack_policy = AckPolicyWrapper::parse_str(v).unwrap()
         }
         if let Some(v) = &self.ack_wait {
             c.ack_wait = *v
@@ -208,7 +208,7 @@ impl NatsPropertiesConsumer {
             c.filter_subjects = v.clone()
         }
         if let Some(v) = &self.replay_policy {
-            c.replay_policy = ReplayPolicyWrapper::parse_str(v)
+            c.replay_policy = ReplayPolicyWrapper::parse_str(v).unwrap()
         }
         if let Some(v) = &self.rate_limit {
             c.rate_limit = *v
