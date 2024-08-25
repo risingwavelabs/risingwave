@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::time::Duration;
 
 use risingwave_pb::secret::PbSecretRef;
 
@@ -51,7 +50,7 @@ impl<T: crate::source::cdc::CdcSourceTypeTrait> WithOptions
 
 impl<T: WithOptions> WithOptions for Option<T> {}
 impl WithOptions for Vec<String> {}
-impl WithOptions for Vec<Duration> {}
+impl WithOptions for Vec<u64> {}
 impl WithOptions for HashMap<String, String> {}
 impl WithOptions for BTreeMap<String, String> {}
 

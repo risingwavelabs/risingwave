@@ -22,14 +22,16 @@ use std::time::Duration;
 use async_nats::jetstream::consumer::pull::Config;
 use async_nats::jetstream::consumer::{AckPolicy, ReplayPolicy};
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr, DurationSeconds};
+use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
 
 use crate::connector_common::NatsCommon;
 use crate::source::nats::enumerator::NatsSplitEnumerator;
 use crate::source::nats::source::{NatsSplit, NatsSplitReader};
 use crate::source::SourceProperties;
-use crate::{deserialize_duration_seq_from_string, deserialize_optional_string_seq_from_string};
+use crate::{
+    deserialize_optional_string_seq_from_string, deserialize_optional_u64_seq_from_string,
+};
 
 pub const NATS_CONNECTOR: &str = "nats";
 
@@ -113,9 +115,9 @@ pub struct NatsPropertiesConsumer {
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub ack_policy: Option<String>,
 
-    #[serde(rename = "consumer.ack_wait")]
-    #[serde_as(as = "Option<DurationSeconds<String>>")]
-    pub ack_wait: Option<Duration>,
+    #[serde(rename = "consumer.ack_wait.sec")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub ack_wait: Option<u64>,
 
     #[serde(rename = "consumer.max_deliver")]
     #[serde_as(as = "Option<DisplayFromStr>")]
@@ -160,13 +162,13 @@ pub struct NatsPropertiesConsumer {
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_bytes: Option<i64>,
 
-    #[serde(rename = "consumer.max_expires")]
-    #[serde_as(as = "Option<DurationSeconds<String>>")]
-    pub max_expires: Option<Duration>,
+    #[serde(rename = "consumer.max_expires.sec")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub max_expires: Option<u64>,
 
-    #[serde(rename = "consumer.inactive_threshold")]
-    #[serde_as(as = "Option<DurationSeconds<String>>")]
-    pub inactive_threshold: Option<Duration>,
+    #[serde(rename = "consumer.inactive_threshold.sec")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub inactive_threshold: Option<u64>,
 
     #[serde(rename = "consumer.num.replicas", alias = "consumer.num_replicas")]
     #[serde_as(as = "Option<DisplayFromStr>")]
@@ -176,9 +178,9 @@ pub struct NatsPropertiesConsumer {
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub memory_storage: Option<bool>,
 
-    #[serde(rename = "consumer.backoff")]
-    #[serde(deserialize_with = "deserialize_duration_seq_from_string")]
-    pub backoff: Option<Vec<Duration>>,
+    #[serde(rename = "consumer.backoff.sec")]
+    #[serde(deserialize_with = "deserialize_optional_u64_seq_from_string")]
+    pub backoff: Option<Vec<u64>>,
 }
 
 impl NatsPropertiesConsumer {
@@ -196,7 +198,7 @@ impl NatsPropertiesConsumer {
             c.ack_policy = AckPolicyWrapper::parse_str(v).unwrap()
         }
         if let Some(v) = &self.ack_wait {
-            c.ack_wait = *v
+            c.ack_wait = Duration::from_secs(*v)
         }
         if let Some(v) = &self.max_deliver {
             c.max_deliver = *v
@@ -232,10 +234,10 @@ impl NatsPropertiesConsumer {
             c.max_bytes = *v
         }
         if let Some(v) = &self.max_expires {
-            c.max_expires = *v
+            c.max_expires = Duration::from_secs(*v)
         }
         if let Some(v) = &self.inactive_threshold {
-            c.inactive_threshold = *v
+            c.inactive_threshold = Duration::from_secs(*v)
         }
         if let Some(v) = &self.num_replicas {
             c.num_replicas = *v
@@ -244,7 +246,7 @@ impl NatsPropertiesConsumer {
             c.memory_storage = *v
         }
         if let Some(v) = &self.backoff {
-            c.backoff = v.clone()
+            c.backoff = v.iter().map(|&x| Duration::from_secs(x)).collect()
         }
     }
 }
@@ -287,7 +289,7 @@ mod test {
             "consumer.durable_name".to_string() => "durable_foobar".to_string(),
             "consumer.description".to_string() => "A description".to_string(),
             "consumer.ack_policy".to_string() => "all".to_string(),
-            "consumer.ack_wait".to_string() => "10".to_string(),
+            "consumer.ack_wait.sec".to_string() => "10".to_string(),
             "consumer.max_deliver".to_string() => "10".to_string(),
             "consumer.filter_subject".to_string() => "subject".to_string(),
             "consumer.filter_subjects".to_string() => "subject1,subject2".to_string(),
@@ -299,11 +301,11 @@ mod test {
             "consumer.headers_only".to_string() => "true".to_string(),
             "consumer.max_batch".to_string() => "10".to_string(),
             "consumer.max_bytes".to_string() => "1024".to_string(),
-            "consumer.max_expires".to_string() => "24".to_string(),
-            "consumer.inactive_threshold".to_string() => "10".to_string(),
+            "consumer.max_expires.sec".to_string() => "24".to_string(),
+            "consumer.inactive_threshold.sec".to_string() => "10".to_string(),
             "consumer.num_replicas".to_string() => "3".to_string(),
             "consumer.memory_storage".to_string() => "true".to_string(),
-            "consumer.backoff".to_string() => "2,10,15".to_string(),
+            "consumer.backoff.sec".to_string() => "2,10,15".to_string(),
 
         };
 
@@ -326,10 +328,7 @@ mod test {
             props.nats_properties_consumer.ack_policy,
             Some("all".to_string())
         );
-        assert_eq!(
-            props.nats_properties_consumer.ack_wait,
-            Some(Duration::from_secs(10))
-        );
+        assert_eq!(props.nats_properties_consumer.ack_wait, Some(10));
         assert_eq!(
             props.nats_properties_consumer.filter_subjects,
             Some(vec!["subject1".to_string(), "subject2".to_string()])
@@ -345,23 +344,13 @@ mod test {
         assert_eq!(props.nats_properties_consumer.headers_only, Some(true));
         assert_eq!(props.nats_properties_consumer.max_batch, Some(10));
         assert_eq!(props.nats_properties_consumer.max_bytes, Some(1024));
-        assert_eq!(
-            props.nats_properties_consumer.max_expires,
-            Some(Duration::from_secs(24))
-        );
-        assert_eq!(
-            props.nats_properties_consumer.inactive_threshold,
-            Some(Duration::from_secs(10))
-        );
+        assert_eq!(props.nats_properties_consumer.max_expires, Some(24));
+        assert_eq!(props.nats_properties_consumer.inactive_threshold, Some(10));
         assert_eq!(props.nats_properties_consumer.num_replicas, Some(3));
         assert_eq!(props.nats_properties_consumer.memory_storage, Some(true));
         assert_eq!(
             props.nats_properties_consumer.backoff,
-            Some(vec![
-                Duration::from_secs(2),
-                Duration::from_secs(10),
-                Duration::from_secs(15)
-            ])
+            Some(vec![2, 10, 15])
         );
     }
 }
