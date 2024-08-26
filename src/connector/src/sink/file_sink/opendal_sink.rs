@@ -14,7 +14,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
+use std::num::NonZeroU64;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use arrow_schema_iceberg::SchemaRef;
@@ -25,9 +27,14 @@ use parquet::file::properties::WriterProperties;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use serde::Deserialize;
+use serde_with::serde_as;
 use tokio_util::compat::{Compat, FuturesAsyncWriteCompatExt};
+use with_options::WithOptions;
 
+use crate::sink::batching_log_sink::BatchingLogSinkerOf;
 use crate::sink::catalog::SinkEncode;
+use crate::sink::log_store::ChunkId;
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam, SinkWriter,
@@ -48,6 +55,7 @@ pub struct FileSink<S: OpendalSinkBackend> {
     /// The schema describing the structure of the data being written to the file sink.
     pub(crate) schema: Schema,
     pub(crate) is_append_only: bool,
+    pub(crate) batching_strategy: Option<BatchingStrategy>,
 
     /// The description of the sink's format.
     pub(crate) format_desc: SinkFormatDesc,
@@ -79,6 +87,7 @@ pub trait OpendalSinkBackend: Send + Sync + 'static + Clone + PartialEq {
     fn new_operator(properties: Self::Properties) -> Result<Operator>;
     fn get_path(properties: Self::Properties) -> String;
     fn get_engine_type() -> EngineType;
+    fn get_batching_strategy(properties: Self::Properties) -> Option<BatchingStrategy>;
 }
 
 #[derive(Clone, Debug)]
@@ -90,7 +99,7 @@ pub enum EngineType {
 
 impl<S: OpendalSinkBackend> Sink for FileSink<S> {
     type Coordinator = DummySinkCommitCoordinator;
-    type LogSinker = LogSinkerOf<OpenDalSinkWriter>;
+    type LogSinker = BatchingLogSinkerOf<OpenDalSinkWriter>;
 
     const SINK_NAME: &'static str = S::SINK_NAME;
 
@@ -118,7 +127,7 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
         &self,
         writer_param: crate::sink::SinkWriterParam,
     ) -> Result<Self::LogSinker> {
-        Ok(OpenDalSinkWriter::new(
+        let writer = OpenDalSinkWriter::new(
             self.op.clone(),
             &self.path,
             self.schema.clone(),
@@ -126,8 +135,15 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
             writer_param.executor_id,
             self.format_desc.encode.clone(),
             self.engine_type.clone(),
-        )?
-        .into_log_sinker(writer_param.sink_metrics))
+            self.batching_strategy.clone(),
+        )?;
+        let commit_checkpoint_interval = NonZeroU64::new(1).unwrap();
+        Ok(BatchingLogSinkerOf::new(
+            writer,
+            self.batching_strategy.clone(),
+            writer_param.sink_metrics,
+            commit_checkpoint_interval,
+        ))
     }
 }
 
@@ -139,12 +155,14 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
         let config = S::from_btreemap(param.properties)?;
         let path = S::get_path(config.clone()).to_string();
         let op = S::new_operator(config.clone())?;
+        let batching_strategy = S::get_batching_strategy(config.clone());
         let engine_type = S::get_engine_type();
         Ok(Self {
             op,
             path,
             schema,
             is_append_only: param.sink_type.is_append_only(),
+            batching_strategy,
             format_desc: param
                 .format_desc
                 .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
@@ -164,6 +182,8 @@ pub struct OpenDalSinkWriter {
     executor_id: u64,
     encode_type: SinkEncode,
     engine_type: EngineType,
+    pub(crate) batching_strategy: Option<BatchingStrategy>,
+    current_row_num: usize,
 }
 
 /// The `FileWriterEnum` enum represents different types of file writers used for various sink
@@ -208,13 +228,13 @@ impl SinkWriter for OpenDalSinkWriter {
     /// When a checkpoint arrives, the force commit is performed to write the data to the file.
     /// In the future if flush and checkpoint is decoupled, we should enable sink decouple accordingly.
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
-        if is_checkpoint && let Some(sink_writer) = self.sink_writer.take() {
-            match sink_writer {
-                FileWriterEnum::ParquetFileWriter(w) => {
-                    let _ = w.close().await?;
-                }
-            };
-        }
+        // if is_checkpoint && let Some(sink_writer) = self.sink_writer.take() {
+        //     match sink_writer {
+        //         FileWriterEnum::ParquetFileWriter(w) => {
+        //             let _ = w.close().await?;
+        //         }
+        //     };
+        // }
 
         Ok(())
     }
@@ -229,6 +249,7 @@ impl OpenDalSinkWriter {
         executor_id: u64,
         encode_type: SinkEncode,
         engine_type: EngineType,
+        batching_strategy: Option<BatchingStrategy>,
     ) -> Result<Self> {
         let arrow_schema = convert_rw_schema_to_arrow_schema(rw_schema)?;
         Ok(Self {
@@ -242,6 +263,8 @@ impl OpenDalSinkWriter {
 
             encode_type,
             engine_type,
+            batching_strategy,
+            current_row_num: 0,
         })
     }
 
@@ -305,7 +328,19 @@ impl OpenDalSinkWriter {
             FileWriterEnum::ParquetFileWriter(w) => {
                 let batch =
                     IcebergArrowConvert.to_record_batch(self.schema.clone(), &data_chunk)?;
+                let batch_row_nums = batch.num_rows();
                 w.write(&batch).await?;
+                self.current_row_num += batch_row_nums;
+                if self.current_row_num > self.batching_strategy.clone().unwrap().max_row_count.unwrap() && let Some(sink_writer) = self.sink_writer.take(){
+        
+                        match sink_writer {
+                            FileWriterEnum::ParquetFileWriter(w) => {
+                                let _ = w.close().await?;
+                            }
+                        };
+                    
+
+                }
             }
         }
 
@@ -331,4 +366,24 @@ fn convert_rw_schema_to_arrow_schema(
     }
 
     Ok(arrow_schema_iceberg::Schema::new(arrow_fields))
+}
+#[derive(Deserialize, Debug, Clone, WithOptions)]
+pub struct BatchingStrategy {
+    // pub batching_interval: Option<Duration>,
+    // pub inactivity_interval: Option<Duration>,
+    pub max_row_count: Option<usize>,
+    pub max_file_size: Option<usize>,
+}
+
+#[derive(Deserialize, Debug, Clone, WithOptions)]
+pub struct FileSinkBatchingStrategy {
+    // #[serde(rename = "batching_interval")]
+    // pub batching_interval: Option<String>,
+
+    // #[serde(rename = "inactivity_interval")]
+    // pub inactivity_interval: Option<String>,
+    #[serde(rename = "max_row_count")]
+    pub max_row_count: Option<String>,
+    #[serde(rename = "max_file_size")]
+    pub max_file_size: Option<usize>,
 }

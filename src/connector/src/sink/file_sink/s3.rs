@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::collections::{BTreeMap, HashMap};
+use std::time::Duration;
 
 use anyhow::anyhow;
 use opendal::layers::{LoggingLayer, RetryLayer};
@@ -21,7 +22,7 @@ use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
-use super::opendal_sink::FileSink;
+use super::opendal_sink::{BatchingStrategy, FileSink, FileSinkBatchingStrategy};
 use crate::sink::file_sink::opendal_sink::OpendalSinkBackend;
 use crate::sink::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::source::UnknownFields;
@@ -49,6 +50,9 @@ pub struct S3Common {
 pub struct S3Config {
     #[serde(flatten)]
     pub common: S3Common,
+
+    #[serde(flatten)]
+    pub batching_strategy: FileSinkBatchingStrategy,
 
     pub r#type: String, // accept "append-only"
 
@@ -139,4 +143,40 @@ impl OpendalSinkBackend for S3Sink {
     fn get_engine_type() -> super::opendal_sink::EngineType {
         super::opendal_sink::EngineType::S3
     }
+
+    fn get_batching_strategy(properties: Self::Properties) -> Option<BatchingStrategy> {
+        // if properties.batching_strategy.batching_interval.is_none()
+        //     && properties.batching_strategy.inactivity_interval.is_none()
+        if properties.batching_strategy.max_row_count.is_none()
+            && properties.batching_strategy.max_file_size.is_none()
+        {
+            return None;
+        }
+
+        Some(BatchingStrategy {
+            // batching_interval: properties
+            //     .batching_strategy
+            //     .batching_interval
+            //     .map(|s| parse_duration(&s))
+            //     .transpose()
+            //     .ok(),
+            // inactivity_interval: properties
+            //     .batching_strategy
+            //     .inactivity_interval
+            //     .map(|s| parse_duration(&s))
+            //     .transpose()
+            //     .ok(),
+            max_row_count: properties
+                .batching_strategy
+                .max_row_count
+                .and_then(|s| s.parse().ok()),
+            max_file_size: properties.batching_strategy.max_file_size,
+        })
+    }
 }
+
+// fn parse_duration(s: &str) -> Result<Duration, &'static str> {
+//     s.parse::<u64>()
+//         .map(Duration::from_secs)
+//         .map_err(|_| "Invalid duration format")
+// }

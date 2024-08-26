@@ -21,7 +21,7 @@ use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
-use super::opendal_sink::FileSink;
+use super::opendal_sink::{BatchingStrategy, FileSink, FileSinkBatchingStrategy};
 use crate::sink::file_sink::opendal_sink::OpendalSinkBackend;
 use crate::sink::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::source::UnknownFields;
@@ -49,6 +49,9 @@ pub struct GcsCommon {
 pub struct GcsConfig {
     #[serde(flatten)]
     pub common: GcsCommon,
+
+    #[serde(flatten)]
+    pub batching_strategy: FileSinkBatchingStrategy,
 
     pub r#type: String, // accept "append-only"
 
@@ -115,5 +118,34 @@ impl OpendalSinkBackend for GcsSink {
 
     fn get_engine_type() -> super::opendal_sink::EngineType {
         super::opendal_sink::EngineType::Gcs
+    }
+
+    fn get_batching_strategy(properties: Self::Properties) -> Option<BatchingStrategy> {
+        //     && properties.batching_strategy.inactivity_interval.is_none()
+        if properties.batching_strategy.max_row_count.is_none()
+            && properties.batching_strategy.max_file_size.is_none()
+        {
+            return None;
+        }
+
+        Some(BatchingStrategy {
+            // batching_interval: properties
+            //     .batching_strategy
+            //     .batching_interval
+            //     .map(|s| parse_duration(&s))
+            //     .transpose()
+            //     .ok(),
+            // inactivity_interval: properties
+            //     .batching_strategy
+            //     .inactivity_interval
+            //     .map(|s| parse_duration(&s))
+            //     .transpose()
+            //     .ok(),
+            max_row_count: properties
+                .batching_strategy
+                .max_row_count
+                .and_then(|s| s.parse().ok()),
+            max_file_size: properties.batching_strategy.max_file_size,
+        })
     }
 }
