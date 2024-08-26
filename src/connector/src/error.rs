@@ -48,7 +48,7 @@ def_anyhow_newtype! {
     // Connector errors
     opendal::Error => transparent, // believed to be self-explanatory
     parquet::errors::ParquetError => transparent,
-    deltalake::parquet::errors::ParquetError => transparent,
+    deltalake::parquet::errors::ParquetError => "Parquet error",
     ArrayError => "Array error",
     sqlx::Error => transparent, // believed to be self-explanatory
     mysql_async::Error => "MySQL error",
