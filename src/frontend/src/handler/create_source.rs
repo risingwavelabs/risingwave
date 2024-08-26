@@ -73,7 +73,7 @@ use thiserror_ext::AsReport;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::{DatabaseId, SchemaId};
+use crate::catalog::{CatalogError, DatabaseId, SchemaId};
 use crate::error::ErrorCode::{self, Deprecated, InvalidInputSyntax, NotSupported, ProtocolError};
 use crate::error::{Result, RwError};
 use crate::expr::Expr;
@@ -1313,12 +1313,9 @@ pub async fn extract_iceberg_columns(
     let props = ConnectorProperties::extract(with_properties.clone(), true)?;
     if let ConnectorProperties::Iceberg(properties) = props {
         let iceberg_config: IcebergConfig = properties.to_iceberg_config();
-        let table = iceberg_config.load_table().await?;
-        let iceberg_schema: arrow_schema_iceberg::Schema = table
-            .current_table_metadata()
-            .current_schema()?
-            .clone()
-            .try_into()?;
+        let table = iceberg_config.load_table_v2().await?;
+        let iceberg_schema: arrow_schema_iceberg::Schema =
+            iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 
         let columns = iceberg_schema
             .fields()
@@ -1368,13 +1365,9 @@ pub async fn check_iceberg_source(
             .collect(),
     };
 
-    let table = iceberg_config.load_table().await?;
+    let table = iceberg_config.load_table_v2().await?;
 
-    let iceberg_schema: arrow_schema_iceberg::Schema = table
-        .current_table_metadata()
-        .current_schema()?
-        .clone()
-        .try_into()?;
+    let iceberg_schema = iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 
     for f1 in schema.fields() {
         if !iceberg_schema.fields.iter().any(|f2| f2.name() == &f1.name) {
@@ -1663,6 +1656,15 @@ pub async fn handle_create_source(
         overwrite_options.source_rate_limit,
     )
     .await?;
+
+    // If it is a temporary source, put it into SessionImpl.
+    if stmt.temporary {
+        if session.get_temporary_source(&source_catalog.name).is_some() {
+            return Err(CatalogError::Duplicated("source", source_catalog.name.clone()).into());
+        }
+        session.create_temporary_source(source_catalog);
+        return Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE));
+    }
 
     let source = source_catalog.to_prost(schema_id, database_id);
 

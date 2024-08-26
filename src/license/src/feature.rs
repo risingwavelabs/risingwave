@@ -56,6 +56,7 @@ macro_rules! for_all_features {
             { SqlServerSink,        Paid,       "Sink data from RisingWave to SQL Server." },
             { SqlServerCdcSource,   Paid,       "CDC source connector for Sql Server." },
             { CdcAutoSchemaChange,  Paid,       "Auto replicate upstream DDL to CDC Table." },
+            { IcebergSinkWithGlue,  Paid,       "Delivering data to Iceberg with Glue catalog." },
         }
     };
 }

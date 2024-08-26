@@ -228,7 +228,7 @@
   sql: |
     with a(a1) as (values (array[2]), (null)) select count(*) filter(where unnest(a1) < 3) from a;
   binder_error: |
-    Failed to bind expression: count(*) FILTER(WHERE unnest(a1) < 3)
+    Failed to bind expression: count(*) FILTER (WHERE unnest(a1) < 3)
 
     Caused by:
       Invalid input syntax: table functions are not allowed in FILTER

@@ -19,7 +19,7 @@ use crate::aggregate::AggKind;
 use crate::Result;
 
 /// Kind of window functions.
-#[derive(Debug, Display, FromStr, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Display, FromStr /* for builtin */, Clone, PartialEq, Eq, Hash)]
 #[display(style = "snake_case")]
 pub enum WindowFuncKind {
     // General-purpose window functions.
