@@ -10,6 +10,7 @@ members = [
     "src/common/fields-derive",
     "src/common/heap_profiling",
     "src/common/metrics",
+    "src/common/telemetry_event",
     "src/compute",
     "src/connector",
     "src/connector/codec",
@@ -141,8 +142,9 @@ arrow-array-iceberg = { package = "arrow-array", version = "52" }
 arrow-schema-iceberg = { package = "arrow-schema", version = "52" }
 arrow-buffer-iceberg = { package = "arrow-buffer", version = "52" }
 arrow-cast-iceberg = { package = "arrow-cast", version = "52" }
-iceberg = { git = "https://github.com/apache/iceberg-rust.git", rev = "4440af69a354d9af56f239a6126a7f4b7945d58b" }
-iceberg-catalog-rest = { git = "https://github.com/apache/iceberg-rust.git", rev = "4440af69a354d9af56f239a6126a7f4b7945d58b" }
+iceberg = "0.3.0"
+iceberg-catalog-rest = "0.3.0"
+iceberg-catalog-glue = "0.3.0"
 opendal = "0.47"
 arrow-array = "50"
 arrow-arith = "50"
@@ -241,6 +243,7 @@ risingwave_udf = { path = "./src/expr/udf" }
 risingwave_variables = { path = "./src/utils/variables" }
 risingwave_java_binding = { path = "./src/java_binding" }
 risingwave_jni_core = { path = "src/jni_core" }
+risingwave_telemetry_event = { path = "./src/common/telemetry_event" }
 rw_futures_util = { path = "src/utils/futures_util" }
 rw_resource_util = { path = "src/utils/resource_util" }
 rw_iter_util = { path = "src/utils/iter_util" }

@@ -98,9 +98,9 @@ ClickHouseConfig:
     required: false
   - name: commit_checkpoint_interval
     field_type: u64
-    comments: Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
+    comments: Commit every n(>0) checkpoints, default is 10.
     required: false
-    default: Default::default
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
   - name: r#type
     field_type: String
     required: true
@@ -126,9 +126,9 @@ DeltaLakeConfig:
     required: false
   - name: commit_checkpoint_interval
     field_type: u64
-    comments: Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
+    comments: Commit every n(>0) checkpoints, default is 10.
     required: false
-    default: Default::default
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
   - name: r#type
     field_type: String
     required: true
@@ -209,6 +209,36 @@ DynamoDbConfig:
     required: false
     alias:
     - profile
+FsConfig:
+  fields:
+  - name: fs.path
+    field_type: String
+    comments: The directory where the sink file is located.
+    required: true
+  - name: r#type
+    field_type: String
+    required: true
+GcsConfig:
+  fields:
+  - name: gcs.bucket_name
+    field_type: String
+    required: true
+  - name: gcs.credential
+    field_type: String
+    comments: The base64 encoded credential key. If not set, ADC will be used.
+    required: true
+  - name: gcs.service_account
+    field_type: String
+    comments: If credential/ADC is not set. The service account can be used to provide the credential info.
+    required: false
+    default: Default::default
+  - name: gcs.path
+    field_type: String
+    comments: The directory where the sink file is located
+    required: true
+  - name: r#type
+    field_type: String
+    required: true
 GooglePubSubConfig:
   fields:
   - name: pubsub.project_id
@@ -292,8 +322,9 @@ IcebergConfig:
     required: false
   - name: commit_checkpoint_interval
     field_type: u64
+    comments: Commit every n(>0) checkpoints, default is 10.
     required: false
-    default: Default::default
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
 KafkaConfig:
   fields:
   - name: properties.bootstrap.server
@@ -819,6 +850,36 @@ RedisConfig:
   - name: redis.url
     field_type: String
     required: true
+S3Config:
+  fields:
+  - name: s3.region_name
+    field_type: String
+    required: true
+  - name: s3.bucket_name
+    field_type: String
+    required: true
+  - name: s3.path
+    field_type: String
+    comments: The directory where the sink file is located.
+    required: true
+  - name: s3.credentials.access
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.credentials.secret
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.endpoint_url
+    field_type: String
+    required: false
+  - name: s3.assume_role
+    field_type: String
+    required: false
+    default: Default::default
+  - name: r#type
+    field_type: String
+    required: true
 SnowflakeConfig:
   fields:
   - name: snowflake.s3_bucket
@@ -928,9 +989,9 @@ StarrocksConfig:
       to Starrocks at every n checkpoints by leveraging the
       [StreamLoad Transaction API](https://docs.starrocks.io/docs/loading/Stream_Load_transaction_interface/),
       also, in this time, the `sink_decouple` option should be enabled as well.
-      Defaults to 1 if commit_checkpoint_interval <= 0
+      Defaults to 10 if commit_checkpoint_interval <= 0
     required: false
-    default: Default::default
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
   - name: starrocks.partial_update
     field_type: String
     comments: Enable partial update

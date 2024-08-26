@@ -302,15 +302,9 @@ impl ControlStreamManager {
         self.nodes
             .iter_mut()
             .map(|(node_id, node)| {
-                let actor_ids_to_send: Vec<_> =
-                    pre_applied_graph_info.actor_ids_to_send(*node_id).collect();
                 let actor_ids_to_collect: Vec<_> = pre_applied_graph_info
                     .actor_ids_to_collect(*node_id)
                     .collect();
-                if actor_ids_to_collect.is_empty() {
-                    // No need to send or collect barrier for this node.
-                    assert!(actor_ids_to_send.is_empty());
-                }
                 let table_ids_to_sync = if let Some(graph_info) = applied_graph_info {
                     graph_info
                         .existing_table_ids()
@@ -340,7 +334,6 @@ impl ControlStreamManager {
                                     InjectBarrierRequest {
                                         request_id: StreamRpcManager::new_request_id(),
                                         barrier: Some(barrier),
-                                        actor_ids_to_send,
                                         actor_ids_to_collect,
                                         table_ids_to_sync,
                                         partial_graph_id,

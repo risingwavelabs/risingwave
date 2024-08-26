@@ -1020,6 +1020,8 @@ pub enum ShowObject {
     Cluster,
     Jobs,
     ProcessList,
+    Cursor,
+    SubscriptionCursor,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1064,6 +1066,8 @@ impl fmt::Display for ShowObject {
             ShowObject::ProcessList => write!(f, "PROCESSLIST"),
             ShowObject::Subscription { schema } => write!(f, "SUBSCRIPTIONS{}", fmt_schema(schema)),
             ShowObject::Secret { schema } => write!(f, "SECRETS{}", fmt_schema(schema)),
+            ShowObject::Cursor => write!(f, "CURSORS"),
+            ShowObject::SubscriptionCursor => write!(f, "SUBSCRIPTION CURSORS"),
         }
     }
 }
@@ -2552,6 +2556,10 @@ impl FunctionArgList {
         }
     }
 
+    pub fn is_args_only(&self) -> bool {
+        !self.distinct && !self.variadic && self.order_by.is_empty() && !self.ignore_nulls
+    }
+
     pub fn for_agg(distinct: bool, args: Vec<FunctionArg>, order_by: Vec<OrderByExpr>) -> Self {
         Self {
             distinct,
@@ -2567,13 +2575,19 @@ impl FunctionArgList {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Function {
-    /// Whether the function is prefixed with `aggregate:`
+    /// Whether the function is prefixed with `AGGREGATE:`
     pub scalar_as_agg: bool,
+    /// Function name.
     pub name: ObjectName,
+    /// Argument list of the function call, i.e. things in `()`.
     pub arg_list: FunctionArgList,
-    pub over: Option<WindowSpec>,
-    pub filter: Option<Box<Expr>>,
+    /// `WITHIN GROUP` clause of the function call, for ordered-set aggregate functions.
+    /// FIXME(rc): why we only support one expression here?
     pub within_group: Option<Box<OrderByExpr>>,
+    /// `FILTER` clause of the function call, for aggregate and window (not supported yet) functions.
+    pub filter: Option<Box<Expr>>,
+    /// `OVER` clause of the function call, for window functions.
+    pub over: Option<WindowSpec>,
 }
 
 impl Function {
@@ -2582,9 +2596,9 @@ impl Function {
             scalar_as_agg: false,
             name,
             arg_list: FunctionArgList::empty(),
-            over: None,
-            filter: None,
             within_group: None,
+            filter: None,
+            over: None,
         }
     }
 }
@@ -2595,11 +2609,14 @@ impl fmt::Display for Function {
             write!(f, "AGGREGATE:")?;
         }
         write!(f, "{}{}", self.name, self.arg_list)?;
-        if let Some(o) = &self.over {
-            write!(f, " OVER ({})", o)?;
+        if let Some(within_group) = &self.within_group {
+            write!(f, " WITHIN GROUP (ORDER BY {})", within_group)?;
         }
         if let Some(filter) = &self.filter {
-            write!(f, " FILTER(WHERE {})", filter)?;
+            write!(f, " FILTER (WHERE {})", filter)?;
+        }
+        if let Some(o) = &self.over {
+            write!(f, " OVER ({})", o)?;
         }
         Ok(())
     }
