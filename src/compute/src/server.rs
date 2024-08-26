@@ -127,11 +127,11 @@ pub async fn compute_node_serve(
             is_streaming: opts.role.for_streaming(),
             is_serving: opts.role.for_serving(),
             is_unschedulable: false,
+            internal_rpc_host_addr: "".to_string(),
         },
         &config.meta,
     )
-    .await
-    .unwrap();
+    .await;
 
     let state_store_url = system_params.state_store();
 

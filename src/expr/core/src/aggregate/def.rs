@@ -239,6 +239,7 @@ impl Display for AggKind {
     }
 }
 
+/// `FromStr` for builtin aggregate functions.
 impl FromStr for AggKind {
     type Err = ();
 

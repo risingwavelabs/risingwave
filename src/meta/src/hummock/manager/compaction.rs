@@ -665,7 +665,7 @@ impl HummockManager {
         let _timer = start_measure_real_process_timer!(self, "get_compact_tasks_impl");
 
         let start_time = Instant::now();
-        let max_committed_epoch = versioning.current_version.max_committed_epoch;
+        let max_committed_epoch = versioning.current_version.visible_table_committed_epoch();
         let watermark = self
             .context_info
             .read()
@@ -1375,13 +1375,15 @@ impl HummockManager {
         _base_version_id: HummockVersionId,
         compaction_groups: Vec<CompactionGroupId>,
     ) -> Result<()> {
-        let old_version = self.get_current_version().await;
-        tracing::info!(
-            "Trigger compaction for version {}, epoch {}, groups {:?}",
-            old_version.id,
-            old_version.max_committed_epoch,
-            compaction_groups
-        );
+        self.on_current_version(|old_version| {
+            tracing::info!(
+                "Trigger compaction for version {}, epoch {}, groups {:?}",
+                old_version.id,
+                old_version.visible_table_committed_epoch(),
+                compaction_groups
+            );
+        })
+        .await;
 
         if compaction_groups.is_empty() {
             return Ok(());
@@ -1506,7 +1508,7 @@ impl HummockManager {
                     existing_table_ids.extend(sst.table_ids.iter());
                     for table_id in &sst.table_ids {
                         *table_size_info.entry(*table_id).or_default() +=
-                            sst.file_size / (sst.table_ids.len() as u64);
+                            sst.sst_size / (sst.table_ids.len() as u64);
                     }
                 }
             }

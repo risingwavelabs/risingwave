@@ -113,9 +113,38 @@ impl FunctionRegistry {
         name: impl Into<FuncName>,
         args: &[DataType],
         ret: &DataType,
-    ) -> Option<&FuncSign> {
-        let v = self.0.get(&name.into())?;
-        v.iter().find(|d| d.match_args_ret(args, ret))
+    ) -> Result<&FuncSign, ExprError> {
+        let name = name.into();
+        let err = |candidates: &Vec<FuncSign>| {
+            // Note: if we return error here, it probably means there is a bug in frontend type inference,
+            // because such error should be caught in the frontend.
+            ExprError::UnsupportedFunction(format!(
+                "{}({}) -> {}{}",
+                name,
+                args.iter().format(", "),
+                ret,
+                if candidates.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(
+                        "\nHINT: Supported functions:\n{}",
+                        candidates
+                            .iter()
+                            .map(|d| format!(
+                                "  {}({}) -> {}",
+                                d.name,
+                                d.inputs_type.iter().format(", "),
+                                d.ret_type
+                            ))
+                            .format("\n")
+                    )
+                }
+            ))
+        };
+        let v = self.0.get(&name).ok_or_else(|| err(&vec![]))?;
+        v.iter()
+            .find(|d| d.match_args_ret(args, ret))
+            .ok_or_else(|| err(v))
     }
 
     /// Returns all function signatures with the same type and number of arguments.
@@ -395,6 +424,8 @@ pub enum SigDataType {
     AnyArray,
     /// Accepts any struct data type
     AnyStruct,
+    /// TODO: not all type can be used as a map key.
+    AnyMap,
 }
 
 impl From<DataType> for SigDataType {
@@ -410,6 +441,7 @@ impl std::fmt::Display for SigDataType {
             Self::Any => write!(f, "any"),
             Self::AnyArray => write!(f, "anyarray"),
             Self::AnyStruct => write!(f, "anystruct"),
+            Self::AnyMap => write!(f, "anymap"),
         }
     }
 }
@@ -422,6 +454,7 @@ impl SigDataType {
             Self::Any => true,
             Self::AnyArray => dt.is_array(),
             Self::AnyStruct => dt.is_struct(),
+            Self::AnyMap => dt.is_map(),
         }
     }
 

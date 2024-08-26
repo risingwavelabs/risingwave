@@ -885,3 +885,117 @@ fn test_union() {
             ])"#]],
     );
 }
+
+#[test]
+fn test_map() {
+    let schema = r#"
+{
+    "type": "record",
+    "namespace": "com.redpanda.examples.avro",
+    "name": "ClickEvent",
+    "fields": [
+        {
+            "name": "map_str",
+            "type": {
+                "type": "map",
+                "values": "string"
+            },
+            "default": {}
+        },
+        {
+            "name": "map_map_int",
+            "type": {
+                "type": "map",
+                "values": {
+                    "type": "map",
+                    "values": "int"
+                }
+            }
+        }
+    ]
+}
+    "#;
+
+    let data = &[
+        // {"map_str": {"a":"1","b":"2"}, "map_map_int": {"m1": {"a":1,"b":2}, "m2": {"c":3,"d":4}}}
+        "0402610278026202790004046d310402610202620400046d32040263060264080000",
+        // {"map_map_int": {}}
+        "0000",
+    ];
+
+    check(
+        schema,
+        data,
+        Config {
+            map_handling: None,
+            data_encoding: TestDataEncoding::HexBinary,
+        },
+        expect![[r#"
+            [
+                map_str(#1): Map(Varchar,Varchar),
+                map_map_int(#2): Map(Varchar,Map(Varchar,Int32)),
+            ]"#]],
+        expect![[r#"
+            Owned([
+                StructValue(
+                    Utf8("a"),
+                    Utf8("x"),
+                ),
+                StructValue(
+                    Utf8("b"),
+                    Utf8("y"),
+                ),
+            ])
+            Owned([
+                StructValue(
+                    Utf8("m1"),
+                    [
+                        StructValue(
+                            Utf8("a"),
+                            Int32(1),
+                        ),
+                        StructValue(
+                            Utf8("b"),
+                            Int32(2),
+                        ),
+                    ],
+                ),
+                StructValue(
+                    Utf8("m2"),
+                    [
+                        StructValue(
+                            Utf8("c"),
+                            Int32(3),
+                        ),
+                        StructValue(
+                            Utf8("d"),
+                            Int32(4),
+                        ),
+                    ],
+                ),
+            ])
+            ----
+            Owned([])
+            Owned([])"#]],
+    );
+
+    check(
+        schema,
+        data,
+        Config {
+            map_handling: Some(MapHandling::Jsonb),
+            data_encoding: TestDataEncoding::HexBinary,
+        },
+        expect![[r#"
+            [
+                map_str(#1): Jsonb,
+                map_map_int(#2): Jsonb,
+            ]"#]],
+        expect![[r#"
+            Owned(Jsonb(JsonbRef({"a": "x", "b": "y"})))
+            Owned(Jsonb(JsonbRef({"m1": {"a": Number(1), "b": Number(2)}, "m2": {"c": Number(3), "d": Number(4)}})))
+            ----
+            Owned(Jsonb(JsonbRef({})))
+            Owned(Jsonb(JsonbRef({})))"#]],
+    );
+}

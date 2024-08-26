@@ -414,7 +414,7 @@ where
             FeMessage::CancelQuery(m) => self.process_cancel_msg(m)?,
             FeMessage::Terminate => self.process_terminate(),
             FeMessage::Parse(m) => {
-                if let Err(err) = self.process_parse_msg(m) {
+                if let Err(err) = self.process_parse_msg(m).await {
                     self.ignore_util_sync = true;
                     return Err(err);
                 }
@@ -681,16 +681,17 @@ where
         self.is_terminate = true;
     }
 
-    fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
+    async fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
         record_sql_in_span(sql, self.redact_sql_option_keywords.clone());
         let session = self.session.clone().unwrap();
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
 
         self.inner_process_parse_msg(session, sql, statement_name, msg.type_ids)
+            .await
     }
 
-    fn inner_process_parse_msg(
+    async fn inner_process_parse_msg(
         &mut self,
         session: Arc<SM::Session>,
         sql: &str,
@@ -737,6 +738,7 @@ where
 
         let prepare_statement = session
             .parse(stmt, param_types)
+            .await
             .map_err(PsqlError::ExtendedPrepareError)?;
 
         if statement_name.is_empty() {
@@ -850,7 +852,6 @@ where
                 .unwrap()
                 .describe_statement(prepare_statement)
                 .map_err(PsqlError::Uncategorized)?;
-
             self.stream
                 .write_no_flush(&BeMessage::ParameterDescription(
                     &param_types.iter().map(|t| t.to_oid()).collect_vec(),

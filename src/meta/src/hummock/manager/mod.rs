@@ -67,9 +67,7 @@ mod transaction;
 mod utils;
 mod worker;
 
-pub(crate) use commit_epoch::*;
-#[cfg(any(test, feature = "test"))]
-pub use commit_epoch::{BatchCommitForNewCg, CommitEpochInfo};
+pub use commit_epoch::{CommitEpochInfo, NewTableFragmentInfo};
 use compaction::*;
 pub use compaction::{check_cg_write_limit, WriteLimitType};
 pub(crate) use utils::*;
@@ -380,7 +378,7 @@ impl HummockManager {
                         .into_iter()
                         .map(|m| {
                             (
-                                m.id as HummockVersionId,
+                                HummockVersionId::new(m.id as _),
                                 HummockVersionDelta::from_persisted_protobuf(
                                     &PbHummockVersionDelta::from(m),
                                 ),
@@ -433,8 +431,8 @@ impl HummockManager {
 
         self.latest_snapshot.store(
             HummockSnapshot {
-                committed_epoch: redo_state.max_committed_epoch,
-                current_epoch: redo_state.max_committed_epoch,
+                committed_epoch: redo_state.visible_table_committed_epoch(),
+                current_epoch: redo_state.visible_table_committed_epoch(),
             }
             .into(),
         );

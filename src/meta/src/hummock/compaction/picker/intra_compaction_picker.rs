@@ -191,7 +191,7 @@ impl IntraCompactionPicker {
                 for level_select_table in &input.sstable_infos {
                     let level_select_size = level_select_table
                         .iter()
-                        .map(|sst| sst.file_size)
+                        .map(|sst| sst.sst_size)
                         .sum::<u64>();
 
                     max_level_size = std::cmp::max(max_level_size, level_select_size);
@@ -267,7 +267,7 @@ impl IntraCompactionPicker {
                 continue;
             }
 
-            let trivial_move_picker = TrivialMovePicker::new(0, 0, overlap_strategy.clone());
+            let trivial_move_picker = TrivialMovePicker::new(0, 0, overlap_strategy.clone(), 0);
 
             let select_sst = trivial_move_picker.pick_trivial_move_sst(
                 &l0.sub_levels[idx + 1].table_infos,
@@ -291,7 +291,7 @@ impl IntraCompactionPicker {
                 .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
                 .is_empty());
 
-            let select_input_size = select_sst.file_size;
+            let select_input_size = select_sst.sst_size;
             let input_levels = vec![
                 InputLevel {
                     level_idx: 0,
@@ -591,6 +591,7 @@ pub mod tests {
             let config = Arc::new(
                 CompactionConfigBuilder::new()
                     .level0_sub_level_compact_level_count(1)
+                    .sub_level_max_compaction_bytes(300)
                     .build(),
             );
             let mut picker = IntraCompactionPicker::for_test(
@@ -614,7 +615,7 @@ pub mod tests {
             assert_eq!(3, ret.input_levels[1].table_infos[0].sst_id);
             assert_eq!(1, ret.input_levels[2].table_infos[0].sst_id);
 
-            // will pick sst [2, 6, 5]
+            // will pick sst [2, 6]
             let ret2 = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
                 .unwrap();
@@ -624,12 +625,11 @@ pub mod tests {
                     .iter()
                     .map(|i| i.table_infos.len())
                     .sum::<usize>(),
-                3
+                2
             );
 
-            assert_eq!(5, ret2.input_levels[0].table_infos[0].sst_id);
-            assert_eq!(6, ret2.input_levels[1].table_infos[0].sst_id);
-            assert_eq!(2, ret2.input_levels[2].table_infos[0].sst_id);
+            assert_eq!(6, ret2.input_levels[0].table_infos[0].sst_id);
+            assert_eq!(2, ret2.input_levels[1].table_infos[0].sst_id);
         }
 
         {
@@ -662,6 +662,7 @@ pub mod tests {
             let config = Arc::new(
                 CompactionConfigBuilder::new()
                     .level0_sub_level_compact_level_count(1)
+                    .sub_level_max_compaction_bytes(300)
                     .build(),
             );
             let mut picker = IntraCompactionPicker::for_test(

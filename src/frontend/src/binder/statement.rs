@@ -17,6 +17,7 @@ use risingwave_common::catalog::Field;
 use risingwave_sqlparser::ast::Statement;
 
 use super::delete::BoundDelete;
+use super::fetch_cursor::BoundFetchCursor;
 use super::update::BoundUpdate;
 use crate::binder::create_view::BoundCreateView;
 use crate::binder::{Binder, BoundInsert, BoundQuery};
@@ -29,6 +30,7 @@ pub enum BoundStatement {
     Delete(Box<BoundDelete>),
     Update(Box<BoundUpdate>),
     Query(Box<BoundQuery>),
+    FetchCursor(Box<BoundFetchCursor>),
     CreateView(Box<BoundCreateView>),
 }
 
@@ -48,6 +50,10 @@ impl BoundStatement {
                 .as_ref()
                 .map_or(vec![], |s| s.fields().into()),
             BoundStatement::Query(q) => q.schema().fields().into(),
+            BoundStatement::FetchCursor(f) => f
+                .returning_schema
+                .as_ref()
+                .map_or(vec![], |s| s.fields().into()),
             BoundStatement::CreateView(_) => vec![],
         }
     }
@@ -127,6 +133,7 @@ impl RewriteExprsRecursive for BoundStatement {
             BoundStatement::Delete(inner) => inner.rewrite_exprs_recursive(rewriter),
             BoundStatement::Update(inner) => inner.rewrite_exprs_recursive(rewriter),
             BoundStatement::Query(inner) => inner.rewrite_exprs_recursive(rewriter),
+            BoundStatement::FetchCursor(_) => {}
             BoundStatement::CreateView(inner) => inner.rewrite_exprs_recursive(rewriter),
         }
     }

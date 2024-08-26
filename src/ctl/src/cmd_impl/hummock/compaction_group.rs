@@ -66,6 +66,7 @@ pub fn build_compaction_config_vec(
     tombstone_reclaim_ratio: Option<u32>,
     compress_algorithm: Option<CompressionAlgorithm>,
     max_l0_compact_level: Option<u32>,
+    sst_allowed_trivial_move_min_size: Option<u64>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {
@@ -118,6 +119,9 @@ pub fn build_compaction_config_vec(
     }
     if let Some(c) = max_l0_compact_level {
         configs.push(MutableConfig::MaxL0CompactLevelCount(c))
+    }
+    if let Some(c) = sst_allowed_trivial_move_min_size {
+        configs.push(MutableConfig::SstAllowedTrivialMoveMinSize(c))
     }
 
     configs

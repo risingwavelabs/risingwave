@@ -44,6 +44,7 @@ pub struct SourceCatalog {
     pub version: SourceVersionId,
     pub created_at_cluster_version: Option<String>,
     pub initialized_at_cluster_version: Option<String>,
+    pub rate_limit: Option<u32>,
 }
 
 impl SourceCatalog {
@@ -77,6 +78,7 @@ impl SourceCatalog {
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             secret_refs,
+            rate_limit: self.rate_limit,
         }
     }
 
@@ -112,15 +114,13 @@ impl From<&PbSource> for SourceCatalog {
         let owner = prost.owner;
         let watermark_descs = prost.get_watermark_descs().clone();
 
-        let associated_table_id = prost
-            .optional_associated_table_id
-            .clone()
-            .map(|id| match id {
-                OptionalAssociatedTableId::AssociatedTableId(id) => id,
-            });
+        let associated_table_id = prost.optional_associated_table_id.map(|id| match id {
+            OptionalAssociatedTableId::AssociatedTableId(id) => id,
+        });
         let version = prost.version;
 
         let connection_id = prost.connection_id;
+        let rate_limit = prost.rate_limit;
 
         Self {
             id,
@@ -141,6 +141,7 @@ impl From<&PbSource> for SourceCatalog {
             version,
             created_at_cluster_version: prost.created_at_cluster_version.clone(),
             initialized_at_cluster_version: prost.initialized_at_cluster_version.clone(),
+            rate_limit,
         }
     }
 }

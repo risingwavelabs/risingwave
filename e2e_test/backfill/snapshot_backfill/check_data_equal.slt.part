@@ -1,0 +1,26 @@
+control substitution on
+
+# the result from batch query and materialized view should be the same
+query T
+select * from ${TEST_NAME}_v
+except
+select * from ${TEST_NAME}_mv;
+----
+
+query T
+select * from ${TEST_NAME}_mv
+except
+select * from ${TEST_NAME}_v;
+----
+
+query T
+select * from ${TEST_NAME}_extended_mv
+except
+select * from ${TEST_NAME}_mv;
+----
+
+query T
+select * from ${TEST_NAME}_mv
+except
+select * from ${TEST_NAME}_extended_mv;
+----

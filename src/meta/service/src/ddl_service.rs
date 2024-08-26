@@ -16,19 +16,26 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
 use risingwave_meta::rpc::ddl_controller::fill_table_stream_graph_info;
 use risingwave_pb::catalog::connection::private_link_service::{
     PbPrivateLinkProvider, PrivateLinkProvider,
 };
 use risingwave_pb::catalog::connection::PbPrivateLinkService;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{connection, Comment, Connection, CreateType, Secret};
+use risingwave_pb::catalog::{connection, Comment, Connection, CreateType, Secret, Table};
+use risingwave_pb::common::worker_node::State;
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
+use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
+use risingwave_pb::meta::event_log;
+use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
@@ -907,7 +914,7 @@ impl DdlService for DdlServiceImpl {
         let req = request.into_inner();
 
         let table_id = req.get_table_id();
-        let parallelism = req.get_parallelism()?.clone();
+        let parallelism = *req.get_parallelism()?;
         let deferred = req.get_deferred();
 
         self.ddl_controller
@@ -915,6 +922,124 @@ impl DdlService for DdlServiceImpl {
             .await?;
 
         Ok(Response::new(AlterParallelismResponse {}))
+    }
+
+    /// Auto schema change for cdc sources,
+    /// called by the source parser when a schema change is detected.
+    async fn auto_schema_change(
+        &self,
+        request: Request<AutoSchemaChangeRequest>,
+    ) -> Result<Response<AutoSchemaChangeResponse>, Status> {
+        let req = request.into_inner();
+
+        // randomly select a frontend worker to get the replace table plan
+        let workers = self
+            .metadata_manager
+            .list_worker_node(Some(WorkerType::Frontend), Some(State::Running))
+            .await?;
+        let worker = workers
+            .choose(&mut thread_rng())
+            .ok_or_else(|| MetaError::from(anyhow!("no frontend worker available")))?;
+
+        let client = self
+            .env
+            .frontend_client_pool()
+            .get(worker)
+            .await
+            .map_err(MetaError::from)?;
+
+        let Some(schema_change) = req.schema_change else {
+            return Err(Status::invalid_argument(
+                "schema change message is required",
+            ));
+        };
+
+        for table_change in schema_change.table_changes {
+            // get the table catalog corresponding to the cdc table
+            let tables: Vec<Table> = self
+                .metadata_manager
+                .get_table_catalog_by_cdc_table_id(&table_change.cdc_table_id)
+                .await?;
+
+            for table in tables {
+                // send a request to the frontend to get the ReplaceTablePlan
+                // will retry with exponential backoff if the request fails
+                let resp = client
+                    .get_table_replace_plan(GetTableReplacePlanRequest {
+                        database_id: table.database_id,
+                        owner: table.owner,
+                        table_name: table.name,
+                        table_change: Some(table_change.clone()),
+                    })
+                    .await;
+
+                match resp {
+                    Ok(resp) => {
+                        let resp = resp.into_inner();
+                        if let Some(plan) = resp.replace_plan {
+                            plan.table.as_ref().inspect(|t| {
+                                tracing::info!(
+                                    target: "auto_schema_change",
+                                    table_id = t.id,
+                                    cdc_table_id = t.cdc_table_id,
+                                    upstraem_ddl = table_change.upstream_ddl,
+                                    "Start the replace config change")
+                            });
+                            // start the schema change procedure
+                            let replace_res = self
+                                .ddl_controller
+                                .run_command(DdlCommand::ReplaceTable(
+                                    Self::extract_replace_table_info(plan),
+                                ))
+                                .await;
+
+                            match replace_res {
+                                Ok(_) => {
+                                    tracing::info!(
+                                        target: "auto_schema_change",
+                                        table_id = table.id,
+                                        cdc_table_id = table.cdc_table_id,
+                                        "Table replaced success");
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        target: "auto_schema_change",
+                                        error = %e.as_report(),
+                                        table_id = table.id,
+                                        cdc_table_id = table.cdc_table_id,
+                                        upstraem_ddl = table_change.upstream_ddl,
+                                        "failed to replace the table",
+                                    );
+                                    add_auto_schema_change_fail_event_log(
+                                        table.id,
+                                        table_change.cdc_table_id.clone(),
+                                        table_change.upstream_ddl.clone(),
+                                        &self.env.event_log_manager_ref(),
+                                    );
+                                }
+                            };
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            target: "auto_schema_change",
+                            error = %e.as_report(),
+                            table_id = table.id,
+                            cdc_table_id = table.cdc_table_id,
+                            "failed to get replace table plan",
+                        );
+                        add_auto_schema_change_fail_event_log(
+                            table.id,
+                            table_change.cdc_table_id.clone(),
+                            table_change.upstream_ddl.clone(),
+                            &self.env.event_log_manager_ref(),
+                        );
+                    }
+                };
+            }
+        }
+
+        Ok(Response::new(AutoSchemaChangeResponse {}))
     }
 }
 
@@ -950,4 +1075,18 @@ impl DdlServiceImpl {
         }
         Ok(())
     }
+}
+
+fn add_auto_schema_change_fail_event_log(
+    table_id: u32,
+    cdc_table_id: String,
+    upstream_ddl: String,
+    event_log_manager: &EventLogManagerRef,
+) {
+    let event = event_log::EventAutoSchemaChangeFail {
+        table_id,
+        cdc_table_id,
+        upstream_ddl,
+    };
+    event_log_manager.add_event_logs(vec![event_log::Event::AutoSchemaChangeFail(event)]);
 }

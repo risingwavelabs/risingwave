@@ -32,6 +32,7 @@ use iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY
 use iceberg::spec::TableMetadata;
 use iceberg::table::Table as TableV2;
 use iceberg::{Catalog as CatalogV2, TableIdent};
+use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 use icelake::catalog::{
     load_catalog, load_iceberg_base_catalog_config, BaseCatalogConfig, CatalogRef, CATALOG_NAME,
     CATALOG_TYPE,
@@ -54,6 +55,7 @@ use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
 use serde_derive::Deserialize;
+use serde_with::{serde_as, DisplayFromStr};
 use storage_catalog::StorageCatalogConfig;
 use thiserror_ext::AsReport;
 use url::Url;
@@ -63,7 +65,10 @@ use self::mock_catalog::MockCatalog;
 use self::prometheus::monitored_base_file_writer::MonitoredBaseFileWriterBuilder;
 use self::prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
 use super::catalog::desc::SinkDesc;
-use super::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
+use super::decouple_checkpoint_log_sink::{
+    default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
+    DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
+};
 use super::{
     Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
@@ -71,14 +76,12 @@ use crate::error::ConnectorResult;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkCommitCoordinator, SinkDecouple, SinkParam};
-use crate::{
-    deserialize_bool_from_string, deserialize_optional_string_seq_from_string,
-    deserialize_optional_u64_from_string,
-};
+use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 /// This iceberg sink is WIP. When it ready, we will change this name to "iceberg".
 pub const ICEBERG_SINK: &str = "iceberg";
 
+#[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions, Default)]
 pub struct IcebergConfig {
     pub connector: String, // Avoid deny unknown field. Must be "iceberg"
@@ -124,6 +127,13 @@ pub struct IcebergConfig {
     pub secret_key: String,
 
     #[serde(
+        rename = "s3.path.style.access",
+        default,
+        deserialize_with = "deserialize_bool_from_string"
+    )]
+    pub path_style_access: bool,
+
+    #[serde(
         rename = "primary_key",
         default,
         deserialize_with = "deserialize_optional_string_seq_from_string"
@@ -134,9 +144,10 @@ pub struct IcebergConfig {
     #[serde(skip)]
     pub java_catalog_props: HashMap<String, String>,
 
-    // Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
-    #[serde(default, deserialize_with = "deserialize_optional_u64_from_string")]
-    pub commit_checkpoint_interval: Option<u64>,
+    /// Commit every n(>0) checkpoints, default is 10.
+    #[serde(default = "default_commit_checkpoint_interval")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub commit_checkpoint_interval: u64,
 }
 
 impl IcebergConfig {
@@ -188,16 +199,16 @@ impl IcebergConfig {
             .map(|(k, v)| (k[8..].to_string(), v.to_string()))
             .collect();
 
-        if config.commit_checkpoint_interval == Some(0) {
+        if config.commit_checkpoint_interval == 0 {
             return Err(SinkError::Config(anyhow!(
-                "commit_checkpoint_interval must be greater than 0"
+                "`commit_checkpoint_interval` must be greater than 0"
             )));
         }
 
         Ok(config)
     }
 
-    fn catalog_type(&self) -> &str {
+    pub fn catalog_type(&self) -> &str {
         self.catalog_type.as_deref().unwrap_or("storage")
     }
 
@@ -269,6 +280,10 @@ impl IcebergConfig {
         iceberg_configs.insert(
             "iceberg.table.io.secret_access_key".to_string(),
             self.secret_key.clone().to_string(),
+        );
+        iceberg_configs.insert(
+            "iceberg.table.io.enable_virtual_host_style".to_string(),
+            (!self.path_style_access).to_string(),
         );
 
         let (bucket, root) = {
@@ -409,7 +424,10 @@ impl IcebergConfig {
                 "s3.secret-access-key".to_string(),
                 self.secret_key.clone().to_string(),
             );
-
+            java_catalog_configs.insert(
+                "s3.path-style-access".to_string(),
+                self.path_style_access.to_string(),
+            );
             if matches!(self.catalog_type.as_deref(), Some("glue")) {
                 java_catalog_configs.insert(
                     "client.credentials-provider".to_string(),
@@ -536,18 +554,55 @@ impl IcebergConfig {
                     })?)
                     .props(iceberg_configs)
                     .build();
-                let catalog = iceberg_catalog_rest::RestCatalog::new(config).await?;
+                let catalog = iceberg_catalog_rest::RestCatalog::new(config);
                 Ok(Arc::new(catalog))
             }
-            catalog_type
-                if catalog_type == "hive" || catalog_type == "jdbc" || catalog_type == "glue" =>
-            {
+            "glue" => {
+                let mut iceberg_configs = HashMap::new();
+                // glue
+                if let Some(region) = &self.region {
+                    iceberg_configs.insert(AWS_REGION_NAME.to_string(), region.clone().to_string());
+                }
+                iceberg_configs.insert(
+                    AWS_ACCESS_KEY_ID.to_string(),
+                    self.access_key.clone().to_string(),
+                );
+                iceberg_configs.insert(
+                    AWS_SECRET_ACCESS_KEY.to_string(),
+                    self.secret_key.clone().to_string(),
+                );
+                // s3
+                if let Some(region) = &self.region {
+                    iceberg_configs.insert(S3_REGION.to_string(), region.clone().to_string());
+                }
+                if let Some(endpoint) = &self.endpoint {
+                    iceberg_configs.insert(S3_ENDPOINT.to_string(), endpoint.clone().to_string());
+                }
+                iceberg_configs.insert(
+                    S3_ACCESS_KEY_ID.to_string(),
+                    self.access_key.clone().to_string(),
+                );
+                iceberg_configs.insert(
+                    S3_SECRET_ACCESS_KEY.to_string(),
+                    self.secret_key.clone().to_string(),
+                );
+                let config_builder = iceberg_catalog_glue::GlueCatalogConfig::builder()
+                    .warehouse(self.path.clone())
+                    .props(iceberg_configs);
+                let config = if let Some(uri) = self.uri.as_deref() {
+                    config_builder.uri(uri.to_string()).build()
+                } else {
+                    config_builder.build()
+                };
+                let catalog = iceberg_catalog_glue::GlueCatalog::new(config).await?;
+                Ok(Arc::new(catalog))
+            }
+            catalog_type if catalog_type == "hive" || catalog_type == "jdbc" => {
                 // Create java catalog
                 let (base_catalog_config, java_catalog_props) = self.build_jni_catalog_configs()?;
                 let catalog_impl = match catalog_type {
                     "hive" => "org.apache.iceberg.hive.HiveCatalog",
                     "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
-                    "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
                     _ => unreachable!(),
                 };
 
@@ -700,30 +755,34 @@ impl Sink for IcebergSink {
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
     fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        let config_decouple = if let Some(interval) =
-            desc.properties.get("commit_checkpoint_interval")
-            && interval.parse::<u64>().unwrap_or(0) > 1
-        {
-            true
-        } else {
-            false
-        };
+        let commit_checkpoint_interval =
+            if let Some(interval) = desc.properties.get("commit_checkpoint_interval") {
+                interval
+                    .parse::<u64>()
+                    .unwrap_or(DEFAULT_COMMIT_CHECKPOINT_INTERVAL)
+            } else {
+                DEFAULT_COMMIT_CHECKPOINT_INTERVAL
+            };
 
         match user_specified {
-            SinkDecouple::Default => Ok(config_decouple),
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => {
-                if config_decouple {
+                if commit_checkpoint_interval > 1 {
                     return Err(SinkError::Config(anyhow!(
-                        "config conflict: Iceberg config `commit_checkpoint_interval` bigger than 1 which means that must enable sink decouple, but session config sink decouple is disabled"
+                        "config conflict: Iceberg config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
                     )));
                 }
                 Ok(false)
             }
-            SinkDecouple::Enable => Ok(true),
         }
     }
 
     async fn validate(&self) -> Result<()> {
+        if "glue".eq_ignore_ascii_case(self.config.catalog_type()) {
+            risingwave_common::license::Feature::IcebergSinkWithGlue
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
         let _ = self.create_and_validate_table().await?;
         Ok(())
     }
@@ -752,7 +811,7 @@ impl Sink for IcebergSink {
         .await?;
 
         let commit_checkpoint_interval =
-            NonZeroU64::new(self.config.commit_checkpoint_interval.unwrap_or(1)).expect(
+            NonZeroU64::new(self.config.commit_checkpoint_interval).expect(
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
             );
 
@@ -764,10 +823,12 @@ impl Sink for IcebergSink {
     }
 
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+        let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
         let partition_type = table.current_partition_type()?;
 
         Ok(IcebergSinkCommitter {
+            catalog,
             table,
             partition_type,
         })
@@ -1139,6 +1200,7 @@ impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
 }
 
 pub struct IcebergSinkCommitter {
+    catalog: CatalogRef,
     table: Table,
     partition_type: Any,
 }
@@ -1165,6 +1227,12 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             tracing::debug!(?epoch, "no data to commit");
             return Ok(());
         }
+        // Load the latest table to avoid concurrent modification with the best effort.
+        self.table = self
+            .catalog
+            .clone()
+            .load_table(self.table.table_name())
+            .await?;
         let mut txn = Transaction::new(&mut self.table);
         write_results.into_iter().for_each(|s| {
             txn.append_data_file(s.data_files);
@@ -1232,6 +1300,7 @@ mod test {
 
     use risingwave_common::catalog::Field;
 
+    use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
     use crate::sink::iceberg::IcebergConfig;
     use crate::source::DataType;
 
@@ -1278,6 +1347,7 @@ mod test {
             ("s3.endpoint", "http://127.0.0.1:9301"),
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
+            ("s3.path.style.access", "true"),
             ("s3.region", "us-east-1"),
             ("catalog.type", "jdbc"),
             ("catalog.name", "demo"),
@@ -1307,12 +1377,13 @@ mod test {
             endpoint: Some("http://127.0.0.1:9301".to_string()),
             access_key: "hummockadmin".to_string(),
             secret_key: "hummockadmin".to_string(),
+            path_style_access: true,
             primary_key: Some(vec!["v1".to_string()]),
             java_catalog_props: [("jdbc.user", "admin"), ("jdbc.password", "123456")]
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
-            commit_checkpoint_interval: None,
+            commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);
@@ -1342,6 +1413,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "storage"),
             ("warehouse.path", "s3://icebergdata/demo"),
@@ -1366,6 +1438,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "rest"),
             ("catalog.uri", "http://192.168.167.4:8181"),
@@ -1391,6 +1464,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "jdbc"),
             ("catalog.uri", "jdbc:postgresql://localhost:5432/iceberg"),
@@ -1418,6 +1492,7 @@ mod test {
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
             ("s3.region", "us-east-1"),
+            ("s3.path.style.access", "true"),
             ("catalog.name", "demo"),
             ("catalog.type", "hive"),
             ("catalog.uri", "thrift://localhost:9083"),

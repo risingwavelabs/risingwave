@@ -24,7 +24,8 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::RW_VERSION;
-use risingwave_pb::common::worker_node::{Property, State};
+use risingwave_license::LicenseManager;
+use risingwave_pb::common::worker_node::{Property, Resource, State};
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::heartbeat_request;
@@ -113,6 +114,13 @@ impl ClusterManager {
         let new_worker_parallelism = property.worker_node_parallelism as usize;
         let mut property = self.parse_property(r#type, property);
         let mut core = self.core.write().await;
+
+        if let WorkerType::ComputeNode = r#type {
+            core.check_cpu_core_limit_on_newly_joined_compute_node(
+                host_address.clone(),
+                &resource,
+            )?;
+        }
 
         if let Some(worker) = core.get_worker_by_host_mut(host_address.clone()) {
             tracing::info!("worker {} re-joined the cluster", worker.worker_id());
@@ -491,11 +499,12 @@ impl ClusterManager {
         worker_type: WorkerType,
         worker_property: AddNodeProperty,
     ) -> Option<Property> {
-        if worker_type == WorkerType::ComputeNode {
+        if worker_type == WorkerType::ComputeNode || worker_type == WorkerType::Frontend {
             Some(Property {
                 is_streaming: worker_property.is_streaming,
                 is_serving: worker_property.is_serving,
                 is_unschedulable: worker_property.is_unschedulable,
+                internal_rpc_host_addr: worker_property.internal_rpc_host_addr,
             })
         } else {
             None
@@ -629,6 +638,29 @@ impl ClusterManagerCore {
             .iter()
             .find(|(_, worker)| worker.worker_id() == id)
             .map(|(_, worker)| worker.clone())
+    }
+
+    /// Check if the total CPU cores in the cluster exceed the license limit, after counting the
+    /// newly joined compute node.
+    pub fn check_cpu_core_limit_on_newly_joined_compute_node(
+        &self,
+        host_address: HostAddress,
+        resource: &Resource,
+    ) -> MetaResult<()> {
+        let this_key = WorkerKey(host_address);
+
+        let this = resource.total_cpu_cores;
+        let others = (self.workers.iter())
+            .filter(|(k, _v)| k != &&this_key)
+            .filter(|(_k, v)| v.worker_node.r#type == WorkerType::ComputeNode as i32)
+            .flat_map(|(_k, v)| v.resource.as_ref().map(|r| r.total_cpu_cores))
+            .sum::<u64>();
+
+        LicenseManager::get()
+            .check_cpu_core_limit(this + others)
+            .map_err(anyhow::Error::from)?;
+
+        Ok(())
     }
 
     fn add_worker_node(&mut self, worker: Worker) {
@@ -807,6 +839,7 @@ mod tests {
                         is_streaming: true,
                         is_serving: true,
                         is_unschedulable: false,
+                        internal_rpc_host_addr: "".to_string(),
                     },
                     Default::default(),
                 )
@@ -848,6 +881,7 @@ mod tests {
                     is_streaming: true,
                     is_serving: true,
                     is_unschedulable: false,
+                    internal_rpc_host_addr: "".to_string(),
                 },
                 Default::default(),
             )
@@ -870,6 +904,7 @@ mod tests {
                     is_streaming: true,
                     is_serving: true,
                     is_unschedulable: false,
+                    internal_rpc_host_addr: "".to_string(),
                 },
                 Default::default(),
             )
@@ -919,6 +954,7 @@ mod tests {
                     is_streaming: true,
                     is_serving: true,
                     is_unschedulable: false,
+                    internal_rpc_host_addr: "".to_string(),
                 },
                 Default::default(),
             )
@@ -977,6 +1013,7 @@ mod tests {
                     is_streaming: true,
                     is_serving: true,
                     is_unschedulable: false,
+                    internal_rpc_host_addr: "".to_string(),
                 },
                 Default::default(),
             )
