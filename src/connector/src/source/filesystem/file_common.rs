@@ -79,8 +79,8 @@ impl FsSplit {
 pub struct OpendalFsSplit<Src: OpendalSource> {
     pub name: String,
     pub offset: usize,
-    // For Parquet encoding, the size represents the number of rows, while for other encodings, the size denotes the file size.
-    pub size: usize,
+    // For Parquet encoding, the `end_offset` represents the number of rows, while for other encodings, the `end_offset` denotes the file size.
+    pub end_offset: usize,
     _marker: PhantomData<Src>,
 }
 
@@ -89,7 +89,7 @@ impl<Src: OpendalSource> From<&Object> for OpendalFsSplit<Src> {
         Self {
             name: value.key().unwrap().to_owned(),
             offset: 0,
-            size: value.size().unwrap_or_default() as usize,
+            end_offset: value.size().unwrap_or_default() as usize,
             _marker: PhantomData,
         }
     }
@@ -116,11 +116,11 @@ impl<Src: OpendalSource> SplitMetaData for OpendalFsSplit<Src> {
 }
 
 impl<Src: OpendalSource> OpendalFsSplit<Src> {
-    pub fn new(name: String, start: usize, size: usize) -> Self {
+    pub fn new(name: String, start: usize, end_offset: usize) -> Self {
         Self {
             name,
             offset: start,
-            size,
+            end_offset,
             _marker: PhantomData,
         }
     }
@@ -129,7 +129,7 @@ impl<Src: OpendalSource> OpendalFsSplit<Src> {
         Self {
             name: "empty_split".to_string(),
             offset: 0,
-            size: 0,
+            end_offset: 0,
             _marker: PhantomData,
         }
     }

@@ -15,8 +15,8 @@ use std::future::IntoFuture;
 use std::sync::Arc;
 
 use arrow_array_iceberg::RecordBatch;
+use deltalake::parquet::arrow::async_reader::AsyncFileReader;
 use futures_async_stream::try_stream;
-use parquet::arrow::ParquetRecordBatchStreamBuilder;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
 use risingwave_common::bail;
@@ -219,7 +219,7 @@ pub async fn get_total_row_nums_for_parquet_file(
         ConnectorProperties::Gcs(prop) => {
             let connector: OpendalEnumerator<OpendalGcs> =
                 OpendalEnumerator::new_gcs_source(*prop)?;
-            let reader = connector
+            let mut reader = connector
                 .op
                 .reader_with(parquet_file_name)
                 .into_future()
@@ -228,16 +228,17 @@ pub async fn get_total_row_nums_for_parquet_file(
                 .await?
                 .compat();
 
-            ParquetRecordBatchStreamBuilder::new(reader)
-                .await?
-                .metadata()
+            reader
+                .get_metadata()
+                .await
+                .unwrap()
                 .file_metadata()
                 .num_rows()
         }
         ConnectorProperties::OpendalS3(prop) => {
             let connector: OpendalEnumerator<OpendalS3> =
                 OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
-            let reader = connector
+            let mut reader = connector
                 .op
                 .reader_with(parquet_file_name)
                 .into_future()
@@ -245,9 +246,10 @@ pub async fn get_total_row_nums_for_parquet_file(
                 .into_futures_async_read(..)
                 .await?
                 .compat();
-            ParquetRecordBatchStreamBuilder::new(reader)
-                .await?
-                .metadata()
+            reader
+                .get_metadata()
+                .await
+                .unwrap()
                 .file_metadata()
                 .num_rows()
         }
@@ -255,7 +257,7 @@ pub async fn get_total_row_nums_for_parquet_file(
         ConnectorProperties::PosixFs(prop) => {
             let connector: OpendalEnumerator<OpendalPosixFs> =
                 OpendalEnumerator::new_posix_fs_source(*prop)?;
-            let reader = connector
+            let mut reader = connector
                 .op
                 .reader_with(parquet_file_name)
                 .into_future()
@@ -263,9 +265,10 @@ pub async fn get_total_row_nums_for_parquet_file(
                 .into_futures_async_read(..)
                 .await?
                 .compat();
-            ParquetRecordBatchStreamBuilder::new(reader)
-                .await?
-                .metadata()
+            reader
+                .get_metadata()
+                .await
+                .unwrap()
                 .file_metadata()
                 .num_rows()
         }

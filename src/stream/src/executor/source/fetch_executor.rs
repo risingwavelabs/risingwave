@@ -374,8 +374,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     }
                                     _ => unreachable!(),
                                 };
-
-                                if offset.parse::<usize>().unwrap() >= fs_split.size {
+                                if offset.parse::<usize>().unwrap() >= fs_split.end_offset {
                                     splits_on_fetch -= 1;
                                     state_store_handler.delete(split_id).await?;
                                 } else {
