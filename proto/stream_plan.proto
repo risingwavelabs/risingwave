@@ -473,7 +473,7 @@ message AsOfJoinNode {
   // the join key and satisfies unique constrain.
   repeated uint32 right_deduped_input_pk_indices = 10;
   repeated bool null_safe = 11;
-  optional plan_common.AsOfJoinDesc as_of_desc = 12;
+  optional plan_common.AsOfJoinDesc asof_desc = 12;
 }
 
 message TemporalJoinNode {

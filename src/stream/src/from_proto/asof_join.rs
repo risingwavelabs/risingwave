@@ -91,8 +91,8 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
             StateTable::from_table_catalog(degree_table_r, store, Some(vnodes)).await;
 
         let join_type_proto = node.get_join_type()?;
-        let as_of_desc_proto = node.get_as_of_desc()?;
-        let as_of_desc = AsOfDesc::from_protobuf(as_of_desc_proto)?;
+        let as_of_desc_proto = node.get_asof_desc()?;
+        let asof_desc = AsOfDesc::from_protobuf(as_of_desc_proto)?;
 
         let args = AsOfJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
@@ -117,7 +117,7 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
                 .config()
                 .developer
                 .high_join_amplification_threshold,
-            as_of_desc,
+            asof_desc,
         };
 
         let exec = args.dispatch()?;
@@ -144,7 +144,7 @@ struct AsOfJoinExecutorDispatcherArgs<S: StateStore> {
     join_key_data_types: Vec<DataType>,
     chunk_size: usize,
     high_join_amplification_threshold: usize,
-    as_of_desc: AsOfDesc,
+    asof_desc: AsOfDesc,
 }
 
 impl<S: StateStore> HashKeyDispatcher for AsOfJoinExecutorDispatcherArgs<S> {
@@ -171,7 +171,7 @@ impl<S: StateStore> HashKeyDispatcher for AsOfJoinExecutorDispatcherArgs<S> {
                     self.metrics,
                     self.chunk_size,
                     self.high_join_amplification_threshold,
-                    self.as_of_desc,
+                    self.asof_desc,
                 )
                 .boxed())
             };

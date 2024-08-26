@@ -791,11 +791,11 @@ impl EstimateSize for JoinEntryState {
 #[derive(Error, Debug)]
 pub enum JoinEntryError {
     #[error("double inserting a join state entry")]
-    OccupiedError,
+    Occupied,
     #[error("removing a join state entry but it is not in the cache")]
-    RemoveError,
+    Remove,
     #[error("retrieving a pk from the inequality index but it is not in the cache")]
-    InequalIndexError,
+    InequalIndex,
 }
 
 impl JoinEntryState {
@@ -833,7 +833,7 @@ impl JoinEntryState {
             }
         }
 
-        ret.map_err(|_| JoinEntryError::OccupiedError)
+        ret.map_err(|_| JoinEntryError::Occupied)
     }
 
     /// Delete from the cache.
@@ -849,7 +849,7 @@ impl JoinEntryState {
             }
             Ok(())
         } else if enable_strict_consistency() {
-            Err(JoinEntryError::RemoveError)
+            Err(JoinEntryError::Remove)
         } else {
             consistency_error!(?pk, "removing a join state entry but it's not in the cache");
             Ok(())
@@ -970,9 +970,9 @@ where {
         if let Some(value) = self.cached.get(pk) {
             Some(value.decode(data_types))
         } else if enable_strict_consistency() {
-            Some(Err(anyhow!(JoinEntryError::InequalIndexError).into()))
+            Some(Err(anyhow!(JoinEntryError::InequalIndex).into()))
         } else {
-            consistency_error!(?pk, "{}", JoinEntryError::InequalIndexError);
+            consistency_error!(?pk, "{}", JoinEntryError::InequalIndex);
             None
         }
     }

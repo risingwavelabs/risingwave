@@ -132,8 +132,8 @@ pub struct AsOfJoinExecutor<K: HashKey, S: StateStore, const T: AsOfJoinTypePrim
     watermark_buffers: BTreeMap<usize, BufferedWatermarks<SideTypePrimitive>>,
 
     high_join_amplification_threshold: usize,
-    /// `AsOf`` join description
-    as_of_desc: AsOfDesc,
+    /// `AsOf` join description
+    asof_desc: AsOfDesc,
 }
 
 impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> std::fmt::Debug
@@ -165,7 +165,7 @@ struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
     ctx: &'a ActorContextRef,
     side_l: &'a mut JoinSide<K, S>,
     side_r: &'a mut JoinSide<K, S>,
-    as_of_desc: &'a AsOfDesc,
+    asof_desc: &'a AsOfDesc,
     actual_output_data_types: &'a [DataType],
     // inequality_watermarks: &'a Watermark,
     chunk: StreamChunk,
@@ -193,7 +193,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         high_join_amplification_threshold: usize,
-        as_of_desc: AsOfDesc,
+        asof_desc: AsOfDesc,
     ) -> Self {
         let side_l_column_n = input_l.schema().len();
 
@@ -284,8 +284,8 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
         // let inequality_watermarks = None;
         let watermark_buffers = BTreeMap::new();
 
-        let inequal_key_idx_l = Some(as_of_desc.left_idx);
-        let inequal_key_idx_r = Some(as_of_desc.right_idx);
+        let inequal_key_idx_l = Some(asof_desc.left_idx);
+        let inequal_key_idx_r = Some(asof_desc.right_idx);
 
         Self {
             ctx: ctx.clone(),
@@ -354,7 +354,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
             cnt_rows_received: 0,
             watermark_buffers,
             high_join_amplification_threshold,
-            as_of_desc,
+            asof_desc,
         }
     }
 
@@ -420,16 +420,12 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
             join_actor_input_waiting_duration_ns.inc_by(start_time.elapsed().as_nanos() as u64);
             match msg? {
                 AlignedMessage::WatermarkLeft(watermark) => {
-                    for watermark_to_emit in
-                        self.handle_watermark(SideType::Left, watermark).await?
-                    {
+                    for watermark_to_emit in self.handle_watermark(SideType::Left, watermark)? {
                         yield Message::Watermark(watermark_to_emit);
                     }
                 }
                 AlignedMessage::WatermarkRight(watermark) => {
-                    for watermark_to_emit in
-                        self.handle_watermark(SideType::Right, watermark).await?
-                    {
+                    for watermark_to_emit in self.handle_watermark(SideType::Right, watermark)? {
                         yield Message::Watermark(watermark_to_emit);
                     }
                 }
@@ -441,7 +437,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                         ctx: &self.ctx,
                         side_l: &mut self.side_l,
                         side_r: &mut self.side_r,
-                        as_of_desc: &self.as_of_desc,
+                        asof_desc: &self.asof_desc,
                         actual_output_data_types: &self.actual_output_data_types,
                         // inequality_watermarks: &self.inequality_watermarks,
                         chunk,
@@ -465,7 +461,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                         ctx: &self.ctx,
                         side_l: &mut self.side_l,
                         side_r: &mut self.side_r,
-                        as_of_desc: &self.as_of_desc,
+                        asof_desc: &self.asof_desc,
                         actual_output_data_types: &self.actual_output_data_types,
                         // inequality_watermarks: &self.inequality_watermarks,
                         chunk,
@@ -543,7 +539,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
         }
     }
 
-    async fn handle_watermark(
+    fn handle_watermark(
         &mut self,
         side: SideTypePrimitive,
         watermark: Watermark,
@@ -610,7 +606,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
             ctx: _,
             side_l,
             side_r,
-            as_of_desc,
+            asof_desc,
             actual_output_data_types,
             // inequality_watermarks,
             chunk,
@@ -644,7 +640,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
             let inequal_key = side_update.ht.serialize_inequal_key_from_row(row);
 
             if let Some(matched_rows) = matched_rows {
-                let matched_row_by_inequality = match as_of_desc.inequality_type {
+                let matched_row_by_inequality = match asof_desc.inequality_type {
                     AsOfInequalityType::Lt => matched_rows.lower_bound_by_inequality(
                         Bound::Excluded(&inequal_key),
                         &side_match.all_data_types,
@@ -730,7 +726,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
             ctx,
             side_l,
             side_r,
-            as_of_desc,
+            asof_desc,
             actual_output_data_types,
             // inequality_watermarks,
             chunk,
@@ -848,7 +844,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                         right_inequality_index.upper_bound_key(Bound::Excluded(&inequal_key));
                     let next_inequality_key =
                         right_inequality_index.lower_bound_key(Bound::Excluded(&inequal_key));
-                    let affected_row_r = match as_of_desc.inequality_type {
+                    let affected_row_r = match asof_desc.inequality_type {
                         AsOfInequalityType::Lt | AsOfInequalityType::Le => next_inequality_key
                             .and_then(|k| {
                                 update_rows.get_first_by_inequality(k, &side_update.all_data_types)
@@ -868,26 +864,22 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                             (Some(_), None) => (row_to_delete_r, affected_row_r),
                             (None, None) => unreachable!(),
                         };
-                    let range = match as_of_desc.inequality_type {
+                    let range = match asof_desc.inequality_type {
                         AsOfInequalityType::Lt => (
-                            prev_inequality_key
-                                .map_or_else(|| Bound::Unbounded, Bound::Included),
+                            prev_inequality_key.map_or_else(|| Bound::Unbounded, Bound::Included),
                             Bound::Excluded(&inequal_key),
                         ),
                         AsOfInequalityType::Le => (
-                            prev_inequality_key
-                                .map_or_else(|| Bound::Unbounded, Bound::Excluded),
+                            prev_inequality_key.map_or_else(|| Bound::Unbounded, Bound::Excluded),
                             Bound::Included(&inequal_key),
                         ),
                         AsOfInequalityType::Gt => (
                             Bound::Excluded(&inequal_key),
-                            next_inequality_key
-                                .map_or_else(|| Bound::Unbounded, Bound::Included),
+                            next_inequality_key.map_or_else(|| Bound::Unbounded, Bound::Included),
                         ),
                         AsOfInequalityType::Ge => (
                             Bound::Included(&inequal_key),
-                            next_inequality_key
-                                .map_or_else(|| Bound::Unbounded, Bound::Excluded),
+                            next_inequality_key.map_or_else(|| Bound::Unbounded, Bound::Excluded),
                         ),
                     };
 
@@ -1025,7 +1017,7 @@ mod tests {
     }
 
     async fn create_executor<const T: AsOfJoinTypePrimitive>(
-        as_of_desc: AsOfDesc,
+        asof_desc: AsOfDesc,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
         let schema = Schema {
             fields: vec![
@@ -1089,14 +1081,14 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             1024,
             2048,
-            as_of_desc,
+            asof_desc,
         );
         (tx_l, tx_r, executor.boxed().execute())
     }
 
     #[tokio::test]
     async fn test_as_of_inner_join() -> StreamExecutorResult<()> {
-        let as_of_desc = AsOfDesc {
+        let asof_desc = AsOfDesc {
             left_idx: 0,
             right_idx: 2,
             inequality_type: AsOfInequalityType::Lt,
@@ -1145,7 +1137,7 @@ mod tests {
         );
 
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ AsOfJoinType::Inner }>(as_of_desc).await;
+            create_executor::<{ AsOfJoinType::Inner }>(asof_desc).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(test_epoch(1), false);
@@ -1244,7 +1236,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_as_of_left_outer_join() -> StreamExecutorResult<()> {
-        let as_of_desc = AsOfDesc {
+        let asof_desc = AsOfDesc {
             left_idx: 1,
             right_idx: 2,
             inequality_type: AsOfInequalityType::Ge,
@@ -1285,7 +1277,7 @@ mod tests {
         );
 
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ AsOfJoinType::LeftOuter }>(as_of_desc).await;
+            create_executor::<{ AsOfJoinType::LeftOuter }>(asof_desc).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(test_epoch(1), false);
