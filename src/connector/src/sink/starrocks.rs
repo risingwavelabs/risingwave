@@ -38,6 +38,7 @@ use tokio::task::JoinHandle;
 use url::form_urlencoded;
 use with_options::WithOptions;
 
+use super::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
 use super::doris_starrocks_connector::{
     HeaderBuilder, InserterInner, StarrocksTxnRequestBuilder, STARROCKS_DELETE_SIGN,
     STARROCKS_SUCCESS_STATUS,
@@ -47,7 +48,6 @@ use super::{
     SinkCommitCoordinator, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION,
     SINK_TYPE_UPSERT,
 };
-use crate::deserialize_optional_u64_from_string;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
@@ -105,15 +105,20 @@ pub struct StarrocksConfig {
     /// to Starrocks at every n checkpoints by leveraging the
     /// [StreamLoad Transaction API](https://docs.starrocks.io/docs/loading/Stream_Load_transaction_interface/),
     /// also, in this time, the `sink_decouple` option should be enabled as well.
-    /// Defaults to 1 if commit_checkpoint_interval <= 0
-    #[serde(default, deserialize_with = "deserialize_optional_u64_from_string")]
-    pub commit_checkpoint_interval: Option<u64>,
+    /// Defaults to 10 if commit_checkpoint_interval <= 0
+    #[serde(default = "default_commit_checkpoint_interval")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub commit_checkpoint_interval: u64,
 
     /// Enable partial update
     #[serde(rename = "starrocks.partial_update")]
     pub partial_update: Option<String>,
 
     pub r#type: String, // accept "append-only" or "upsert"
+}
+
+fn default_commit_checkpoint_interval() -> u64 {
+    DEFAULT_COMMIT_CHECKPOINT_INTERVAL
 }
 
 impl StarrocksConfig {
@@ -129,9 +134,9 @@ impl StarrocksConfig {
                 SINK_TYPE_UPSERT
             )));
         }
-        if config.commit_checkpoint_interval == Some(0) {
+        if config.commit_checkpoint_interval == 0 {
             return Err(SinkError::Config(anyhow!(
-                "commit_checkpoint_interval must be greater than 0"
+                "`commit_checkpoint_interval` must be greater than 0"
             )));
         }
         Ok(config)
@@ -260,26 +265,25 @@ impl Sink for StarrocksSink {
     const SINK_NAME: &'static str = STARROCKS_SINK;
 
     fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        let config_decouple = if let Some(interval) =
-            desc.properties.get("commit_checkpoint_interval")
-            && interval.parse::<u64>().unwrap_or(0) > 1
-        {
-            true
-        } else {
-            false
-        };
+        let commit_checkpoint_interval =
+            if let Some(interval) = desc.properties.get("commit_checkpoint_interval") {
+                interval
+                    .parse::<u64>()
+                    .unwrap_or(DEFAULT_COMMIT_CHECKPOINT_INTERVAL)
+            } else {
+                DEFAULT_COMMIT_CHECKPOINT_INTERVAL
+            };
 
         match user_specified {
-            SinkDecouple::Default => Ok(config_decouple),
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => {
-                if config_decouple {
+                if commit_checkpoint_interval > 1 {
                     return Err(SinkError::Config(anyhow!(
-                        "config conflict: StarRocks config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
+                        "config conflict: Starrocks config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
                     )));
                 }
                 Ok(false)
             }
-            SinkDecouple::Enable => Ok(true),
         }
     }
 
@@ -323,7 +327,7 @@ impl Sink for StarrocksSink {
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let commit_checkpoint_interval =
-            NonZeroU64::new(self.config.commit_checkpoint_interval.unwrap_or(1)).expect(
+            NonZeroU64::new(self.config.commit_checkpoint_interval).expect(
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
             );
 
