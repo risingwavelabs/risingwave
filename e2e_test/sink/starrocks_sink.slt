@@ -34,3 +34,34 @@ DROP MATERIALIZED VIEW mv6;
 
 statement ok
 DROP TABLE t6;
+
+statement ok
+CREATE TABLE reserved_words (id int primary key, "order" text, "from" text);
+
+statement ok
+CREATE SINK sink_reserved_words
+FROM reserved_words
+WITH (
+    connector = 'starrocks',
+    type = 'upsert',
+    starrocks.host = 'starrocks-fe-server',
+    starrocks.mysqlport = '9030',
+    starrocks.httpport = '8030',
+    starrocks.user = 'users',
+    starrocks.password = '123456',
+    starrocks.database = 'demo',
+    starrocks.table = 'demo_reserved_words',
+    primary_key = 'id'
+);
+
+statement ok
+INSERT INTO reserved_words VALUES (1, 'asc', 'x');
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK sink_reserved_words;
+
+statement ok
+DROP TABLE reserved_words;
