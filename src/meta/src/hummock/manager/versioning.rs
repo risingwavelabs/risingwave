@@ -281,22 +281,6 @@ impl HummockManager {
         HummockSnapshot::clone(&snapshot)
     }
 
-    /// We don't commit an epoch without checkpoint. We will only update the `max_current_epoch`.
-    pub fn update_current_epoch(&self, max_current_epoch: HummockEpoch) -> HummockSnapshot {
-        // We only update `max_current_epoch`!
-        let prev_snapshot = self.latest_snapshot.rcu(|snapshot| HummockSnapshot {
-            committed_epoch: snapshot.committed_epoch,
-            current_epoch: max_current_epoch,
-        });
-        assert!(prev_snapshot.current_epoch < max_current_epoch);
-
-        tracing::trace!("new current epoch {}", max_current_epoch);
-        HummockSnapshot {
-            committed_epoch: prev_snapshot.committed_epoch,
-            current_epoch: max_current_epoch,
-        }
-    }
-
     pub async fn list_change_log_epochs(
         &self,
         table_id: u32,
