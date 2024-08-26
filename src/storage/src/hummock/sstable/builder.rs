@@ -532,30 +532,16 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         {
             // fill total_compressed_size
-
-            let mut last_total_compressed_size = 0;
-            let mut last_table_id = None;
+            let mut last_table_id = meta.block_metas[0].table_id().table_id();
+            let mut last_table_stats = self.table_stats.get_mut(&last_table_id).unwrap();
             for block_meta in &meta.block_metas {
                 let block_table_id = block_meta.table_id();
-                if last_table_id.is_none() || last_table_id.unwrap() != block_table_id.table_id() {
-                    if last_table_id.is_some() {
-                        self.table_stats
-                            .get_mut(&last_table_id.unwrap())
-                            .unwrap()
-                            .total_compressed_size = last_total_compressed_size;
-                    }
-
-                    last_table_id = Some(block_table_id.table_id());
-                    last_total_compressed_size = 0;
+                if last_table_id != block_table_id.table_id() {
+                    last_table_id = block_table_id.table_id();
+                    last_table_stats = self.table_stats.get_mut(&last_table_id).unwrap();
                 }
-                last_total_compressed_size += block_meta.len as u64;
-            }
 
-            if last_total_compressed_size != 0 {
-                self.table_stats
-                    .get_mut(&last_table_id.unwrap())
-                    .unwrap()
-                    .total_compressed_size = last_total_compressed_size;
+                last_table_stats.total_compressed_size += block_meta.len as u64;
             }
         }
 
