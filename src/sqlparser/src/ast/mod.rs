@@ -1020,6 +1020,8 @@ pub enum ShowObject {
     Cluster,
     Jobs,
     ProcessList,
+    Cursor,
+    SubscriptionCursor,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1064,6 +1066,8 @@ impl fmt::Display for ShowObject {
             ShowObject::ProcessList => write!(f, "PROCESSLIST"),
             ShowObject::Subscription { schema } => write!(f, "SUBSCRIPTIONS{}", fmt_schema(schema)),
             ShowObject::Secret { schema } => write!(f, "SECRETS{}", fmt_schema(schema)),
+            ShowObject::Cursor => write!(f, "CURSORS"),
+            ShowObject::SubscriptionCursor => write!(f, "SUBSCRIPTION CURSORS"),
         }
     }
 }
