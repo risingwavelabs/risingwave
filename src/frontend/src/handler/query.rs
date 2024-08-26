@@ -416,6 +416,8 @@ async fn execute(
     plan_fragmenter_result: BatchPlanFragmenterResult,
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
+    // Used in counting row count.
+    let first_field_format = formats.first().copied().unwrap_or(Format::Text);
     let query_mode = plan_fragmenter_result.query_mode;
     let stmt_type = plan_fragmenter_result.stmt_type;
 
@@ -468,6 +470,7 @@ async fn execute(
     };
 
     Ok(PgResponse::builder(stmt_type)
+        .row_cnt_format_opt(Some(first_field_format))
         .values(row_stream, pg_descs)
         .callback(callback)
         .into())
