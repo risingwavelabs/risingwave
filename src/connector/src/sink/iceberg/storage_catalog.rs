@@ -221,7 +221,10 @@ impl Catalog for StorageCatalog {
         _namespace: &NamespaceIdent,
         _creation: TableCreation,
     ) -> iceberg::Result<Table> {
-        todo!()
+        Err(Error::new(
+            ErrorKind::Unexpected,
+            "create table is unimplemented for storage catalog",
+        ))
     }
 
     /// Load table from the catalog.
@@ -263,7 +266,10 @@ impl Catalog for StorageCatalog {
 
     /// Check if a table exists in the catalog.
     async fn table_exists(&self, _table: &TableIdent) -> iceberg::Result<bool> {
-        todo!()
+        Err(Error::new(
+            ErrorKind::Unexpected,
+            "table exists is unimplemented for storage catalog",
+    ))
     }
 
     /// Rename a table in the catalog.
