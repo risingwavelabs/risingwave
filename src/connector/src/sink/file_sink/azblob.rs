@@ -37,7 +37,7 @@ pub struct AzblobCommon {
     #[serde(rename = "azblob.credentials.account_key", default)]
     pub account_key: Option<String>,
     #[serde(rename = "azblob.endpoint_url")]
-    pub endpoint_url: Option<String>,
+    pub endpoint_url: String,
 }
 
 #[serde_as]
@@ -56,14 +56,11 @@ pub const AZBLOB_SINK: &str = "azblob";
 
 impl<S: OpendalSinkBackend> FileSink<S> {
     pub fn new_azblob_sink(config: AzblobConfig) -> Result<Operator> {
-        println!("这里");
         // Create azblob builder.
         let mut builder = Azblob::default();
         builder.container(&config.common.container_name);
 
-        if let Some(endpoint_url) = config.common.endpoint_url {
-            builder.endpoint(&endpoint_url);
-        }
+        builder.endpoint(&config.common.endpoint_url);
 
         if let Some(account_name) = config.common.account_name {
             builder.account_name(&account_name);
