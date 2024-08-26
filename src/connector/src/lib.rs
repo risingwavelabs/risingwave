@@ -112,6 +112,25 @@ where
     }
 }
 
+pub(crate) fn deserialize_optional_u64_seq_from_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<Vec<u64>>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: Option<String> = de::Deserialize::deserialize(deserializer)?;
+    if let Some(s) = s {
+        let numbers = s
+            .split(',')
+            .map(|s| s.trim().parse())
+            .collect::<Result<Vec<u64>, _>>()
+            .map_err(|_| de::Error::invalid_value(de::Unexpected::Str(&s), &"invalid number"));
+        Ok(Some(numbers?))
+    } else {
+        Ok(None)
+    }
+}
+
 pub(crate) fn deserialize_bool_from_string<'de, D>(deserializer: D) -> Result<bool, D::Error>
 where
     D: de::Deserializer<'de>,
