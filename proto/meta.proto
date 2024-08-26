@@ -736,8 +736,9 @@ message EventLog {
   }
   message EventAutoSchemaChangeFail {
     uint32 table_id = 1;
-    string cdc_table_id = 2;
-    string upstream_ddl = 3;
+    string table_name = 2;
+    string cdc_table_id = 3;
+    string upstream_ddl = 4;
   }
   // Event logs identifier, which should be populated by event log service.
   optional string unique_id = 1;
