@@ -530,7 +530,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let bloom_filter_size = meta.bloom_filter.len();
         let sstable_file_size = sst_info.file_size as usize;
 
-        {
+        if !meta.block_metas.is_empty() {
             // fill total_compressed_size
             let mut last_table_id = meta.block_metas[0].table_id().table_id();
             let mut last_table_stats = self.table_stats.get_mut(&last_table_id).unwrap();
