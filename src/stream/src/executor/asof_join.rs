@@ -798,7 +798,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                                             Some(Either::Right(row)),
                                         )
                                     } else {
-                                        // Something wrong happend. Ignore this row in non strict consistency mode.
+                                        // Something wrong happened. Ignore this row in non strict consistency mode.
                                         (None, None)
                                     }
                                 } else {
@@ -819,7 +819,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                                                 Some(Either::Left(to_insert_row?.row)),
                                             )
                                         } else {
-                                            // Something wrong happend. Ignore this row in non strict consistency mode.
+                                            // Something wrong happened. Ignore this row in non strict consistency mode.
                                             (None, None)
                                         }
                                     } else {

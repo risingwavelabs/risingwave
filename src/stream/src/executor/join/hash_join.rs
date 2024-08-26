@@ -199,7 +199,7 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     need_degree_table: bool,
     /// Pk is part of the join key.
     pk_contained_in_jk: bool,
-    /// Inequality key describtion for AsOf join.
+    /// Inequality key description for AsOf join.
     inequality_key_desc: Option<InequalityKeyDesc>,
     /// Metrics of the hash map
     metrics: JoinHashMapMetrics,
@@ -794,7 +794,7 @@ pub enum JoinEntryError {
     OccupiedError,
     #[error("removing a join state entry but it is not in the cache")]
     RemoveError,
-    #[error("retriving a pk from the inequality index but it is not in the cache")]
+    #[error("retrieving a pk from the inequality index but it is not in the cache")]
     InequalIndexError,
 }
 
