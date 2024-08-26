@@ -24,7 +24,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 glob = "0.3"
 itertools = { workspace = true }
 lru = { workspace = true }
-madsim = "0.2.27"
+madsim = "0.2.30"
 paste = "1"
 pin-project = "1.1"
 pretty_assertions = "1"
@@ -55,9 +55,10 @@ tempfile = "3"
 tikv-jemallocator = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
 tokio-postgres = "0.7"
-tokio-stream = "0.1"
+tokio-stream = { workspace = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = "*"
 
 [lints]
 workspace = true

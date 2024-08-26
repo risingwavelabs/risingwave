@@ -65,12 +65,17 @@ impl From<&str> for TableChangeType {
 
 #[derive(Debug)]
 pub struct TableSchemaChange {
-    pub(crate) cdc_table_name: String,
+    pub(crate) cdc_table_id: String,
     pub(crate) columns: Vec<ColumnCatalog>,
     pub(crate) change_type: TableChangeType,
+    pub(crate) upstream_ddl: String,
 }
 
 impl SchemaChangeEnvelope {
+    pub fn is_empty(&self) -> bool {
+        self.table_changes.is_empty()
+    }
+
     pub fn to_protobuf(&self) -> PbSchemaChangeEnvelope {
         let table_changes = self
             .table_changes
@@ -83,12 +88,20 @@ impl SchemaChangeEnvelope {
                     .collect();
                 PbTableSchemaChange {
                     change_type: table_change.change_type.to_proto() as _,
-                    cdc_table_name: table_change.cdc_table_name.clone(),
+                    cdc_table_id: table_change.cdc_table_id.clone(),
                     columns,
+                    upstream_ddl: table_change.upstream_ddl.clone(),
                 }
             })
             .collect();
 
         PbSchemaChangeEnvelope { table_changes }
+    }
+
+    pub fn table_ids(&self) -> Vec<String> {
+        self.table_changes
+            .iter()
+            .map(|table_change| table_change.cdc_table_id.clone())
+            .collect()
     }
 }

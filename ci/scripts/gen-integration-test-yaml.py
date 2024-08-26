@@ -65,6 +65,7 @@ def gen_pipeline_steps():
          env:
            GHCR_USERNAME: ghcr-username
            GHCR_TOKEN: ghcr-token
+           RW_LICENSE_KEY: rw-license-key
      - ./ci/plugins/docker-compose-logs
 """
     return pipeline_steps

@@ -73,7 +73,7 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
                     throw ValidatorUtils.invalidArgument(
                             "Sql Server's DB_NAME() '"
                                     + res.getString(1)
-                                    + "' does not match db_name'"
+                                    + "' does not match db_name '"
                                     + dbName
                                     + "'.");
                 }
@@ -142,8 +142,8 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
                 if (res.getInt(1) == 0) {
                     throw ValidatorUtils.invalidArgument(
                             String.format(
-                                    "Sql Server table '%s'.'%s' doesn't exist",
-                                    schemaName, tableName));
+                                    "Sql Server table '%s'.'%s' doesn't exist in '%s'",
+                                    schemaName, tableName, dbName));
                 }
             }
         }
@@ -182,7 +182,20 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
                 throw ValidatorUtils.invalidArgument("Primary key mismatch");
             }
         }
-
+        // Check whether the db is case-sensitive
+        boolean isCaseSensitive = false;
+        try (var stmt =
+                jdbcConnection.prepareStatement(
+                        ValidatorUtils.getSql("sqlserver.case.sensitive"))) {
+            stmt.setString(1, this.dbName);
+            var res = stmt.executeQuery();
+            while (res.next()) {
+                var caseSensitive = res.getInt(2);
+                if (caseSensitive == 1) {
+                    isCaseSensitive = true;
+                }
+            }
+        }
         // Check whether source schema match table schema on upstream
         // All columns defined must exist in upstream database
         try (var stmt =
@@ -196,7 +209,11 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
             while (res.next()) {
                 var field = res.getString(1);
                 var dataType = res.getString(2);
-                schema.put(field.toLowerCase(), dataType);
+                if (isCaseSensitive) {
+                    schema.put(field, dataType);
+                } else {
+                    schema.put(field.toLowerCase(), dataType);
+                }
             }
 
             for (var e : tableSchema.getColumnTypes().entrySet()) {
@@ -204,7 +221,7 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
                 if (e.getKey().startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
                     continue;
                 }
-                var dataType = schema.get(e.getKey().toLowerCase());
+                var dataType = schema.get(isCaseSensitive ? e.getKey() : e.getKey().toLowerCase());
                 if (dataType == null) {
                     throw ValidatorUtils.invalidArgument(
                             "Column '" + e.getKey() + "' not found in the upstream database");
@@ -272,6 +289,7 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
                 return Data.DataType.TypeName.INT16_VALUE <= val
                         && val <= Data.DataType.TypeName.INT64_VALUE;
             case "integer":
+            case "int":
                 return Data.DataType.TypeName.INT32_VALUE <= val
                         && val <= Data.DataType.TypeName.INT64_VALUE;
             case "bigint":
@@ -288,9 +306,15 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
             case "decimal":
             case "numeric":
                 return val == Data.DataType.TypeName.DECIMAL_VALUE;
+            case "char":
+            case "nchar":
             case "varchar":
-            case "character varying":
+            case "nvarchar":
+            case "text":
+            case "ntext":
+            case "uniqueidentifier":
                 return val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "binary":
             case "varbinary":
                 return val == Data.DataType.TypeName.BYTEA_VALUE;
             case "date":

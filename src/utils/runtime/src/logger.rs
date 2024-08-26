@@ -210,6 +210,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         // Configure levels for some RisingWave crates.
         // Other RisingWave crates like `stream` and `storage` will follow the default level.
         filter = filter
+            .with_target("auto_schema_change", Level::INFO)
             .with_target("risingwave_sqlparser", Level::INFO)
             .with_target("risingwave_connector_node", Level::INFO)
             .with_target("pgwire", Level::INFO)

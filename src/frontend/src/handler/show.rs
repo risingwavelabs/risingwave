@@ -319,6 +319,7 @@ pub async fn handle_show_object(
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_source()
             .map(|t| t.name.clone())
+            .chain(session.temporary_source_manager().keys())
             .collect(),
         ShowObject::Sink { schema } => catalog_reader
             .read_guard()
@@ -588,7 +589,7 @@ mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
 
         let sql = r#"CREATE SOURCE t1 (column1 varchar)
-        WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+        WITH (connector = 'kafka', kafka.topic = 'abc', kafka.brokers = 'localhost:1001')
         FORMAT PLAIN ENCODE JSON"#;
         frontend.run_sql(sql).await.unwrap();
 
@@ -602,7 +603,7 @@ mod tests {
         let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t
-    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.brokers = 'localhost:1001')
     FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );

@@ -35,7 +35,7 @@ pub trait SystemParamsModel: Sized {
 #[async_trait]
 impl SystemParamsModel for SystemParams {
     fn cf_name() -> String {
-        SYSTEM_PARAMS_CF_NAME.to_string()
+        SYSTEM_PARAMS_CF_NAME.to_owned()
     }
 
     /// Return error if there are missing or unrecognized fields.

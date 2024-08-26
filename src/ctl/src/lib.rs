@@ -21,7 +21,7 @@ use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
 use itertools::Itertools;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
@@ -267,6 +267,8 @@ enum HummockCommands {
         compression_algorithm: Option<String>,
         #[clap(long)]
         max_l0_compact_level: Option<u32>,
+        #[clap(long)]
+        sst_allowed_trivial_move_min_size: Option<u64>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -594,7 +596,12 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             start_id,
             num_epochs,
         }) => {
-            cmd_impl::hummock::list_version_deltas(context, start_id, num_epochs).await?;
+            cmd_impl::hummock::list_version_deltas(
+                context,
+                HummockVersionId::new(start_id),
+                num_epochs,
+            )
+            .await?;
         }
         Commands::Hummock(HummockCommands::ListKv {
             epoch,
@@ -662,6 +669,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             compression_level,
             compression_algorithm,
             max_l0_compact_level,
+            sst_allowed_trivial_move_min_size,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -692,6 +700,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                         None
                     },
                     max_l0_compact_level,
+                    sst_allowed_trivial_move_min_size,
                 ),
             )
             .await?
@@ -737,7 +746,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => {
             cmd_impl::hummock::print_version_delta_in_archive(
                 context,
-                archive_ids,
+                archive_ids.into_iter().map(HummockVersionId::new),
                 data_dir,
                 sst_id,
                 use_new_object_prefix_strategy,
@@ -752,7 +761,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => {
             cmd_impl::hummock::print_user_key_in_archive(
                 context,
-                archive_ids,
+                archive_ids.into_iter().map(HummockVersionId::new),
                 data_dir,
                 user_key,
                 use_new_object_prefix_strategy,

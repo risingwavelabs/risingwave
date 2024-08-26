@@ -29,6 +29,7 @@ use risingwave_common::catalog::{
 use risingwave_common::license::Feature;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
+use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
     ExternalTableConfig, ExternalTableImpl, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
@@ -734,6 +735,7 @@ fn gen_table_plan_inner(
         version,
         is_external_source,
         retention_seconds,
+        None,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -817,7 +819,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     let options = CdcScanOptions::from_with_options(context.with_options())?;
 
     let logical_scan = LogicalCdcScan::create(
-        external_table_name,
+        external_table_name.clone(),
         Rc::new(cdc_table_desc),
         context.clone(),
         options,
@@ -833,6 +835,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         vec![],
     );
 
+    let cdc_table_id = build_cdc_table_id(source.id, &external_table_name);
     let materialize = plan_root.gen_table_plan(
         context,
         resolved_table_name,
@@ -847,6 +850,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         Some(col_id_gen.into_version()),
         true,
         None,
+        Some(cdc_table_id),
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);

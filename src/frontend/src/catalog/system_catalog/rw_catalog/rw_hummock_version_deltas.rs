@@ -39,9 +39,9 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockVersionDelta
     let rows = deltas
         .into_iter()
         .map(|d| RwHummockVersionDelta {
-            id: d.id as _,
-            prev_id: d.prev_id as _,
-            max_committed_epoch: d.max_committed_epoch as _,
+            id: d.id.to_u64() as _,
+            prev_id: d.prev_id.to_u64() as _,
+            max_committed_epoch: d.visible_table_committed_epoch() as _,
             safe_epoch: d.visible_table_safe_epoch() as _,
             trivial_move: d.trivial_move,
             group_deltas: json!(d

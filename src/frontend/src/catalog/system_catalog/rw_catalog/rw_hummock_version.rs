@@ -100,8 +100,8 @@ fn version_to_compaction_group_rows(version: &HummockVersion) -> Vec<RwHummockVe
         .levels
         .values()
         .map(|cg| RwHummockVersion {
-            version_id: version.id as _,
-            max_committed_epoch: version.max_committed_epoch as _,
+            version_id: version.id.to_u64() as _,
+            max_committed_epoch: version.visible_table_committed_epoch() as _,
             safe_epoch: version.visible_table_safe_epoch() as _,
             compaction_group: json!(cg.to_protobuf()).into(),
         })
@@ -222,6 +222,30 @@ async fn read_hummock_snapshot_groups(
             table_id: table_id.table_id as _,
             committed_epoch: info.committed_epoch as _,
             safe_epoch: info.safe_epoch as _,
+        })
+        .collect())
+}
+
+#[derive(Fields)]
+struct RwHummockTableChangeLog {
+    #[primary_key]
+    table_id: i32,
+    change_log: JsonbVal,
+}
+
+#[system_catalog(table, "rw_catalog.rw_hummock_table_change_log")]
+async fn read_hummock_table_change_log(
+    reader: &SysCatalogReaderImpl,
+) -> Result<
+    Vec<crate::catalog::system_catalog::rw_catalog::rw_hummock_version::RwHummockTableChangeLog>,
+> {
+    let version = reader.meta_client.get_hummock_current_version().await?;
+    Ok(version
+        .table_change_log
+        .iter()
+        .map(|(table_id, change_log)| RwHummockTableChangeLog {
+            table_id: table_id.table_id as i32,
+            change_log: json!(change_log.to_protobuf()).into(),
         })
         .collect())
 }
