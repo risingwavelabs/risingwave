@@ -3,11 +3,11 @@ FROM ubuntu:24.04 AS base
 ENV LANG en_US.utf8
 
 RUN apt-get update \
-  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-17-jdk software-properties-common python3.12 python3.12-dev openssl pkg-config
+  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-17-jdk software-properties-common python3.12 python3.12-dev openssl pkg-config curl
 
 FROM base AS rust-base
 
-RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip rsync
+RUN apt-get update && apt-get -y install make cmake protobuf-compiler bash lld unzip rsync
 
 # Install Node.js as dependency for building the dashboard.
 # Bump version together with `dashboard/.node-version`.
@@ -21,7 +21,7 @@ ENV PATH $NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
 SHELL ["/bin/bash", "-c"]
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
-ENV PATH /root/.cargo/bin/:$PATH
+ENV PATH /root/.cargo/bin:$PATH
 ENV CARGO_INCREMENTAL=0
 
 COPY rust-toolchain rust-toolchain
@@ -34,6 +34,8 @@ RUN rustup self update \
   && rustup target add wasm32-wasi
 
 RUN cargo install flamegraph
+RUN cargo install addr2line --features bin --bin addr2line
+
 # TODO: cargo-chef doesn't work well now, because we update Cargo.lock very often.
 # We may consider sccache instead.
 
@@ -122,7 +124,7 @@ LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwa
 RUN apt-get update && apt-get -y install linux-tools-generic \
     && ln -s "$(find /usr/lib/linux-tools/*/perf | head -1)" /usr/local/bin/perf
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install gdb libpam-krb5 krb5-user telnet kafkacat rustup \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install gdb libpam-krb5 krb5-user telnet kafkacat less rustup \
   && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 # Set default Rust toolchain but don't install it to keep the image size small
@@ -137,6 +139,7 @@ COPY --from=rust-builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwa
 COPY --from=java-builder /risingwave/bin/connector-node /risingwave/bin/connector-node
 COPY --from=rust-builder /risingwave/bin/jeprof /usr/local/bin/jeprof
 COPY --from=rust-base /root/.cargo/bin/flamegraph /usr/local/bin/flamegraph
+COPY --from=rust-base /root/.cargo/bin/addr2line /usr/local/bin/addr2line
 
 # Set default playground mode to docker-playground profile
 ENV PLAYGROUND_PROFILE docker-playground

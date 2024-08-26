@@ -639,6 +639,7 @@ impl NatsCommon {
         stream: String,
         split_id: String,
         start_sequence: NatsOffset,
+        mut config: jetstream::consumer::pull::Config,
     ) -> ConnectorResult<
         async_nats::jetstream::consumer::Consumer<async_nats::jetstream::consumer::pull::Config>,
     > {
@@ -649,10 +650,6 @@ impl NatsCommon {
             .replace(',', "-")
             .replace(['.', '>', '*', ' ', '\t'], "_");
         let name = format!("risingwave-consumer-{}-{}", subject_name, split_id);
-        let mut config = jetstream::consumer::pull::Config {
-            ack_policy: jetstream::consumer::AckPolicy::None,
-            ..Default::default()
-        };
 
         let deliver_policy = match start_sequence {
             NatsOffset::Earliest => DeliverPolicy::All,
@@ -671,6 +668,7 @@ impl NatsCommon {
             },
             NatsOffset::None => DeliverPolicy::All,
         };
+
         let consumer = stream
             .get_or_create_consumer(&name, {
                 config.deliver_policy = deliver_policy;
