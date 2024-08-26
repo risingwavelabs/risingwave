@@ -989,7 +989,7 @@ impl CatalogController {
         for sink_id in updated_sink_catalogs {
             sink::ActiveModel {
                 sink_id: Set(sink_id as _),
-                original_target_columns: Set(original_table_catalogs.clone()),
+                original_target_columns: Set(Some(original_table_catalogs.clone())),
                 ..Default::default()
             }
             .update(txn)
