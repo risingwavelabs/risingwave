@@ -228,7 +228,12 @@ pub async fn get_total_row_nums_for_parquet_file(
                 .await?
                 .compat();
 
-            reader.get_metadata().await?.file_metadata().num_rows()
+            reader
+                .get_metadata()
+                .await
+                .map_err(anyhow::Error::from)?
+                .file_metadata()
+                .num_rows()
         }
         ConnectorProperties::OpendalS3(prop) => {
             let connector: OpendalEnumerator<OpendalS3> =
@@ -241,7 +246,12 @@ pub async fn get_total_row_nums_for_parquet_file(
                 .into_futures_async_read(..)
                 .await?
                 .compat();
-            reader.get_metadata().await?.file_metadata().num_rows()
+            reader
+                .get_metadata()
+                .await
+                .map_err(anyhow::Error::from)?
+                .file_metadata()
+                .num_rows()
         }
 
         ConnectorProperties::PosixFs(prop) => {
@@ -255,7 +265,12 @@ pub async fn get_total_row_nums_for_parquet_file(
                 .into_futures_async_read(..)
                 .await?
                 .compat();
-            reader.get_metadata().await?.file_metadata().num_rows()
+            reader
+                .get_metadata()
+                .await
+                .map_err(anyhow::Error::from)?
+                .file_metadata()
+                .num_rows()
         }
         other => bail!("Unsupported source: {:?}", other),
     };
