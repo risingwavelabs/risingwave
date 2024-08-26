@@ -507,7 +507,7 @@ pub fn optimize_by_copy_block(compact_task: &CompactTask, context: &CompactorCon
         .collect_vec();
     let compaction_size = sstable_infos
         .iter()
-        .map(|table_info| table_info.file_size)
+        .map(|table_info| table_info.sst_size)
         .sum::<u64>();
 
     let all_ssts_are_blocked_filter = sstable_infos
@@ -574,7 +574,7 @@ pub async fn generate_splits_for_task(
         .collect_vec();
     let compaction_size = sstable_infos
         .iter()
-        .map(|table_info| table_info.file_size)
+        .map(|table_info| table_info.sst_size)
         .sum::<u64>();
 
     if !optimize_by_copy_block {
@@ -611,7 +611,7 @@ pub fn metrics_report_for_task(compact_task: &CompactTask, context: &CompactorCo
         .collect_vec();
     let select_size = select_table_infos
         .iter()
-        .map(|table| table.file_size)
+        .map(|table| table.sst_size)
         .sum::<u64>();
     context
         .compactor_metrics
@@ -624,7 +624,7 @@ pub fn metrics_report_for_task(compact_task: &CompactTask, context: &CompactorCo
         .with_label_values(&[&group_label, &cur_level_label])
         .inc_by(select_table_infos.len() as u64);
 
-    let target_level_read_bytes = target_table_infos.iter().map(|t| t.file_size).sum::<u64>();
+    let target_level_read_bytes = target_table_infos.iter().map(|t| t.sst_size).sum::<u64>();
     let next_level_label = compact_task.target_level.to_string();
     context
         .compactor_metrics
@@ -659,7 +659,7 @@ pub fn calculate_task_parallelism(compact_task: &CompactTask, context: &Compacto
         .collect_vec();
     let compaction_size = sstable_infos
         .iter()
-        .map(|table_info| table_info.file_size)
+        .map(|table_info| table_info.sst_size)
         .sum::<u64>();
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
     calculate_task_parallelism_impl(

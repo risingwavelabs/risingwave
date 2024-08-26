@@ -1016,8 +1016,8 @@ fn split_sst_info_for_level(
             let branch_sst = split_sst(
                 sst_info,
                 new_sst_id,
-                sst_info.file_size / 2,
-                sst_info.file_size / 2,
+                sst_info.sst_size / 2,
+                sst_info.sst_size / 2,
                 member_table_ids.iter().cloned().collect_vec(),
             );
             insert_table_infos.push(branch_sst);
@@ -1342,10 +1342,10 @@ pub fn split_sst(
 ) -> SstableInfo {
     let mut branch_table_info = sst_info.clone();
     branch_table_info.sst_id = *new_sst_id;
-    branch_table_info.file_size = new_sst_size;
+    branch_table_info.sst_size = new_sst_size;
 
     sst_info.sst_id = *new_sst_id + 1;
-    sst_info.file_size = old_sst_size;
+    sst_info.sst_size = old_sst_size;
 
     {
         // related github.com/risingwavelabs/risingwave/pull/17898/

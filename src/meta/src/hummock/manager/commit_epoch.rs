@@ -441,7 +441,7 @@ impl HummockManager {
                     continue;
                 }
 
-                let origin_sst_size = sst.sst_info.file_size;
+                let origin_sst_size = sst.sst_info.sst_size;
                 let new_sst_size = match_ids
                     .iter()
                     .map(|id| {
