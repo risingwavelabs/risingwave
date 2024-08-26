@@ -35,6 +35,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
+use thiserror_ext::AsReport;
 
 use super::row::{DegreeType, EncodedJoinRow};
 use crate::cache::ManagedLruCache;
@@ -972,7 +973,7 @@ where {
         } else if enable_strict_consistency() {
             Some(Err(anyhow!(JoinEntryError::InequalIndex).into()))
         } else {
-            consistency_error!(?pk, "{}", JoinEntryError::InequalIndex);
+            consistency_error!(?pk, "{}", JoinEntryError::InequalIndex.as_report());
             None
         }
     }
