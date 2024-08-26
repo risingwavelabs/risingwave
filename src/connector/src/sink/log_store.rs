@@ -26,7 +26,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::metrics::LabelGuardedIntCounter;
-use risingwave_common::util::epoch::{Epoch, EpochPair, INVALID_EPOCH};
+use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
 
 use crate::sink::SinkMetrics;
 
