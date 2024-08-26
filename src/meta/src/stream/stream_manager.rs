@@ -427,6 +427,8 @@ impl GlobalStreamManager {
             "built actors finished"
         );
 
+        let need_pause = replace_table_job_info.is_some();
+
         if let Some((streaming_job, context, table_fragments)) = replace_table_job_info {
             self.build_actors(
                 &table_fragments,
@@ -516,7 +518,15 @@ impl GlobalStreamManager {
             }
         };
         let result: MetaResult<NotificationVersion> = try {
-            self.barrier_scheduler.run_command(command).await?;
+            if need_pause {
+                // Special handling is required when creating sink into table, we need to pause the stream to avoid data loss.
+                self.barrier_scheduler
+                    .run_config_change_command_with_pause(command)
+                    .await?;
+            } else {
+                self.barrier_scheduler.run_command(command).await?;
+            }
+
             tracing::debug!(?streaming_job, "first barrier collected for stream job");
             let result = self
                 .metadata_manager
