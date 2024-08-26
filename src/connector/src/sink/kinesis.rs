@@ -23,7 +23,6 @@ use futures::{FutureExt, TryFuture};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
@@ -32,7 +31,6 @@ use super::catalog::SinkFormatDesc;
 use super::SinkParam;
 use crate::connector_common::KinesisCommon;
 use crate::dispatch_sink_formatter_str_key_impl;
-use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
@@ -78,13 +76,6 @@ impl Sink for KinesisSink {
     type LogSinker = AsyncTruncateLogSinkerOf<KinesisSinkWriter>;
 
     const SINK_NAME: &'static str = KINESIS_SINK;
-
-    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        match user_specified {
-            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
-            SinkDecouple::Disable => Ok(false),
-        }
-    }
 
     async fn validate(&self) -> Result<()> {
         // Kinesis requires partition key. There is no builtin support for round-robin as in kafka/pulsar.

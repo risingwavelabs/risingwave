@@ -22,7 +22,6 @@ use pulsar::producer::{Message, SendFuture};
 use pulsar::{Producer, ProducerOptions, Pulsar, TokioExecutor};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
@@ -30,7 +29,6 @@ use with_options::WithOptions;
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam, SinkWriterParam};
 use crate::connector_common::{AwsAuthProps, PulsarCommon, PulsarOauthCommon};
-use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::encoder::SerTo;
 use crate::sink::formatter::{SinkFormatter, SinkFormatterImpl};
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
@@ -169,13 +167,6 @@ impl Sink for PulsarSink {
     type LogSinker = AsyncTruncateLogSinkerOf<PulsarSinkWriter>;
 
     const SINK_NAME: &'static str = PULSAR_SINK;
-
-    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        match user_specified {
-            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
-            SinkDecouple::Disable => Ok(false),
-        }
-    }
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(PulsarSinkWriter::new(

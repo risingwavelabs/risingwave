@@ -370,8 +370,8 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     /// `user_specified` is the value of `sink_decouple` config.
     fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
-            SinkDecouple::Disable | SinkDecouple::Default => Ok(false),
-            SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Disable => Ok(false),
         }
     }
 

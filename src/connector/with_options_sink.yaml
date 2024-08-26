@@ -98,9 +98,9 @@ ClickHouseConfig:
     required: false
   - name: commit_checkpoint_interval
     field_type: u64
-    comments: Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
+    comments: Commit every n(>0) checkpoints, default is 10.
     required: false
-    default: Default::default
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
   - name: r#type
     field_type: String
     required: true
@@ -126,9 +126,9 @@ DeltaLakeConfig:
     required: false
   - name: commit_checkpoint_interval
     field_type: u64
-    comments: Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
+    comments: Commit every n(>0) checkpoints, default is 10.
     required: false
-    default: Default::default
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
   - name: r#type
     field_type: String
     required: true
@@ -322,8 +322,9 @@ IcebergConfig:
     required: false
   - name: commit_checkpoint_interval
     field_type: u64
+    comments: Commit every n(>0) checkpoints, default is 10.
     required: false
-    default: Default::default
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
 KafkaConfig:
   fields:
   - name: properties.bootstrap.server
@@ -988,9 +989,9 @@ StarrocksConfig:
       to Starrocks at every n checkpoints by leveraging the
       [StreamLoad Transaction API](https://docs.starrocks.io/docs/loading/Stream_Load_transaction_interface/),
       also, in this time, the `sink_decouple` option should be enabled as well.
-      Defaults to 1 if commit_checkpoint_interval <= 0
+      Defaults to 10 if commit_checkpoint_interval <= 0
     required: false
-    default: Default::default
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
   - name: starrocks.partial_update
     field_type: String
     comments: Enable partial update
