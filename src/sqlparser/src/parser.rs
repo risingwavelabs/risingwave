@@ -2947,7 +2947,7 @@ impl Parser<'_> {
         Ok(SqlOption { name, value })
     }
 
-    pub fn parse_since(&mut self) -> PResult<Option<Since>> {
+    pub fn parse_since(&mut self) -> PResult<Since> {
         if self.parse_keyword(Keyword::SINCE) {
             let checkpoint = *self;
             let token = self.next_token();
@@ -2958,11 +2958,11 @@ impl Parser<'_> {
                     if ident.real_value() == "proctime" || ident.real_value() == "now" {
                         self.expect_token(&Token::LParen)?;
                         self.expect_token(&Token::RParen)?;
-                        Ok(Some(Since::ProcessTime))
+                        Ok(Since::ProcessTime)
                     } else if ident.real_value() == "begin" {
                         self.expect_token(&Token::LParen)?;
                         self.expect_token(&Token::RParen)?;
-                        Ok(Some(Since::Begin))
+                        Ok(Since::Begin)
                     } else {
                         parser_err!(
                             "Expected proctime(), begin() or now(), found: {}",
@@ -2974,12 +2974,14 @@ impl Parser<'_> {
                     let num = s
                         .parse::<u64>()
                         .map_err(|e| StrError(format!("Could not parse '{}' as u64: {}", s, e)))?;
-                    Ok(Some(Since::TimestampMsNum(num)))
+                    Ok(Since::TimestampMsNum(num))
                 }
                 _ => self.expected_at(checkpoint, "proctime(), begin() , now(), Number"),
             }
+        } else if self.parse_word("FULL") {
+            Ok(Since::Full)
         } else {
-            Ok(None)
+            Ok(Since::ProcessTime)
         }
     }
 
@@ -4484,6 +4486,19 @@ impl Parser<'_> {
                 Keyword::TRANSACTION => {
                     self.expect_keywords(&[Keyword::ISOLATION, Keyword::LEVEL])?;
                     return Ok(Statement::ShowTransactionIsolationLevel);
+                }
+                Keyword::CURSORS => {
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Cursor,
+                        filter: None,
+                    });
+                }
+                Keyword::SUBSCRIPTION => {
+                    self.expect_keyword(Keyword::CURSORS)?;
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::SubscriptionCursor,
+                        filter: None,
+                    });
                 }
                 _ => {}
             }
