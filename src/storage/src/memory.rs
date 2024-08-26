@@ -750,7 +750,6 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
         }
     }
 
-
     async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
         MemtableLocalStateStore::new(self.clone(), option)
     }

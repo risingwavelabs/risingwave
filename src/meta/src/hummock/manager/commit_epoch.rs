@@ -319,9 +319,7 @@ impl HummockManager {
         }
 
         let snapshot = if is_visible_table_committed_epoch {
-            let snapshot = HummockSnapshot {
-                committed_epoch,
-            };
+            let snapshot = HummockSnapshot { committed_epoch };
             let prev_snapshot = self.latest_snapshot.swap(snapshot.into());
             assert!(prev_snapshot.committed_epoch < committed_epoch);
             Some(snapshot)
