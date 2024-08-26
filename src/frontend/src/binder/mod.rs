@@ -20,9 +20,7 @@ use parking_lot::RwLock;
 use risingwave_common::session_config::{SearchPath, SessionConfig};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_sqlparser::ast::{
-    Expr as AstExpr, FunctionArg, FunctionArgExpr, SelectItem, SetExpr, Statement,
-};
+use risingwave_sqlparser::ast::{Expr as AstExpr, SelectItem, SetExpr, Statement};
 
 use crate::error::Result;
 
@@ -63,7 +61,6 @@ pub use update::BoundUpdate;
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
-use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, TableId, ViewId};
 use crate::error::ErrorCode;
@@ -225,41 +222,6 @@ impl UdfContext {
         };
 
         Ok(expr)
-    }
-
-    /// Create the sql udf context
-    /// used per `bind_function` for sql udf & semantic check at definition time
-    pub fn create_udf_context(
-        args: &[FunctionArg],
-        catalog: &Arc<FunctionCatalog>,
-    ) -> Result<HashMap<String, AstExpr>> {
-        let mut ret: HashMap<String, AstExpr> = HashMap::new();
-        for (i, current_arg) in args.iter().enumerate() {
-            match current_arg {
-                FunctionArg::Unnamed(arg) => {
-                    let FunctionArgExpr::Expr(e) = arg else {
-                        return Err(ErrorCode::InvalidInputSyntax(
-                            "expect `FunctionArgExpr` for unnamed argument".to_string(),
-                        )
-                        .into());
-                    };
-                    if catalog.arg_names[i].is_empty() {
-                        ret.insert(format!("${}", i + 1), e.clone());
-                    } else {
-                        // The index mapping here is accurate
-                        // So that we could directly use the index
-                        ret.insert(catalog.arg_names[i].clone(), e.clone());
-                    }
-                }
-                _ => {
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        "expect unnamed argument when creating sql udf context".to_string(),
-                    )
-                    .into())
-                }
-            }
-        }
-        Ok(ret)
     }
 }
 
