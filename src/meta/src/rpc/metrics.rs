@@ -25,10 +25,13 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
     HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
-use risingwave_common::metrics::{LabelGuardedHistogramVec, LabelGuardedIntGaugeVec};
+use risingwave_common::metrics::{
+    LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
+};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
-    register_guarded_histogram_vec_with_registry, register_guarded_int_gauge_vec_with_registry,
+    register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
+    register_guarded_int_gauge_vec_with_registry,
 };
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_meta_model_v2::WorkerId;
@@ -195,6 +198,11 @@ pub struct MetaMetrics {
 
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
+
+    // ********************************** Auto Schema Change ************************************
+    pub auto_schema_change_failure_cnt: LabelGuardedIntCounterVec<2>,
+    pub auto_schema_change_success_cnt: LabelGuardedIntCounterVec<2>,
+    pub auto_schema_change_latency: LabelGuardedHistogramVec<2>,
 }
 
 pub static GLOBAL_META_METRICS: LazyLock<MetaMetrics> =
@@ -573,6 +581,34 @@ impl MetaMetrics {
         );
         let recovery_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
+        let auto_schema_change_failure_cnt = register_guarded_int_counter_vec_with_registry!(
+            "auto_schema_change_failure_cnt",
+            "Number of failed auto schema change",
+            &["table_id", "table_name"],
+            registry
+        )
+        .unwrap();
+
+        let auto_schema_change_success_cnt = register_guarded_int_counter_vec_with_registry!(
+            "auto_schema_change_success_cnt",
+            "Number of success auto schema change",
+            &["table_id", "table_name"],
+            registry
+        )
+        .unwrap();
+
+        let opts = histogram_opts!(
+            "auto_schema_change_latency",
+            "Latency of the auto schema change process",
+            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
+        );
+        let auto_schema_change_latency = register_guarded_histogram_vec_with_registry!(
+            opts,
+            &["table_id", "table_name"],
+            registry
+        )
+        .unwrap();
+
         let source_is_up = register_guarded_int_gauge_vec_with_registry!(
             "source_status_is_up",
             "source is up or not",
@@ -763,6 +799,9 @@ impl MetaMetrics {
             branched_sst_count,
             compaction_event_consumed_latency,
             compaction_event_loop_iteration_latency,
+            auto_schema_change_failure_cnt,
+            auto_schema_change_success_cnt,
+            auto_schema_change_latency,
         }
     }
 
