@@ -1103,7 +1103,7 @@ mod tests {
         let as_of_desc = AsOfDesc {
             left_idx: 0,
             right_idx: 2,
-            inequality_type: AsOfInequalityType::LT,
+            inequality_type: AsOfInequalityType::Lt,
         };
 
         let chunk_l1 = StreamChunk::from_pretty(
@@ -1251,7 +1251,7 @@ mod tests {
         let as_of_desc = AsOfDesc {
             left_idx: 1,
             right_idx: 2,
-            inequality_type: AsOfInequalityType::GE,
+            inequality_type: AsOfInequalityType::Ge,
         };
 
         let chunk_l1 = StreamChunk::from_pretty(

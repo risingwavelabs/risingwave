@@ -73,10 +73,10 @@ pub struct AsOfDesc {
 impl AsOfDesc {
     pub fn from_protobuf(desc_proto: &AsOfJoinDesc) -> StreamResult<Self> {
         let typ = match desc_proto.inequality_type() {
-            AsOfJoinInequalityType::AsOfInequalityTypeLt => AsOfInequalityType::LT,
-            AsOfJoinInequalityType::AsOfInequalityTypeLe => AsOfInequalityType::LE,
-            AsOfJoinInequalityType::AsOfInequalityTypeGt => AsOfInequalityType::GT,
-            AsOfJoinInequalityType::AsOfInequalityTypeGe => AsOfInequalityType::GE,
+            AsOfJoinInequalityType::AsOfInequalityTypeLt => AsOfInequalityType::Lt,
+            AsOfJoinInequalityType::AsOfInequalityTypeLe => AsOfInequalityType::Le,
+            AsOfJoinInequalityType::AsOfInequalityTypeGt => AsOfInequalityType::Gt,
+            AsOfJoinInequalityType::AsOfInequalityTypeGe => AsOfInequalityType::Ge,
             AsOfJoinInequalityType::AsOfInequalityTypeUnspecified => {
                 bail!("unspecified AsOf join inequality type")
             }

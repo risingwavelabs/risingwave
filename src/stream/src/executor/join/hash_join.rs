@@ -944,78 +944,6 @@ impl JoinEntryState {
         })
     }
 
-    /// Range scan the cache using the inequality index.
-    pub fn range_by_inequality_mut<'a, R>(
-        &'a mut self,
-        range: R,
-        data_types: &'a [DataType],
-    ) -> impl Iterator<
-        Item = Result<
-            (
-                &'a mut StateValueType,
-                StreamExecutorResult<JoinRow<OwnedRow>>,
-            ),
-            JoinEntryError,
-        >,
-    > + 'a
-    where
-        R: RangeBounds<InequalKeyType> + 'a,
-    {
-        Self::get_many_by_inequality_mut(
-            &mut self.cached,
-            self.inequality_index.range(range),
-            data_types,
-        )
-    }
-
-    /// Get the records whose inequality key lower bound satisfy the given bound.
-    pub fn lower_bound_by_inequality_mut<'a, R>(
-        &'a mut self,
-        bound: Bound<&InequalKeyType>,
-        data_types: &'a [DataType],
-    ) -> impl Iterator<
-        Item = Result<
-            (
-                &'a mut StateValueType,
-                StreamExecutorResult<JoinRow<OwnedRow>>,
-            ),
-            JoinEntryError,
-        >,
-    > + 'a
-    where
-        R: RangeBounds<InequalKeyType> + 'a,
-    {
-        Self::get_many_by_inequality_mut(
-            &mut self.cached,
-            self.inequality_index.upper_bound(bound).into_iter(),
-            data_types,
-        )
-    }
-
-    /// Get the records whose inequality key upper bound satisfy the given bound.
-    pub fn upper_bound_by_inequality_mut<'a, R>(
-        &'a mut self,
-        bound: Bound<&InequalKeyType>,
-        data_types: &'a [DataType],
-    ) -> impl Iterator<
-        Item = Result<
-            (
-                &'a mut StateValueType,
-                StreamExecutorResult<JoinRow<OwnedRow>>,
-            ),
-            JoinEntryError,
-        >,
-    > + 'a
-    where
-        R: RangeBounds<InequalKeyType> + 'a,
-    {
-        Self::get_many_by_inequality_mut(
-            &mut self.cached,
-            self.inequality_index.upper_bound(bound).into_iter(),
-            data_types,
-        )
-    }
-
     /// Get the records whose inequality key upper bound satisfy the given bound.
     pub fn upper_bound_by_inequality<'a>(
         &'a self,
@@ -1047,38 +975,6 @@ where {
             consistency_error!(?pk, "{}", JoinEntryError::InequalIndexError);
             None
         }
-    }
-
-    fn get_many_by_inequality_mut<'a, I>(
-        cached: &'a mut JoinRowSet<PkType, StateValueType>,
-        pk_sets: I,
-        data_types: &'a [DataType],
-    ) -> impl Iterator<
-        Item = Result<
-            (
-                &'a mut StateValueType,
-                StreamExecutorResult<JoinRow<OwnedRow>>,
-            ),
-            JoinEntryError,
-        >,
-    > + 'a
-    where
-        I: Iterator<Item = (&'a InequalKeyType, &'a JoinRowSet<PkType, ()>)> + 'a,
-    {
-        pk_sets
-            .flat_map(|(_, pk_set)| pk_set.keys())
-            .flat_map(|pk| {
-                if let Some(value) = cached.get_mut(pk) {
-                    let decoded = value.decode(data_types);
-                    let value_ptr: *mut _ = value as *mut _;
-                    Some(Ok((unsafe { &mut *value_ptr }, decoded)))
-                } else if enable_strict_consistency() {
-                    Some(Err(JoinEntryError::InequalIndexError))
-                } else {
-                    consistency_error!(?pk, "{}", JoinEntryError::InequalIndexError);
-                    None
-                }
-            })
     }
 
     /// Get the records whose inequality key lower bound satisfy the given bound.
