@@ -156,7 +156,7 @@ impl JoinHashMapMetrics {
     }
 }
 
-/// Inequality key description for AsOf join.
+/// Inequality key description for `AsOf` join.
 struct InequalityKeyDesc {
     idx: usize,
     serializer: OrderedRowSerde,
@@ -199,7 +199,7 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     need_degree_table: bool,
     /// Pk is part of the join key.
     pk_contained_in_jk: bool,
-    /// Inequality key description for AsOf join.
+    /// Inequality key description for `AsOf` join.
     inequality_key_desc: Option<InequalityKeyDesc>,
     /// Metrics of the hash map
     metrics: JoinHashMapMetrics,
@@ -1176,7 +1176,7 @@ mod tests {
         );
         check(&mut managed_state, &col_types, &col1, &col2);
 
-        let bound = OwnedRow::new(vec![Some(ScalarImpl::Int64(4))])
+        let bound = OwnedRow::new(vec![Some(ScalarImpl::Int64(8))])
             .memcmp_serialize(&inequality_key_serializer);
         let row = managed_state.lower_bound_by_inequality(Bound::Excluded(&bound), &col_types);
         assert!(row.is_none());

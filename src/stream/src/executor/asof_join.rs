@@ -641,7 +641,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
             } else {
                 None
             };
-            let inequal_key = side_update.ht.serialize_inequal_key_from_row(&row);
+            let inequal_key = side_update.ht.serialize_inequal_key_from_row(row);
 
             if let Some(matched_rows) = matched_rows {
                 let matched_row_by_inequality = match as_of_desc.inequality_type {
@@ -672,12 +672,10 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                             {
                                 yield chunk;
                             }
-                        } else {
-                            if let Some(chunk) =
-                                hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
-                            {
-                                yield chunk;
-                            }
+                        } else if let Some(chunk) =
+                            hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
+                        {
+                            yield chunk;
                         }
                         side_update.ht.insert_row(key, row).await?;
                     }
@@ -690,12 +688,10 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                             {
                                 yield chunk;
                             }
-                        } else {
-                            if let Some(chunk) =
-                                hashjoin_chunk_builder.forward_if_not_matched(Op::Delete, row)
-                            {
-                                yield chunk;
-                            }
+                        } else if let Some(chunk) =
+                            hashjoin_chunk_builder.forward_if_not_matched(Op::Delete, row)
+                        {
+                            yield chunk;
                         }
                         side_update.ht.delete_row(key, row)?;
                     }
@@ -775,7 +771,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
             } else {
                 None
             };
-            let inequal_key = side_update.ht.serialize_inequal_key_from_row(&row);
+            let inequal_key = side_update.ht.serialize_inequal_key_from_row(row);
 
             if let Some(matched_rows) = matched_rows {
                 let update_rows = Self::hash_eq_match(key, &mut side_update.ht).await?.expect("None is not expected because we have checked null in key when getting matched_rows");
@@ -783,7 +779,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                 let (row_to_delete_r, row_to_insert_r) =
                     if let Some(pks) = right_inequality_index.get(&inequal_key) {
                         assert!(!pks.is_empty());
-                        let row_pk = side_match.ht.serialize_pk_from_row(&row);
+                        let row_pk = side_match.ht.serialize_pk_from_row(row);
                         match op {
                             Op::Insert | Op::UpdateInsert => {
                                 // If there are multiple rows match the inequality key in the right table, we use one with smallest pk.
@@ -875,23 +871,23 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                     let range = match as_of_desc.inequality_type {
                         AsOfInequalityType::Lt => (
                             prev_inequality_key
-                                .map_or_else(|| Bound::Unbounded, |ik| Bound::Included(ik)),
+                                .map_or_else(|| Bound::Unbounded, Bound::Included),
                             Bound::Excluded(&inequal_key),
                         ),
                         AsOfInequalityType::Le => (
                             prev_inequality_key
-                                .map_or_else(|| Bound::Unbounded, |ik| Bound::Excluded(ik)),
+                                .map_or_else(|| Bound::Unbounded, Bound::Excluded),
                             Bound::Included(&inequal_key),
                         ),
                         AsOfInequalityType::Gt => (
                             Bound::Excluded(&inequal_key),
                             next_inequality_key
-                                .map_or_else(|| Bound::Unbounded, |ik| Bound::Included(ik)),
+                                .map_or_else(|| Bound::Unbounded, Bound::Included),
                         ),
                         AsOfInequalityType::Ge => (
                             Bound::Included(&inequal_key),
                             next_inequality_key
-                                .map_or_else(|| Bound::Unbounded, |ik| Bound::Excluded(ik)),
+                                .map_or_else(|| Bound::Unbounded, Bound::Excluded),
                         ),
                     };
 
