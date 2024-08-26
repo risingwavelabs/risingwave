@@ -393,17 +393,27 @@ impl StarrocksSinkWriter {
         is_append_only: bool,
         executor_id: u64,
     ) -> Result<Self> {
-        let mut fields_name = schema.names_str();
+        let mut field_names = schema.names_str();
         if !is_append_only {
-            fields_name.push(STARROCKS_DELETE_SIGN);
+            field_names.push(STARROCKS_DELETE_SIGN);
         };
+        // we should quote field names in `MySQL` style to prevent `StarRocks` from rejecting the request due to
+        // a field name being a reserved word. For example, `order`, 'from`, etc.
+        let field_names = field_names
+            .into_iter()
+            .map(|name| format!("`{}`", name))
+            .collect::<Vec<String>>();
+        let field_names_str = field_names
+            .iter()
+            .map(|name| name.as_str())
+            .collect::<Vec<&str>>();
 
         let header = HeaderBuilder::new()
             .add_common_header()
             .set_user_password(config.common.user.clone(), config.common.password.clone())
             .add_json_format()
             .set_partial_update(config.partial_update.clone())
-            .set_columns_name(fields_name)
+            .set_columns_name(field_names_str)
             .set_db(config.common.database.clone())
             .set_table(config.common.table.clone())
             .build();
@@ -711,6 +721,8 @@ pub struct StarrocksInsertResultResponse {
     pub stream_load_plan_time_ms: Option<i32>,
     #[serde(rename = "ExistingJobStatus")]
     pub existing_job_status: Option<String>,
+    #[serde(rename = "ErrorURL")]
+    pub error_url: Option<String>,
 }
 
 pub struct StarrocksClient {
@@ -733,8 +745,10 @@ impl StarrocksClient {
 
         if !STARROCKS_SUCCESS_STATUS.contains(&res.status.as_str()) {
             return Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
-                "Insert error: {:?}",
+                "Insert error: {}, {}, {:?}",
+                res.status,
                 res.message,
+                res.error_url,
             )));
         };
         Ok(res)
@@ -755,8 +769,10 @@ impl StarrocksTxnClient {
             .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
         if !STARROCKS_SUCCESS_STATUS.contains(&res.status.as_str()) {
             return Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
-                "transaction error: {:?}",
+                "transaction error: {}, {}, {:?}",
+                res.status,
                 res.message,
+                res.error_url,
             )));
         }
         res.label.ok_or_else(|| {
