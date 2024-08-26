@@ -484,7 +484,7 @@ pub async fn handle_show_object(
         }
         ShowObject::Cursor => {
             let (rows, pg_descs) = session.get_cursor_manager().get_all_query_cursors().await;
-            return Ok(PgResponse::builder(StatementType::FETCH_CURSOR)
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
                 .row_cnt_opt(Some(rows.len() as i32))
                 .values(PgResponseStream::from(rows), pg_descs)
                 .into());
@@ -494,7 +494,7 @@ pub async fn handle_show_object(
                 .get_cursor_manager()
                 .get_all_subscription_cursors()
                 .await;
-            return Ok(PgResponse::builder(StatementType::FETCH_CURSOR)
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
                 .row_cnt_opt(Some(rows.len() as i32))
                 .values(PgResponseStream::from(rows), pg_descs)
                 .into());
