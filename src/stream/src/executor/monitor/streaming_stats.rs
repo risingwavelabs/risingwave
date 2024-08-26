@@ -27,6 +27,7 @@ use risingwave_common::metrics::{
     RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_common::{
     register_guarded_gauge_vec_with_registry, register_guarded_histogram_vec_with_registry,
     register_guarded_int_counter_vec_with_registry, register_guarded_int_gauge_vec_with_registry,
@@ -1255,6 +1256,11 @@ impl StreamingMetrics {
         let log_store_first_write_epoch = self
             .log_store_first_write_epoch
             .with_guarded_label_values(&label_list);
+
+        let initial_epoch = Epoch::now().0;
+        log_store_first_write_epoch.set(initial_epoch as _);
+        log_store_latest_write_epoch.set(initial_epoch as _);
+        log_store_latest_read_epoch.set(initial_epoch as _);
 
         let log_store_write_rows = self
             .log_store_write_rows
