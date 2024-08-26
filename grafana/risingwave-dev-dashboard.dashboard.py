@@ -1103,7 +1103,7 @@ def section_streaming_cdc(outer_panels):
                     ],
                     ["last"],
                 ),
-                panels.timeseries_latency_ms(
+                panels.timeseries_latency(
                     "Auto Schema Change Latency (sec)",
                     "Latency of Auto Schema Change Process",
                     [

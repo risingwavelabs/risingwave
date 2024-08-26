@@ -25,7 +25,6 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::must_match;
 use risingwave_common::row::Row;
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::ScalarRefImpl;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
@@ -33,7 +32,6 @@ use thiserror_ext::AsReport;
 use tonic::async_trait;
 use with_options::WithOptions;
 
-use super::catalog::desc::SinkDesc;
 use super::encoder::BsonEncoder;
 use crate::connector_common::MongodbCommon;
 use crate::deserialize_bool_from_string;
@@ -184,14 +182,6 @@ impl Sink for MongodbSink {
     type LogSinker = LogSinkerOf<MongodbSinkWriter>;
 
     const SINK_NAME: &'static str = MONGODB_SINK;
-
-    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        match user_specified {
-            // Set default sink decouple to false, because mongodb sink writer only ensure delivery on checkpoint barrier
-            SinkDecouple::Default | SinkDecouple::Disable => Ok(false),
-            SinkDecouple::Enable => Ok(true),
-        }
-    }
 
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
