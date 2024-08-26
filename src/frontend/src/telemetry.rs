@@ -14,9 +14,10 @@
 
 use prost::Message;
 use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
-use risingwave_common::telemetry::report::{report_event_common, TelemetryReportCreator};
+use risingwave_common::telemetry::report::TelemetryReportCreator;
 use risingwave_common::telemetry::{
-    current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase, TelemetryResult,
+    current_timestamp, report_event_common, SystemData, TelemetryNodeType, TelemetryReportBase,
+    TelemetryResult,
 };
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
 use serde::{Deserialize, Serialize};

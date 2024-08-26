@@ -1020,6 +1020,8 @@ pub enum ShowObject {
     Cluster,
     Jobs,
     ProcessList,
+    Cursor,
+    SubscriptionCursor,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1064,6 +1066,8 @@ impl fmt::Display for ShowObject {
             ShowObject::ProcessList => write!(f, "PROCESSLIST"),
             ShowObject::Subscription { schema } => write!(f, "SUBSCRIPTIONS{}", fmt_schema(schema)),
             ShowObject::Secret { schema } => write!(f, "SECRETS{}", fmt_schema(schema)),
+            ShowObject::Cursor => write!(f, "CURSORS"),
+            ShowObject::SubscriptionCursor => write!(f, "SUBSCRIPTION CURSORS"),
         }
     }
 }
@@ -2550,6 +2554,10 @@ impl FunctionArgList {
             order_by: vec![],
             ignore_nulls: false,
         }
+    }
+
+    pub fn is_args_only(&self) -> bool {
+        !self.distinct && !self.variadic && self.order_by.is_empty() && !self.ignore_nulls
     }
 
     pub fn for_agg(distinct: bool, args: Vec<FunctionArg>, order_by: Vec<OrderByExpr>) -> Self {
