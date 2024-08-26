@@ -69,7 +69,8 @@ def do_test(config, file_num, item_num_per_file, prefix):
         s3.bucket_name = '{config['S3_BUCKET']}',
         s3.credentials.access = '{config['S3_ACCESS_KEY']}',
         s3.credentials.secret = '{config['S3_SECRET_KEY']}',
-        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
+        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}',
+        refresh.interval.sec = 1,
     ) FORMAT PLAIN ENCODE PARQUET;''')
 
     total_rows = file_num * item_num_per_file
