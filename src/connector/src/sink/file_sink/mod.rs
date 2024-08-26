@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod azblob;
 pub mod fs;
 pub mod gcs;
 pub mod opendal_sink;
