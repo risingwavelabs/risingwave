@@ -33,9 +33,16 @@ impl TableChangeLog {
         &self.0[start..end]
     }
 
-    pub fn get_epochs(&self, min_epoch: u64, max_count: usize) -> Vec<u64> {
+    /// Returns epochs where value is non-null and >= `min_epoch`.
+    pub fn get_non_empty_epochs(&self, min_epoch: u64, max_count: usize) -> Vec<u64> {
         self.filter_epoch((min_epoch, u64::MAX))
             .iter()
+            .filter(|epoch_change_log| {
+                // Filter out empty change logs
+                let new_value_empty = epoch_change_log.new_value.is_empty();
+                let old_value_empty = epoch_change_log.old_value.is_empty();
+                !new_value_empty || !old_value_empty
+            })
             .flat_map(|epoch_change_log| epoch_change_log.epochs.iter().cloned())
             .filter(|a| a >= &min_epoch)
             .clone()

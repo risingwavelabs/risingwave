@@ -303,7 +303,7 @@ impl HummockManager {
             .get(&TableId::new(table_id))
         {
             let table_change_log = table_change_log.clone();
-            table_change_log.get_epochs(min_epoch, max_count as usize)
+            table_change_log.get_non_empty_epochs(min_epoch, max_count as usize)
         } else {
             vec![]
         }
