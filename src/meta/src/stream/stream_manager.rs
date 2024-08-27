@@ -841,6 +841,24 @@ mod tests {
                             }));
                         }
                         streaming_control_stream_request::Request::InjectBarrier(req) => {
+                            {
+                                let mut guard = inner.actor_infos.lock().unwrap();
+                                for info in req.broadcast_info {
+                                    guard.insert(
+                                        info.get_actor_id(),
+                                        info.get_host().unwrap().clone(),
+                                    );
+                                }
+                            }
+                            {
+                                let mut guard = inner.actor_streams.lock().unwrap();
+                                let mut actor_ids = inner.actor_ids.lock().unwrap();
+                                for actor in req.actors_to_build {
+                                    let actor = actor.actor.as_ref().unwrap();
+                                    assert!(actor_ids.insert(actor.actor_id));
+                                    guard.insert(actor.get_actor_id(), actor.clone());
+                                }
+                            }
                             let _ = tx.send(Ok(StreamingControlStreamResponse {
                                 response: Some(
                                     streaming_control_stream_response::Response::CompleteBarrier(
