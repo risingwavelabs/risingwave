@@ -29,6 +29,8 @@ jobs:
             echo "documentation_update=true" >> $GITHUB_OUTPUT
           elif [[ $PR_LABEL == *"user-facing-changes"* ]]; then
             echo "documentation_update=true" >> $GITHUB_OUTPUT
+          elif [[ $PR_LABEL == *"breaking-change"* ]]; then
+            echo "documentation_update=true" >> $GITHUB_OUTPUT
           else
             echo "documentation_update=false" >> $GITHUB_OUTPUT
           fi
