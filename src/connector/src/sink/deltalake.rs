@@ -478,6 +478,14 @@ impl SinkWriter for DeltaLakeSinkWriter {
         Ok(())
     }
 
+    async fn write_batch_and_try_finish(
+        &mut self,
+        _chunk: StreamChunk,
+        _chunk_id: usize,
+    ) -> Result<bool> {
+        unreachable!()
+    }
+
     async fn abort(&mut self) -> Result<()> {
         Ok(())
     }

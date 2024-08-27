@@ -76,7 +76,6 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for BatchingLogSinkerOf<W> {
 
         let mut current_checkpoint: u64 = 0;
         let commit_checkpoint_interval = self.commit_checkpoint_interval;
-
         loop {
             let (epoch, item): (u64, LogStoreReadItem) = log_reader.next_item().await?;
             if let LogStoreReadItem::UpdateVnodeBitmap(_) = &item {
@@ -116,10 +115,20 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for BatchingLogSinkerOf<W> {
                 }
             };
             match item {
-                LogStoreReadItem::StreamChunk { chunk, .. } => {
-                    if let Err(e) = sink_writer.write_batch(chunk).await {
-                        sink_writer.abort().await?;
-                        return Err(e);
+                LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
+                    match sink_writer
+                        .write_batch_and_try_finish(chunk, chunk_id)
+                        .await
+                    {
+                        Err(e) => {
+                            sink_writer.abort().await?;
+                            return Err(e);
+                        }
+                        Ok(true) => {
+
+                        }
+                        Ok(false) => {
+                        }
                     }
                 }
                 LogStoreReadItem::Barrier { is_checkpoint } => {

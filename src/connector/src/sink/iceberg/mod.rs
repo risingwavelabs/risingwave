@@ -1023,6 +1023,14 @@ impl SinkWriter for IcebergWriter {
         Ok(())
     }
 
+    async fn write_batch_and_try_finish(
+        &mut self,
+        _chunk: StreamChunk,
+        _chunk_id: usize,
+    ) -> Result<bool> {
+        unreachable!()
+    }
+
     /// Write a stream chunk to sink
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         let (mut chunk, ops) = chunk.compact().into_parts();

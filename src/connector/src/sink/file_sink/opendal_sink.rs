@@ -183,7 +183,8 @@ pub struct OpenDalSinkWriter {
     encode_type: SinkEncode,
     engine_type: EngineType,
     pub(crate) batching_strategy: Option<BatchingStrategy>,
-    current_row_num: usize,
+    current_bached_row_num: usize,
+    current_writer_idx: usize,
 }
 
 /// The `FileWriterEnum` enum represents different types of file writers used for various sink
@@ -203,13 +204,25 @@ enum FileWriterEnum {
 #[async_trait]
 impl SinkWriter for OpenDalSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        // Note: epoch is used to name the output files.
-        // Todo: after enabling sink decouple, use the new naming convention.
-        let epoch = self.epoch.ok_or_else(|| {
-            SinkError::File("epoch has not been initialize, call `begin_epoch`".to_string())
-        })?;
+        todo!()
+        // if self.sink_writer.is_none() {
+        //     self.create_sink_writer(self.current_writer_idx).await?;
+        // }
+        // if self.is_append_only {
+        //     self.append_only(chunk).await
+        // } else {
+        //     // currently file sink only supports append only mode.
+        //     unimplemented!()
+        // }
+    }
+
+    async fn write_batch_and_try_finish(
+        &mut self,
+        chunk: StreamChunk,
+        chunk_id: usize,
+    ) -> Result<bool> {
         if self.sink_writer.is_none() {
-            self.create_sink_writer(epoch).await?;
+            self.create_sink_writer(self.current_writer_idx).await?;
         }
         if self.is_append_only {
             self.append_only(chunk).await
@@ -227,15 +240,7 @@ impl SinkWriter for OpenDalSinkWriter {
     /// For the file sink, currently, the sink decoupling feature is not enabled.
     /// When a checkpoint arrives, the force commit is performed to write the data to the file.
     /// In the future if flush and checkpoint is decoupled, we should enable sink decouple accordingly.
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
-        // if is_checkpoint && let Some(sink_writer) = self.sink_writer.take() {
-        //     match sink_writer {
-        //         FileWriterEnum::ParquetFileWriter(w) => {
-        //             let _ = w.close().await?;
-        //         }
-        //     };
-        // }
-
+    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
         Ok(())
     }
 }
@@ -264,11 +269,12 @@ impl OpenDalSinkWriter {
             encode_type,
             engine_type,
             batching_strategy,
-            current_row_num: 0,
+            current_bached_row_num: 0,
+            current_writer_idx: 0,
         })
     }
 
-    async fn create_object_writer(&mut self, epoch: u64) -> Result<OpendalWriter> {
+    async fn create_object_writer(&mut self, writer_idx: usize) -> Result<OpendalWriter> {
         // Todo: specify more file suffixes based on encode_type.
         let suffix = match self.encode_type {
             SinkEncode::Parquet => "parquet",
@@ -281,14 +287,14 @@ impl OpenDalSinkWriter {
             // For the local fs sink, the data will be automatically written to the defined path.
             // Therefore, there is no need to specify the path in the file name.
             EngineType::Fs => {
-                format!("{}_{}.{}", epoch, self.executor_id, suffix,)
+                format!("{}_{}.{}", self.executor_id, writer_idx, suffix)
             }
             _ => format!(
                 "{}/{}_{}.{}",
-                self.write_path, epoch, self.executor_id, suffix,
+                self.write_path, self.executor_id, writer_idx, suffix,
             ),
         };
-
+        tracing::info!("create new writer, file name: {:?}", object_name);
         Ok(self
             .operator
             .writer_with(&object_name)
@@ -296,8 +302,8 @@ impl OpenDalSinkWriter {
             .await?)
     }
 
-    async fn create_sink_writer(&mut self, epoch: u64) -> Result<()> {
-        let object_writer = self.create_object_writer(epoch).await?;
+    async fn create_sink_writer(&mut self, writer_idx: usize) -> Result<()> {
+        let object_writer = self.create_object_writer(writer_idx).await?;
         match self.encode_type {
             SinkEncode::Parquet => {
                 let props = WriterProperties::builder();
@@ -317,9 +323,8 @@ impl OpenDalSinkWriter {
         Ok(())
     }
 
-    async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
+    async fn append_only(&mut self, chunk: StreamChunk) -> Result<(bool)> {
         let (data_chunk, _) = chunk.compact().into_parts();
-
         match self
             .sink_writer
             .as_mut()
@@ -330,21 +335,37 @@ impl OpenDalSinkWriter {
                     IcebergArrowConvert.to_record_batch(self.schema.clone(), &data_chunk)?;
                 let batch_row_nums = batch.num_rows();
                 w.write(&batch).await?;
-                self.current_row_num += batch_row_nums;
-                if self.current_row_num > self.batching_strategy.clone().unwrap().max_row_count.unwrap() && let Some(sink_writer) = self.sink_writer.take(){
-        
-                        match sink_writer {
-                            FileWriterEnum::ParquetFileWriter(w) => {
-                                let _ = w.close().await?;
-                            }
-                        };
-                    
+                self.current_bached_row_num += batch_row_nums;
+                if self.current_bached_row_num
+                    >= self
+                        .batching_strategy
+                        .clone()
+                        .unwrap()
+                        .max_row_count
+                        .unwrap()
+                    && let Some(sink_writer) = self.sink_writer.take()
+                {
+                    match sink_writer {
+                        FileWriterEnum::ParquetFileWriter(w) => {
+                            let metadata = w.close().await?;
+                            tracing::info!(
+                                "Writer {:?}_{:?} finish write file, metadata: {:?}",
+                                self.executor_id,
+                                self.current_writer_idx,
+                                metadata
+                            );
+                            self.current_bached_row_num = 0;
+                        }
+                    };
+                    self.current_writer_idx += 1;
 
+                    self.create_sink_writer(self.current_writer_idx).await?;
+                    return Ok(true);
                 }
             }
         }
 
-        Ok(())
+        Ok(false)
     }
 }
 

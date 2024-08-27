@@ -40,6 +40,13 @@ pub trait SinkWriter: Send + 'static {
     /// Write a stream chunk to sink
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
 
+    /// Write a stream chunk to sink and try close writer according to batching strategy.
+    async fn write_batch_and_try_finish(
+        &mut self,
+        chunk: StreamChunk,
+        chunk_id: usize,
+    ) -> Result<bool>;
+
     /// Receive a barrier and mark the end of current epoch. When `is_checkpoint` is true, the sink
     /// writer should commit the current epoch.
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata>;
