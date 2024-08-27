@@ -50,7 +50,7 @@ INSERT INTO t6 VALUES (1, 2, '1-2'), (2, 2, '2-2'), (3, 2, '3-2'), (5, 2, '5-2')
 statement ok
 FLUSH;
 
-sleep 10s
+sleep 20s
 
 query I
 select count(*) from rw_iceberg_snapshots where source_name = 'iceberg_demo_source';
