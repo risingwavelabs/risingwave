@@ -773,10 +773,16 @@ impl IcebergSink {
             let iceberg_schema = iceberg::arrow::arrow_schema_to_schema(&arrow_schema)
                 .map_err(|e| SinkError::Iceberg(anyhow!(e))).context("failed to convert arrow schema to iceberg schema")?;
 
+            let location = {
+                let mut names = namespace.clone().inner();
+                names.push(self.config.table_name.to_string());
+                format!("{}/{}", self.config.path, names.join("/"))
+            };
+
             let table_creation = TableCreation::builder()
                 .name(self.config.table_name.clone())
                 .schema(iceberg_schema)
-                .location(self.config.path.clone())
+                .location(location)
                 .build();
 
             catalog

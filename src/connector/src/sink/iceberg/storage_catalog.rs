@@ -243,7 +243,7 @@ impl Catalog for StorageCatalog {
         // Write the version hint file
         let version_hint_path = format!("{table_path}/metadata/version-hint.text");
         let version_hint_output = self.file_io.new_output(&version_hint_path)?;
-        version_hint_output.write("v1".into()).await?;
+        version_hint_output.write("1".into()).await?;
 
         Ok(Table::builder()
             .metadata(table_metadata)
