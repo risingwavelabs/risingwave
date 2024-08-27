@@ -51,25 +51,21 @@ pub mod group_split {
     use crate::can_concat;
     use crate::level::{Level, Levels};
 
-    pub fn merge_levels(left_levels: &mut Levels, right_levels: &mut Levels) {
-        let right_l0 = &right_levels.l0;
+    pub fn merge_levels(left_levels: &mut Levels, right_levels: Levels) {
+        let right_l0 = right_levels.l0;
 
-        for right_sub_level in &right_l0.sub_levels {
+        for right_sub_level in right_l0.sub_levels {
             let sub_level = right_sub_level.clone();
             match get_sub_level_insert_hint(&left_levels.l0.sub_levels, &sub_level) {
                 Ok(insert_hint) => {
-                    add_ssts_to_sub_level(
-                        &mut left_levels.l0,
-                        insert_hint,
-                        sub_level.table_infos.clone(),
-                    );
+                    add_ssts_to_sub_level(&mut left_levels.l0, insert_hint, sub_level.table_infos);
                 }
                 Err(insert_hint) => {
                     insert_new_sub_level(
                         &mut left_levels.l0,
                         sub_level.sub_level_id,
                         sub_level.level_type,
-                        sub_level.table_infos.clone(),
+                        sub_level.table_infos,
                         Some(insert_hint),
                     );
                 }
@@ -81,7 +77,7 @@ pub mod group_split {
             .sub_levels
             .sort_by_key(|sub_level| sub_level.sub_level_id);
 
-        // Reinitialise `vnode_partition_count`` to avoid misaligned hierarchies
+        // Reinitialise `vnode_partition_count` to avoid misaligned hierarchies
         // caused by the merge of different compaction groups.(picker might reject the different `vnode_partition_count` sub_level to compact)
         left_levels
             .l0
@@ -89,16 +85,15 @@ pub mod group_split {
             .iter_mut()
             .for_each(|sub_level| sub_level.vnode_partition_count = 0);
 
-        for (idx, level) in right_levels.levels.iter_mut().enumerate() {
+        for (idx, level) in right_levels.levels.into_iter().enumerate() {
             if level.table_infos.is_empty() {
                 continue;
             }
 
-            let insert_table_infos = level.table_infos.clone();
+            let insert_table_infos = level.table_infos;
             left_levels.levels[idx].total_file_size += insert_table_infos
                 .iter()
-                // .map(|sst| sst.estimated_sst_size)
-                .map(|sst| sst.file_size)
+                .map(|sst| sst.sst_size)
                 .sum::<u64>();
             left_levels.levels[idx].uncompressed_file_size += insert_table_infos
                 .iter()
@@ -119,7 +114,6 @@ pub mod group_split {
                     idx, left_levels.levels[idx].table_infos, left_levels.levels[idx].level_idx
                 )
             );
-            level.table_infos.clear();
         }
     }
 

@@ -58,7 +58,7 @@ pub use context::HummockVersionSafePoint;
 use versioning::*;
 pub(crate) mod checkpoint;
 mod commit_epoch;
-pub mod compaction;
+mod compaction;
 pub mod sequence;
 pub mod time_travel;
 mod timer_task;

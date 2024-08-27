@@ -57,7 +57,7 @@ pub struct GroupDeltasSummary {
 
 pub fn summarize_group_deltas(
     group_deltas: &GroupDeltas,
-    default_group_id: CompactionGroupId,
+    compaction_group_id: CompactionGroupId,
 ) -> GroupDeltasSummary {
     let mut delete_sst_levels = Vec::with_capacity(group_deltas.group_deltas.len());
     let mut delete_sst_ids_set = HashSet::new();
@@ -91,7 +91,7 @@ pub fn summarize_group_deltas(
             }
             GroupDelta::GroupDestroy(_) => {
                 assert!(group_destroy.is_none());
-                group_destroy = Some(default_group_id);
+                group_destroy = Some(compaction_group_id);
             }
             GroupDelta::GroupMetaChange(meta_delta) => {
                 group_meta_changes.push(meta_delta.clone());
@@ -847,31 +847,31 @@ impl HummockVersion {
             .state_table_info
             .compaction_group_member_table_ids(left_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
-            .collect_vec();
-
-        assert!(left_group_id_table_ids.is_sorted());
+            .map(|table_id| table_id.table_id);
         let right_group_id_table_ids = self
             .state_table_info
             .compaction_group_member_table_ids(right_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
-            .collect_vec();
-        assert!(right_group_id_table_ids.is_sorted());
-        assert!(
-            left_group_id_table_ids.last().unwrap() < right_group_id_table_ids.first().unwrap()
-        );
+            .map(|table_id| table_id.table_id);
+
+        assert!(left_group_id_table_ids
+            .chain(right_group_id_table_ids)
+            .is_sorted());
 
         let total_cg = self.levels.keys().cloned().collect::<Vec<_>>();
-        let [left_levels, right_levels] = self
-            .levels
-            .get_many_mut([&left_group_id, &right_group_id])
-            .unwrap_or_else(|| {
-                panic!(
-                    "compaction group should exist left {} right {} all {:?}",
-                    left_group_id, right_group_id, total_cg
-                )
-            });
+        let right_levels = self.levels.remove(&right_group_id).unwrap_or_else(|| {
+            panic!(
+                "compaction group should exist right {} all {:?}",
+                right_group_id, total_cg
+            )
+        });
+
+        let left_levels = self.levels.get_mut(&left_group_id).unwrap_or_else(|| {
+            panic!(
+                "compaction group should exist left {} all {:?}",
+                left_group_id, total_cg
+            )
+        });
 
         group_split::merge_levels(left_levels, right_levels);
     }
@@ -1558,7 +1558,7 @@ mod tests {
             },
             table_ids,
             file_size: 100,
-            // estimated_sst_size: 100,
+            sst_size: 100,
             uncompressed_file_size: 100,
             ..Default::default()
         }
@@ -1869,7 +1869,7 @@ mod tests {
             let mut left_levels = Levels::default();
             let mut right_levels = Levels::default();
 
-            group_split::merge_levels(&mut left_levels, &mut right_levels);
+            group_split::merge_levels(&mut left_levels, right_levels);
         }
 
         {
@@ -1883,7 +1883,7 @@ mod tests {
             );
             let mut right_levels = right_levels.clone();
 
-            group_split::merge_levels(&mut left_levels, &mut right_levels);
+            group_split::merge_levels(&mut left_levels, right_levels);
 
             assert!(left_levels.l0.sub_levels.len() == 3);
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
@@ -1908,7 +1908,7 @@ mod tests {
                 },
             );
 
-            group_split::merge_levels(&mut left_levels, &mut right_levels);
+            group_split::merge_levels(&mut left_levels, right_levels);
 
             assert!(left_levels.l0.sub_levels.len() == 3);
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
@@ -1926,7 +1926,7 @@ mod tests {
             let mut left_levels = left_levels.clone();
             let mut right_levels = right_levels.clone();
 
-            group_split::merge_levels(&mut left_levels, &mut right_levels);
+            group_split::merge_levels(&mut left_levels, right_levels);
 
             assert!(left_levels.l0.sub_levels.len() == 4);
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);

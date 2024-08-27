@@ -13,14 +13,12 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::ops::{Deref, DerefMut};
+use std::ops::DerefMut;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compact_task::ReportTask;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ids, TableGroupInfo,
-};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::TableGroupInfo;
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::version::{GroupDelta, GroupDeltas};
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -67,39 +65,45 @@ impl HummockManager {
         }
 
         let state_table_info = versioning.current_version.state_table_info.clone();
-        let member_table_ids_1 = state_table_info
+        let mut member_table_ids_1 = state_table_info
             .compaction_group_member_table_ids(group_1)
             .iter()
             .cloned()
             .collect_vec();
 
-        let member_table_ids_2 = state_table_info
+        let mut member_table_ids_2 = state_table_info
             .compaction_group_member_table_ids(group_2)
             .iter()
             .cloned()
             .collect_vec();
 
-        let mut combine_1 = member_table_ids_1.clone();
-        combine_1.extend_from_slice(&member_table_ids_2);
+        debug_assert!(!member_table_ids_1.is_empty());
+        debug_assert!(!member_table_ids_2.is_empty());
+        assert!(member_table_ids_1.is_sorted());
+        assert!(member_table_ids_2.is_sorted());
 
-        let mut combine_2 = member_table_ids_2;
-        combine_2.extend_from_slice(&member_table_ids_1);
+        // Make sure `member_table_ids_1` is smaller than `member_table_ids_2`
+        let (left_group_id, right_group_id) =
+            if member_table_ids_1.first().unwrap() < member_table_ids_2.first().unwrap() {
+                (group_1, group_2)
+            } else {
+                std::mem::swap(&mut member_table_ids_1, &mut member_table_ids_2);
+                (group_2, group_1)
+            };
 
-        if !combine_1.is_sorted() && !combine_2.is_sorted() {
+        // We can only merge two groups with non-overlapping member table ids
+        if member_table_ids_1.last().unwrap() >= member_table_ids_2.first().unwrap() {
             return Err(Error::CompactionGroup(format!(
                 "invalid merge group_1 {} group_2 {}",
-                group_1, group_2
+                left_group_id, right_group_id
             )));
         }
 
-        let mut left_group_id = group_1;
-        let mut right_group_id = group_2;
-        let combine_member_table_ids = if combine_1.is_sorted() {
-            combine_1
-        } else {
-            std::mem::swap(&mut left_group_id, &mut right_group_id);
-            combine_2
-        };
+        let combined_member_table_ids = member_table_ids_1
+            .iter()
+            .chain(member_table_ids_2.iter())
+            .collect_vec();
+        assert!(combined_member_table_ids.is_sorted());
 
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
@@ -110,21 +114,6 @@ impl HummockManager {
         let mut new_version_delta = version.new_delta();
 
         let target_compaction_group_id = {
-            let mut config = self
-                .compaction_group_manager
-                .read()
-                .await
-                .try_get_compaction_group_config(group_1)
-                .unwrap()
-                .compaction_config()
-                .deref()
-                .clone();
-
-            {
-                // update config
-                config.split_weight_by_vnode = 0;
-            }
-
             // merge right_group_id to left_group_id and remove right_group_id
             new_version_delta.group_deltas.insert(
                 left_group_id,
@@ -141,7 +130,7 @@ impl HummockManager {
         // TODO: remove compaciton group_id from state_table_info
         // rewrite compaction_group_id for all tables
         new_version_delta.with_latest_version(|version, new_version_delta| {
-            for table_id in combine_member_table_ids {
+            for table_id in combined_member_table_ids {
                 let table_id = TableId::new(table_id.table_id());
                 let info = version
                     .state_table_info
@@ -183,10 +172,8 @@ impl HummockManager {
 
             new_version_delta.pre_apply();
 
-            // purge right_group_id
-            compaction_groups_txn.purge(HashSet::from_iter(get_compaction_group_ids(
-                version.latest_version(),
-            )));
+            // remove right_group_id
+            compaction_groups_txn.remove(right_group_id);
             commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
         }
 
