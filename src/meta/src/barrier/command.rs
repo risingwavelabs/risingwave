@@ -844,6 +844,43 @@ impl CommandContext {
         mutation
     }
 
+    pub fn actors_to_create(&self) -> HashMap<WorkerId, Vec<StreamActor>> {
+        match &self.command {
+            Command::CreateStreamingJob { info, job_type } => {
+                let mut map = match job_type {
+                    CreateStreamingJobType::Normal => HashMap::new(),
+                    CreateStreamingJobType::SinkIntoTable(replace_table) => {
+                        replace_table.new_table_fragments.actors_to_create()
+                    }
+                    CreateStreamingJobType::SnapshotBackfill(_) => {
+                        // for snapshot backfill, the actors to create is measured separately
+                        return HashMap::new();
+                    }
+                };
+                for (worker_id, new_actors) in info.table_fragments.actors_to_create() {
+                    map.entry(worker_id).or_default().extend(new_actors)
+                }
+                map
+            }
+            Command::RescheduleFragment { reschedules, .. } => {
+                let mut map: HashMap<WorkerId, Vec<_>> = HashMap::new();
+                for (actor, status) in reschedules
+                    .values()
+                    .flat_map(|reschedule| reschedule.newly_created_actors.iter())
+                {
+                    let worker_id = status.location.as_ref().unwrap().worker_node_id;
+                    map.entry(worker_id).or_default().push(actor.clone());
+                }
+
+                map
+            }
+            Command::ReplaceTable(replace_table) => {
+                replace_table.new_table_fragments.actors_to_create()
+            }
+            _ => HashMap::new(),
+        }
+    }
+
     fn generate_update_mutation_for_replace_table(
         old_table_fragments: &TableFragments,
         merge_updates: &[MergeUpdate],

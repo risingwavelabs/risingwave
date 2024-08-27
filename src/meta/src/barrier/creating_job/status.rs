@@ -19,6 +19,7 @@ use std::sync::Arc;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
+use risingwave_pb::stream_service::BuildActorInfo;
 
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::InflightGraphInfo;
@@ -39,6 +40,7 @@ pub(super) enum CreatingStreamingJobStatus {
         /// The `prev_epoch` of pending non checkpoint barriers
         pending_non_checkpoint_barriers: Vec<u64>,
         snapshot_backfill_actors: HashMap<WorkerId, HashSet<ActorId>>,
+        actors_to_create: Option<HashMap<WorkerId, Vec<BuildActorInfo>>>,
     },
     ConsumingLogStore {
         graph_info: InflightGraphInfo,
@@ -89,7 +91,12 @@ impl CreatingStreamingJobStatus {
         &mut self,
         is_checkpoint: bool,
     ) -> Option<(
-        Vec<(TracedEpoch, TracedEpoch, BarrierKind)>,
+        Vec<(
+            TracedEpoch,
+            TracedEpoch,
+            BarrierKind,
+            HashMap<WorkerId, Vec<BuildActorInfo>>,
+        )>,
         Option<InflightGraphInfo>,
     )> {
         if let CreatingStreamingJobStatus::ConsumingSnapshot {
@@ -99,10 +106,12 @@ impl CreatingStreamingJobStatus {
             graph_info,
             pending_non_checkpoint_barriers,
             ref backfill_epoch,
+            actors_to_create,
             ..
         } = self
         {
             if create_mview_tracker.has_pending_finished_jobs() {
+                assert!(actors_to_create.is_none());
                 pending_non_checkpoint_barriers.push(*backfill_epoch);
 
                 let prev_epoch = Epoch::from_physical_time(*prev_epoch_fake_physical_time);
@@ -110,6 +119,7 @@ impl CreatingStreamingJobStatus {
                     TracedEpoch::new(Epoch(*backfill_epoch)),
                     TracedEpoch::new(prev_epoch),
                     BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers)),
+                    HashMap::new(),
                 )]
                 .into_iter()
                 .chain(pending_commands.drain(..).map(|command_ctx| {
@@ -117,6 +127,7 @@ impl CreatingStreamingJobStatus {
                         command_ctx.curr_epoch.clone(),
                         command_ctx.prev_epoch.clone(),
                         command_ctx.kind.clone(),
+                        HashMap::new(),
                     )
                 }))
                 .collect();
@@ -135,7 +146,15 @@ impl CreatingStreamingJobStatus {
                 } else {
                     BarrierKind::Barrier
                 };
-                Some((vec![(curr_epoch, prev_epoch, kind)], None))
+                Some((
+                    vec![(
+                        curr_epoch,
+                        prev_epoch,
+                        kind,
+                        actors_to_create.take().unwrap_or_default(),
+                    )],
+                    None,
+                ))
             }
         } else {
             None
