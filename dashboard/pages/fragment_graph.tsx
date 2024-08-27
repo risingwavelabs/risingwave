@@ -289,7 +289,7 @@ export default function Streaming() {
           let actorIds = fragmentIdToRelationId[fragmentId].ids
           if (actorIds.includes(searchActorIdInt)) {
             setRelationId(parseInt(relationId))
-            setSelectedFragmentId(fragmentId)
+            setSelectedFragmentId(parseInt(fragmentId))
             return
           }
         }
