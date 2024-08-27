@@ -136,7 +136,8 @@ impl MaterializedInputState {
                 | PbAggKind::ArrayAgg
                 | PbAggKind::JsonbAgg
                 | PbAggKind::JsonbObjectAgg,
-            ) => Box::new(GenericAggStateCache::new(
+            )
+            | AggKind::WrapScalar(_) => Box::new(GenericAggStateCache::new(
                 OrderedStateCache::new(),
                 agg_call.args.arg_types(),
             )),
