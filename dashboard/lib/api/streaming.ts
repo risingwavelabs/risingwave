@@ -27,7 +27,7 @@ import {
   View,
 } from "../../proto/gen/catalog"
 import {
-  ListObjectDependenciesResponse_ObjectDependencies as ObjectDependencies,
+  ListObjectDependenciesResponse_ObjectDependencies as ObjectDependencies, RelationIdInfos,
   TableFragments,
 } from "../../proto/gen/meta"
 import { ColumnCatalog, Field } from "../../proto/gen/plan_common"
@@ -43,8 +43,8 @@ export async function getFragmentsByJobId(jobId: number): Promise<TableFragments
   return tableFragments
 }
 
-export async function getFragmentIds(): Promise<Map<number, Set<number>>> {
-  let fragmentIds: Map<number, Set<number>> = (await api.get("/fragments/ids"))
+export async function getRelationIdInfos(): Promise<RelationIdInfos> {
+  let fragmentIds: RelationIdInfos = (await api.get("/relation_id_infos"))
   return fragmentIds
 }
 

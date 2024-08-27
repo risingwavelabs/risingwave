@@ -45,7 +45,13 @@ import {
   fetchEmbeddedBackPressure,
   fetchPrometheusBackPressure,
 } from "../lib/api/metric"
-import { getFragments, getFragmentIds, getFragmentsByJobId, getStreamingJobs } from "../lib/api/streaming"
+import {
+  getFragments,
+  getFragmentIds,
+  getFragmentsByJobId,
+  getStreamingJobs,
+  getRelationIdInfos
+} from "../lib/api/streaming"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
@@ -194,9 +200,9 @@ interface EmbeddedBackPressureInfo {
 
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
-  // const { response: fragmentList } = useFetch(getFragments)
   const { response: fragmentList } = useFetch(getFragments)
-  const { response: relationIdToFragmentIds } = useFetch(getFragmentIds)
+  const { response: fragmentList } = useFetch(getFragments)
+  const { response: relationIdInfos } = useFetch(getRelationIdInfos)
 
   const [relationId, setRelationId] = useQueryState("id", parseAsInteger)
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
