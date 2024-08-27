@@ -227,3 +227,6 @@ harness = false
 
 [lints]
 workspace = true
+
+# [features]
+# hdfs-backend = ["opendal/services-hdfs", "dep:risingwave_jni_core"]

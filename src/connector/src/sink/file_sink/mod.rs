@@ -17,3 +17,5 @@ pub mod fs;
 pub mod gcs;
 pub mod opendal_sink;
 pub mod s3;
+#[cfg(feature = "hdfs-backend")]
+pub mod hdfs;
