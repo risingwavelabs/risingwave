@@ -200,8 +200,6 @@ interface EmbeddedBackPressureInfo {
 
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
-  const { response: fragmentList } = useFetch(getFragments)
-  const { response: fragmentList } = useFetch(getFragments)
   const { response: relationIdInfos } = useFetch(getRelationIdInfos)
 
   const [relationId, setRelationId] = useQueryState("id", parseAsInteger)
@@ -267,39 +265,38 @@ export default function Streaming() {
 
   const handleSearchFragment = () => {
     const searchFragIdInt = parseInt(searchFragId)
-    if (fragmentList) {
-      for (const tf of fragmentList) {
-        for (const fragmentId in tf.fragments) {
-          const fragment = tf.fragments[fragmentId]
-          if (fragment.fragmentId == searchFragIdInt) {
-            setRelationId(tf.tableId)
-            setSelectedFragmentId(fragment.fragmentId)
+    if (relationIdInfos) {
+      let map = relationIdInfos.map
+      for (const relationId in map) {
+        const fragmentIdToRelationId = map[relationId].map
+        for (const fragmentId in fragmentIdToRelationId) {
+          if (parseInt(fragmentId) == searchFragIdInt) {
+            setRelationId(parseInt(relationId))
+            setSelectedFragmentId(searchFragIdInt)
             return
           }
         }
       }
     }
-
     toast(new Error(`Fragment ${searchFragIdInt} not found`))
   }
 
   const handleSearchActor = () => {
     const searchActorIdInt = parseInt(searchActorId)
-    if (fragmentList) {
-      for (const tf of fragmentList) {
-        for (const fragmentId in tf.fragments) {
-          const fragment = tf.fragments[fragmentId]
-          for (const actor of fragment.actors) {
-            if (actor.actorId == searchActorIdInt) {
-              setRelationId(tf.tableId)
-              setSelectedFragmentId(fragment.fragmentId)
-              return
-            }
+    if (relationIdInfos) {
+      let map = relationIdInfos.map
+      for (const relationId in map) {
+        const fragmentIdToRelationId = map[relationId].map
+        for (const fragmentId in fragmentIdToRelationId) {
+          let actorIds = fragmentIdToRelationId[fragmentId].ids
+          if (actorIds.includes(searchActorIdInt)) {
+            setRelationId(parseInt(relationId))
+            setSelectedFragmentId(fragmentId)
+            return
           }
         }
       }
     }
-
     toast(new Error(`Actor ${searchActorIdInt} not found`))
   }
 
