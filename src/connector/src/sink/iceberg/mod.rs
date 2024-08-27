@@ -725,19 +725,20 @@ impl Sink for IcebergSink {
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
     fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        let commit_checkpoint_interval =
-            if let Some(interval) = desc.properties.get("commit_checkpoint_interval") {
+        let commit_checkpoint_interval = desc.properties
+            .get("commit_checkpoint_interval")
+            .map(|interval| {
                 interval
                     .parse::<u64>()
                     .unwrap_or(DEFAULT_COMMIT_CHECKPOINT_INTERVAL)
-            } else {
-                DEFAULT_COMMIT_CHECKPOINT_INTERVAL
-            };
+            });
 
         match user_specified {
             SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => {
-                if commit_checkpoint_interval > 1 {
+                if let Some(commit_checkpoint_interval) = commit_checkpoint_interval
+                    && commit_checkpoint_interval > 1
+                {
                     return Err(SinkError::Config(anyhow!(
                         "config conflict: Iceberg config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
                     )));
