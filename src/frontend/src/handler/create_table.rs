@@ -1157,7 +1157,8 @@ async fn derive_schema_for_cdc_table(
         ))
     } else {
         let columns = bind_sql_columns(column_defs)?;
-        // retrieve primary key names from original table catalog if we can
+        // For table created by `create table t (*)` the constraint is empty, we need to
+        // retrieve primary key names from original table catalog if available
         let pk_names = if let Some(original_catalog) = original_catalog {
             original_catalog
                 .pk
