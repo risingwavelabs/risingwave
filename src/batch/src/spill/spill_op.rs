@@ -61,15 +61,13 @@ impl SpillOp {
 
         let op = match spill_backend {
             SpillBackend::Disk => {
-                let mut builder = Fs::default();
-                builder.root(&root);
+                let builder = Fs::default().root(&root);
                 Operator::new(builder)?
                     .layer(RetryLayer::default())
                     .finish()
             }
             SpillBackend::Memory => {
-                let mut builder = Memory::default();
-                builder.root(&root);
+                let builder = Memory::default().root(&root);
                 Operator::new(builder)?
                     .layer(RetryLayer::default())
                     .finish()
@@ -86,8 +84,7 @@ impl SpillOp {
             std::env::var(RW_BATCH_SPILL_DIR_ENV).unwrap_or_else(|_| DEFAULT_SPILL_DIR.to_string());
         let root = format!("/{}/{}/", spill_dir, RW_MANAGED_SPILL_DIR);
 
-        let mut builder = Fs::default();
-        builder.root(&root);
+        let builder = Fs::default().root(&root);
 
         let op: Operator = Operator::new(builder)?
             .layer(RetryLayer::default())

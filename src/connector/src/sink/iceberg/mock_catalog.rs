@@ -32,8 +32,7 @@ impl MockCatalog {
     fn sparse_table(self: &Arc<Self>) -> Table {
         Table::builder_from_catalog(
             {
-                let mut builder = Memory::default();
-                builder.root("/tmp");
+                let builder = Memory::default().root("/tmp");
                 Operator::new(builder).unwrap().finish()
             },
             self.clone(),
@@ -124,8 +123,7 @@ impl MockCatalog {
     fn range_table(self: &Arc<Self>) -> Table {
         Table::builder_from_catalog(
             {
-                let mut builder = Memory::default();
-                builder.root("/tmp");
+                let builder = Memory::default().root("/tmp");
                 Operator::new(builder).unwrap().finish()
             },
             self.clone(),

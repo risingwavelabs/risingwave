@@ -35,13 +35,13 @@ impl OpendalObjectStore {
         // Create webhdfs backend builder.
         let mut builder = Webhdfs::default();
         // Set the name node for webhdfs.
-        builder.endpoint(&endpoint);
+        builder = builder.endpoint(&endpoint);
         // Set the root for hdfs, all operations will happen under this root.
         // NOTE: the root must be absolute path.
-        builder.root(&root);
+        builder = builder.root(&root);
 
         let atomic_write_dir = format!("{}/{}", root, ATOMIC_WRITE_DIR);
-        builder.atomic_write_dir(&atomic_write_dir);
+        builder = builder.atomic_write_dir(&atomic_write_dir);
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .finish();

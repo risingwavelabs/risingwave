@@ -32,16 +32,16 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         assume_role: Option<String>,
     ) -> ConnectorResult<Self> {
         // Create s3 builder.
-        let mut builder = S3::default();
-        builder.bucket(&s3_properties.bucket_name);
-        builder.region(&s3_properties.region_name);
+        let mut builder = S3::default()
+            .bucket(&s3_properties.bucket_name)
+            .region(&s3_properties.region_name);
 
         if let Some(endpoint_url) = s3_properties.endpoint_url {
-            builder.endpoint(&endpoint_url);
+            builder = builder.endpoint(&endpoint_url);
         }
 
         if let Some(access) = s3_properties.access {
-            builder.access_key_id(&access);
+            builder = builder.access_key_id(&access);
         } else {
             tracing::error!(
                 "access key id of aws s3 is not set, bucket {}",
@@ -50,7 +50,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         }
 
         if let Some(secret) = s3_properties.secret {
-            builder.secret_access_key(&secret);
+            builder = builder.secret_access_key(&secret);
         } else {
             tracing::error!(
                 "secret access key of aws s3 is not set, bucket {}",
@@ -59,10 +59,10 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         }
 
         if let Some(assume_role) = assume_role {
-            builder.role_arn(&assume_role);
+            builder = builder.role_arn(&assume_role);
         }
 
-        builder.disable_config_load();
+        builder = builder.disable_config_load();
         let (prefix, matcher) = if let Some(pattern) = s3_properties.match_pattern.as_ref() {
             let prefix = get_prefix(pattern);
             let matcher = glob::Pattern::new(pattern)

@@ -32,11 +32,10 @@ impl OpendalObjectStore {
         metrics: Arc<ObjectStoreMetrics>,
     ) -> ObjectResult<Self> {
         // Create fs backend builder.
-        let mut builder = Fs::default();
-        builder.root(&root);
+        let mut builder = Fs::default().root(&root);
         if config.set_atomic_write_dir {
             let atomic_write_dir = format!("{}/{}", root, ATOMIC_WRITE_DIR);
-            builder.atomic_write_dir(&atomic_write_dir);
+            builder = builder.atomic_write_dir(&atomic_write_dir);
         }
 
         let op: Operator = Operator::new(builder)?

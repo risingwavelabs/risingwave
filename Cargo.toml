@@ -145,7 +145,7 @@ arrow-cast-iceberg = { package = "arrow-cast", version = "52" }
 iceberg = "0.3.0"
 iceberg-catalog-rest = "0.3.0"
 iceberg-catalog-glue = "0.3.0"
-opendal = "0.47"
+opendal = "0.49"
 arrow-array = "50"
 arrow-arith = "50"
 arrow-cast = "50"

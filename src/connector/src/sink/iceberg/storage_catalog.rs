@@ -117,16 +117,15 @@ impl StorageCatalog {
     /// `table_path`: relative path of table dir under warehouse root.
     async fn list_table_metadata_paths(&self, table_path: &str) -> Result<Vec<String>> {
         // create s3 operator
-        let mut builder = opendal::services::S3::default();
-        builder
+        let mut builder = opendal::services::S3::default()
             .root(&self.warehouse)
             .access_key_id(&self.config.access_key)
             .secret_access_key(&self.config.secret_key);
         if let Some(endpoint) = &self.config.endpoint {
-            builder.endpoint(endpoint);
+            builder = builder.endpoint(endpoint);
         }
         if let Some(region) = &self.config.region {
-            builder.region(region);
+            builder = builder.region(region);
         }
         let op: Operator = Operator::new(builder)
             .map_err(|err| Error::new(ErrorKind::Unexpected, err.to_report_string()))?

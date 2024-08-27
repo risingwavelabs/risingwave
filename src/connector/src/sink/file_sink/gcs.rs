@@ -67,13 +67,10 @@ pub const GCS_SINK: &str = "gcs";
 impl<S: OpendalSinkBackend> FileSink<S> {
     pub fn new_gcs_sink(config: GcsConfig) -> Result<Operator> {
         // Create gcs builder.
-        let mut builder = Gcs::default();
-
-        builder.bucket(&config.common.bucket_name);
-
-        builder.credential(&config.common.credential);
-
-        builder.service_account(&config.common.service_account);
+        let builder = Gcs::default()
+            .bucket(&config.common.bucket_name)
+            .credential(&config.common.credential)
+            .service_account(&config.common.service_account);
 
         let operator: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
