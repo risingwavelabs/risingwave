@@ -244,6 +244,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.filter_builder.add_raw_data(filter_data);
         let block_meta = self.block_metas.last_mut().unwrap();
         self.writer.write_block_bytes(buf, block_meta).await?;
+
         Ok(true)
     }
 
@@ -538,6 +539,21 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         );
         let bloom_filter_size = meta.bloom_filter.len();
         let sstable_file_size = sst_info.file_size as usize;
+
+        if !meta.block_metas.is_empty() {
+            // fill total_compressed_size
+            let mut last_table_id = meta.block_metas[0].table_id().table_id();
+            let mut last_table_stats = self.table_stats.get_mut(&last_table_id).unwrap();
+            for block_meta in &meta.block_metas {
+                let block_table_id = block_meta.table_id();
+                if last_table_id != block_table_id.table_id() {
+                    last_table_id = block_table_id.table_id();
+                    last_table_stats = self.table_stats.get_mut(&last_table_id).unwrap();
+                }
+
+                last_table_stats.total_compressed_size += block_meta.len as u64;
+            }
+        }
 
         let writer_output = self.writer.finish(meta).await?;
         Ok(SstableBuilderOutput::<W::Output> {
