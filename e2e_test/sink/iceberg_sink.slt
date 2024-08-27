@@ -52,6 +52,14 @@ FLUSH;
 
 sleep 20s
 
+statement ok
+FLUSH;
+
+query I
+select count(*) from iceberg_demo_source;
+----
+7
+
 query I
 select count(*) from rw_iceberg_snapshots where source_name = 'iceberg_demo_source';
 ----
