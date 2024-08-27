@@ -8793,6 +8793,7 @@ dependencies = [
  "openssl",
  "panic-message",
  "parking_lot 0.12.1",
+ "postgres-types",
  "reqwest 0.12.4",
  "risingwave_common",
  "risingwave_sqlparser",
