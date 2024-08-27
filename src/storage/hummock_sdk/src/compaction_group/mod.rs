@@ -72,10 +72,14 @@ pub mod group_split {
             }
         }
 
-        left_levels
-            .l0
-            .sub_levels
-            .sort_by_key(|sub_level| sub_level.sub_level_id);
+        assert!(
+            left_levels
+                .l0
+                .sub_levels
+                .is_sorted_by_key(|sub_level| sub_level.sub_level_id),
+            "{}",
+            format!("left_levels.l0.sub_levels: {:?}", left_levels.l0.sub_levels)
+        );
 
         // Reinitialise `vnode_partition_count` to avoid misaligned hierarchies
         // caused by the merge of different compaction groups.(picker might reject the different `vnode_partition_count` sub_level to compact)

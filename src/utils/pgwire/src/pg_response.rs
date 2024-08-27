@@ -22,7 +22,7 @@ use crate::error::PsqlError;
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_protocol::ParameterStatus;
 use crate::pg_server::BoxedError;
-use crate::types::Row;
+use crate::types::{Format, Row};
 
 pub type RowSet = Vec<Row>;
 pub type RowSetResult = Result<RowSet, BoxedError>;
@@ -129,6 +129,8 @@ pub struct PgResponse<VS> {
     // row count of affected row. Used for INSERT, UPDATE, DELETE, COPY, and other statements that
     // don't return rows.
     row_cnt: Option<i32>,
+    // Used for INSERT, UPDATE, DELETE to specify the format of the affected row count.
+    row_cnt_format: Option<Format>,
     notices: Vec<String>,
     values_stream: Option<VS>,
     callback: Option<BoxedCallback>,
@@ -141,6 +143,8 @@ pub struct PgResponseBuilder<VS> {
     // row count of affected row. Used for INSERT, UPDATE, DELETE, COPY, and other statements that
     // don't return rows.
     row_cnt: Option<i32>,
+    // Used for INSERT, UPDATE, DELETE to specify the format of the affected row count.
+    row_cnt_format: Option<Format>,
     notices: Vec<String>,
     values_stream: Option<VS>,
     callback: Option<BoxedCallback>,
@@ -153,6 +157,7 @@ impl<VS> From<PgResponseBuilder<VS>> for PgResponse<VS> {
         Self {
             stmt_type: builder.stmt_type,
             row_cnt: builder.row_cnt,
+            row_cnt_format: builder.row_cnt_format,
             notices: builder.notices,
             values_stream: builder.values_stream,
             callback: builder.callback,
@@ -168,6 +173,7 @@ impl<VS> PgResponseBuilder<VS> {
         Self {
             stmt_type,
             row_cnt,
+            row_cnt_format: None,
             notices: vec![],
             values_stream: None,
             callback: None,
@@ -185,6 +191,13 @@ impl<VS> PgResponseBuilder<VS> {
 
     pub fn row_cnt_opt(self, row_cnt: Option<i32>) -> Self {
         Self { row_cnt, ..self }
+    }
+
+    pub fn row_cnt_format_opt(self, row_cnt_format: Option<Format>) -> Self {
+        Self {
+            row_cnt_format,
+            ..self
+        }
     }
 
     pub fn values(self, values_stream: VS, row_desc: Vec<PgFieldDescriptor>) -> Self {
@@ -392,6 +405,10 @@ where
 
     pub fn affected_rows_cnt(&self) -> Option<i32> {
         self.row_cnt
+    }
+
+    pub fn row_cnt_format(&self) -> Option<Format> {
+        self.row_cnt_format
     }
 
     pub fn is_query(&self) -> bool {
