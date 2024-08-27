@@ -49,7 +49,8 @@ pub struct DashboardService {
 pub type Service = Arc<DashboardService>;
 
 pub(super) mod handlers {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
+
     use anyhow::Context;
     use axum::Json;
     use futures::future::join_all;
@@ -61,7 +62,9 @@ pub(super) mod handlers {
     use risingwave_pb::catalog::{PbDatabase, PbSchema, Sink, Source, Subscription, Table, View};
     use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
-    use risingwave_pb::meta::PbTableFragments;
+    use risingwave_pb::meta::{
+        ActorIds, FragmentIdToActorIdMap, PbTableFragments, RelationIdInfos,
+    };
     use risingwave_pb::monitor_service::{
         GetBackPressureResponse, HeapProfilingResponse, ListHeapProfilingResponse,
         StackTraceResponse,
@@ -214,29 +217,55 @@ pub(super) mod handlers {
         Ok(Json(table_fragments))
     }
 
-    pub async fn list_fragment_ids(
+    pub async fn get_relation_id_infos(
         Extension(srv): Extension<Service>,
-    ) -> Result<Json<HashMap<u32, HashSet<u32>>>> {
-        let table_fragments = match &srv.metadata_manager {
-            MetadataManager::V1(mgr) => mgr
-                .fragment_manager
-                .get_fragment_read_guard()
-                .await
-                .table_fragments()
-                .iter()
-                .map(|(id, tf)| (id.table_id, tf.fragments.keys().copied().collect::<HashSet<u32>>()))
-                .collect(),
-            MetadataManager::V2(mgr) => mgr
-                .catalog_controller
-                .table_fragments()
-                .await
-                .map_err(err)?
-                .iter()
-                .map(|(id, tf)| (*id as u32, tf.fragments.keys().copied().collect::<HashSet<u32>>()))
-                .collect(),
+    ) -> Result<Json<RelationIdInfos>> {
+        let map = match &srv.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                let core = mgr.fragment_manager.get_fragment_read_guard().await;
+                let table_fragments = core.table_fragments();
+                let mut map = HashMap::new();
+                for (id, tf) in table_fragments {
+                    let mut fragment_id_to_actor_ids = HashMap::new();
+                    for (fragment_id, fragment) in &tf.fragments {
+                        let actor_ids = fragment.actors.iter().map(|a| a.actor_id).collect_vec();
+                        fragment_id_to_actor_ids.insert(*fragment_id, ActorIds { ids: actor_ids });
+                    }
+                    map.insert(
+                        id.table_id,
+                        FragmentIdToActorIdMap {
+                            map: fragment_id_to_actor_ids,
+                        },
+                    );
+                }
+                map
+            }
+            MetadataManager::V2(mgr) => {
+                let table_fragments = mgr
+                    .catalog_controller
+                    .table_fragments()
+                    .await
+                    .map_err(err)?;
+                let mut map = HashMap::new();
+                for (id, tf) in table_fragments {
+                    let mut fragment_id_to_actor_ids = HashMap::new();
+                    for (fragment_id, fragment) in &tf.fragments {
+                        let actor_ids = fragment.actors.iter().map(|a| a.actor_id).collect_vec();
+                        fragment_id_to_actor_ids.insert(*fragment_id, ActorIds { ids: actor_ids });
+                    }
+                    map.insert(
+                        id as u32,
+                        FragmentIdToActorIdMap {
+                            map: fragment_id_to_actor_ids,
+                        },
+                    );
+                }
+                map
+            }
         };
+        let relation_id_infos = RelationIdInfos { map };
 
-        Ok(Json(table_fragments))
+        Ok(Json(relation_id_infos))
     }
 
     pub async fn list_fragments_by_job_id(
@@ -492,7 +521,7 @@ impl DashboardService {
             .route("/clusters/:ty", get(list_clusters))
             .route("/fragments2", get(list_fragments))
             .route("/fragments/job_id/:job_id", get(list_fragments_by_job_id))
-            .route("/fragments/ids", get(list_fragment_ids))
+            .route("/relation_id_infos", get(get_relation_id_infos))
             .route("/views", get(list_views))
             .route("/materialized_views", get(list_materialized_views))
             .route("/tables", get(list_tables))
