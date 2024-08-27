@@ -1,7 +1,4 @@
 statement ok
-SET VISIBILITY_MODE TO all;
-
-statement ok
 create table t (v int);
 
 statement ok
