@@ -174,7 +174,7 @@ pub fn parse_schema_change(
 
     // Currently only accept ADD COLUMN and DROP COLUMN,
     // and we assumes each schema change message only contains one DDL statement.
-    let allowed_ddl = vec!["ADD COLUMN", "DROP COLUMN"];
+    let allowed_ddl = ["ADD COLUMN", "DROP COLUMN"];
     let upper_upstream_ddl = upstream_ddl.to_uppercase();
     let is_allowed = allowed_ddl
         .iter()
