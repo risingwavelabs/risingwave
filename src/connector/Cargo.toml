@@ -87,6 +87,7 @@ nexmark = { version = "0.2", features = ["serde"] }
 num-bigint = "0.4"
 opendal = { workspace = true, features = [
     "executors-tokio",
+    "services-azblob",
     "services-fs",
     "services-gcs",
     "services-memory",
