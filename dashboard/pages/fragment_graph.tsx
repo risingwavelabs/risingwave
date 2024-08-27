@@ -46,11 +46,9 @@ import {
   fetchPrometheusBackPressure,
 } from "../lib/api/metric"
 import {
-  getFragments,
-  getFragmentIds,
   getFragmentsByJobId,
+  getRelationIdInfos,
   getStreamingJobs,
-  getRelationIdInfos
 } from "../lib/api/streaming"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
@@ -210,7 +208,7 @@ export default function Streaming() {
 
   useEffect(() => {
     if (relationId) {
-      getFragmentsByJobId(relationId).then(tf => {
+      getFragmentsByJobId(relationId).then((tf) => {
         setTableFragments(tf)
       })
     }
