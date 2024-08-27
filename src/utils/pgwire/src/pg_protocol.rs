@@ -672,7 +672,7 @@ where
                 .as_ref()
                 .expect("compute node should return affected rows in output");
 
-            // must be Format::Text
+            assert!(matches!(res.row_cnt_format(), Some(Format::Text)));
             let affected_rows_cnt = String::from_utf8(affected_rows_str.to_vec())
                 .unwrap()
                 .parse()
