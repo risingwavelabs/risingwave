@@ -89,6 +89,16 @@ impl Op {
             Op::UpdateDelete => 4,
         }
     }
+
+    pub fn to_varchar(self) -> String {
+        match self {
+            Op::Insert => "Insert",
+            Op::Delete => "Delete",
+            Op::UpdateInsert => "UpdateInsert",
+            Op::UpdateDelete => "UpdateDelete",
+        }
+        .to_string()
+    }
 }
 
 pub type Ops<'a> = &'a [Op];

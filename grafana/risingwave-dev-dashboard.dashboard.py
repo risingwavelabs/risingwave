@@ -1081,6 +1081,41 @@ def section_streaming_cdc(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Auto Schema Change Failure Count",
+                    "Total number of failed auto schema change attempts of CDC Table",
+                    [
+                        panels.target(
+                            f"sum({metric('auto_schema_change_failure_cnt')}) by (table_id, table_name)",
+                            "{{table_id}} - {{table_name}}",
+                            )
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_count(
+                    "Auto Schema Change Success Count",
+                    "Total number of succeeded auto schema change of CDC Table",
+                    [
+                        panels.target(
+                            f"sum({metric('auto_schema_change_success_cnt')}) by (table_id, table_name)",
+                            "{{table_id}} - {{table_name}}",
+                        )
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_latency(
+                    "Auto Schema Change Latency (sec)",
+                    "Latency of Auto Schema Change Process",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('auto_schema_change_latency_bucket')}[$__rate_interval])) by (le, table_id, table_name))",
+                                f"lag p{legend}" + "{{table_id}} - {{table_name}}",
+                                ),
+                            [50, 99, "max"],
+                        ),
+                    ],
+                ),
             ],
         ),
     ]

@@ -41,6 +41,7 @@ import useFetch from "../lib/api/fetch"
 import {
   BackPressureInfo,
   calculateBPRate,
+  calculateCumulativeBp,
   fetchEmbeddedBackPressure,
   fetchPrometheusBackPressure,
 } from "../lib/api/metric"
@@ -54,7 +55,7 @@ interface DispatcherNode {
 }
 
 // Refresh interval (ms) for back pressure stats
-const INTERVAL = 5000
+const INTERVAL_MS = 5000
 
 /** Associated data of each plan node in the fragment graph, including the dispatchers. */
 export interface PlanNodeDatum {
@@ -187,6 +188,8 @@ const backPressureDataSources: BackPressureDataSource[] = [
 interface EmbeddedBackPressureInfo {
   previous: BackPressureInfo[]
   current: BackPressureInfo[]
+  totalBackpressureNs: BackPressureInfo[]
+  totalDurationNs: number
 }
 
 export default function Streaming() {
@@ -293,7 +296,7 @@ export default function Streaming() {
   // Periodically fetch Prometheus back-pressure from Meta node
   const { response: promethusMetrics } = useFetch(
     fetchPrometheusBackPressure,
-    INTERVAL,
+    INTERVAL_MS,
     backPressureDataSource === "Prometheus"
   )
 
@@ -312,10 +315,19 @@ export default function Streaming() {
                 ? {
                     previous: prev.current,
                     current: newBP,
+                    totalBackpressureNs: calculateCumulativeBp(
+                      prev.totalBackpressureNs,
+                      prev.current,
+                      newBP
+                    ),
+                    totalDurationNs:
+                      prev.totalDurationNs + INTERVAL_MS * 1000 * 1000,
                   }
                 : {
                     previous: newBP, // Use current value to show zero rate, but it's fine
                     current: newBP,
+                    totalBackpressureNs: [],
+                    totalDurationNs: 0,
                   }
             )
           },
@@ -324,7 +336,7 @@ export default function Streaming() {
             toast(e, "error")
           }
         )
-      }, INTERVAL)
+      }, INTERVAL_MS)
       return () => {
         clearInterval(interval)
       }
@@ -337,9 +349,8 @@ export default function Streaming() {
 
       if (backPressureDataSource === "Embedded" && embeddedBackPressureInfo) {
         const metrics = calculateBPRate(
-          embeddedBackPressureInfo.current,
-          embeddedBackPressureInfo.previous,
-          INTERVAL
+          embeddedBackPressureInfo.totalBackpressureNs,
+          embeddedBackPressureInfo.totalDurationNs
         )
         for (const m of metrics.outputBufferBlockingDuration) {
           map.set(

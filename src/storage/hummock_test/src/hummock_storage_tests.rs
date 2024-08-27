@@ -2530,6 +2530,8 @@ async fn test_commit_multi_epoch() {
         sst_id: 11,
         object_id: 1,
         table_ids: vec![existing_table_id.table_id],
+        file_size: 100,
+        sst_size: 100,
         ..Default::default()
     };
 
@@ -2578,6 +2580,8 @@ async fn test_commit_multi_epoch() {
         sst_id: 22,
         object_id: 2,
         table_ids: vec![existing_table_id.table_id],
+        file_size: 100,
+        sst_size: 100,
         ..Default::default()
     };
 
@@ -2629,6 +2633,8 @@ async fn test_commit_multi_epoch() {
         sst_id: 33,
         object_id: 3,
         table_ids: vec![new_table_id.table_id],
+        file_size: 100,
+        sst_size: 100,
         ..Default::default()
     };
 
@@ -2671,6 +2677,8 @@ async fn test_commit_multi_epoch() {
         sst_id: 44,
         object_id: 4,
         table_ids: vec![new_table_id.table_id],
+        file_size: 100,
+        sst_size: 100,
         ..Default::default()
     };
 
@@ -2711,6 +2719,8 @@ async fn test_commit_multi_epoch() {
         sst_id: 55,
         object_id: 5,
         table_ids: vec![existing_table_id.table_id, new_table_id.table_id],
+        file_size: 100,
+        sst_size: 100,
         ..Default::default()
     };
 

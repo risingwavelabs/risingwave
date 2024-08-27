@@ -1199,7 +1199,6 @@ impl GlobalBarrierManagerContext {
         Ok(())
     }
 
-    /// Try to commit this node. If err, returns
     async fn complete_barrier(
         self,
         node: EpochNode,
@@ -1254,7 +1253,7 @@ impl GlobalBarrierManagerContext {
         });
         try_join_all(finished_jobs.into_iter().map(|finished_job| {
             let metadata_manager = &self.metadata_manager;
-            async move { finished_job.pre_finish(metadata_manager).await }
+            async move { finished_job.finish(metadata_manager).await }
         }))
         .await?;
         let duration_sec = enqueue_time.stop_and_record();
