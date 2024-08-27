@@ -1074,7 +1074,7 @@ impl StageRunner {
             }
             PlanNodeType::BatchIcebergScan => {
                 let node_body = execution_plan_node.node.clone();
-                let NodeBody::IcebergScan(mut iceberg_source_node) = node_body else {
+                let NodeBody::IcebergScan(mut iceberg_scan_node) = node_body else {
                     unreachable!();
                 };
 
@@ -1082,14 +1082,14 @@ impl StageRunner {
                     .expect("no partition info for seq scan")
                     .into_source()
                     .expect("PartitionInfo should be SourcePartitionInfo");
-                iceberg_source_node.split = partition
+                iceberg_scan_node.split = partition
                     .into_iter()
                     .map(|split| split.encode_to_bytes().into())
                     .collect_vec();
                 PbPlanNode {
                     children: vec![],
                     identity,
-                    node_body: Some(NodeBody::IcebergScan(iceberg_source_node)),
+                    node_body: Some(NodeBody::IcebergScan(iceberg_scan_node)),
                 }
             }
             _ => {

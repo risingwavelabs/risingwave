@@ -580,12 +580,12 @@ impl LocalQueryExecution {
             PlanNodeType::BatchIcebergScan => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
-                    NodeBody::IcebergScan(ref mut iceberg_source_node) => {
+                    NodeBody::IcebergScan(ref mut iceberg_scan_node) => {
                         if let Some(partition) = partition {
                             let partition = partition
                                 .into_source()
                                 .expect("PartitionInfo should be SourcePartitionInfo here");
-                            iceberg_source_node.split = partition
+                            iceberg_scan_node.split = partition
                                 .into_iter()
                                 .map(|split| split.encode_to_bytes().into())
                                 .collect_vec();
