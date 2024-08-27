@@ -1,0 +1,62 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (a varchar, b int, c int);
+
+statement ok
+insert into t values ('aaa', 1, 1), ('bbb', 0, 2), ('ccc', 0, 5), ('ddd', 1, 4);
+
+statement ok
+create materialized view mv1 as select aggregate:array_sum(c) as res from t;
+
+statement ok
+create materialized view mv2 as select b, aggregate:array_max(c) as res from t group by b;
+
+statement ok
+create function myjoin(text[]) returns text language sql as $$ select array_join($1, ', '); $$;
+
+statement ok
+create materialized view mv3 as select b, aggregate:myjoin(a order by c) as res from t group by b;
+
+query I
+select * from mv1;
+----
+12
+
+query II
+select * from mv2 order by b;
+----
+0	5
+1	4
+
+query IT
+select * from mv3 order by b;
+----
+0	bbb, ccc
+1	aaa, ddd
+
+statement ok
+insert into t values ('x', 1, 2), ('y', 3, 6);
+
+query I
+select * from mv1;
+----
+20
+
+query II
+select * from mv2 order by b;
+----
+0	5
+1	4
+3	6
+
+query IT
+select * from mv3 order by b;
+----
+0	bbb, ccc
+1	aaa, x, ddd
+3	y
+
+statement ok
+drop table t cascade;

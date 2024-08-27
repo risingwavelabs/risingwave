@@ -259,6 +259,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
                     .compactor_metrics
                     .write_build_l0_bytes
                     .inc_by(sst_info.file_size());
+
                 sst_infos.push(sst_info.sst_info.clone());
             }
             level0.extend(ssts);
@@ -557,7 +558,6 @@ impl SharedBufferCompactRunner {
                 watermark: GC_WATERMARK_FOR_FLUSH,
                 stats_target_table_ids: None,
                 task_type: compact_task::TaskType::SharedBuffer,
-                is_target_l0_or_lbase: true,
                 table_vnode_partition,
                 use_block_based_filter,
                 table_schemas: Default::default(),
