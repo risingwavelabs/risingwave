@@ -1,4 +1,7 @@
 statement ok
+set sink_decouple = false;
+
+statement ok
 set streaming_parallelism=4;
 
 statement ok
