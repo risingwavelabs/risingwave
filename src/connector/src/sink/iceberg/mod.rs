@@ -725,13 +725,14 @@ impl Sink for IcebergSink {
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
     fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        let commit_checkpoint_interval = desc.properties
-            .get("commit_checkpoint_interval")
-            .map(|interval| {
-                interval
-                    .parse::<u64>()
-                    .unwrap_or(DEFAULT_COMMIT_CHECKPOINT_INTERVAL)
-            });
+        let commit_checkpoint_interval =
+            desc.properties
+                .get("commit_checkpoint_interval")
+                .map(|interval| {
+                    interval
+                        .parse::<u64>()
+                        .unwrap_or(DEFAULT_COMMIT_CHECKPOINT_INTERVAL)
+                });
 
         match user_specified {
             SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
