@@ -53,14 +53,14 @@ FLUSH;
 sleep 10s
 
 query I
-select sum(record_count) from rw_iceberg_files where source_name = 'iceberg_demo_source';
-----
-7
-
-query I
 select count(*) from rw_iceberg_snapshots where source_name = 'iceberg_demo_source';
 ----
 1
+
+query I
+select sum(record_count) from rw_iceberg_files where source_name = 'iceberg_demo_source';
+----
+7
 
 statement ok
 INSERT INTO t6 VALUES (1, 50, '1-50');
