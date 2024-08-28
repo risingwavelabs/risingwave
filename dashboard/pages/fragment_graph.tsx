@@ -208,6 +208,7 @@ export default function Streaming() {
 
   useEffect(() => {
     if (relationId) {
+      setTableFragments(undefined)
       getFragmentsByJobId(relationId).then((tf) => {
         setTableFragments(tf)
       })
