@@ -77,7 +77,7 @@ use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServ
 use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use risingwave_rpc_client::ComputeClientPool;
-use sea_orm::{ConnectionTrait, DbBackend};
+use sea_orm::{ConnectionTrait, DbBackend, Statement};
 use thiserror_ext::AsReport;
 use tokio::sync::watch;
 
@@ -202,20 +202,30 @@ pub async fn rpc_serve(
             .await
         }
         MetaStoreBackend::Sql { endpoint } => {
-            let max_connection = if DbBackend::Sqlite.is_prefix_of(&endpoint) {
-                // Due to the fact that Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
-                // here we forcibly specify the number of connections as 1.
-                1
-            } else {
-                10
-            };
-
+            let is_sqlite = DbBackend::Sqlite.is_prefix_of(&endpoint);
             let mut options = sea_orm::ConnectOptions::new(endpoint);
             options
-                .max_connections(max_connection)
+                .max_connections(10)
                 .connect_timeout(Duration::from_secs(10))
-                .idle_timeout(Duration::from_secs(30));
+                .idle_timeout(Duration::from_secs(30))
+                .acquire_timeout(Duration::from_secs(30));
+
+            if is_sqlite {
+                // Due to the fact that Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
+                // here we forcibly specify the number of connections as 1.
+                options.max_connections(1);
+            }
+
             let conn = sea_orm::Database::connect(options).await?;
+            if is_sqlite {
+                // Enable Write-Ahead Logging (WAL) mode for SQLite, which can improve concurrency.
+                conn.execute(Statement::from_string(
+                    conn.get_database_backend(),
+                    "PRAGMA journal_mode=WAL",
+                ))
+                .await?;
+            }
+
             let meta_store_sql = SqlMetaStore::new(conn);
 
             // Init election client.
