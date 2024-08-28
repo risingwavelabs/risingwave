@@ -295,7 +295,7 @@ pub struct MetaOpts {
 
     pub table_info_statistic_history_times: usize,
 
-    pub max_actor_num_per_worker_parallelism: usize,
+    pub actor_cnt_per_worker_parallelism_hard_limit: usize,
 }
 
 impl MetaOpts {
@@ -360,7 +360,7 @@ impl MetaOpts {
             secret_store_private_key: Some("0123456789abcdef".as_bytes().to_vec()),
             temp_secret_file_dir: "./secrets".to_string(),
             table_info_statistic_history_times: 240,
-            max_actor_num_per_worker_parallelism: usize::MAX,
+            actor_cnt_per_worker_parallelism_hard_limit: usize::MAX,
         }
     }
 }
@@ -413,13 +413,13 @@ impl MetaSrvEnv {
 
                 // For new clusters:
                 // 1. the name of the object store needs to be prefixed according to the object id.
-                // 2. max_actor_num_per_worker_parallelism is set to the default value.
+                // 2. actor_cnt_per_worker_parallelism_hard_limit is set to the default value.
                 //
                 // For old clusters
                 // 1. the prefix is ​​not divided for the sake of compatibility.
-                // 2. max_actor_num_per_worker_parallelism is set to unlimited to ensure backward compatibility.
+                // 2. actor_cnt_per_worker_parallelism_hard_limit is set to unlimited to ensure backward compatibility.
                 if !cluster_first_launch {
-                    opts.max_actor_num_per_worker_parallelism = usize::MAX;
+                    opts.actor_cnt_per_worker_parallelism_hard_limit = usize::MAX;
                 }
 
                 init_system_params.use_new_object_prefix_strategy = Some(cluster_first_launch);
@@ -483,13 +483,13 @@ impl MetaSrvEnv {
 
                 // For new clusters:
                 // 1. the name of the object store needs to be prefixed according to the object id.
-                // 2. max_actor_num_per_worker_parallelism is set to the default value.
+                // 2. actor_cnt_per_worker_parallelism_hard_limit is set to the default value.
                 //
                 // For old clusters
                 // 1. the prefix is ​​not divided for the sake of compatibility.
-                // 2. max_actor_num_per_worker_parallelism is set to unlimited to ensure backward compatibility.
+                // 2. actor_cnt_per_worker_parallelism_hard_limit is set to unlimited to ensure backward compatibility.
                 if !cluster_first_launch {
-                    opts.max_actor_num_per_worker_parallelism = usize::MAX;
+                    opts.actor_cnt_per_worker_parallelism_hard_limit = usize::MAX;
                 }
                 init_system_params.use_new_object_prefix_strategy = Some(cluster_first_launch);
 

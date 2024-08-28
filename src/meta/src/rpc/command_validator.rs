@@ -35,16 +35,16 @@ impl DdlController {
                     .map(|e| (e.id, e.parallelism()))
                     .collect();
 
-                // check whether there are more than `max_actor_num_per_worker_parallelism` actors on a worker per parallelism
-                let max_actor_num_per_worker_parallelism =
-                    self.env.opts.max_actor_num_per_worker_parallelism;
+                // check whether there are more than `actor_cnt_per_worker_parallelism_hard_limit` actors on a worker per parallelism
+                let actor_cnt_per_worker_parallelism_hard_limit =
+                    self.env.opts.actor_cnt_per_worker_parallelism_hard_limit;
                 let (passed, failed): (Vec<_>, Vec<_>) = worker_actor_count
                     .into_iter()
                     .map(|(worker_id, actor_count)| (worker_id, actor_count))
                     .partition(|(worker_id, actor_count)| {
                         let max_actor_count = running_worker_parallelism
                             .get(worker_id)
-                            .map(|c| c.saturating_mul(max_actor_num_per_worker_parallelism))
+                            .map(|c| c.saturating_mul(actor_cnt_per_worker_parallelism_hard_limit))
                             .unwrap_or(usize::MAX);
                         actor_count <= &max_actor_count
                     });
@@ -52,10 +52,10 @@ impl DdlController {
                 if !failed.is_empty() {
                     let error_msg = format!(
                         "Too many actors on worker(s).
-                        max_actor_num_per_worker_parallelism: {:?}), 
+                        actor_cnt_per_worker_parallelism_hard_limit: {:?}), 
                         failed worker id -> actor count: {:?}, 
                         passed worker id -> actor count: {:?}",
-                        max_actor_num_per_worker_parallelism, failed, passed
+                        actor_cnt_per_worker_parallelism_hard_limit, failed, passed
                     );
                     return MetaError::resource_exhausted(error_msg);
                 }
