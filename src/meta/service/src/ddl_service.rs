@@ -22,6 +22,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
 use risingwave_meta::rpc::ddl_controller::fill_table_stream_graph_info;
+use risingwave_meta::rpc::metrics::MetaMetrics;
 use risingwave_pb::catalog::connection::private_link_service::{
     PbPrivateLinkProvider, PrivateLinkProvider,
 };
@@ -56,6 +57,7 @@ pub struct DdlServiceImpl {
     sink_manager: SinkCoordinatorManager,
     ddl_controller: DdlController,
     aws_client: Arc<Option<AwsEc2Client>>,
+    meta_metrics: Arc<MetaMetrics>,
 }
 
 impl DdlServiceImpl {
@@ -68,6 +70,7 @@ impl DdlServiceImpl {
         source_manager: SourceManagerRef,
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
+        meta_metrics: Arc<MetaMetrics>,
     ) -> Self {
         let aws_cli_ref = Arc::new(aws_client);
         let ddl_controller = DdlController::new(
@@ -85,6 +88,7 @@ impl DdlServiceImpl {
             ddl_controller,
             aws_client: aws_cli_ref,
             sink_manager,
+            meta_metrics,
         }
     }
 
@@ -962,13 +966,18 @@ impl DdlService for DdlServiceImpl {
                 .await?;
 
             for table in tables {
+                let latency_timer = self
+                    .meta_metrics
+                    .auto_schema_change_latency
+                    .with_guarded_label_values(&[&table.id.to_string(), &table.name])
+                    .start_timer();
                 // send a request to the frontend to get the ReplaceTablePlan
                 // will retry with exponential backoff if the request fails
                 let resp = client
                     .get_table_replace_plan(GetTableReplacePlanRequest {
                         database_id: table.database_id,
                         owner: table.owner,
-                        table_name: table.name,
+                        table_name: table.name.clone(),
                         table_change: Some(table_change.clone()),
                     })
                     .await;
@@ -1000,6 +1009,15 @@ impl DdlService for DdlServiceImpl {
                                         table_id = table.id,
                                         cdc_table_id = table.cdc_table_id,
                                         "Table replaced success");
+
+                                    self.meta_metrics
+                                        .auto_schema_change_success_cnt
+                                        .with_guarded_label_values(&[
+                                            &table.id.to_string(),
+                                            &table.name,
+                                        ])
+                                        .inc();
+                                    latency_timer.observe_duration();
                                 }
                                 Err(e) => {
                                     tracing::error!(
@@ -1011,7 +1029,9 @@ impl DdlService for DdlServiceImpl {
                                         "failed to replace the table",
                                     );
                                     add_auto_schema_change_fail_event_log(
+                                        &self.meta_metrics,
                                         table.id,
+                                        table.name.clone(),
                                         table_change.cdc_table_id.clone(),
                                         table_change.upstream_ddl.clone(),
                                         &self.env.event_log_manager_ref(),
@@ -1029,7 +1049,9 @@ impl DdlService for DdlServiceImpl {
                             "failed to get replace table plan",
                         );
                         add_auto_schema_change_fail_event_log(
+                            &self.meta_metrics,
                             table.id,
+                            table.name.clone(),
                             table_change.cdc_table_id.clone(),
                             table_change.upstream_ddl.clone(),
                             &self.env.event_log_manager_ref(),
@@ -1078,13 +1100,20 @@ impl DdlServiceImpl {
 }
 
 fn add_auto_schema_change_fail_event_log(
+    meta_metrics: &Arc<MetaMetrics>,
     table_id: u32,
+    table_name: String,
     cdc_table_id: String,
     upstream_ddl: String,
     event_log_manager: &EventLogManagerRef,
 ) {
+    meta_metrics
+        .auto_schema_change_failure_cnt
+        .with_guarded_label_values(&[&table_id.to_string(), &table_name])
+        .inc();
     let event = event_log::EventAutoSchemaChangeFail {
         table_id,
+        table_name,
         cdc_table_id,
         upstream_ddl,
     };
