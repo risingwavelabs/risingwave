@@ -127,7 +127,7 @@ export function calculateCumulativeBp(
   mapResult.forEach((value, key) => {
     const [fragmentId, downstreamFragmentId] = key.split("-").map(Number)
     const backPressureInfo: BackPressureInfo = {
-      actorId: 0,
+      dispatcherCount: 1, // the value here has already been averaged by real dispatcher count
       fragmentId,
       downstreamFragmentId,
       value,
