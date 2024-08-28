@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod cloud_provider;
-pub mod ddl_controller;
-mod ddl_controller_v2;
-pub mod election;
-pub mod intercept;
-pub mod metrics;
-mod command_validator;
+use super::ddl_controller::{DdlCommand, DdlController};
+use crate::MetaResult;
 
-pub type ElectionClientRef = std::sync::Arc<dyn ElectionClient>;
+impl DdlController {
+    pub async fn validate_command(&self, command: &DdlCommand) -> MetaResult<()> {
+        // check whether there are more than 200 actors on a worker per core
+        let worker_actor_count = self.metadata_manager.worker_actor_count().await?;
 
-pub use election::etcd::EtcdElectionClient;
-pub use election::{ElectionClient, ElectionMember};
+        Ok(())
+    }
+}
