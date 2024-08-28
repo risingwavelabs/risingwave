@@ -879,7 +879,7 @@ def section_streaming(outer_panels):
                     "The figure shows the number of rows written into each materialized view per second.",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_mview_input_row_count')}[$__rate_interval])) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
+                            f"sum(rate({table_metric('stream_mview_input_row_count')}[$__rate_interval])) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
                             "mview {{table_id}} {{table_name}}",
                         ),
                     ],
@@ -889,7 +889,7 @@ def section_streaming(outer_panels):
                     "The figure shows the number of rows written into each materialized view per second.",
                     [
                         panels.target(
-                            f"rate({metric('stream_mview_input_row_count')}[$__rate_interval]) * on(fragment_id, table_id) group_left(table_name) {metric('table_info')}",
+                            f"rate({table_metric('stream_mview_input_row_count')}[$__rate_interval]) * on(fragment_id, table_id) group_left(table_name) {metric('table_info')}",
                             "mview {{table_id}} {{table_name}} - actor {{actor_id}} fragment_id {{fragment_id}}",
                         ),
                     ],
@@ -1078,6 +1078,41 @@ def section_streaming_cdc(outer_panels):
                         panels.target(
                             f"sum({metric('cdc_source_error')}) by (connector_name, source_id, error_msg)",
                             "{{connector_name}}: {{error_msg}} ({{source_id}})",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Auto Schema Change Failure Count",
+                    "Total number of failed auto schema change attempts of CDC Table",
+                    [
+                        panels.target(
+                            f"sum({metric('auto_schema_change_failure_cnt')}) by (table_id, table_name)",
+                            "{{table_id}} - {{table_name}}",
+                            )
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_count(
+                    "Auto Schema Change Success Count",
+                    "Total number of succeeded auto schema change of CDC Table",
+                    [
+                        panels.target(
+                            f"sum({metric('auto_schema_change_success_cnt')}) by (table_id, table_name)",
+                            "{{table_id}} - {{table_name}}",
+                        )
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_latency(
+                    "Auto Schema Change Latency (sec)",
+                    "Latency of Auto Schema Change Process",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('auto_schema_change_latency_bucket')}[$__rate_interval])) by (le, table_id, table_name))",
+                                f"lag p{legend}" + "{{table_id}} - {{table_name}}",
+                                ),
+                            [50, 99, "max"],
                         ),
                     ],
                 ),
