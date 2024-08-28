@@ -30,6 +30,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
@@ -1095,6 +1096,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _min_epoch: u64,
         _max_count: u32,
     ) -> RpcResult<Vec<u64>> {
+        unimplemented!()
+    }
+
+    async fn get_cluster_limits(&self) -> RpcResult<Vec<ClusterLimit>> {
         unimplemented!()
     }
 }

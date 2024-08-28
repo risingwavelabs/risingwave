@@ -168,6 +168,10 @@ impl LicenseManager {
         }
     }
 
+    pub fn tier(&self) -> Result<Tier, LicenseKeyError> {
+        self.license().map(|l| l.tier)
+    }
+
     /// Get the current license if it is valid.
     ///
     /// Since the license can expire, the returned license should not be cached by the caller.

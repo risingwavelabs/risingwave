@@ -466,6 +466,24 @@ pub struct MetaDeveloperConfig {
 
     #[serde(default = "default::developer::max_get_task_probe_times")]
     pub max_get_task_probe_times: usize,
+
+    /// Max number of actor allowed per parallelism (default = 100).
+    /// CREATE MV/Table will be noticed when the number of actors exceeds this limit.
+    /// This limit is effective for clusters that meets the following conditions:
+    /// - running with version >= 2.0
+    /// - running with paied tier license
+    /// Free tier cluster's limit will be hardcoded to FREE_TIER_ACTOR_CNT_SOFT_LIMIT
+    #[serde(default = "default::developer::actor_cnt_per_worker_parallelism_soft_limit")]
+    pub actor_cnt_per_worker_parallelism_soft_limit: usize,
+
+    /// Max number of actor allowed per parallelism (default = 400).
+    /// CREATE MV/Table will be rejected when the number of actors exceeds this limit.
+    /// This limit is effective for clusters that meets the following conditions:
+    /// - created with version >= 2.0
+    /// - running with paied tier license
+    /// Free tier cluster's limit will be hardcoded to FREE_TIER_ACTOR_CNT_HARD_LIMIT
+    #[serde(default = "default::developer::actor_cnt_per_worker_parallelism_hard_limit")]
+    pub actor_cnt_per_worker_parallelism_hard_limit: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -1857,6 +1875,14 @@ pub mod default {
 
         pub fn max_get_task_probe_times() -> usize {
             5
+        }
+
+        pub fn actor_cnt_per_worker_parallelism_soft_limit() -> usize {
+            100
+        }
+
+        pub fn actor_cnt_per_worker_parallelism_hard_limit() -> usize {
+            400
         }
 
         pub fn memory_controller_threshold_aggressive() -> f64 {

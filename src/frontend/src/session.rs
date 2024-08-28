@@ -49,6 +49,7 @@ use risingwave_common::catalog::{
 use risingwave_common::config::{
     load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
 };
+use risingwave_common::license::LicenseManager;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::session_config::{ConfigReporter, SessionConfig, VisibilityMode};
@@ -60,8 +61,8 @@ use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::resource_util;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use risingwave_common::util::{cluster_limit, resource_util};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager};
@@ -1193,6 +1194,49 @@ impl SessionImpl {
 
     pub fn temporary_source_manager(&self) -> TemporarySourceManager {
         self.temporary_source_manager.lock().clone()
+    }
+
+    pub async fn check_cluster_limits(&self) -> Result<()> {
+        let bypass_cluster_limits = self.config().bypass_cluster_limits();
+        let tier = LicenseManager::get()
+            .tier()
+            .map_err(|e| RwError::from(ErrorCode::ProtocolError(e.to_string())))?;
+        let limits = self.env().meta_client().get_cluster_limits().await?;
+        for limit in limits {
+            match limit {
+                cluster_limit::ClusterLimit::ActorCount(l) => {
+                    if l.exceed_hard_limit() {
+                        let mut msg =
+                            "\n- Actor count per parallelism exceeds the hard limit".to_string();
+                        msg.push_str("\n- This may overload the cluster and cause performance/stability issues. Please scale the cluster before proceeding.");
+                        if matches!(tier, risingwave_common::license::Tier::Free) {
+                            msg.push_str("\n- Feel free to contact us via https://risingwave.com/contact-us/ for a upgrade.");
+                        }
+                        msg.push_str("\n- You can check actor count distribution via SQL `SELECT * FROM rw_worker_actor_count`.");
+                        msg.push_str(format!("\n{}", l).as_str());
+                        if bypass_cluster_limits {
+                            // Only send a notice if `bypass_cluster_limits` is set.
+                            self.notice_to_user(&msg);
+                        } else {
+                            // Return an error if `bypass_cluster_limits` is not set.
+                            return Err(RwError::from(ErrorCode::ProtocolError(msg)));
+                        }
+                    } else if l.exceed_soft_limit() {
+                        // Send a notice if soft limit is exceeded.
+                        let mut msg =
+                            "\n- Actor count per parallelism exceeds the soft limit".to_string();
+                        msg.push_str("\n- This may overload the cluster and cause performance/stability issues. Scaling the cluster is recommended.");
+                        if matches!(tier, risingwave_common::license::Tier::Free) {
+                            msg.push_str("\n- Feel free to contact us via https://risingwave.com/contact-us/ for a upgrade.");
+                        }
+                        msg.push_str("\n- You can check actor count distribution via SQL `SELECT * FROM rw_worker_actor_count`.");
+                        msg.push_str(format!("\n{}", l).as_str());
+                        self.notice_to_user(&msg);
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 

@@ -24,6 +24,7 @@ use chrono_tz::Tz;
 pub use over_window::OverWindowCachePolicy;
 pub use query_mode::QueryMode;
 use risingwave_common_proc_macro::{ConfigDoc, SessionConfig};
+use risingwave_license::LicenseManager;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
@@ -292,6 +293,13 @@ pub struct SessionConfig {
 
     #[parameter(default = "hex", check_hook = check_bytea_output)]
     bytea_output: String,
+
+    /// Bypass checks on cluster limits
+    ///
+    /// When enabled, `CREATE MATERIALIZED VIEW` will not fail if the cluster limit is hit.
+    /// This session variable is only mutable in paid tier.
+    #[parameter(default = false, check_hook = check_bypass_cluster_limits)]
+    bypass_cluster_limits: bool,
 }
 
 fn check_timezone(val: &str) -> Result<(), String> {
@@ -315,6 +323,15 @@ fn check_bytea_output(val: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err("Only support 'hex' for BYTEA_OUTPUT".to_string())
+    }
+}
+
+fn check_bypass_cluster_limits(_val: &bool) -> Result<(), String> {
+    match LicenseManager::get().tier().map_err(|e| e.to_string())? {
+        risingwave_license::Tier::Free => {
+            Err("Bypassing cluster limits is only allowed in paid tier".to_string())
+        }
+        risingwave_license::Tier::Paid => Ok(()),
     }
 }
 
