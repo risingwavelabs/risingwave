@@ -113,24 +113,23 @@ impl CreatingStreamingJobStatus {
                 pending_non_checkpoint_barriers.push(*backfill_epoch);
 
                 let prev_epoch = Epoch::from_physical_time(*prev_epoch_fake_physical_time);
-                let barriers_to_inject = [CreatingJobInjectBarrierInfo {
-                    curr_epoch: TracedEpoch::new(Epoch(*backfill_epoch)),
-                    prev_epoch: TracedEpoch::new(prev_epoch),
-                    kind: BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers)),
-                    new_actors: None,
-                }]
-                .into_iter()
-                .chain(
-                    pending_commands
-                        .drain(..)
-                        .map(|command_ctx| CreatingJobInjectBarrierInfo {
+                let barriers_to_inject =
+                    [CreatingJobInjectBarrierInfo {
+                        curr_epoch: TracedEpoch::new(Epoch(*backfill_epoch)),
+                        prev_epoch: TracedEpoch::new(prev_epoch),
+                        kind: BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers)),
+                        new_actors: None,
+                    }]
+                    .into_iter()
+                    .chain(pending_commands.drain(..).map(|command_ctx| {
+                        CreatingJobInjectBarrierInfo {
                             curr_epoch: command_ctx.curr_epoch.clone(),
                             prev_epoch: command_ctx.prev_epoch.clone(),
                             kind: command_ctx.kind.clone(),
                             new_actors: None,
-                        }),
-                )
-                .collect();
+                        }
+                    }))
+                    .collect();
 
                 let graph_info = take(graph_info);
                 Some((barriers_to_inject, Some(graph_info)))

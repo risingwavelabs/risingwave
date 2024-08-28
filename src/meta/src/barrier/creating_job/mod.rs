@@ -35,7 +35,9 @@ use crate::barrier::command::CommandContext;
 use crate::barrier::creating_job::barrier_control::{
     CreatingStreamingJobBarrierControl, CreatingStreamingJobBarrierType,
 };
-use crate::barrier::creating_job::status::{CreatingStreamingJobStatus, CreatingJobInjectBarrierInfo};
+use crate::barrier::creating_job::status::{
+    CreatingJobInjectBarrierInfo, CreatingStreamingJobStatus,
+};
 use crate::barrier::info::InflightGraphInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
