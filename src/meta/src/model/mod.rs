@@ -147,9 +147,9 @@ pub trait MetadataModel: std::fmt::Debug + Sized + private::MetadataModelMarker 
             .collect()
     }
 
-    async fn list_at_snapshot<S>(snapshot: &S::Snapshot) -> MetadataModelResult<Vec<Self>>
+    async fn list_at_snapshot<S>(snapshot: &S) -> MetadataModelResult<Vec<Self>>
     where
-        S: MetaStore,
+        S: Snapshot,
     {
         let bytes_vec = snapshot.list_cf(&Self::cf_name()).await?;
         bytes_vec

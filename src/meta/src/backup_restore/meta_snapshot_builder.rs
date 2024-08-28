@@ -66,7 +66,7 @@ impl<S: MetaStore> MetaSnapshotV1Builder<S> {
         let hummock_version = {
             let mut redo_state = hummock_version;
             let hummock_version_deltas: BTreeMap<_, _> =
-                HummockVersionDelta::list_at_snapshot::<S>(&meta_store_snapshot)
+                HummockVersionDelta::list_at_snapshot(&meta_store_snapshot)
                     .await?
                     .into_iter()
                     .map(|d| (d.id, d))
@@ -86,45 +86,44 @@ impl<S: MetaStore> MetaSnapshotV1Builder<S> {
             }
             redo_state
         };
-        let version_stats = HummockVersionStats::list_at_snapshot::<S>(&meta_store_snapshot)
+        let version_stats = HummockVersionStats::list_at_snapshot(&meta_store_snapshot)
             .await?
             .into_iter()
             .next()
             .unwrap_or_else(HummockVersionStats::default);
         let compaction_groups =
-            crate::hummock::model::CompactionGroup::list_at_snapshot::<S>(&meta_store_snapshot)
+            crate::hummock::model::CompactionGroup::list_at_snapshot(&meta_store_snapshot)
                 .await?
                 .iter()
                 .map(MetadataModel::to_protobuf)
                 .collect();
-        let table_fragments =
-            crate::model::TableFragments::list_at_snapshot::<S>(&meta_store_snapshot)
-                .await?
-                .iter()
-                .map(MetadataModel::to_protobuf)
-                .collect();
-        let user_info = UserInfo::list_at_snapshot::<S>(&meta_store_snapshot).await?;
+        let table_fragments = crate::model::TableFragments::list_at_snapshot(&meta_store_snapshot)
+            .await?
+            .iter()
+            .map(MetadataModel::to_protobuf)
+            .collect();
+        let user_info = UserInfo::list_at_snapshot(&meta_store_snapshot).await?;
 
-        let database = Database::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let schema = Schema::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let table = Table::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let index = Index::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let sink = Sink::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let source = Source::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let view = View::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let function = Function::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let connection = Connection::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let system_param = SystemParams::get_at_snapshot::<S>(&meta_store_snapshot)
+        let database = Database::list_at_snapshot(&meta_store_snapshot).await?;
+        let schema = Schema::list_at_snapshot(&meta_store_snapshot).await?;
+        let table = Table::list_at_snapshot(&meta_store_snapshot).await?;
+        let index = Index::list_at_snapshot(&meta_store_snapshot).await?;
+        let sink = Sink::list_at_snapshot(&meta_store_snapshot).await?;
+        let source = Source::list_at_snapshot(&meta_store_snapshot).await?;
+        let view = View::list_at_snapshot(&meta_store_snapshot).await?;
+        let function = Function::list_at_snapshot(&meta_store_snapshot).await?;
+        let connection = Connection::list_at_snapshot(&meta_store_snapshot).await?;
+        let system_param = SystemParams::get_at_snapshot(&meta_store_snapshot)
             .await?
             .ok_or_else(|| anyhow!("system params not found in meta store"))?;
 
         // tracking_id is always created in meta store
-        let cluster_id = ClusterId::from_snapshot::<S>(&meta_store_snapshot)
+        let cluster_id = ClusterId::from_snapshot(&meta_store_snapshot)
             .await?
             .ok_or_else(|| anyhow!("cluster id not found in meta store"))?
             .into();
-        let subscription = Subscription::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let secret = Secret::list_at_snapshot::<S>(&meta_store_snapshot).await?;
+        let subscription = Subscription::list_at_snapshot(&meta_store_snapshot).await?;
+        let secret = Secret::list_at_snapshot(&meta_store_snapshot).await?;
 
         self.snapshot.metadata = ClusterMetadata {
             default_cf,

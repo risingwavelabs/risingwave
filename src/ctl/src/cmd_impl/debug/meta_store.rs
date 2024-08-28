@@ -74,7 +74,7 @@ enum Item {
 
 macro_rules! generate_list_branches_for_catalog {
     ($kind:expr, $catalog:ident, $snapshot:expr, $items:ident) => {
-        catalog::$catalog::list_at_snapshot::<EtcdMetaStore>($snapshot)
+        catalog::$catalog::list_at_snapshot($snapshot)
             .await?
             .into_iter()
             .for_each(|item| $items.push($kind(item)))
@@ -108,15 +108,15 @@ pub async fn dump(common: DebugCommon) -> anyhow::Result<()> {
     let mut items = vec![];
     for kind in kinds {
         match kind {
-            DebugCommonKind::Worker => Worker::list_at_snapshot::<EtcdMetaStore>(&snapshot)
+            DebugCommonKind::Worker => Worker::list_at_snapshot(&snapshot)
                 .await?
                 .into_iter()
                 .for_each(|worker| items.push(Item::Worker(worker))),
-            DebugCommonKind::User => UserInfo::list_at_snapshot::<EtcdMetaStore>(&snapshot)
+            DebugCommonKind::User => UserInfo::list_at_snapshot(&snapshot)
                 .await?
                 .into_iter()
                 .for_each(|user| items.push(Item::User(user))),
-            DebugCommonKind::Table => TableFragments::list_at_snapshot::<EtcdMetaStore>(&snapshot)
+            DebugCommonKind::Table => TableFragments::list_at_snapshot(&snapshot)
                 .await?
                 .into_iter()
                 .for_each(|table| items.push(Item::Table(table))),

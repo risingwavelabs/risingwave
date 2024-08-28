@@ -114,7 +114,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         .expect("failed to init sql backend");
 
     // cluster Id.
-    let cluster_id: Uuid = ClusterId::from_snapshot::<EtcdMetaStore>(&snapshot)
+    let cluster_id: Uuid = ClusterId::from_snapshot(&snapshot)
         .await?
         .expect("cluster id not found")
         .parse()?;
@@ -135,7 +135,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     println!("cluster id updated to {}", cluster_id);
 
     // system parameters.
-    let system_parameters = PbSystemParams::get_at_snapshot::<EtcdMetaStore>(&snapshot)
+    let system_parameters = PbSystemParams::get_at_snapshot(&snapshot)
         .await?
         .expect("system parameters not found");
     SystemParameter::insert_many(system_params_to_model(&system_parameters)?)
@@ -144,7 +144,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     println!("system parameters migrated");
 
     // workers.
-    let workers = model::Worker::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
+    let workers = model::Worker::list_at_snapshot(&snapshot).await?;
     let next_worker_id = workers
         .iter()
         .map(|w| w.worker_node.id + 1)
@@ -174,18 +174,18 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     println!("worker nodes migrated");
 
     // catalogs.
-    let databases = PbDatabase::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
-    let schemas = PbSchema::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
-    let users = PbUserInfo::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
-    let tables = PbTable::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
-    let sources = PbSource::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
-    let sinks = PbSink::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
-    let indexes = PbIndex::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
-    let views = PbView::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
-    let functions = PbFunction::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
-    let connections = PbConnection::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
-    let subscriptions = PbSubscription::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
-    let secrets = PbSecret::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
+    let databases = PbDatabase::list_at_snapshot(&snapshot).await?;
+    let schemas = PbSchema::list_at_snapshot(&snapshot).await?;
+    let users = PbUserInfo::list_at_snapshot(&snapshot).await?;
+    let tables = PbTable::list_at_snapshot(&snapshot).await?;
+    let sources = PbSource::list_at_snapshot(&snapshot).await?;
+    let sinks = PbSink::list_at_snapshot(&snapshot).await?;
+    let indexes = PbIndex::list_at_snapshot(&snapshot).await?;
+    let views = PbView::list_at_snapshot(&snapshot).await?;
+    let functions = PbFunction::list_at_snapshot(&snapshot).await?;
+    let connections = PbConnection::list_at_snapshot(&snapshot).await?;
+    let subscriptions = PbSubscription::list_at_snapshot(&snapshot).await?;
+    let secrets = PbSecret::list_at_snapshot(&snapshot).await?;
 
     // inuse object ids.
     let mut inuse_obj_ids = tables
@@ -415,8 +415,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     }
 
     // table fragments.
-    let table_fragments =
-        model::TableFragments::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
+    let table_fragments = model::TableFragments::list_at_snapshot(&snapshot).await?;
     let mut fragment_job_map = HashMap::new();
     let mut fragments = vec![];
     let mut actors = vec![];
@@ -703,8 +702,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
 
     // hummock.
     // hummock pinned snapshots
-    let pinned_snapshots =
-        HummockPinnedSnapshot::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
+    let pinned_snapshots = HummockPinnedSnapshot::list_at_snapshot(&snapshot).await?;
     if !pinned_snapshots.is_empty() {
         hummock_pinned_snapshot::Entity::insert_many(
             pinned_snapshots
@@ -721,7 +719,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     println!("hummock pinned snapshots migrated");
 
     // hummock pinned version
-    let pinned_version = HummockPinnedVersion::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
+    let pinned_version = HummockPinnedVersion::list_at_snapshot(&snapshot).await?;
     if !pinned_version.is_empty() {
         hummock_pinned_version::Entity::insert_many(
             pinned_version
@@ -738,7 +736,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     println!("hummock pinned version migrated");
 
     // hummock version delta
-    let version_delta = HummockVersionDelta::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
+    let version_delta = HummockVersionDelta::list_at_snapshot(&snapshot).await?;
     if !version_delta.is_empty() {
         hummock_version_delta::Entity::insert_many(
             version_delta
@@ -759,7 +757,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     println!("hummock version delta migrated");
 
     // hummock version stat
-    let version_stats = HummockVersionStats::list_at_snapshot::<EtcdMetaStore>(&snapshot)
+    let version_stats = HummockVersionStats::list_at_snapshot(&snapshot)
         .await?
         .into_iter()
         .next();
@@ -775,7 +773,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
 
     // compaction
     // compaction config
-    let compaction_groups = CompactionGroup::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
+    let compaction_groups = CompactionGroup::list_at_snapshot(&snapshot).await?;
     if !compaction_groups.is_empty() {
         compaction_config::Entity::insert_many(
             compaction_groups
@@ -792,7 +790,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     println!("compaction config migrated");
 
     // compaction status
-    let compaction_statuses = CompactStatus::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
+    let compaction_statuses = CompactStatus::list_at_snapshot(&snapshot).await?;
     if !compaction_statuses.is_empty() {
         compaction_status::Entity::insert_many(
             compaction_statuses
@@ -811,8 +809,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     println!("compaction status migrated");
 
     // compaction task
-    let compaction_tasks =
-        CompactTaskAssignment::list_at_snapshot::<EtcdMetaStore>(&snapshot).await?;
+    let compaction_tasks = CompactTaskAssignment::list_at_snapshot(&snapshot).await?;
     if !compaction_tasks.is_empty() {
         compaction_task::Entity::insert_many(compaction_tasks.into_iter().map(|ct| {
             let context_id = ct.context_id;

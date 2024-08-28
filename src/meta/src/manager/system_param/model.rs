@@ -26,9 +26,7 @@ const SYSTEM_PARAMS_CF_NAME: &str = "cf/system_params";
 pub trait SystemParamsModel: Sized {
     fn cf_name() -> String;
     async fn get<S: MetaStore>(store: &S) -> MetadataModelResult<Option<Self>>;
-    async fn get_at_snapshot<S: MetaStore>(
-        store: &S::Snapshot,
-    ) -> MetadataModelResult<Option<Self>>;
+    async fn get_at_snapshot<S: Snapshot>(store: &S) -> MetadataModelResult<Option<Self>>;
     async fn insert<S: MetaStore>(&self, store: &S) -> MetadataModelResult<()>;
 }
 
@@ -43,12 +41,12 @@ impl SystemParamsModel for SystemParams {
     where
         S: MetaStore,
     {
-        Self::get_at_snapshot::<S>(&store.snapshot().await).await
+        Self::get_at_snapshot(&store.snapshot().await).await
     }
 
-    async fn get_at_snapshot<S>(snapshot: &S::Snapshot) -> MetadataModelResult<Option<SystemParams>>
+    async fn get_at_snapshot<S>(snapshot: &S) -> MetadataModelResult<Option<SystemParams>>
     where
-        S: MetaStore,
+        S: Snapshot,
     {
         let kvs = snapshot.list_cf(&SystemParams::cf_name()).await?;
         if kvs.is_empty() {

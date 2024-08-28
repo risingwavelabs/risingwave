@@ -149,10 +149,10 @@ impl ClusterId {
     pub async fn from_meta_store<S: MetaStore>(
         meta_store: &S,
     ) -> MetadataModelResult<Option<Self>> {
-        Self::from_snapshot::<S>(&meta_store.snapshot().await).await
+        Self::from_snapshot(&meta_store.snapshot().await).await
     }
 
-    pub async fn from_snapshot<S: MetaStore>(s: &S::Snapshot) -> MetadataModelResult<Option<Self>> {
+    pub async fn from_snapshot<S: Snapshot>(s: &S) -> MetadataModelResult<Option<Self>> {
         match s.get_cf(CLUSTER_ID_CF_NAME, CLUSTER_ID_KEY).await {
             Ok(bytes) => Ok(Some(Self::from_bytes(bytes)?)),
             Err(e) => match e {
