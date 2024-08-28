@@ -93,6 +93,7 @@ opendal = { workspace = true, features = [
     "services-gcs",
     "services-memory",
     "services-s3",
+    "services-webhdfs",
 ] }
 openssl = "0.10"
 parking_lot = { workspace = true }
@@ -227,6 +228,3 @@ harness = false
 
 [lints]
 workspace = true
-
-# [features]
-# hdfs-backend = ["opendal/services-hdfs", "dep:risingwave_jni_core"]
