@@ -43,6 +43,7 @@ members = [
     "src/storage",
     "src/storage/backup",
     "src/storage/compactor",
+    "src/storage/hummock_memory_limiter",
     "src/storage/hummock_sdk",
     "src/storage/hummock_test",
     "src/stream",
@@ -219,6 +220,7 @@ risingwave_error = { path = "./src/error" }
 risingwave_expr = { path = "./src/expr/core" }
 risingwave_expr_impl = { path = "./src/expr/impl" }
 risingwave_frontend = { path = "./src/frontend" }
+risingwave_hummock_memory_limiter = { path = "./src/storage/hummock_memory_limiter" }
 risingwave_hummock_sdk = { path = "./src/storage/hummock_sdk" }
 risingwave_hummock_test = { path = "./src/storage/hummock_test" }
 risingwave_hummock_trace = { path = "./src/storage/hummock_trace" }
@@ -260,6 +262,7 @@ unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(madsim)',
     'cfg(coverage)',
     'cfg(dashboard_built)',
+    'cfg(loom)',
 ] }
 
 [workspace.lints.clippy]
