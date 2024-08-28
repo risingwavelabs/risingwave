@@ -537,6 +537,7 @@ NatsProperties:
   - name: consumer.filter_subjects
     field_type: Vec<String>
     required: false
+    default: Default::default
   - name: consumer.replay_policy
     field_type: String
     required: false
@@ -578,6 +579,7 @@ NatsProperties:
   - name: consumer.backoff.sec
     field_type: Vec<u64>
     required: false
+    default: Default::default
   - name: scan.startup.mode
     field_type: String
     required: false
