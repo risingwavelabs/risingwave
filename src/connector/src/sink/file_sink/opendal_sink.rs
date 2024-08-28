@@ -87,7 +87,7 @@ pub enum EngineType {
     S3,
     Fs,
     Azblob,
-    Hdfs,
+    Webhdfs,
 }
 
 impl<S: OpendalSinkBackend> Sink for FileSink<S> {
