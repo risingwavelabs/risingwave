@@ -126,8 +126,11 @@ pub struct NatsPropertiesConsumer {
     #[serde(rename = "consumer.filter_subject")]
     pub filter_subject: Option<String>,
 
-    #[serde(rename = "consumer.filter_subjects")]
-    #[serde(deserialize_with = "deserialize_optional_string_seq_from_string")]
+    #[serde(
+        rename = "consumer.filter_subjects",
+        default,
+        deserialize_with = "deserialize_optional_string_seq_from_string"
+    )]
     pub filter_subjects: Option<Vec<String>>,
 
     #[serde(rename = "consumer.replay_policy")]
@@ -178,8 +181,11 @@ pub struct NatsPropertiesConsumer {
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub memory_storage: Option<bool>,
 
-    #[serde(rename = "consumer.backoff.sec")]
-    #[serde(deserialize_with = "deserialize_optional_u64_seq_from_string")]
+    #[serde(
+        rename = "consumer.backoff.sec",
+        default,
+        deserialize_with = "deserialize_optional_u64_seq_from_string"
+    )]
     pub backoff: Option<Vec<u64>>,
 }
 

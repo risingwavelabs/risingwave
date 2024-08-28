@@ -66,6 +66,7 @@ def init_risingwave_mv(docker):
     sink_config = config['sink']
     sink_param = ",\n".join([f"{k}='{v}'" for k, v in sink_config.items()])
     sqls = [
+        "set sink_decouple = false",
         "set streaming_parallelism = 4",
         """
         CREATE SOURCE bid (

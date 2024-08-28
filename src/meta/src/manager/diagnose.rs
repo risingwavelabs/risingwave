@@ -475,7 +475,7 @@ impl DiagnoseCommand {
                     let mut visit_level = |level: &Level| {
                         sst_num += level.table_infos.len();
                         sst_total_file_size +=
-                            level.table_infos.iter().map(|t| t.file_size).sum::<u64>();
+                            level.table_infos.iter().map(|t| t.sst_size).sum::<u64>();
                         for sst in &level.table_infos {
                             if sst.total_key_count == 0 {
                                 continue;
