@@ -55,7 +55,7 @@ pub(super) enum CreatingStreamingJobStatus {
     },
 }
 
-pub(super) struct InjectBarrierInfo {
+pub(super) struct CreatingJobInjectBarrierInfo {
     pub curr_epoch: TracedEpoch,
     pub prev_epoch: TracedEpoch,
     pub kind: BarrierKind,
@@ -96,7 +96,7 @@ impl CreatingStreamingJobStatus {
     pub(super) fn may_inject_fake_barrier(
         &mut self,
         is_checkpoint: bool,
-    ) -> Option<(Vec<InjectBarrierInfo>, Option<InflightGraphInfo>)> {
+    ) -> Option<(Vec<CreatingJobInjectBarrierInfo>, Option<InflightGraphInfo>)> {
         if let CreatingStreamingJobStatus::ConsumingSnapshot {
             prev_epoch_fake_physical_time,
             pending_commands,
@@ -113,7 +113,7 @@ impl CreatingStreamingJobStatus {
                 pending_non_checkpoint_barriers.push(*backfill_epoch);
 
                 let prev_epoch = Epoch::from_physical_time(*prev_epoch_fake_physical_time);
-                let barriers_to_inject = [InjectBarrierInfo {
+                let barriers_to_inject = [CreatingJobInjectBarrierInfo {
                     curr_epoch: TracedEpoch::new(Epoch(*backfill_epoch)),
                     prev_epoch: TracedEpoch::new(prev_epoch),
                     kind: BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers)),
@@ -123,7 +123,7 @@ impl CreatingStreamingJobStatus {
                 .chain(
                     pending_commands
                         .drain(..)
-                        .map(|command_ctx| InjectBarrierInfo {
+                        .map(|command_ctx| CreatingJobInjectBarrierInfo {
                             curr_epoch: command_ctx.curr_epoch.clone(),
                             prev_epoch: command_ctx.prev_epoch.clone(),
                             kind: command_ctx.kind.clone(),
@@ -147,7 +147,7 @@ impl CreatingStreamingJobStatus {
                     BarrierKind::Barrier
                 };
                 Some((
-                    vec![InjectBarrierInfo {
+                    vec![CreatingJobInjectBarrierInfo {
                         curr_epoch,
                         prev_epoch,
                         kind,

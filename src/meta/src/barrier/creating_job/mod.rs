@@ -35,7 +35,7 @@ use crate::barrier::command::CommandContext;
 use crate::barrier::creating_job::barrier_control::{
     CreatingStreamingJobBarrierControl, CreatingStreamingJobBarrierType,
 };
-use crate::barrier::creating_job::status::{CreatingStreamingJobStatus, InjectBarrierInfo};
+use crate::barrier::creating_job::status::{CreatingStreamingJobStatus, CreatingJobInjectBarrierInfo};
 use crate::barrier::info::InflightGraphInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
@@ -276,7 +276,7 @@ impl CreatingStreamingJobControl {
                 .active_graph_info()
                 .expect("must exist when having barriers to inject");
             let table_id = self.info.table_fragments.table_id();
-            for InjectBarrierInfo {
+            for CreatingJobInjectBarrierInfo {
                 curr_epoch,
                 prev_epoch,
                 kind,
