@@ -1,4 +1,7 @@
 statement ok
+set sink_decouple = false;
+
+statement ok
 set streaming_parallelism=4;
 
 statement ok
@@ -33,7 +36,8 @@ CREATE SINK sink1 AS select * from mv1 WITH (
     s3.endpoint = 'http://127.0.0.1:9301',
     s3.region = 'us-east-1',
     s3.access.key = 'hummockadmin',
-    s3.secret.key = 'hummockadmin'
+    s3.secret.key = 'hummockadmin',
+    commit_checkpoint_interval = 1
 );
 
 statement ok
@@ -50,7 +54,7 @@ CREATE SINK sink2 AS select * from mv1 WITH (
     s3.region = 'us-east-1',
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
-    commit_checkpoint_interval = 5
+    commit_checkpoint_interval = 1
 );
 
 sleep 20s
