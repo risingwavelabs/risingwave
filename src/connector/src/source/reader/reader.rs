@@ -197,6 +197,7 @@ async fn build_opendal_fs_list_stream<Src: OpendalSource>(lister: OpendalEnumera
                     .map(|m| m.matches(&res.name))
                     .unwrap_or(true)
                 {
+                    println!("这里 res{:?}", res.name);
                     yield res
                 } else {
                     // Currrntly due to the lack of prefix list, we just skip the unmatched files.
