@@ -47,29 +47,37 @@ impl From<StaticCompactionGroupId> for CompactionGroupId {
 pub mod group_split {
     use std::cmp::Ordering;
 
-    use super::hummock_version_ext::{add_ssts_to_sub_level, insert_new_sub_level};
+    use super::hummock_version_ext::insert_new_sub_level;
     use crate::can_concat;
     use crate::level::{Level, Levels};
 
     pub fn merge_levels(left_levels: &mut Levels, right_levels: Levels) {
         let right_l0 = right_levels.l0;
 
-        for right_sub_level in right_l0.sub_levels {
-            let sub_level = right_sub_level.clone();
-            match get_sub_level_insert_hint(&left_levels.l0.sub_levels, &sub_level) {
-                Ok(insert_hint) => {
-                    add_ssts_to_sub_level(&mut left_levels.l0, insert_hint, sub_level.table_infos);
-                }
-                Err(insert_hint) => {
-                    insert_new_sub_level(
-                        &mut left_levels.l0,
-                        sub_level.sub_level_id,
-                        sub_level.level_type,
-                        sub_level.table_infos,
-                        Some(insert_hint),
-                    );
-                }
+        let mut max_left_sub_level_id = left_levels
+            .l0
+            .sub_levels
+            .iter()
+            .map(|sub_level| sub_level.sub_level_id + 1)
+            .max()
+            .unwrap_or(0); // If there are no sub levels, the max sub level id is 0.
+        let need_rewrite_right_sub_level_id = max_left_sub_level_id != 0;
+
+        for mut right_sub_level in right_l0.sub_levels {
+            // Rewrtie the sub level id of right sub level to avoid conflict with left sub levels. (conflict level type)
+            // e.g. left sub levels: [0, 1, 2], right sub levels: [0, 1, 2], after rewrite, right sub levels: [3, 4, 5]
+            if need_rewrite_right_sub_level_id {
+                right_sub_level.sub_level_id = max_left_sub_level_id;
+                max_left_sub_level_id += 1;
             }
+
+            insert_new_sub_level(
+                &mut left_levels.l0,
+                right_sub_level.sub_level_id,
+                right_sub_level.level_type,
+                right_sub_level.table_infos,
+                None,
+            );
         }
 
         assert!(

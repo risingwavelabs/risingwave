@@ -1959,15 +1959,19 @@ mod tests {
 
             group_split::merge_levels(&mut left_levels, right_levels);
 
-            assert!(left_levels.l0.sub_levels.len() == 4);
+            assert!(left_levels.l0.sub_levels.len() == 6);
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
-            assert_eq!(200, left_levels.l0.sub_levels[0].total_file_size);
-            assert!(left_levels.l0.sub_levels[1].sub_level_id == 102);
+            assert_eq!(100, left_levels.l0.sub_levels[0].total_file_size);
+            assert!(left_levels.l0.sub_levels[1].sub_level_id == 103);
             assert_eq!(100, left_levels.l0.sub_levels[1].total_file_size);
-            assert!(left_levels.l0.sub_levels[2].sub_level_id == 103);
-            assert_eq!(200, left_levels.l0.sub_levels[2].total_file_size);
-            assert!(left_levels.l0.sub_levels[3].sub_level_id == 105);
+            assert!(left_levels.l0.sub_levels[2].sub_level_id == 105);
+            assert_eq!(100, left_levels.l0.sub_levels[2].total_file_size);
+            assert!(left_levels.l0.sub_levels[3].sub_level_id == 106);
             assert_eq!(100, left_levels.l0.sub_levels[3].total_file_size);
+            assert!(left_levels.l0.sub_levels[4].sub_level_id == 107);
+            assert_eq!(100, left_levels.l0.sub_levels[4].total_file_size);
+            assert!(left_levels.l0.sub_levels[5].sub_level_id == 108);
+            assert_eq!(100, left_levels.l0.sub_levels[5].total_file_size);
 
             assert!(left_levels.levels[0].level_idx == 1);
             assert_eq!(600, left_levels.levels[0].total_file_size);
