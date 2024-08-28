@@ -8420,6 +8420,7 @@ dependencies = [
  "risingwave_sqlparser",
  "serde",
  "serde_json",
+ "socket2 0.5.6",
  "tempfile",
  "thiserror",
  "thiserror-ext",
