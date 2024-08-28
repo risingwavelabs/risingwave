@@ -61,7 +61,7 @@ impl ReadSnapshot {
         }
     }
 
-    pub fn now_proc_time(&self) -> InlineNowProcTime {
+    pub fn inline_now_proc_time(&self) -> InlineNowProcTime {
         let epoch = match self {
             ReadSnapshot::FrontendPinned { snapshot, .. } => Epoch(snapshot.committed_epoch()),
             ReadSnapshot::Other(epoch) => *epoch,

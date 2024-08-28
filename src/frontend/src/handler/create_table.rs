@@ -331,7 +331,7 @@ pub fn bind_sql_column_constraints(
                     // snapshot value.
                     let rewritten_expr_impl = session
                         .pinned_snapshot()
-                        .now_proc_time()
+                        .inline_now_proc_time()
                         .rewrite_expr(expr_impl.clone());
 
                     if let Some(snapshot_value) = rewritten_expr_impl.try_fold_const() {
