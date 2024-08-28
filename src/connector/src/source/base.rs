@@ -323,6 +323,9 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
             (SourceFormat::DebeziumMongo, SourceEncode::Json)
         }
         (PbFormatType::Plain, PbEncodeType::Bytes) => (SourceFormat::Plain, SourceEncode::Bytes),
+        (PbFormatType::Upsert, PbEncodeType::Protobuf) => {
+            (SourceFormat::Upsert, SourceEncode::Protobuf)
+        }
         (format, encode) => {
             bail!(
                 "Unsupported combination of format {:?} and encode {:?}",
