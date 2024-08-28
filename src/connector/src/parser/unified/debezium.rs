@@ -172,22 +172,6 @@ pub fn parse_schema_change(
         .as_utf8()
         .to_string();
 
-    // Currently only accept ADD COLUMN and DROP COLUMN,
-    // and we assumes each schema change message only contains one DDL statement.
-    let allowed_ddl = ["ADD COLUMN", "DROP COLUMN"];
-    let upper_upstream_ddl = upstream_ddl.to_uppercase();
-    let is_allowed = allowed_ddl
-        .iter()
-        .any(|&allowed_ddl| upper_upstream_ddl.contains(allowed_ddl));
-    if !is_allowed {
-        Err(AccessError::Uncategorized {
-            message: format!(
-                "skip unsupported table schema change for upstream DDL: {}",
-                upstream_ddl
-            ),
-        })?;
-    }
-
     if let Some(ScalarRefImpl::List(table_changes)) = accessor
         .access(&[TABLE_CHANGES], &DataType::List(Box::new(DataType::Jsonb)))?
         .to_datum_ref()
