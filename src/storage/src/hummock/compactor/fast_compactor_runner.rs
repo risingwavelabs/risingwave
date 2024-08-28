@@ -294,7 +294,6 @@ impl CompactorRunner {
             watermark: task.watermark,
             stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
             task_type: task.task_type,
-            is_target_l0_or_lbase: task.target_level == 0 || task.target_level == task.base_level,
             table_vnode_partition: task.table_vnode_partition.clone(),
             use_block_based_filter: true,
             table_schemas: Default::default(),
@@ -493,10 +492,10 @@ impl CompactorRunner {
         }
         let mut total_read_bytes = 0;
         for sst in &self.left.sstables {
-            total_read_bytes += sst.file_size;
+            total_read_bytes += sst.sst_size;
         }
         for sst in &self.right.sstables {
-            total_read_bytes += sst.file_size;
+            total_read_bytes += sst.sst_size;
         }
         self.metrics
             .compact_fast_runner_bytes

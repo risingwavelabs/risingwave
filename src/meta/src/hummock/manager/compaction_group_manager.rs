@@ -30,8 +30,8 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    compact_task, CompactionConfig, CompactionGroupInfo, CompatibilityVersion, PbGroupConstruct,
-    PbGroupDestroy, PbStateTableInfoDelta,
+    CompactionConfig, CompactionGroupInfo, CompatibilityVersion, PbGroupConstruct, PbGroupDestroy,
+    PbStateTableInfoDelta,
 };
 use tokio::sync::OnceCell;
 
@@ -604,16 +604,6 @@ impl HummockManager {
         drop(versioning_guard);
         drop(compaction_guard);
         self.report_compact_tasks(canceled_tasks).await?;
-
-        // Don't trigger compactions if we enable deterministic compaction
-        if !self.env.opts.compaction_deterministic_test {
-            // commit_epoch may contains SSTs from any compaction group
-            self.try_send_compaction_request(parent_group_id, compact_task::TaskType::SpaceReclaim);
-            self.try_send_compaction_request(
-                target_compaction_group_id,
-                compact_task::TaskType::SpaceReclaim,
-            );
-        }
 
         self.metrics
             .move_state_table_count

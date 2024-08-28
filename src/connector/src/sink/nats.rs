@@ -21,7 +21,6 @@ use futures::prelude::TryFuture;
 use futures::FutureExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -34,7 +33,6 @@ use super::encoder::{
 use super::utils::chunk_to_json;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::connector_common::NatsCommon;
-use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
@@ -106,13 +104,6 @@ impl Sink for NatsSink {
     type LogSinker = AsyncTruncateLogSinkerOf<NatsSinkWriter>;
 
     const SINK_NAME: &'static str = NATS_SINK;
-
-    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        match user_specified {
-            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
-            SinkDecouple::Disable => Ok(false),
-        }
-    }
 
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {

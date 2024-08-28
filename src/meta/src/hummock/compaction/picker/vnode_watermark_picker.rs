@@ -50,7 +50,7 @@ impl VnodeWatermarkCompactionPicker {
             return None;
         }
         Some(CompactionInput {
-            select_input_size: select_input_ssts.iter().map(|sst| sst.file_size).sum(),
+            select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size).sum(),
             total_file_count: select_input_ssts.len() as u64,
             input_levels: vec![
                 InputLevel {

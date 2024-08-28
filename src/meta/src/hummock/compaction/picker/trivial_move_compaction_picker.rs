@@ -55,7 +55,7 @@ impl TrivialMovePicker {
     ) -> Option<SstableInfo> {
         let mut skip_by_pending = false;
         for sst in select_tables {
-            if sst.file_size < self.sst_allowed_trivial_move_min_size {
+            if sst.sst_size < self.sst_allowed_trivial_move_min_size {
                 continue;
             }
 
@@ -90,7 +90,7 @@ impl TrivialMovePicker {
             self.pick_trivial_move_sst(select_tables, target_tables, level_handlers, stats)
         {
             return Some(CompactionInput {
-                select_input_size: trivial_move_sst.file_size,
+                select_input_size: trivial_move_sst.sst_size,
                 total_file_count: 1,
                 input_levels: vec![
                     InputLevel {
@@ -128,6 +128,7 @@ pub mod tests {
         let sst = SstableInfo {
             sst_id: 1,
             file_size: 100,
+            sst_size: 100,
             ..Default::default()
         };
 
