@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
@@ -966,6 +967,46 @@ impl DdlService for DdlServiceImpl {
                 .await?;
 
             for table in tables {
+                // Since we only support `ADD` and `DROP` column, we check whether the new columns and the original columns
+                // is a subset of the other.
+                let original_column_names: HashSet<String> = HashSet::from_iter(
+                    table
+                        .columns
+                        .iter()
+                        .map(|col| ColumnCatalog::from(col.clone()).column_desc.name),
+                );
+                let new_column_names: HashSet<String> = HashSet::from_iter(
+                    table_change
+                        .columns
+                        .iter()
+                        .map(|col| ColumnCatalog::from(col.clone()).column_desc.name),
+                );
+                if !(original_column_names.is_subset(&new_column_names)
+                    || original_column_names.is_superset(&new_column_names))
+                {
+                    tracing::warn!(target: "auto_schema_change",
+                                    table_id = table.id,
+                                    cdc_table_id = table.cdc_table_id,
+                                    upstraem_ddl = table_change.upstream_ddl,
+                                    original_columns = ?original_column_names,
+                                    new_columns = ?new_column_names,
+                                    "New columns should be a subset or superset of the original columns, since only `ADD COLUMN` and `DROP COLUMN` is supported");
+                    return Err(Status::invalid_argument(
+                        "New columns should be a subset or superset of the original columns",
+                    ));
+                }
+                // skip the schema change if there is no change to original columns
+                if original_column_names == new_column_names {
+                    tracing::warn!(target: "auto_schema_change",
+                                   table_id = table.id,
+                                   cdc_table_id = table.cdc_table_id,
+                                   upstraem_ddl = table_change.upstream_ddl,
+                                    original_columns = ?original_column_names,
+                                    new_columns = ?new_column_names,
+                                   "No change to columns, skipping the schema change");
+                    continue;
+                }
+
                 let latency_timer = self
                     .meta_metrics
                     .auto_schema_change_latency
