@@ -1386,12 +1386,19 @@ impl ToStream for LogicalAgg {
             panic!("the root PlanNode must be StreamHashAgg, StreamSimpleAgg, StreamGlobalApproxPercentile, or StreamRowMerge");
         };
 
-        if self.agg_calls().len() == n_final_agg_calls {
+        let is_hash_agg = !self.group_key().is_empty();
+        // "Simple Agg" includes normal simple agg, as well as approx percentile simple 2 phase agg.
+        let is_simple_agg = !is_hash_agg;
+        if self.agg_calls().len() == n_final_agg_calls && is_hash_agg {
             // an existing `count(*)` is used as row count column in `StreamXxxAgg`
             Ok(plan)
         } else {
-            // a `count(*)` is appended, should project the output
-            assert_eq!(self.agg_calls().len() + 1, n_final_agg_calls);
+            // For hash agg, a `count(*)` is appended, should project the output.
+            // For simple agg, we output every epoch, so we will always add a project
+            // to filter out no-op updates, and we don't need the following assert.
+            if is_hash_agg {
+                assert_eq!(self.agg_calls().len() + 1, n_final_agg_calls);
+            }
             Ok(StreamProject::new(generic::Project::with_out_col_idx(
                 plan,
                 0..self.schema().len(),
@@ -1400,7 +1407,9 @@ impl ToStream for LogicalAgg {
             // Since it'll be pruned immediately in `StreamProject`, the update records are likely to be
             // no-op. So we set the hint to instruct the executor to eliminate them.
             // See https://github.com/risingwavelabs/risingwave/issues/17030.
-            .with_noop_update_hint(self.agg_calls().is_empty())
+            // Further for simple agg, we also have to set the hint to eliminate no-op updates.
+            // Since we will output every epoch.
+            .with_noop_update_hint(self.agg_calls().is_empty() || is_simple_agg)
             .into())
         }
     }
