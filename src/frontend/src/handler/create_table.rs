@@ -1124,6 +1124,7 @@ async fn derive_schema_for_cdc_table(
     constraints: &Vec<TableConstraint>,
     connect_properties: WithOptionsSecResolved,
     need_auto_schema_map: bool,
+    // original table catalog available in auto schema change process
     original_catalog: Option<Arc<TableCatalog>>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
