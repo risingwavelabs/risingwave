@@ -63,7 +63,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         let object_lister = self
             .op
             .lister_with(prefix)
-            .recursive(true)
+            .recursive(false)
             .metakey(Metakey::ContentLength | Metakey::LastModified)
             .await?;
         let stream = stream::unfold(object_lister, |mut object_lister| async move {
