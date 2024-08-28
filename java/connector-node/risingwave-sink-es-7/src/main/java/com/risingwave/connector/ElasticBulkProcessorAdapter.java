@@ -39,7 +39,7 @@ public class ElasticBulkProcessorAdapter implements BulkProcessorAdapter {
     public ElasticBulkProcessorAdapter(
             RequestTracker requestTracker,
             ElasticRestHighLevelClientAdapter client,
-            int retryOnConflict) {
+            EsSinkConfig config) {
         BulkProcessor.Builder builder =
                 BulkProcessor.builder(
                         (bulkRequest, bulkResponseActionListener) ->
@@ -50,20 +50,20 @@ public class ElasticBulkProcessorAdapter implements BulkProcessorAdapter {
                         new BulkListener(requestTracker));
         // Possible feature: move these to config
         // execute the bulk every 10 000 requests
-        builder.setBulkActions(1000);
+        builder.setBulkActions(config.getBulkActions());
         // flush the bulk every 5mb
-        builder.setBulkSize(new ByteSizeValue(5, ByteSizeUnit.MB));
+        builder.setBulkSize(new ByteSizeValue(config.getBulkSize(), ByteSizeUnit.KB));
         // flush the bulk every 5 seconds whatever the number of requests
         builder.setFlushInterval(TimeValue.timeValueSeconds(5));
         // Set the number of concurrent requests
-        builder.setConcurrentRequests(1);
+        builder.setConcurrentRequests(config.getConcurrentRequests());
         // Set a custom backoff policy which will initially wait for 100ms, increase exponentially
         // and retries up to three times.
         builder.setBackoffPolicy(
                 BackoffPolicy.exponentialBackoff(TimeValue.timeValueMillis(100), 3));
         this.esBulkProcessor = builder.build();
         this.requestTracker = requestTracker;
-        this.retryOnConflict = retryOnConflict;
+        this.retryOnConflict = config.getRetryOnConflict();
     }
 
     @Override

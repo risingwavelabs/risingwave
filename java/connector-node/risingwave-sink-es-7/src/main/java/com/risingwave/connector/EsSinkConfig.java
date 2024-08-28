@@ -41,11 +41,17 @@ public class EsSinkConfig extends CommonSinkConfig {
     @JsonProperty(value = "index_column")
     private String indexColumn;
 
-    @JsonProperty(value = "max_task_num")
-    private Integer maxTaskNum;
-
     @JsonProperty(value = "retry_on_conflict")
     private Integer retryOnConflict;
+
+    @JsonProperty(value = "bulk_actions")
+    private Integer bulkActions;
+
+    @JsonProperty(value = "bulk_size")
+    private Integer bulkSize;
+
+    @JsonProperty(value = "concurrent_requests")
+    private Integer concurrentRequests;
 
     @JsonCreator
     public EsSinkConfig(@JsonProperty(value = "url") String url) {
@@ -101,21 +107,39 @@ public class EsSinkConfig extends CommonSinkConfig {
         return this;
     }
 
-    public Integer getMaxTaskNum() {
-        return maxTaskNum;
+    public Integer getBulkActions() {
+        return this.bulkActions == null ? 1000 : this.bulkActions;
     }
 
-    public EsSinkConfig withMaxTaskNum(Integer maxTaskNum) {
-        this.maxTaskNum = maxTaskNum;
+    public EsSinkConfig withBulkActions(Integer bulkActions) {
+        this.bulkActions = bulkActions;
+        return this;
+    }
+
+    public Integer getBulkSize() {
+        return this.bulkSize == null ? 5 * 1024 : this.bulkSize;
+    }
+
+    public EsSinkConfig withBulkSize(Integer bulkSize) {
+        this.bulkSize = bulkSize;
         return this;
     }
 
     public Integer getRetryOnConflict() {
-        return retryOnConflict;
+        return this.retryOnConflict == null ? 3 : this.retryOnConflict;
     }
 
     public EsSinkConfig withRetryOnConflict(Integer retryOnConflict) {
         this.retryOnConflict = retryOnConflict;
+        return this;
+    }
+
+    public Integer getConcurrentRequests() {
+        return this.concurrentRequests == null ? 1 : this.concurrentRequests;
+    }
+
+    public EsSinkConfig withConcurrentRequests(Integer concurrentRequests) {
+        this.concurrentRequests = concurrentRequests;
         return this;
     }
 }
