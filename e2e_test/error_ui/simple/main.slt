@@ -27,12 +27,10 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: failed to check UDF signature
   2: failed to send requests to UDF service
-  3: status: Unavailable, message: "error trying to connect: tcp connect error: deadline has elapsed", details: [], metadata: MetadataMap { headers: {} }
+  3: status: Unknown, message: "transport error", details: [], metadata: MetadataMap { headers: {} }
   4: transport error
-  5: error trying to connect
-  6: tcp connect error
-  7: deadline has elapsed
-
+  5: connection error
+  6: connection reset
 
 statement error
 alter system set not_exist_key to value;
