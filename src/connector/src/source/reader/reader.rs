@@ -29,7 +29,7 @@ use crate::error::ConnectorResult;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use crate::source::filesystem::opendal_source::{
-    OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
+    OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
 };
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{
@@ -93,6 +93,11 @@ impl SourceReader {
             ConnectorProperties::OpendalS3(prop) => {
                 let lister: OpendalEnumerator<OpendalS3> =
                     OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
+                Ok(build_opendal_fs_list_stream(lister))
+            }
+            ConnectorProperties::Azblob(prop) => {
+                let lister: OpendalEnumerator<OpendalAzblob> =
+                    OpendalEnumerator::new_azblob_source(*prop)?;
                 Ok(build_opendal_fs_list_stream(lister))
             }
             ConnectorProperties::PosixFs(prop) => {
