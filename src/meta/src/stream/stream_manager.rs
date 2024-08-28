@@ -291,12 +291,6 @@ impl GlobalStreamManager {
                         // try to cancel buffered creating command.
                         if self.barrier_scheduler.try_cancel_scheduled_create(table_id) {
                             tracing::debug!("cancelling streaming job {table_id} in buffer queue.");
-                            let node_actors = table_fragments.worker_actor_ids();
-                            let cluster_info =
-                                self.metadata_manager.get_streaming_cluster_info().await?;
-                            self.stream_rpc_manager
-                                .drop_actors(&cluster_info.worker_nodes, node_actors.into_iter())
-                                .await?;
 
                             if let MetadataManager::V1(mgr) = &self.metadata_manager {
                                 mgr.fragment_manager

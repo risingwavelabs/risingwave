@@ -263,38 +263,39 @@ impl ControlStreamManager {
             pre_applied_graph_info,
             applied_graph_info,
             actor_ids_to_pre_sync_mutation,
-            command_ctx
-                .actors_to_create()
-                .into_iter()
-                .map(|(worker_id, actors)| {
-                    (
-                        worker_id,
-                        actors
-                            .into_iter()
-                            .map(|actor| BuildActorInfo {
-                                actor: Some(actor),
-                                // TODO: consider subscriber of backfilling mv
-                                related_subscriptions: command_ctx
-                                    .subscription_info
-                                    .mv_depended_subscriptions
-                                    .iter()
-                                    .map(|(table_id, subscriptions)| {
-                                        (
-                                            table_id.table_id,
-                                            SubscriptionIds {
-                                                subscription_ids: subscriptions
-                                                    .keys()
-                                                    .cloned()
-                                                    .collect(),
-                                            },
-                                        )
-                                    })
-                                    .collect(),
-                            })
-                            .collect_vec(),
-                    )
-                })
-                .collect(),
+            command_ctx.actors_to_create().map(|actors_to_create| {
+                actors_to_create
+                    .into_iter()
+                    .map(|(worker_id, actors)| {
+                        (
+                            worker_id,
+                            actors
+                                .into_iter()
+                                .map(|actor| BuildActorInfo {
+                                    actor: Some(actor),
+                                    // TODO: consider subscriber of backfilling mv
+                                    related_subscriptions: command_ctx
+                                        .subscription_info
+                                        .mv_depended_subscriptions
+                                        .iter()
+                                        .map(|(table_id, subscriptions)| {
+                                            (
+                                                table_id.table_id,
+                                                SubscriptionIds {
+                                                    subscription_ids: subscriptions
+                                                        .keys()
+                                                        .cloned()
+                                                        .collect(),
+                                                },
+                                            )
+                                        })
+                                        .collect(),
+                                })
+                                .collect_vec(),
+                        )
+                    })
+                    .collect()
+            }),
         )
     }
 
@@ -307,7 +308,7 @@ impl ControlStreamManager {
         pre_applied_graph_info: &InflightGraphInfo,
         applied_graph_info: Option<&InflightGraphInfo>,
         actor_ids_to_pre_sync_mutation: HashMap<WorkerId, Vec<ActorId>>,
-        mut new_actors: HashMap<WorkerId, Vec<BuildActorInfo>>,
+        mut new_actors: Option<HashMap<WorkerId, Vec<BuildActorInfo>>>,
     ) -> MetaResult<HashSet<WorkerId>> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
             "inject_barrier_err"
@@ -327,7 +328,11 @@ impl ControlStreamManager {
                     .into_iter()
                     .flat_map(|info| info.worker_ids()),
             )
-            .chain(new_actors.keys().cloned())
+            .chain(
+                new_actors
+                    .iter()
+                    .flat_map(|new_actors| new_actors.keys().cloned()),
+            )
         {
             if !self.nodes.contains_key(&worker_id) {
                 return Err(anyhow!("unconnected worker node {}", worker_id).into());
@@ -337,6 +342,7 @@ impl ControlStreamManager {
         let mut node_need_collect = HashSet::new();
         let new_actors_location_to_broadcast = new_actors
             .iter()
+            .flatten()
             .flat_map(|(worker_id, actor_infos)| {
                 actor_infos.iter().map(|actor_info| ActorInfo {
                     actor_id: actor_info.actor.as_ref().unwrap().actor_id,
@@ -398,8 +404,10 @@ impl ControlStreamManager {
                                                 .collect(),
                                         broadcast_info: new_actors_location_to_broadcast.clone(),
                                         actors_to_build: new_actors
-                                            .remove(node_id)
+                                            .as_mut()
+                                            .map(|new_actors| new_actors.remove(node_id))
                                             .into_iter()
+                                            .flatten()
                                             .flatten()
                                             .collect(),
                                     },

@@ -844,7 +844,7 @@ impl CommandContext {
         mutation
     }
 
-    pub fn actors_to_create(&self) -> HashMap<WorkerId, Vec<StreamActor>> {
+    pub fn actors_to_create(&self) -> Option<HashMap<WorkerId, Vec<StreamActor>>> {
         match &self.command {
             Command::CreateStreamingJob { info, job_type } => {
                 let mut map = match job_type {
@@ -854,13 +854,13 @@ impl CommandContext {
                     }
                     CreateStreamingJobType::SnapshotBackfill(_) => {
                         // for snapshot backfill, the actors to create is measured separately
-                        return HashMap::new();
+                        return None;
                     }
                 };
                 for (worker_id, new_actors) in info.table_fragments.actors_to_create() {
                     map.entry(worker_id).or_default().extend(new_actors)
                 }
-                map
+                Some(map)
             }
             Command::RescheduleFragment { reschedules, .. } => {
                 let mut map: HashMap<WorkerId, Vec<_>> = HashMap::new();
@@ -871,13 +871,12 @@ impl CommandContext {
                     let worker_id = status.location.as_ref().unwrap().worker_node_id;
                     map.entry(worker_id).or_default().push(actor.clone());
                 }
-
-                map
+                Some(map)
             }
             Command::ReplaceTable(replace_table) => {
-                replace_table.new_table_fragments.actors_to_create()
+                Some(replace_table.new_table_fragments.actors_to_create())
             }
-            _ => HashMap::new(),
+            _ => None,
         }
     }
 

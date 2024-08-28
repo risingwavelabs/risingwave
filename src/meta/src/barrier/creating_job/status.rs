@@ -55,6 +55,13 @@ pub(super) enum CreatingStreamingJobStatus {
     },
 }
 
+pub(super) struct InjectBarrierInfo {
+    pub curr_epoch: TracedEpoch,
+    pub prev_epoch: TracedEpoch,
+    pub kind: BarrierKind,
+    pub new_actors: Option<HashMap<WorkerId, Vec<BuildActorInfo>>>,
+}
+
 impl CreatingStreamingJobStatus {
     pub(super) fn active_graph_info(&self) -> Option<&InflightGraphInfo> {
         match self {
@@ -86,19 +93,10 @@ impl CreatingStreamingJobStatus {
     /// return
     /// - Some(vec[(`curr_epoch`, `prev_epoch`, `barrier_kind`)]) of barriers to newly inject
     /// - Some(`graph_info`) when the status should transit to `ConsumingLogStore`
-    #[expect(clippy::type_complexity)]
     pub(super) fn may_inject_fake_barrier(
         &mut self,
         is_checkpoint: bool,
-    ) -> Option<(
-        Vec<(
-            TracedEpoch,
-            TracedEpoch,
-            BarrierKind,
-            HashMap<WorkerId, Vec<BuildActorInfo>>,
-        )>,
-        Option<InflightGraphInfo>,
-    )> {
+    ) -> Option<(Vec<InjectBarrierInfo>, Option<InflightGraphInfo>)> {
         if let CreatingStreamingJobStatus::ConsumingSnapshot {
             prev_epoch_fake_physical_time,
             pending_commands,
@@ -115,21 +113,23 @@ impl CreatingStreamingJobStatus {
                 pending_non_checkpoint_barriers.push(*backfill_epoch);
 
                 let prev_epoch = Epoch::from_physical_time(*prev_epoch_fake_physical_time);
-                let barriers_to_inject = [(
-                    TracedEpoch::new(Epoch(*backfill_epoch)),
-                    TracedEpoch::new(prev_epoch),
-                    BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers)),
-                    HashMap::new(),
-                )]
+                let barriers_to_inject = [InjectBarrierInfo {
+                    curr_epoch: TracedEpoch::new(Epoch(*backfill_epoch)),
+                    prev_epoch: TracedEpoch::new(prev_epoch),
+                    kind: BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers)),
+                    new_actors: None,
+                }]
                 .into_iter()
-                .chain(pending_commands.drain(..).map(|command_ctx| {
-                    (
-                        command_ctx.curr_epoch.clone(),
-                        command_ctx.prev_epoch.clone(),
-                        command_ctx.kind.clone(),
-                        HashMap::new(),
-                    )
-                }))
+                .chain(
+                    pending_commands
+                        .drain(..)
+                        .map(|command_ctx| InjectBarrierInfo {
+                            curr_epoch: command_ctx.curr_epoch.clone(),
+                            prev_epoch: command_ctx.prev_epoch.clone(),
+                            kind: command_ctx.kind.clone(),
+                            new_actors: None,
+                        }),
+                )
                 .collect();
 
                 let graph_info = take(graph_info);
@@ -147,12 +147,12 @@ impl CreatingStreamingJobStatus {
                     BarrierKind::Barrier
                 };
                 Some((
-                    vec![(
+                    vec![InjectBarrierInfo {
                         curr_epoch,
                         prev_epoch,
                         kind,
-                        actors_to_create.take().unwrap_or_default(),
-                    )],
+                        new_actors: actors_to_create.take(),
+                    }],
                     None,
                 ))
             }

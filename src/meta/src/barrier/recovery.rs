@@ -398,7 +398,7 @@ impl GlobalBarrierManager {
                         &info,
                         Some(&info),
                         HashMap::new(),
-                        node_actors,
+                        Some(node_actors),
                     )?;
                     debug!(?node_to_collect, "inject initial barrier");
                     while !node_to_collect.is_empty() {

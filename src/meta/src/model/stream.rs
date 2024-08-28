@@ -527,7 +527,6 @@ impl TableFragments {
         actors
     }
 
-    /// Returns actor map: `actor_id` => `StreamActor`.
     pub fn actors_to_create(&self) -> HashMap<WorkerId, Vec<StreamActor>> {
         let mut actor_map: HashMap<_, Vec<_>> = HashMap::new();
         self.fragments

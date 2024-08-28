@@ -35,7 +35,7 @@ use crate::barrier::command::CommandContext;
 use crate::barrier::creating_job::barrier_control::{
     CreatingStreamingJobBarrierControl, CreatingStreamingJobBarrierType,
 };
-use crate::barrier::creating_job::status::CreatingStreamingJobStatus;
+use crate::barrier::creating_job::status::{CreatingStreamingJobStatus, InjectBarrierInfo};
 use crate::barrier::info::InflightGraphInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
@@ -276,7 +276,13 @@ impl CreatingStreamingJobControl {
                 .active_graph_info()
                 .expect("must exist when having barriers to inject");
             let table_id = self.info.table_fragments.table_id();
-            for (curr_epoch, prev_epoch, kind, new_actors) in barriers_to_inject {
+            for InjectBarrierInfo {
+                curr_epoch,
+                prev_epoch,
+                kind,
+                new_actors,
+            } in barriers_to_inject
+            {
                 let node_to_collect = control_stream_manager.inject_barrier(
                     Some(table_id),
                     None,
@@ -350,7 +356,7 @@ impl CreatingStreamingJobControl {
                     graph_info,
                     Some(graph_info),
                     HashMap::new(),
-                    HashMap::new(),
+                    None,
                 )?;
                 self.barrier_control.enqueue_epoch(
                     command_ctx.prev_epoch.value().0,
@@ -397,7 +403,7 @@ impl CreatingStreamingJobControl {
                         Some(graph_info)
                     },
                     HashMap::new(),
-                    HashMap::new(),
+                    None,
                 )?;
                 let prev_epoch = command_ctx.prev_epoch.value().0;
                 self.barrier_control.enqueue_epoch(
