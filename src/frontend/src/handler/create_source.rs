@@ -782,7 +782,10 @@ pub(crate) async fn bind_source_pk(
 
         // For all Upsert formats, we only accept one and only key column as primary key.
         // Additional KEY columns must be set in this case and must be primary key.
-        (Format::Upsert, encode @ Encode::Json | encode @ Encode::Avro) => {
+        (
+            Format::Upsert,
+            encode @ Encode::Json | encode @ Encode::Avro | encode @ Encode::Protobuf,
+        ) => {
             if let Some(ref key_column_name) = key_column_name
                 && sql_defined_pk
             {
@@ -977,7 +980,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
         convert_args!(hashmap!(
                 KAFKA_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Avro, Encode::Bytes, Encode::Csv],
-                    Format::Upsert => vec![Encode::Json, Encode::Avro],
+                    Format::Upsert => vec![Encode::Json, Encode::Avro, Encode::Protobuf],
                     Format::Debezium => vec![Encode::Json, Encode::Avro],
                     Format::Maxwell => vec![Encode::Json],
                     Format::Canal => vec![Encode::Json],

@@ -33,6 +33,22 @@ FORMAT plain ENCODE protobuf(
         message = 'test.User'
     );
 
+
+# for upsert protobuf source
+# NOTE: the key part is in json format and rw only read it as bytes
+statement ok
+create table sr_pb_upsert (primary key (rw_key))
+include
+    key as rw_key
+with (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'sr_pb_test',
+    scan.startup.mode = 'earliest')
+FORMAT plain ENCODE protobuf(
+        schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+        message = 'test.User'
+    );
+
 # Wait for source
 sleep 2s
 
@@ -50,9 +66,16 @@ select min(id), max(id), max((sc).file_name) from sr_pb_test;
 ----
 0 19 source/context_019.proto
 
+query TT
+select convert_from(min(rw_key), 'UTF-8'), convert_from(max(rw_key), 'UTF-8') from sr_pb_upsert;
+----
+{"id": 0} {"id": 9}
 
 statement ok
 drop table sr_pb_test;
 
 statement ok
 drop table sr_pb_test_bk;
+
+statement ok
+drop table sr_pb_upsert;
