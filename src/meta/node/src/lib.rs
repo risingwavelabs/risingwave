@@ -457,6 +457,9 @@ pub fn start(
                 table_info_statistic_history_times: config
                     .storage
                     .table_info_statistic_history_times,
+                max_actor_num_per_worker_parallelism: config
+                    .meta
+                    .max_actor_num_per_worker_parallelism,
             },
             config.system.into_init_system_params(),
             Default::default(),

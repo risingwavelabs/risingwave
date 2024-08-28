@@ -282,6 +282,10 @@ impl DdlController {
         if !command.allow_in_recovery() {
             self.barrier_manager.check_status_running()?;
         }
+        if let Err(e) = self.validate_command(&command).await {
+            tracing::error!("validate ddl command failed: {:?}", e);
+            return Err(e);
+        };
         let ctrl = self.clone();
         let fut = async move {
             match command {

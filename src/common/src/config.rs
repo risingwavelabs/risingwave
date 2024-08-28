@@ -375,6 +375,12 @@ pub struct MetaConfig {
     /// Whether compactor should rewrite row to remove dropped column.
     #[serde(default = "default::meta::enable_dropped_column_reclaim")]
     pub enable_dropped_column_reclaim: bool,
+
+    /// Max number of actor allowed per parallelism (default = 500)
+    /// This limit is only effective for cluster created with version >= 2.0
+    /// DDL will be rejected when the number of actors exceeds this limit.
+    #[serde(default = "default::meta::max_actor_num_per_worker_parallelism")]
+    pub max_actor_num_per_worker_parallelism: usize,
 }
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -1464,6 +1470,10 @@ pub mod default {
 
         pub fn enable_dropped_column_reclaim() -> bool {
             false
+        }
+
+        pub fn max_actor_num_per_worker_parallelism() -> usize {
+            500
         }
     }
 

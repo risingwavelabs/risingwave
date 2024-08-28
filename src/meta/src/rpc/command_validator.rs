@@ -12,13 +12,56 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+use std::ops::Mul;
+
+use risingwave_meta_model_v2::worker::{self, WorkerType};
+use risingwave_pb::common::worker_node::State;
+
 use super::ddl_controller::{DdlCommand, DdlController};
-use crate::MetaResult;
+use crate::manager::WorkerId;
+use crate::{MetaError, MetaResult};
 
 impl DdlController {
     pub async fn validate_command(&self, command: &DdlCommand) -> MetaResult<()> {
-        // check whether there are more than 200 actors on a worker per core
-        let worker_actor_count = self.metadata_manager.worker_actor_count().await?;
+        match command {
+            DdlCommand::CreateStreamingJob(_, _, _, _) => {
+                let worker_actor_count = self.metadata_manager.worker_actor_count().await?;
+                let running_worker_parallelism: HashMap<WorkerId, usize> = self
+                    .metadata_manager
+                    .list_worker_node(Some(WorkerType::ComputeNode), Some(State::Running))
+                    .await?
+                    .into_iter()
+                    .map(|e| (e.id, e.parallelism()))
+                    .collect();
+
+                // check whether there are more than `max_actor_num_per_worker_parallelism` actors on a worker per parallelism
+                let max_actor_num_per_worker_parallelism =
+                    self.env.opts.max_actor_num_per_worker_parallelism;
+                let (passed, failed): (Vec<_>, Vec<_>) = worker_actor_count
+                    .into_iter()
+                    .map(|(worker_id, actor_count)| (worker_id, actor_count))
+                    .partition(|(worker_id, actor_count)| {
+                        let max_actor_count = running_worker_parallelism
+                            .get(worker_id)
+                            .map(|c| c.saturating_mul(max_actor_num_per_worker_parallelism))
+                            .unwrap_or(usize::MAX);
+                        actor_count <= &max_actor_count
+                    });
+
+                if !failed.is_empty() {
+                    let error_msg = format!(
+                        "Too many actors on worker(s).
+                        max_actor_num_per_worker_parallelism: {:?}), 
+                        failed worker id -> actor count: {:?}, 
+                        passed worker id -> actor count: {:?}",
+                        max_actor_num_per_worker_parallelism, failed, passed
+                    );
+                    return MetaError::resource_exhausted(error_msg);
+                }
+            }
+            _ => return Ok(()),
+        }
 
         Ok(())
     }

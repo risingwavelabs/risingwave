@@ -294,6 +294,8 @@ pub struct MetaOpts {
     pub temp_secret_file_dir: String,
 
     pub table_info_statistic_history_times: usize,
+
+    pub max_actor_num_per_worker_parallelism: usize,
 }
 
 impl MetaOpts {
@@ -358,6 +360,7 @@ impl MetaOpts {
             secret_store_private_key: Some("0123456789abcdef".as_bytes().to_vec()),
             temp_secret_file_dir: "./secrets".to_string(),
             table_info_statistic_history_times: 240,
+            max_actor_num_per_worker_parallelism: usize::MAX,
         }
     }
 }
@@ -383,7 +386,7 @@ pub async fn is_first_launch_for_sql_backend_cluster(
 
 impl MetaSrvEnv {
     pub async fn new(
-        opts: MetaOpts,
+        mut opts: MetaOpts,
         mut init_system_params: SystemParams,
         init_session_config: SessionConfig,
         meta_store_impl: MetaStoreImpl,
@@ -408,8 +411,16 @@ impl MetaSrvEnv {
                         (ClusterId::new(), true)
                     };
 
-                // For new clusters, the name of the object store needs to be prefixed according to the object id.
-                // For old clusters, the prefix is ​​not divided for the sake of compatibility.
+                // For new clusters:
+                // 1. the name of the object store needs to be prefixed according to the object id.
+                // 2. max_actor_num_per_worker_parallelism is set to the default value.
+                //
+                // For old clusters
+                // 1. the prefix is ​​not divided for the sake of compatibility.
+                // 2. max_actor_num_per_worker_parallelism is set to unlimited to ensure backward compatibility.
+                if !cluster_first_launch {
+                    opts.max_actor_num_per_worker_parallelism = usize::MAX;
+                }
 
                 init_system_params.use_new_object_prefix_strategy = Some(cluster_first_launch);
                 let system_params_manager = Arc::new(
@@ -455,7 +466,7 @@ impl MetaSrvEnv {
                 }
             }
             MetaStoreImpl::Sql(sql_meta_store) => {
-                let is_sql_backend_cluster_first_launch =
+                let cluster_first_launch =
                     is_first_launch_for_sql_backend_cluster(sql_meta_store).await?;
                 // Try to upgrade if any new model changes are added.
                 Migrator::up(&sql_meta_store.conn, None)
@@ -469,10 +480,19 @@ impl MetaSrvEnv {
                     .await?
                     .map(|c| c.cluster_id.to_string().into())
                     .unwrap();
-                init_system_params.use_new_object_prefix_strategy =
-                    Some(is_sql_backend_cluster_first_launch);
-                // For new clusters, the name of the object store needs to be prefixed according to the object id.
-                // For old clusters, the prefix is ​​not divided for the sake of compatibility.
+
+                // For new clusters:
+                // 1. the name of the object store needs to be prefixed according to the object id.
+                // 2. max_actor_num_per_worker_parallelism is set to the default value.
+                //
+                // For old clusters
+                // 1. the prefix is ​​not divided for the sake of compatibility.
+                // 2. max_actor_num_per_worker_parallelism is set to unlimited to ensure backward compatibility.
+                if !cluster_first_launch {
+                    opts.max_actor_num_per_worker_parallelism = usize::MAX;
+                }
+                init_system_params.use_new_object_prefix_strategy = Some(cluster_first_launch);
+
                 let system_param_controller = Arc::new(
                     SystemParamsController::new(
                         sql_meta_store.clone(),
