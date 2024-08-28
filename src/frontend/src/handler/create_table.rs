@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -42,14 +42,11 @@ use risingwave_pb::plan_common::{
 };
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
-use risingwave_sqlparser::ast::{
-    CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType,
-    ExplainOptions, Format, ObjectName, OnConflict, SourceWatermark, TableConstraint,
-};
+use risingwave_sqlparser::ast::{CdcTableInfo, ColumnDef, ColumnOption, CompatibleSourceSchema, ConnectorSchema, CreateSink, CreateSinkStatement, CreateSourceStatement, DataType as AstDataType, ExplainOptions, Format, Ident, ObjectName, OnConflict, SourceWatermark, SqlOption, TableConstraint, Value, WithProperties};
 use risingwave_sqlparser::parser::IncludeOption;
 use thiserror_ext::AsReport;
 
-use super::RwPgResponse;
+use super::{create_sink, create_source, RwPgResponse};
 use crate::binder::{bind_data_type, bind_struct_field, Clause};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -1176,6 +1173,7 @@ pub async fn handle_create_table(
     with_version_column: Option<String>,
     cdc_table_info: Option<CdcTableInfo>,
     include_column_options: IncludeOption,
+    engine: Option<String>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
@@ -1191,9 +1189,9 @@ pub async fn handle_create_table(
         return Ok(resp);
     }
 
-    let (graph, source, table, job_type) = {
+    let (graph, source, mut table, job_type) = {
         let (plan, source, table, job_type) = handle_create_table_plan(
-            handler_args,
+            handler_args.clone(),
             ExplainOptions::default(),
             source_schema,
             cdc_table_info,
@@ -1226,10 +1224,86 @@ pub async fn handle_create_table(
         serde_json::to_string_pretty(&graph).unwrap()
     );
 
+    // Set engine to the table proto
+    table.engine = engine.clone();
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_table(source, table, graph, job_type)
         .await?;
+
+    if let Some(engine) = engine && "iceberg".eq_ignore_ascii_case(&engine) {
+        let with_properties =  WithProperties(vec![]);
+        let create_sink_stmt = CreateSinkStatement {
+            if_not_exists: false,
+            sink_name: ObjectName::from(vec![Ident::from(("__iceberg_sink_".to_string() + &table_name.real_value()).as_str())]),
+            with_properties,
+            sink_from: CreateSink::From(table_name.clone()),
+            columns: vec![],
+            emit_mode: None,
+            sink_schema: None,
+            into_table_name: None,
+        };
+        let mut handler_args= handler_args.clone();
+        let mut with = BTreeMap::new();
+        // connector = 'iceberg',
+        // type='upsert',
+        // primary_key='id',
+        // catalog.type = 'storage',
+        // warehouse.path = 's3a://hummock001',
+        // s3.endpoint = 'http://127.0.0.1:9301',
+        // s3.access.key = 'hummockadmin',
+        // s3.secret.key = 'hummockadmin',
+        // s3.region = 'us-east-1',
+        // catalog.name = 'demo',
+        // database.name='demo_db',
+        // table.name='t',
+        // create_table_if_not_exists='true'
+        with.insert("connector".to_string(), "iceberg".to_string());
+        // TODO: don't hard code primary key
+        with.insert("primary_key".to_string(), "id".to_string());
+        with.insert("type".to_string(), "upsert".to_string());
+        with.insert("catalog.type".to_string(), "storage".to_string());
+        with.insert("warehouse.path".to_string(), "s3a://hummock001".to_string());
+        with.insert("s3.endpoint".to_string(), "http://127.0.0.1:9301".to_string());
+        with.insert("s3.access.key".to_string(), "hummockadmin".to_string());
+        with.insert("s3.secret.key".to_string(), "hummockadmin".to_string());
+        with.insert("s3.region".to_string(), "us-east-1".to_string());
+        with.insert("catalog.name".to_string(), "demo".to_string());
+        with.insert("database.name".to_string(), "demo_db".to_string());
+        with.insert("table.name".to_string(), table_name.to_string());
+        with.insert("create_table_if_not_exists".to_string(), "true".to_string());
+        handler_args.with_options = WithOptions::new_with_options(with);
+        create_sink::handle_create_sink(handler_args.clone(), create_sink_stmt).await?;
+
+
+        let create_source_stmt = CreateSourceStatement {
+            temporary: false,
+            if_not_exists: false,
+            columns: vec![],
+            source_name: ObjectName::from(vec![Ident::from(("__iceberg_source_".to_string() + &table_name.real_value()).as_str())]),
+            wildcard_idx: None,
+            constraints: vec![],
+            with_properties: WithProperties(vec![]),
+            source_schema: CompatibleSourceSchema::V2(ConnectorSchema::none()),
+            source_watermarks: vec![],
+            include_column_options: vec![],
+        };
+
+        let mut handler_args = handler_args.clone();
+        let mut with = BTreeMap::new();
+        with.insert("connector".to_string(), "iceberg".to_string());
+        with.insert("catalog.type".to_string(), "storage".to_string());
+        with.insert("warehouse.path".to_string(), "s3a://hummock001".to_string());
+        with.insert("s3.endpoint".to_string(), "http://127.0.0.1:9301".to_string());
+        with.insert("s3.access.key".to_string(), "hummockadmin".to_string());
+        with.insert("s3.secret.key".to_string(), "hummockadmin".to_string());
+        with.insert("s3.region".to_string(), "us-east-1".to_string());
+        with.insert("catalog.name".to_string(), "demo".to_string());
+        with.insert("database.name".to_string(), "demo_db".to_string());
+        with.insert("table.name".to_string(), table_name.to_string());
+        handler_args.with_options = WithOptions::new_with_options(with);
+        create_source::handle_create_source(handler_args, create_source_stmt).await?;
+    }
 
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
 }

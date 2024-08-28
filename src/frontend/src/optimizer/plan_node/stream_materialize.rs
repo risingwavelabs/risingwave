@@ -283,6 +283,7 @@ impl StreamMaterialize {
             created_at_cluster_version: None,
             retention_seconds: retention_seconds.map(|i| i.into()),
             cdc_table_id: None,
+            engine: None,
         })
     }
 

@@ -133,6 +133,7 @@ pub struct Model {
     pub retention_seconds: Option<i32>,
     pub incoming_sinks: I32Array,
     pub cdc_table_id: Option<String>,
+    pub engine: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -255,6 +256,7 @@ impl From<PbTable> for ActiveModel {
             retention_seconds: Set(pb_table.retention_seconds.map(|i| i as _)),
             incoming_sinks: Set(pb_table.incoming_sinks.into()),
             cdc_table_id: Set(pb_table.cdc_table_id),
+            engine: Set(pb_table.engine),
         }
     }
 }

@@ -741,6 +741,7 @@ impl IcebergSink {
             .await
             .map_err(|e| SinkError::Iceberg(anyhow!(e)))?
         {
+            println!("run create_table_if_not_exists");
             let namespace = if let Some(database_name) = &self.config.database_name {
                 NamespaceIdent::new(database_name.clone())
             } else {
@@ -834,28 +835,29 @@ impl Sink for IcebergSink {
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
     fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        let commit_checkpoint_interval =
-            desc.properties
-                .get("commit_checkpoint_interval")
-                .map(|interval| {
-                    interval
-                        .parse::<u64>()
-                        .unwrap_or(DEFAULT_COMMIT_CHECKPOINT_INTERVAL)
-                });
-
-        match user_specified {
-            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
-            SinkDecouple::Disable => {
-                if let Some(commit_checkpoint_interval) = commit_checkpoint_interval
-                    && commit_checkpoint_interval > 1
-                {
-                    return Err(SinkError::Config(anyhow!(
-                        "config conflict: Iceberg config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
-                    )));
-                }
-                Ok(false)
-            }
-        }
+        Ok(false)
+        // let commit_checkpoint_interval =
+        //     desc.properties
+        //         .get("commit_checkpoint_interval")
+        //         .map(|interval| {
+        //             interval
+        //                 .parse::<u64>()
+        //                 .unwrap_or(DEFAULT_COMMIT_CHECKPOINT_INTERVAL)
+        //         });
+        //
+        // match user_specified {
+        //     SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
+        //     SinkDecouple::Disable => {
+        //         if let Some(commit_checkpoint_interval) = commit_checkpoint_interval
+        //             && commit_checkpoint_interval > 1
+        //         {
+        //             return Err(SinkError::Config(anyhow!(
+        //                 "config conflict: Iceberg config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
+        //             )));
+        //         }
+        //         Ok(false)
+        //     }
+        // }
     }
 
     async fn validate(&self) -> Result<()> {
@@ -891,15 +893,15 @@ impl Sink for IcebergSink {
         )
         .await?;
 
-        let commit_checkpoint_interval =
-            NonZeroU64::new(self.config.commit_checkpoint_interval).expect(
-                "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
-            );
+        // let commit_checkpoint_interval =
+        //     NonZeroU64::new(self.config.commit_checkpoint_interval).expect(
+        //         "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
+        //     );
 
         Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
             writer_param.sink_metrics,
-            commit_checkpoint_interval,
+            NonZeroU64::new(1).unwrap(),
         ))
     }
 

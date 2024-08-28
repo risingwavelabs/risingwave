@@ -421,6 +421,9 @@ message Table {
   // tables and tests. Not to be confused with the global catalog version for
   // notification service.
   TableVersion version = 100;
+
+  // Table Engine, currently only support iceberg
+  optional string engine = 200;
 }
 
 enum HandleConflictBehavior {

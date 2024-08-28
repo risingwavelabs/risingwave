@@ -2603,6 +2603,14 @@ impl Parser<'_> {
             None
         };
 
+        let engine = if self.parse_keyword(Keyword::ENGINE) {
+            self.expect_token(&Token::Eq)?;
+            let engine_name = self.parse_object_name()?;
+            Some(engine_name.real_value())
+        } else {
+            None
+        };
+
         Ok(Statement::CreateTable {
             name: table_name,
             temporary,
@@ -2620,6 +2628,7 @@ impl Parser<'_> {
             query,
             cdc_table_info,
             include_column_options: include_options,
+            engine,
         })
     }
 

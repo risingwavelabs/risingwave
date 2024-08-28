@@ -170,7 +170,12 @@ pub struct TableCatalog {
     pub initialized_at_cluster_version: Option<String>,
 
     pub cdc_table_id: Option<String>,
+
+    pub engine: Option<String>,
 }
+
+pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
+pub const ICEBERG_SINK_PREFIX: &str = "__iceberg_sink_";
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TableType {
@@ -383,6 +388,26 @@ impl TableCatalog {
         self.version().map(|v| v.version_id)
     }
 
+    pub fn iceberg_engine(&self) -> bool {
+        self.engine.as_deref() == Some("iceberg")
+    }
+
+    pub fn iceberg_source_name(&self) -> Option<String> {
+        if self.iceberg_engine() {
+            Some(format!("{}{}", ICEBERG_SOURCE_PREFIX, self.name))
+        } else {
+            None
+        }
+    }
+
+    pub fn iceberg_sink_name(&self) -> Option<String> {
+        if self.iceberg_engine() {
+            Some(format!("{}{}", ICEBERG_SINK_PREFIX, self.name))
+        } else {
+            None
+        }
+    }
+
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbTable {
         PbTable {
             id: self.id.table_id,
@@ -428,6 +453,7 @@ impl TableCatalog {
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             retention_seconds: self.retention_seconds,
             cdc_table_id: self.cdc_table_id.clone(),
+            engine: self.engine.clone(),
         }
     }
 
@@ -602,6 +628,7 @@ impl From<PbTable> for TableCatalog {
                 .map(TableId::from)
                 .collect_vec(),
             cdc_table_id: tb.cdc_table_id,
+            engine: tb.engine,
         }
     }
 }

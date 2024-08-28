@@ -298,13 +298,16 @@ impl Catalog for StorageCatalog {
         };
         
         // Check if the metadata directory exists
-        let metadata_path = format!("{table_path}/metadata");
-        self.file_io.is_exist(&metadata_path).await.map_err(|err| {
+        let metadata_path = format!("{table_path}/metadata/version-hint.text");
+
+        let result = self.file_io.is_exist(&metadata_path).await.map_err(|err| {
             Error::new(
                 ErrorKind::Unexpected,
                 format!("Failed to check if table exists: {}", err),
             )
-        })
+        });
+        println!("table_exists {}, result = {:?}", metadata_path, &result);
+        result
     }
 
     /// Rename a table in the catalog.
