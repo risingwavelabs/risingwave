@@ -507,7 +507,6 @@ KafkaConfig:
       This value is used to limits the time a produced message waits for
       successful delivery (including retries).
     required: false
-    default: '5000'
   - name: properties.max.in.flight.requests.per.connection
     field_type: usize
     comments: The maximum number of unacknowledged requests the client will send on a single connection before blocking.
