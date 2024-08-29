@@ -146,8 +146,13 @@ pub async fn list_prometheus_fragment_back_pressure(
     Extension(srv): Extension<Service>,
 ) -> Result<Json<FragmentBackPressure>> {
     if let Some(ref client) = srv.prometheus_client {
-        let back_pressure_query =
-            format!("avg(rate(stream_actor_output_buffer_blocking_duration_ns{{{}}}[60s])) by (fragment_id, downstream_fragment_id) / 1000000000", srv.prometheus_selector);
+        let back_pressure_query = format!(
+            "sum(rate(stream_actor_output_buffer_blocking_duration_ns{{{}}}[60s])) by (fragment_id, downstream_fragment_id) \
+             / ignoring (downstream_fragment_id) group_left sum(stream_actor_count{{{}}}) by (fragment_id) \
+             / 1000000000",
+            srv.prometheus_selector,
+            srv.prometheus_selector,
+        );
         let result = client.query(back_pressure_query).get().await.map_err(err)?;
         let back_pressure_data = result
             .data()

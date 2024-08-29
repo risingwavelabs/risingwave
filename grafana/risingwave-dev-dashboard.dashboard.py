@@ -1132,8 +1132,12 @@ def section_streaming_actors(outer_panels):
                     "much time it takes an actor to process a message, i.e. a barrier, a watermark or rows of data, "
                     "on average. Then we divide this duration by 1 second and show it as a percentage.",
                     [
+                        # Note: actor_count is equal to the number of dispatchers for a given downstream fragment,
+                        # this holds true as long as we don't support multiple edges between two fragments.
                         panels.target(
-                            f"avg(rate({metric('stream_actor_output_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, downstream_fragment_id) / 1000000000",
+                            f"sum(rate({metric('stream_actor_output_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, downstream_fragment_id) \
+                            / ignoring (downstream_fragment_id) group_left sum({metric('stream_actor_count')}) by (fragment_id) \
+                            / 1000000000",
                             "fragment {{fragment_id}}->{{downstream_fragment_id}}",
                         ),
                     ],
