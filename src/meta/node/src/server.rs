@@ -222,15 +222,6 @@ pub async fn rpc_serve(
             }
 
             let conn = sea_orm::Database::connect(options).await?;
-            if is_sqlite {
-                // Enable Write-Ahead Logging (WAL) mode for SQLite, which can improve concurrency.
-                conn.execute(Statement::from_string(
-                    conn.get_database_backend(),
-                    "PRAGMA journal_mode=WAL",
-                ))
-                .await?;
-            }
-
             let meta_store_sql = SqlMetaStore::new(conn);
 
             // Init election client.
