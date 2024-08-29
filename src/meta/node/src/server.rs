@@ -77,7 +77,7 @@ use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServ
 use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use risingwave_rpc_client::ComputeClientPool;
-use sea_orm::{ConnectionTrait, DbBackend, Statement};
+use sea_orm::{ConnectionTrait, DbBackend};
 use thiserror_ext::AsReport;
 use tokio::sync::watch;
 use tracing::log;
