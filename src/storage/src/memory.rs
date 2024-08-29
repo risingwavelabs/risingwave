@@ -750,14 +750,8 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
         }
     }
 
-    fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {}
-
     async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
         MemtableLocalStateStore::new(self.clone(), option)
-    }
-
-    fn validate_read_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
-        Ok(())
     }
 }
 

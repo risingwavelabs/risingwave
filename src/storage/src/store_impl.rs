@@ -588,10 +588,6 @@ pub mod verify {
             }
         }
 
-        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-            self.actual.seal_epoch(epoch, is_checkpoint)
-        }
-
         async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
             let expected = if let Some(expected) = &self.expected {
                 Some(expected.new_local(option.clone()).await)
@@ -603,10 +599,6 @@ pub mod verify {
                 expected,
                 _phantom: PhantomData::<()>,
             }
-        }
-
-        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-            self.actual.validate_read_epoch(epoch)
         }
     }
 
@@ -1170,11 +1162,7 @@ pub mod boxed_state_store {
             table_ids: HashSet<TableId>,
         ) -> BoxFuture<'static, StorageResult<SyncResult>>;
 
-        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
-
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore;
-
-        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
     }
 
     #[async_trait::async_trait]
@@ -1191,16 +1179,8 @@ pub mod boxed_state_store {
             self.sync(epoch, table_ids).boxed()
         }
 
-        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-            self.seal_epoch(epoch, is_checkpoint);
-        }
-
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore {
             Box::new(self.new_local(option).await)
-        }
-
-        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-            self.validate_read_epoch(epoch)
         }
     }
 
@@ -1285,19 +1265,11 @@ pub mod boxed_state_store {
             self.deref().sync(epoch, table_ids)
         }
 
-        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-            self.deref().seal_epoch(epoch, is_checkpoint)
-        }
-
         fn new_local(
             &self,
             option: NewLocalOptions,
         ) -> impl Future<Output = Self::Local> + Send + '_ {
             self.deref().new_local(option)
-        }
-
-        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-            self.deref().validate_read_epoch(epoch)
         }
     }
 }

@@ -387,9 +387,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             ..Default::default()
         };
         if let Some(value) = self.store.get(serialized_pk, epoch, read_options).await? {
-            // Refer to [`StorageTableInnerIterInner::new`] for necessity of `validate_read_epoch`.
-            self.store.validate_read_epoch(wait_epoch)?;
-
             let row = self.row_serde.deserialize(&value)?;
             let result_row_in_value = self.mapping.project(OwnedRow::new(row));
 
@@ -872,11 +869,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
         let raw_epoch = epoch.get_epoch();
         store.try_wait_epoch(epoch).await?;
         let iter = store.iter(table_key_range, raw_epoch, read_options).await?;
-        // For `HummockStorage`, a cluster recovery will clear storage data and make subsequent
-        // `HummockReadEpoch::Current` read incomplete.
-        // `validate_read_epoch` is a safeguard against that incorrect read. It rejects the read
-        // result if any recovery has happened after `try_wait_epoch`.
-        store.validate_read_epoch(epoch)?;
         let iter = Self {
             iter,
             mapping,

@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
+use risingwave_common::session_config::VisibilityMode;
 use risingwave_hummock_sdk::EpochWithGap;
 
 use super::SessionImpl;
@@ -137,6 +138,11 @@ impl SessionImpl {
             // explicit transaction.
             State::Initial => unreachable!("no implicit transaction in progress"),
             State::Implicit(ctx) => {
+                if self.config().visibility_mode() == VisibilityMode::All {
+                    self.notice_to_user(
+                        "`visibility_mode` is set to `All`, and there is no consistency ensured in the transaction",
+                    );
+                }
                 *txn = State::Explicit(Context {
                     id: ctx.id,
                     access_mode,
