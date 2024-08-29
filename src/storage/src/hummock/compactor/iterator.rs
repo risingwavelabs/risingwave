@@ -99,24 +99,8 @@ impl SstableStreamIterator {
             sstable_info.key_range.clone(),
         );
 
-        let key_range_left = {
-            let tmp = FullKey::decode(&sstable_info.key_range.left);
-            FullKey::new_with_gap_epoch(
-                tmp.user_key.table_id,
-                TableKey(tmp.user_key.table_key.to_vec()),
-                tmp.epoch_with_gap,
-            )
-        };
-
-        let key_range_right = {
-            let tmp = FullKey::decode(&sstable_info.key_range.right);
-            FullKey::new_with_gap_epoch(
-                tmp.user_key.table_id,
-                TableKey(tmp.user_key.table_key.to_vec()),
-                tmp.epoch_with_gap,
-            )
-        };
-
+        let key_range_left = FullKey::decode(&sstable_info.key_range.left).to_vec();
+        let key_range_right = FullKey::decode(&sstable_info.key_range.right).to_vec();
         let key_range_right_exclusive = sstable_info.key_range.right_exclusive;
 
         Self {
@@ -267,25 +251,14 @@ impl SstableStreamIterator {
             return Ok(());
         }
 
-        if self.key_range_right_exclusive {
-            if self
-                .block_iter
-                .as_ref()
-                .unwrap_or_else(|| panic!("no block iter sstinfo={}", self.sst_debug_info()))
-                .key()
-                .cmp(&self.key_range_right.to_ref())
-                .is_ge()
-            {
-                self.block_iter = None;
-            }
-        } else if self
+        // Check if we need to skip the block.
+        let key = self
             .block_iter
             .as_ref()
             .unwrap_or_else(|| panic!("no block iter sstinfo={}", self.sst_debug_info()))
-            .key()
-            .cmp(&self.key_range_right.to_ref())
-            .is_gt()
-        {
+            .key();
+
+        if self.exceed_key_range_right(key) {
             self.block_iter = None;
         }
 
@@ -299,17 +272,20 @@ impl SstableStreamIterator {
             .unwrap_or_else(|| panic!("no block iter sstinfo={}", self.sst_debug_info()))
             .key();
 
-        assert!(key.cmp(&self.key_range_left.to_ref()).is_ge());
-        if self.key_range_right_exclusive {
-            assert!(
-                key.cmp(&self.key_range_right.to_ref()).is_lt(),
-                "key {:?} key_range_right {:?}",
-                key,
-                self.key_range_right.to_ref()
-            );
-        } else {
-            assert!(key.cmp(&self.key_range_right.to_ref()).is_le());
-        }
+        assert!(
+            !self.exceed_key_range_left(key),
+            "key {:?} key_range_left {:?}",
+            key,
+            self.key_range_left.to_ref()
+        );
+
+        assert!(
+            !self.exceed_key_range_right(key),
+            "key {:?} key_range_right {:?} key_range_right_exclusive {}",
+            key,
+            self.key_range_right.to_ref(),
+            self.key_range_right_exclusive
+        );
 
         key
     }
@@ -341,6 +317,18 @@ impl SstableStreamIterator {
 
     fn need_recreate_io_stream(&self) -> bool {
         self.io_retry_times < self.max_io_retry_times
+    }
+
+    fn exceed_key_range_left(&self, key: FullKey<&[u8]>) -> bool {
+        key.cmp(&self.key_range_left.to_ref()).is_lt()
+    }
+
+    fn exceed_key_range_right(&self, key: FullKey<&[u8]>) -> bool {
+        if self.key_range_right_exclusive {
+            key.cmp(&self.key_range_right.to_ref()).is_ge()
+        } else {
+            key.cmp(&self.key_range_right.to_ref()).is_gt()
+        }
     }
 }
 
@@ -1196,7 +1184,7 @@ mod tests {
 
         let table_info = gen_test_sstable_info(
             default_builder_opt_for_test(),
-            1 as u64,
+            1_u64,
             (1..10000).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i)))),
             sstable_store.clone(),
         )
@@ -1208,8 +1196,13 @@ mod tests {
         let total_key_count = sst_1.total_key_count;
 
         let mut new_sst_id = 100;
-        let sst_2 =
-            group_split::split_sst(&mut sst_1, &mut new_sst_id, Some(split_key.clone().into()));
+        let sst_2 = group_split::split_sst(
+            &mut sst_1,
+            &mut new_sst_id,
+            split_key.clone().into(),
+            table_info.file_size / 2,
+            table_info.file_size / 2,
+        );
         sst_1.table_ids.push(0);
 
         {

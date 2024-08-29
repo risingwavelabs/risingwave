@@ -27,6 +27,7 @@ use risingwave_common::metrics::{
     RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_common::{
     register_guarded_gauge_vec_with_registry, register_guarded_histogram_vec_with_registry,
     register_guarded_int_counter_vec_with_registry, register_guarded_int_gauge_vec_with_registry,
@@ -136,6 +137,9 @@ pub struct StreamingMetrics {
     // CDC Backfill
     cdc_backfill_snapshot_read_row_count: LabelGuardedIntCounterVec<2>,
     cdc_backfill_upstream_output_row_count: LabelGuardedIntCounterVec<2>,
+
+    // Snapshot Backfill
+    pub(crate) snapshot_backfill_consume_row_count: LabelGuardedIntCounterVec<3>,
 
     // Over Window
     over_window_cached_entry_count: LabelGuardedIntGaugeVec<3>,
@@ -722,6 +726,14 @@ impl StreamingMetrics {
             )
             .unwrap();
 
+        let snapshot_backfill_consume_row_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_snapshot_backfill_consume_snapshot_row_count",
+            "Total number of rows that have been output from snapshot backfill",
+            &["table_id", "actor_id", "stage"],
+            registry
+        )
+        .unwrap();
+
         let over_window_cached_entry_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_over_window_cached_entry_count",
             "Total entry (partition) count in over window executor cache",
@@ -1161,6 +1173,7 @@ impl StreamingMetrics {
             backfill_upstream_output_row_count,
             cdc_backfill_snapshot_read_row_count,
             cdc_backfill_upstream_output_row_count,
+            snapshot_backfill_consume_row_count,
             over_window_cached_entry_count,
             over_window_cache_lookup_count,
             over_window_cache_miss_count,
@@ -1243,6 +1256,11 @@ impl StreamingMetrics {
         let log_store_first_write_epoch = self
             .log_store_first_write_epoch
             .with_guarded_label_values(&label_list);
+
+        let initial_epoch = Epoch::now().0;
+        log_store_latest_read_epoch.set(initial_epoch as _);
+        log_store_first_write_epoch.set(initial_epoch as _);
+        log_store_latest_write_epoch.set(initial_epoch as _);
 
         let log_store_write_rows = self
             .log_store_write_rows

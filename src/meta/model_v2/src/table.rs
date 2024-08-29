@@ -132,6 +132,7 @@ pub struct Model {
     pub version: Option<TableVersion>,
     pub retention_seconds: Option<i32>,
     pub incoming_sinks: I32Array,
+    pub cdc_table_id: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -176,6 +177,16 @@ pub enum Relation {
         on_delete = "NoAction"
     )]
     Source,
+
+    // To join object_dependency on the used_by column
+    #[sea_orm(
+        belongs_to = "super::object_dependency::Entity",
+        from = "Column::TableId",
+        to = "super::object_dependency::Column::UsedBy",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    ObjectDependency,
 }
 
 impl Related<super::object::Entity> for Entity {
@@ -243,6 +254,7 @@ impl From<PbTable> for ActiveModel {
             version: Set(pb_table.version.as_ref().map(|v| v.into())),
             retention_seconds: Set(pb_table.retention_seconds.map(|i| i as _)),
             incoming_sinks: Set(pb_table.incoming_sinks.into()),
+            cdc_table_id: Set(pb_table.cdc_table_id),
         }
     }
 }

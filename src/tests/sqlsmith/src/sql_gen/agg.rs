@@ -18,7 +18,7 @@ use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::PbAggKind;
 use risingwave_expr::sig::SigDataType;
 use risingwave_sqlparser::ast::{
-    Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, OrderByExpr,
+    Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident, ObjectName, OrderByExpr,
 };
 
 use crate::sql_gen::types::AGG_FUNC_TABLE;
@@ -142,11 +142,8 @@ fn make_agg_func(
     Function {
         scalar_as_agg: false,
         name: ObjectName(vec![Ident::new_unchecked(func_name)]),
-        args,
-        variadic: false,
+        arg_list: FunctionArgList::for_agg(distinct, args, order_by),
         over: None,
-        distinct,
-        order_by,
         filter,
         within_group: None,
     }

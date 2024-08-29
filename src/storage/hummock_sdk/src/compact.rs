@@ -87,22 +87,20 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
                 }
                 if table.total_key_count != 0 {
                     format!(
-                        "[id: {}, obj_id: {} {}KB sst_size {}KB stale_ratio {} key_range {:?}]",
+                        "[id: {}, obj_id: {} object_size {}KB sst_size {}KB stale_ratio {}]",
                         table.sst_id,
                         table.object_id,
                         table.file_size / 1024,
                         table.sst_size / 1024,
                         (table.stale_key_count * 100 / table.total_key_count),
-                        table.key_range,
                     )
                 } else {
                     format!(
-                        "[id: {}, obj_id: {} {}KB sst_size {}KB key_range {:?}]",
+                        "[id: {}, obj_id: {} object_size {}KB sst_size {}KB]",
                         table.sst_id,
                         table.object_id,
                         table.file_size / 1024,
                         table.sst_size / 1024,
-                        table.key_range,
                     )
                 }
             })
@@ -146,13 +144,14 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
         .unwrap_or(0);
     writeln!(
         s,
-        "SstableInfo: object id={}, SST id={}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={}KB, stale_ratio={}%, bloom_filter_kind {:?}",
+        "SstableInfo: object id={}, SST id={}, KeyRange=[{:?},{:?}], table_ids: {:?}, object_size={}KB, sst_size={}KB stale_ratio={}%, bloom_filter_kind {:?}",
         sstable_info.object_id,
         sstable_info.sst_id,
         left_str,
         right_str,
         sstable_info.table_ids,
         sstable_info.file_size / 1024,
+        sstable_info.sst_size / 1024,
         stale_ratio,
         sstable_info.bloom_filter_kind,
     )

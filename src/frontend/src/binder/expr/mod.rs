@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, PG_CATALOG_SCHEMA_NAME};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, MapType};
 use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_common::{bail_no_function, bail_not_implemented, not_implemented};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
@@ -102,7 +102,7 @@ impl Binder {
             Expr::BinaryOp { left, op, right } => self.bind_binary_op(*left, op, *right),
             Expr::Nested(expr) => self.bind_expr_inner(*expr),
             Expr::Array(Array { elem: exprs, .. }) => self.bind_array(exprs),
-            Expr::ArrayIndex { obj, index } => self.bind_array_index(*obj, *index),
+            Expr::Index { obj, index } => self.bind_index(*obj, *index),
             Expr::ArrayRangeIndex { obj, start, end } => {
                 self.bind_array_range_index(*obj, start, end)
             }
@@ -194,7 +194,19 @@ impl Binder {
             Expr::Parameter { index } => self.bind_parameter(index),
             Expr::Collate { expr, collation } => self.bind_collate(*expr, collation),
             Expr::ArraySubquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Array),
-            _ => bail_not_implemented!(issue = 112, "unsupported expression {:?}", expr),
+            Expr::Map { entries } => self.bind_map(entries),
+            Expr::IsJson {
+                unique_keys: true, ..
+            }
+            | Expr::SomeOp(_)
+            | Expr::AllOp(_)
+            | Expr::TryCast { .. }
+            | Expr::GroupingSets(_)
+            | Expr::Cube(_)
+            | Expr::Rollup(_)
+            | Expr::LambdaFunction { .. } => {
+                bail_not_implemented!(issue = 112, "unsupported expression {:?}", expr)
+            }
         }
     }
 
@@ -910,13 +922,16 @@ impl Binder {
     }
 
     pub fn bind_cast_inner(&mut self, expr: Expr, data_type: DataType) -> Result<ExprImpl> {
-        if let Expr::Array(Array { elem: ref expr, .. }) = expr
-            && matches!(&data_type, DataType::List { .. })
-        {
-            return self.bind_array_cast(expr.clone(), data_type);
+        match (expr, data_type) {
+            (Expr::Array(Array { elem: ref expr, .. }), DataType::List(element_type)) => {
+                self.bind_array_cast(expr.clone(), element_type)
+            }
+            (Expr::Map { entries }, DataType::Map(m)) => self.bind_map_cast(entries, m),
+            (expr, data_type) => {
+                let lhs = self.bind_expr_inner(expr)?;
+                lhs.cast_explicit(data_type).map_err(Into::into)
+            }
         }
-        let lhs = self.bind_expr_inner(expr)?;
-        lhs.cast_explicit(data_type).map_err(Into::into)
     }
 
     pub fn bind_collate(&mut self, expr: Expr, collation: ObjectName) -> Result<ExprImpl> {
@@ -999,6 +1014,11 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 .collect::<Result<Vec<_>>>()?,
             types.iter().map(|f| f.name.real_value()).collect_vec(),
         ),
+        AstDataType::Map(kv) => {
+            let key = bind_data_type(&kv.0)?;
+            let value = bind_data_type(&kv.1)?;
+            DataType::Map(MapType::try_from_kv(key, value).map_err(ErrorCode::BindError)?)
+        }
         AstDataType::Custom(qualified_type_name) => {
             let idents = qualified_type_name
                 .0

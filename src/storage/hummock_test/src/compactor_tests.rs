@@ -977,7 +977,7 @@ pub(crate) mod tests {
         compact_task.current_epoch_time = hummock_manager_ref
             .get_current_version()
             .await
-            .max_committed_epoch;
+            .max_committed_epoch();
 
         // assert compact_task
         assert_eq!(
@@ -1179,7 +1179,7 @@ pub(crate) mod tests {
         compact_task.current_epoch_time = hummock_manager_ref
             .get_current_version()
             .await
-            .max_committed_epoch;
+            .max_committed_epoch();
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();

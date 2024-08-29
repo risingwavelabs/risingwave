@@ -261,6 +261,7 @@ impl BigQuerySink {
             DataType::Int256 => Err(SinkError::BigQuery(anyhow::anyhow!(
                 "Bigquery cannot support Int256"
             ))),
+            DataType::Map(_) => todo!(),
         }
     }
 
@@ -310,6 +311,7 @@ impl BigQuerySink {
                     "Bigquery cannot support Int256"
                 )))
             }
+            DataType::Map(_) => todo!(),
         };
         Ok(tfs)
     }
@@ -356,6 +358,9 @@ impl Sink for BigQuerySink {
     }
 
     async fn validate(&self) -> Result<()> {
+        risingwave_common::license::Feature::BigQuerySink
+            .check_available()
+            .map_err(|e| anyhow::anyhow!(e))?;
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
                 "Primary key not defined for upsert bigquery sink (please define in `primary_key` field)")));
@@ -816,6 +821,7 @@ fn build_protobuf_field(
                 "Don't support Float32 and Int256"
             )))
         }
+        DataType::Map(_) => todo!(),
     }
     Ok((field, None))
 }

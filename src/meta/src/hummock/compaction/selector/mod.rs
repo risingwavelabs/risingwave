@@ -208,7 +208,7 @@ pub mod tests {
         min_epoch: u64,
         max_epoch: u64,
     ) -> SstableInfo {
-        let object_file_size = (right - left + 1) as u64;
+        let object_size = (right - left + 1) as u64;
         SstableInfo {
             object_id: id,
             sst_id: id,
@@ -217,13 +217,12 @@ pub mod tests {
                 right: iterator_test_key_of_epoch(table_prefix, right, epoch).into(),
                 right_exclusive: false,
             },
-            file_size: object_file_size,
-
+            file_size: object_size,
             table_ids,
-            uncompressed_file_size: object_file_size,
+            uncompressed_file_size: object_size,
             min_epoch,
             max_epoch,
-            sst_size: object_file_size,
+            sst_size: object_size,
             ..Default::default()
         }
     }

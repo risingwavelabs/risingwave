@@ -23,7 +23,9 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
-use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
+use risingwave_rpc_client::{
+    FrontendClientPool, FrontendClientPoolRef, StreamClientPool, StreamClientPoolRef,
+};
 use sea_orm::EntityTrait;
 
 use super::{
@@ -36,7 +38,7 @@ use crate::controller::session_params::{SessionParamsController, SessionParamsCo
 use crate::controller::system_param::{SystemParamsController, SystemParamsControllerRef};
 use crate::controller::SqlMetaStore;
 use crate::hummock::sequence::SequenceGenerator;
-use crate::manager::event_log::{start_event_log_manager, EventLogMangerRef};
+use crate::manager::event_log::{start_event_log_manager, EventLogManagerRef};
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
     NotificationManagerRef,
@@ -123,10 +125,13 @@ pub struct MetaSrvEnv {
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
 
+    /// rpc client pool for frontend nodes.
+    frontend_client_pool: FrontendClientPoolRef,
+
     /// idle status manager.
     idle_manager: IdleManagerRef,
 
-    event_log_manager: EventLogMangerRef,
+    event_log_manager: EventLogManagerRef,
 
     /// Unique identifier of the cluster.
     cluster_id: ClusterId,
@@ -385,6 +390,7 @@ impl MetaSrvEnv {
     ) -> MetaResult<Self> {
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
         let stream_client_pool = Arc::new(StreamClientPool::new(1)); // typically no need for plural clients
+        let frontend_client_pool = Arc::new(FrontendClientPool::new(1));
         let event_log_manager = Arc::new(start_event_log_manager(
             opts.event_log_enabled,
             opts.event_log_channel_max_size,
@@ -440,6 +446,7 @@ impl MetaSrvEnv {
                     meta_store_impl: meta_store_impl.clone(),
                     notification_manager,
                     stream_client_pool,
+                    frontend_client_pool,
                     idle_manager,
                     event_log_manager,
                     cluster_id,
@@ -495,6 +502,7 @@ impl MetaSrvEnv {
                     meta_store_impl: meta_store_impl.clone(),
                     notification_manager,
                     stream_client_pool,
+                    frontend_client_pool,
                     idle_manager,
                     event_log_manager,
                     cluster_id,
@@ -559,11 +567,15 @@ impl MetaSrvEnv {
         self.stream_client_pool.deref()
     }
 
+    pub fn frontend_client_pool(&self) -> &FrontendClientPool {
+        self.frontend_client_pool.deref()
+    }
+
     pub fn cluster_id(&self) -> &ClusterId {
         &self.cluster_id
     }
 
-    pub fn event_log_manager_ref(&self) -> EventLogMangerRef {
+    pub fn event_log_manager_ref(&self) -> EventLogManagerRef {
         self.event_log_manager.clone()
     }
 }

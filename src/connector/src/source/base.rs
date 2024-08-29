@@ -32,6 +32,7 @@ use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
 use serde::de::DeserializeOwned;
+use tokio::sync::mpsc;
 
 use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
@@ -40,8 +41,9 @@ use super::kafka::KafkaMeta;
 use super::kinesis::KinesisMeta;
 use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
-use super::{GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
+use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
 use crate::error::ConnectorResult as Result;
+use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::parser::ParserConfig;
 use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
@@ -178,6 +180,9 @@ pub struct SourceContext {
     pub metrics: Arc<SourceMetrics>,
     pub source_ctrl_opts: SourceCtrlOpts,
     pub connector_props: ConnectorProperties,
+    // source parser put schema change event into this channel
+    pub schema_change_tx:
+        Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
 }
 
 impl SourceContext {
@@ -189,6 +194,9 @@ impl SourceContext {
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
         connector_props: ConnectorProperties,
+        schema_change_channel: Option<
+            mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
+        >,
     ) -> Self {
         Self {
             actor_id,
@@ -198,6 +206,7 @@ impl SourceContext {
             metrics,
             source_ctrl_opts,
             connector_props,
+            schema_change_tx: schema_change_channel,
         }
     }
 
@@ -215,6 +224,7 @@ impl SourceContext {
                 rate_limit: None,
             },
             ConnectorProperties::default(),
+            None,
         )
     }
 }
@@ -313,6 +323,9 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
             (SourceFormat::DebeziumMongo, SourceEncode::Json)
         }
         (PbFormatType::Plain, PbEncodeType::Bytes) => (SourceFormat::Plain, SourceEncode::Bytes),
+        (PbFormatType::Upsert, PbEncodeType::Protobuf) => {
+            (SourceFormat::Upsert, SourceEncode::Protobuf)
+        }
         (format, encode) => {
             bail!(
                 "Unsupported combination of format {:?} and encode {:?}",
@@ -375,6 +388,7 @@ impl ConnectorProperties {
                 s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
                     || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
                     || s.eq_ignore_ascii_case(GCS_CONNECTOR)
+                    || s.eq_ignore_ascii_case(AZBLOB_CONNECTOR)
             })
             .unwrap_or(false)
     }
@@ -425,6 +439,7 @@ impl ConnectorProperties {
         matches!(self, ConnectorProperties::Kafka(_))
             || matches!(self, ConnectorProperties::OpendalS3(_))
             || matches!(self, ConnectorProperties::Gcs(_))
+            || matches!(self, ConnectorProperties::Azblob(_))
     }
 }
 

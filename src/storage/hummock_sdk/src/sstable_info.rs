@@ -49,7 +49,8 @@ impl SstableInfo {
             + size_of::<u64>() // max_epoch
             + size_of::<u64>() // uncompressed_file_size
             + size_of::<u64>() // range_tombstone_count
-            + size_of::<u32>(); // bloom_filter_kind
+            + size_of::<u32>() // bloom_filter_kind
+            + size_of::<u64>(); // sst_size
         basic += self.key_range.left.len() + self.key_range.right.len() + size_of::<bool>();
 
         basic
@@ -135,6 +136,7 @@ impl From<&PbSstableInfo> for SstableInfo {
 
 impl From<SstableInfo> for PbSstableInfo {
     fn from(sstable_info: SstableInfo) -> Self {
+        assert_ne!(0, sstable_info.sst_size);
         PbSstableInfo {
             object_id: sstable_info.object_id,
             sst_id: sstable_info.sst_id,
@@ -172,6 +174,7 @@ impl From<SstableInfo> for PbSstableInfo {
 
 impl From<&SstableInfo> for PbSstableInfo {
     fn from(sstable_info: &SstableInfo) -> Self {
+        assert_ne!(0, sstable_info.sst_size);
         PbSstableInfo {
             object_id: sstable_info.object_id,
             sst_id: sstable_info.sst_id,

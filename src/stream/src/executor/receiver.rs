@@ -319,7 +319,7 @@ mod tests {
             },
         ));
 
-        barrier_test_env.inject_barrier(&b1, [], [actor_id]);
+        barrier_test_env.inject_barrier(&b1, [actor_id]);
 
         send!([new], Message::Barrier(b1.clone().into_dispatcher()));
         assert_recv_pending!(); // We should not receive the barrier, as new is not the upstream.

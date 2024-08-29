@@ -186,3 +186,17 @@ impl Hash for dyn DynHash {
         self.dyn_hash(state);
     }
 }
+
+pub fn ordinal(i: usize) -> String {
+    let s = i.to_string();
+    let suffix = if s.ends_with('1') && !s.ends_with("11") {
+        "st"
+    } else if s.ends_with('2') && !s.ends_with("12") {
+        "nd"
+    } else if s.ends_with('3') && !s.ends_with("13") {
+        "rd"
+    } else {
+        "th"
+    };
+    s + suffix
+}

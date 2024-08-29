@@ -345,10 +345,6 @@ impl HummockVersion {
         split_key: Option<Bytes>,
     ) {
         let mut new_sst_id = new_sst_start_id;
-        if !self.levels.contains_key(&parent_group_id) {
-            warn!(parent_group_id, "non-existing parent group id to init from");
-            return;
-        }
         if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId {
             if new_sst_start_id != 0 {
                 if cfg!(debug_assertions) {
@@ -363,6 +359,10 @@ impl HummockVersion {
                     );
                 }
             }
+            return;
+        }
+        if !self.levels.contains_key(&parent_group_id) {
+            warn!(parent_group_id, "non-existing parent group id to init from");
             return;
         }
         let [parent_levels, cur_levels] = self
@@ -420,10 +420,9 @@ impl HummockVersion {
                     .table_infos
                     .extract_if(|sst_info| sst_info.table_ids.is_empty())
                     .for_each(|sst_info| {
-                        let sstable_file_size = sst_info.sst_size;
-                        sub_level.total_file_size -= sstable_file_size;
+                        sub_level.total_file_size -= sst_info.sst_size;
                         sub_level.uncompressed_file_size -= sst_info.uncompressed_file_size;
-                        l0.total_file_size -= sstable_file_size;
+                        l0.total_file_size -= sst_info.sst_size;
                         l0.uncompressed_file_size -= sst_info.uncompressed_file_size;
                     });
 
@@ -586,10 +585,17 @@ impl HummockVersion {
     pub fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
         assert_eq!(self.id, version_delta.prev_id);
 
-        let changed_table_info = self.state_table_info.apply_delta(
+        let (changed_table_info, mut is_commit_epoch) = self.state_table_info.apply_delta(
             &version_delta.state_table_info_delta,
             &version_delta.removed_table_ids,
         );
+
+        if !is_commit_epoch
+            && self.visible_table_committed_epoch() < version_delta.visible_table_committed_epoch()
+        {
+            is_commit_epoch = true;
+            tracing::trace!("max committed epoch bumped but no table committed epoch is changed");
+        }
 
         // apply to `levels`, which is different compaction groups
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
@@ -663,6 +669,7 @@ impl HummockVersion {
                 self.merge_compaction_group(group_merge.left_group_id, group_merge.right_group_id)
             }
             let group_destroy = summary.group_destroy;
+            let visible_table_committed_epoch = self.visible_table_committed_epoch();
             let levels = self.levels.get_mut(compaction_group_id).unwrap_or_else(|| {
                 panic!("compaction group {} does not exist", compaction_group_id)
             });
@@ -679,12 +686,12 @@ impl HummockVersion {
             }
 
             assert!(
-                self.max_committed_epoch <= version_delta.max_committed_epoch,
+                visible_table_committed_epoch <= version_delta.visible_table_committed_epoch(),
                 "new max commit epoch {} is older than the current max commit epoch {}",
-                version_delta.max_committed_epoch,
-                self.max_committed_epoch
+                version_delta.visible_table_committed_epoch(),
+                visible_table_committed_epoch
             );
-            if self.max_committed_epoch < version_delta.max_committed_epoch {
+            if is_commit_epoch {
                 // `max_committed_epoch` increases. It must be a `commit_epoch`
                 let GroupDeltasSummary {
                     delete_sst_levels,
@@ -733,7 +740,7 @@ impl HummockVersion {
             }
         }
         self.id = version_delta.id;
-        self.max_committed_epoch = version_delta.max_committed_epoch;
+        self.set_max_committed_epoch(version_delta.visible_table_committed_epoch());
         self.set_safe_epoch(version_delta.visible_table_safe_epoch());
 
         // apply to table watermark
@@ -823,7 +830,7 @@ impl HummockVersion {
             if !contains {
                 warn!(
                         ?table_id,
-                        max_committed_epoch = version_delta.max_committed_epoch,
+                        max_committed_epoch = version_delta.visible_table_committed_epoch(),
                         "table change log dropped due to no further change log at newly committed epoch",
                     );
             }
@@ -1167,11 +1174,9 @@ pub fn add_ssts_to_sub_level(
     insert_table_infos: Vec<SstableInfo>,
 ) {
     insert_table_infos.iter().for_each(|sst| {
-        let sst_file_size = sst.sst_size;
-
-        l0.sub_levels[sub_level_idx].total_file_size += sst_file_size;
+        l0.sub_levels[sub_level_idx].total_file_size += sst.sst_size;
         l0.sub_levels[sub_level_idx].uncompressed_file_size += sst.uncompressed_file_size;
-        l0.total_file_size += sst_file_size;
+        l0.total_file_size += sst.sst_size;
         l0.uncompressed_file_size += sst.uncompressed_file_size;
     });
     l0.sub_levels[sub_level_idx]
@@ -1308,11 +1313,11 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
     let mut res = Vec::new();
 
     // Ensure safe_epoch <= max_committed_epoch
-    if version.visible_table_safe_epoch() > version.max_committed_epoch {
+    if version.visible_table_safe_epoch() > version.visible_table_committed_epoch() {
         res.push(format!(
             "VERSION: safe_epoch {} > max_committed_epoch {}",
             version.visible_table_safe_epoch(),
-            version.max_committed_epoch
+            version.visible_table_committed_epoch()
         ));
     }
 
@@ -1425,12 +1430,12 @@ mod tests {
     use crate::version::{
         GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, IntraLevelDelta,
     };
-    use crate::HummockSstableObjectId;
+    use crate::{HummockSstableObjectId, HummockVersionId};
 
     #[test]
     fn test_get_sst_object_ids() {
         let mut version = HummockVersion::default();
-        version.id = 0;
+        version.id = HummockVersionId::new(0);
         version.levels = HashMap::from_iter([(
             0,
             Levels {
@@ -1477,7 +1482,7 @@ mod tests {
     #[test]
     fn test_apply_version_delta() {
         let mut version = HummockVersion::default();
-        version.id = 0;
+        version.id = HummockVersionId::new(0);
         version.levels = HashMap::from_iter([
             (
                 0,
@@ -1501,7 +1506,7 @@ mod tests {
             ),
         ]);
         let mut version_delta = HummockVersionDelta::default();
-        version_delta.id = 1;
+        version_delta.id = HummockVersionId::new(1);
         version_delta.group_deltas = HashMap::from_iter([
             (
                 2,
@@ -1560,7 +1565,7 @@ mod tests {
         };
         assert_eq!(version, {
             let mut version = HummockVersion::default();
-            version.id = 1;
+            version.id = HummockVersionId::new(1);
             version.levels = HashMap::from_iter([
                 (
                     2,

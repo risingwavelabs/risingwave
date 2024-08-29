@@ -29,6 +29,7 @@ use risingwave_common::catalog::{
 use risingwave_common::license::Feature;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
+use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
     ExternalTableConfig, ExternalTableImpl, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
@@ -67,6 +68,7 @@ use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
+use crate::utils::OverwriteOptions;
 use crate::{Binder, TableCatalog, WithOptions};
 
 /// Column ID generator for a new table or a new version of an existing table to alter.
@@ -459,7 +461,7 @@ pub fn bind_pk_and_row_id_on_relation(
 /// stream source.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn gen_create_table_plan_with_source(
-    handler_args: HandlerArgs,
+    mut handler_args: HandlerArgs,
     explain_options: ExplainOptions,
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
@@ -490,6 +492,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let (columns_from_resolve_source, source_info) =
         bind_columns_from_source(session, &source_schema, Either::Left(&with_properties)).await?;
 
+    let overwrite_options = OverwriteOptions::new(&mut handler_args);
+    let rate_limit = overwrite_options.source_rate_limit;
     let (source_catalog, database_id, schema_id) = bind_create_source_or_table_with_connector(
         handler_args.clone(),
         table_name,
@@ -504,6 +508,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         include_column_options,
         &mut col_id_gen,
         false,
+        rate_limit,
     )
     .await?;
 
@@ -673,6 +678,7 @@ fn gen_table_plan_inner(
     let session = context.session_ctx().clone();
     let retention_seconds = context.with_options().retention_seconds();
     let is_external_source = source_catalog.is_some();
+
     let source_node: PlanRef = LogicalSource::new(
         source_catalog.map(|source| Rc::new(source.clone())),
         columns.clone(),
@@ -729,6 +735,7 @@ fn gen_table_plan_inner(
         version,
         is_external_source,
         retention_seconds,
+        None,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -812,7 +819,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     let options = CdcScanOptions::from_with_options(context.with_options())?;
 
     let logical_scan = LogicalCdcScan::create(
-        external_table_name,
+        external_table_name.clone(),
         Rc::new(cdc_table_desc),
         context.clone(),
         options,
@@ -828,6 +835,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         vec![],
     );
 
+    let cdc_table_id = build_cdc_table_id(source.id, &external_table_name);
     let materialize = plan_root.gen_table_plan(
         context,
         resolved_table_name,
@@ -842,6 +850,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         Some(col_id_gen.into_version()),
         true,
         None,
+        Some(cdc_table_id),
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -1006,6 +1015,7 @@ pub(super) async fn handle_create_table_plan(
                     &constraints,
                     connect_properties.clone(),
                     wildcard_idx.is_some(),
+                    None,
                 )
                 .await?;
 
@@ -1114,6 +1124,8 @@ async fn derive_schema_for_cdc_table(
     constraints: &Vec<TableConstraint>,
     connect_properties: WithOptionsSecResolved,
     need_auto_schema_map: bool,
+    // original table catalog available in auto schema change process
+    original_catalog: Option<Arc<TableCatalog>>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
     if need_auto_schema_map {
@@ -1145,10 +1157,20 @@ async fn derive_schema_for_cdc_table(
             table.pk_names().clone(),
         ))
     } else {
-        Ok((
-            bind_sql_columns(column_defs)?,
-            bind_sql_pk_names(column_defs, constraints)?,
-        ))
+        let columns = bind_sql_columns(column_defs)?;
+        // For table created by `create table t (*)` the constraint is empty, we need to
+        // retrieve primary key names from original table catalog if available
+        let pk_names = if let Some(original_catalog) = original_catalog {
+            original_catalog
+                .pk
+                .iter()
+                .map(|x| original_catalog.columns[x.column_index].name().to_string())
+                .collect()
+        } else {
+            bind_sql_pk_names(column_defs, constraints)?
+        };
+
+        Ok((columns, pk_names))
     }
 }
 
@@ -1319,6 +1341,7 @@ pub async fn generate_stream_graph_for_table(
                 &constraints,
                 connect_properties.clone(),
                 false,
+                Some(original_catalog.clone()),
             )
             .await?;
 

@@ -28,7 +28,8 @@ use risingwave_meta_model_v2::compaction_config;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    CompactionConfig, CompactionGroupInfo, PbGroupConstruct, PbGroupDestroy, PbStateTableInfoDelta,
+    CompactionConfig, CompactionGroupInfo, CompatibilityVersion, PbGroupConstruct, PbGroupDestroy,
+    PbStateTableInfoDelta,
 };
 use tokio::sync::OnceCell;
 
@@ -218,7 +219,9 @@ impl HummockManager {
             &self.metrics,
         );
         let mut new_version_delta = version.new_delta();
-        let epoch = new_version_delta.latest_version().max_committed_epoch;
+        let epoch = new_version_delta
+            .latest_version()
+            .visible_table_committed_epoch();
 
         for (table_id, raw_group_id) in pairs {
             let mut group_id = *raw_group_id;
@@ -589,6 +592,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             }
             MutableConfig::SplitWeightByVnode(c) => {
                 target.split_weight_by_vnode = *c;
+            }
+            MutableConfig::SstAllowedTrivialMoveMinSize(c) => {
+                target.sst_allowed_trivial_move_min_size = Some(*c);
             }
         }
     }

@@ -830,7 +830,8 @@ fn bind_sink_format_desc(session: &SessionImpl, value: ConnectorSchema) -> Resul
         E::Protobuf => SinkEncode::Protobuf,
         E::Avro => SinkEncode::Avro,
         E::Template => SinkEncode::Template,
-        e @ (E::Native | E::Csv | E::Bytes | E::None | E::Text | E::Parquet) => {
+        E::Parquet => SinkEncode::Parquet,
+        e @ (E::Native | E::Csv | E::Bytes | E::None | E::Text) => {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into());
         }
     };
@@ -868,6 +869,12 @@ fn bind_sink_format_desc(session: &SessionImpl, value: ConnectorSchema) -> Resul
 
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, Vec<Encode>>>> =
     LazyLock::new(|| {
+        use risingwave_connector::sink::file_sink::azblob::AzblobSink;
+        use risingwave_connector::sink::file_sink::fs::FsSink;
+        use risingwave_connector::sink::file_sink::gcs::GcsSink;
+        use risingwave_connector::sink::file_sink::opendal_sink::FileSink;
+        use risingwave_connector::sink::file_sink::s3::S3Sink;
+        use risingwave_connector::sink::file_sink::webhdfs::WebhdfsSink;
         use risingwave_connector::sink::google_pubsub::GooglePubSubSink;
         use risingwave_connector::sink::kafka::KafkaSink;
         use risingwave_connector::sink::kinesis::KinesisSink;
@@ -882,8 +889,23 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 ),
                 KafkaSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Avro, Encode::Protobuf],
-                    Format::Upsert => vec![Encode::Json, Encode::Avro],
+                    Format::Upsert => vec![Encode::Json, Encode::Avro, Encode::Protobuf],
                     Format::Debezium => vec![Encode::Json],
+                ),
+                FileSink::<S3Sink>::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Parquet],
+                ),
+                FileSink::<GcsSink>::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Parquet],
+                ),
+                FileSink::<AzblobSink>::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Parquet],
+                ),
+                FileSink::<WebhdfsSink>::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Parquet],
+                ),
+                FileSink::<FsSink>::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Parquet],
                 ),
                 KinesisSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json],
@@ -942,7 +964,7 @@ pub mod tests {
         let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t1
-    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.brokers = 'localhost:1001')
     FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );

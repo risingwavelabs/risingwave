@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 pub mod big_query;
 pub mod boxed;
 pub mod catalog;
@@ -24,6 +23,7 @@ pub mod doris_starrocks_connector;
 pub mod dynamodb;
 pub mod elasticsearch;
 pub mod encoder;
+pub mod file_sink;
 pub mod formatter;
 pub mod google_pubsub;
 pub mod iceberg;
@@ -53,6 +53,8 @@ use ::deltalake::DeltaTableError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
+use opendal::Error as OpendalError;
+use risingwave_common::array::ArrayError;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::metrics::{
@@ -73,9 +75,9 @@ use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEn
 use crate::error::ConnectorError;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
+use crate::sink::file_sink::fs::FsSink;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
-
 const BOUNDED_CHANNEL_SIZE: usize = 16;
 #[macro_export]
 macro_rules! for_all_sinks {
@@ -94,11 +96,18 @@ macro_rules! for_all_sinks {
                 { Nats, $crate::sink::nats::NatsSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
-                { Opensearch, $crate::sink::remote::OpensearchSink },
+                { Opensearch, $crate::sink::remote::OpenSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
+                { S3, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::S3Sink>},
+
+                { Gcs, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::gcs::GcsSink>  },
+                { Azblob, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::azblob::AzblobSink>},
+                { Webhdfs, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::webhdfs::WebhdfsSink>},
+
+                { Fs, $crate::sink::file_sink::opendal_sink::FileSink<FsSink>  },
                 { Snowflake, $crate::sink::snowflake::SnowflakeSink },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
@@ -365,8 +374,8 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     /// `user_specified` is the value of `sink_decouple` config.
     fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
-            SinkDecouple::Disable | SinkDecouple::Default => Ok(false),
-            SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Disable => Ok(false),
         }
     }
 
@@ -480,14 +489,14 @@ macro_rules! def_sink_impl {
         #[derive(Debug)]
         pub enum SinkImpl {
             $(
-                $variant_name($sink_type),
+                $variant_name(Box<$sink_type>),
             )*
         }
 
         $(
             impl From<$sink_type> for SinkImpl {
                 fn from(sink: $sink_type) -> SinkImpl {
-                    SinkImpl::$variant_name(sink)
+                    SinkImpl::$variant_name(Box::new(sink))
                 }
             }
         )*
@@ -572,6 +581,8 @@ pub enum SinkError {
     ),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
+    #[error("File error: {0}")]
+    File(String),
     #[error("Snowflake error: {0}")]
     Snowflake(
         #[source]
@@ -631,6 +642,24 @@ pub enum SinkError {
 impl From<icelake::Error> for SinkError {
     fn from(value: icelake::Error) -> Self {
         SinkError::Iceberg(anyhow!(value))
+    }
+}
+
+impl From<OpendalError> for SinkError {
+    fn from(error: OpendalError) -> Self {
+        SinkError::File(error.to_report_string())
+    }
+}
+
+impl From<parquet::errors::ParquetError> for SinkError {
+    fn from(error: parquet::errors::ParquetError) -> Self {
+        SinkError::File(error.to_report_string())
+    }
+}
+
+impl From<ArrayError> for SinkError {
+    fn from(error: ArrayError) -> Self {
+        SinkError::File(error.to_report_string())
     }
 }
 

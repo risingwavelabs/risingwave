@@ -414,7 +414,7 @@ where
             FeMessage::CancelQuery(m) => self.process_cancel_msg(m)?,
             FeMessage::Terminate => self.process_terminate(),
             FeMessage::Parse(m) => {
-                if let Err(err) = self.process_parse_msg(m) {
+                if let Err(err) = self.process_parse_msg(m).await {
                     self.ignore_util_sync = true;
                     return Err(err);
                 }
@@ -658,6 +658,34 @@ where
                     stmt_type: res.stmt_type(),
                     rows_cnt,
                 }))?;
+        } else if res.stmt_type().is_dml() && !res.stmt_type().is_returning() {
+            let first_row_set = res.values_stream().next().await;
+            let first_row_set = match first_row_set {
+                None => {
+                    return Err(PsqlError::Uncategorized(
+                        anyhow::anyhow!("no affected rows in output").into(),
+                    ));
+                }
+                Some(row) => row.map_err(PsqlError::SimpleQueryError)?,
+            };
+            let affected_rows_str = first_row_set[0].values()[0]
+                .as_ref()
+                .expect("compute node should return affected rows in output");
+
+            assert!(matches!(res.row_cnt_format(), Some(Format::Text)));
+            let affected_rows_cnt = String::from_utf8(affected_rows_str.to_vec())
+                .unwrap()
+                .parse()
+                .unwrap_or_default();
+
+            // Run the callback before sending the `CommandComplete` message.
+            res.run_callback().await?;
+
+            self.stream
+                .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
+                    stmt_type: res.stmt_type(),
+                    rows_cnt: affected_rows_cnt,
+                }))?;
         } else {
             // Run the callback before sending the `CommandComplete` message.
             res.run_callback().await?;
@@ -665,7 +693,7 @@ where
             self.stream
                 .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                     stmt_type: res.stmt_type(),
-                    rows_cnt: res.affected_rows_cnt().expect("row count should be set"),
+                    rows_cnt: 0,
                 }))?;
         }
 
@@ -681,16 +709,17 @@ where
         self.is_terminate = true;
     }
 
-    fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
+    async fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
         record_sql_in_span(sql, self.redact_sql_option_keywords.clone());
         let session = self.session.clone().unwrap();
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
 
         self.inner_process_parse_msg(session, sql, statement_name, msg.type_ids)
+            .await
     }
 
-    fn inner_process_parse_msg(
+    async fn inner_process_parse_msg(
         &mut self,
         session: Arc<SM::Session>,
         sql: &str,
@@ -737,6 +766,7 @@ where
 
         let prepare_statement = session
             .parse(stmt, param_types)
+            .await
             .map_err(PsqlError::ExtendedPrepareError)?;
 
         if statement_name.is_empty() {
@@ -850,7 +880,6 @@ where
                 .unwrap()
                 .describe_statement(prepare_statement)
                 .map_err(PsqlError::Uncategorized)?;
-
             self.stream
                 .write_no_flush(&BeMessage::ParameterDescription(
                     &param_types.iter().map(|t| t.to_oid()).collect_vec(),

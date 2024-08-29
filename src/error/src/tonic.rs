@@ -49,6 +49,9 @@ impl std::error::Error for ServerError {
     }
 
     fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
+        // Provide self so that `ErrorIsFromTonicServerImpl` can work.
+        request.provide_ref(self);
+        // Provide extra fields.
         self.extra.provide(request);
     }
 }
@@ -101,6 +104,21 @@ where
     /// The source chain is preserved by pairing with [`TonicStatusWrapper`].
     pub fn to_status_unnamed(&self, code: tonic::Code) -> tonic::Status {
         to_status(self, code, None)
+    }
+}
+
+#[easy_ext::ext(ErrorIsFromTonicServerImpl)]
+impl<T> T
+where
+    T: ?Sized + std::error::Error,
+{
+    /// Returns whether the error is from the implementation of a tonic server, i.e., created
+    /// with [`ToTonicStatus::to_status`].
+    ///
+    /// This does not count errors initiated from the library, typically connection issues.
+    /// As a result, this function can be used to decide whether an error should be retried.
+    pub fn is_from_tonic_server_impl(&self) -> bool {
+        std::error::request_ref::<ServerError>(self).is_some()
     }
 }
 
@@ -244,7 +262,7 @@ mod tests {
         };
 
         let server_status = original.to_status(tonic::Code::Internal, "test");
-        let body = server_status.to_http();
+        let body = server_status.into_http();
         let client_status = tonic::Status::from_header_map(body.headers()).unwrap();
 
         let wrapper = TonicStatusWrapper::new(client_status);

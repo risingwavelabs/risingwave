@@ -31,7 +31,7 @@ use risingwave_sqlparser::ast::{
     display_comma_separated, Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter,
 };
 
-use super::{fields_to_descriptors, RwPgResponse, RwPgResponseBuilderExt};
+use super::{fields_to_descriptors, PgResponseStream, RwPgResponse, RwPgResponseBuilderExt};
 use crate::binder::{Binder, Relation};
 use crate::catalog::{CatalogError, IndexCatalog};
 use crate::error::Result;
@@ -319,6 +319,7 @@ pub async fn handle_show_object(
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_source()
             .map(|t| t.name.clone())
+            .chain(session.temporary_source_manager().keys())
             .collect(),
         ShowObject::Sink { schema } => catalog_reader
             .read_guard()
@@ -481,6 +482,23 @@ pub async fn handle_show_object(
                 .rows(rows)
                 .into());
         }
+        ShowObject::Cursor => {
+            let (rows, pg_descs) = session.get_cursor_manager().get_all_query_cursors().await;
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .row_cnt_opt(Some(rows.len() as i32))
+                .values(PgResponseStream::from(rows), pg_descs)
+                .into());
+        }
+        ShowObject::SubscriptionCursor => {
+            let (rows, pg_descs) = session
+                .get_cursor_manager()
+                .get_all_subscription_cursors()
+                .await;
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .row_cnt_opt(Some(rows.len() as i32))
+                .values(PgResponseStream::from(rows), pg_descs)
+                .into());
+        }
     };
 
     let rows = names
@@ -588,7 +606,7 @@ mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
 
         let sql = r#"CREATE SOURCE t1 (column1 varchar)
-        WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+        WITH (connector = 'kafka', kafka.topic = 'abc', kafka.brokers = 'localhost:1001')
         FORMAT PLAIN ENCODE JSON"#;
         frontend.run_sql(sql).await.unwrap();
 
@@ -602,7 +620,7 @@ mod tests {
         let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t
-    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.brokers = 'localhost:1001')
     FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );

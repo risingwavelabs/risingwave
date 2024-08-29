@@ -1,5 +1,7 @@
 -- noinspection SqlNoDataSourceInspectionForFile
 -- noinspection SqlResolveForFile
+SET rw_force_split_distinct_agg = ${BENCHMARK_NEXMARK_RISINGWAVE_Q15_RW_FORCE_SPLIT_DISTINCT_AGG};
+SET rw_force_two_phase_agg = ${BENCHMARK_NEXMARK_RISINGWAVE_Q15_RW_FORCE_TWO_PHASE_AGG};
 CREATE SINK nexmark_q15 AS
 SELECT to_char(date_time, 'YYYY-MM-DD')                                          as "day",
        count(*)                                                                  AS total_bids,

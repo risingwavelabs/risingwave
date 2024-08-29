@@ -21,7 +21,7 @@ use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::ScalarRef;
 use risingwave_connector::source::filesystem::opendal_source::{
-    OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
+    OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
 };
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::reader::desc::SourceDesc;
@@ -110,6 +110,11 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
                             SplitImpl::from(split)
                         }
+                        risingwave_connector::source::ConnectorProperties::Azblob(_) => {
+                            let split: OpendalFsSplit<OpendalAzblob> =
+                                OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
+                            SplitImpl::from(split)
+                        }
                         risingwave_connector::source::ConnectorProperties::PosixFs(_) => {
                             let split: OpendalFsSplit<OpendalPosixFs> =
                                 OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
@@ -177,6 +182,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                 rate_limit: self.rate_limit_rps,
             },
             source_desc.source.config.clone(),
+            None,
         )
     }
 

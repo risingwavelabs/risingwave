@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -31,11 +32,11 @@ use risingwave_pb::stream_plan::AddMutation;
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tracing::{debug, warn, Instrument};
+use tracing::{debug, info, warn, Instrument};
 
 use super::{CheckpointControl, TracedEpoch};
 use crate::barrier::command::CommandContext;
-use crate::barrier::info::InflightActorInfo;
+use crate::barrier::info::{InflightGraphInfo, InflightSubscriptionInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::schedule::ScheduledBarriers;
@@ -166,7 +167,7 @@ impl GlobalBarrierManagerContext {
         let mgr = self.metadata_manager.as_v2_ref();
         let mviews = mgr
             .catalog_controller
-            .list_background_creating_mviews()
+            .list_background_creating_mviews(false)
             .await?;
 
         let mut mview_map = HashMap::new();
@@ -228,14 +229,6 @@ impl GlobalBarrierManager {
     ///
     /// Returns the new state of the barrier manager after recovery.
     pub async fn recovery(&mut self, paused_reason: Option<PausedReason>, err: Option<MetaError>) {
-        let prev_epoch = TracedEpoch::new(
-            self.context
-                .hummock_manager
-                .latest_snapshot()
-                .committed_epoch
-                .into(),
-        );
-
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked("cluster is under recovering");
@@ -304,12 +297,9 @@ impl GlobalBarrierManager {
                                 warn!(error = %err.as_report(), "scale actors failed");
                             })?;
 
-                        self.context
-                            .resolve_actor_info(&active_streaming_nodes)
-                            .await
-                            .inspect_err(|err| {
-                                warn!(error = %err.as_report(), "resolve actor info failed");
-                            })?
+                        self.context.resolve_graph_info().await.inspect_err(|err| {
+                            warn!(error = %err.as_report(), "resolve actor info failed");
+                        })?
                     } else {
                         // Migrate actors in expired CN to newly joined one.
                         self.context
@@ -325,43 +315,72 @@ impl GlobalBarrierManager {
                         .pre_apply_drop_cancel(&self.scheduled_barriers)
                         .await?
                     {
-                        info = self
-                            .context
-                            .resolve_actor_info(&active_streaming_nodes)
-                            .await
-                            .inspect_err(|err| {
-                                warn!(error = %err.as_report(), "resolve actor info failed");
-                            })?
+                        info = self.context.resolve_graph_info().await.inspect_err(|err| {
+                            warn!(error = %err.as_report(), "resolve actor info failed");
+                        })?
                     }
 
                     let info = info;
 
                     self.context
-                        .purge_state_table_from_hummock(
-                            &InflightActorInfo::existing_table_ids(&info.fragment_infos).collect(),
-                        )
+                        .purge_state_table_from_hummock(&info.existing_table_ids().collect())
                         .await
                         .context("purge state table from hummock")?;
+
+                    let (prev_epoch, version_id) = self
+                        .context
+                        .hummock_manager
+                        .on_current_version(|version| {
+                            let max_committed_epoch = version.visible_table_committed_epoch();
+                            for (table_id, info) in version.state_table_info.info() {
+                                assert_eq!(
+                                    info.committed_epoch, max_committed_epoch,
+                                    "table {} with invisible epoch is not purged",
+                                    table_id
+                                );
+                            }
+                            (
+                                TracedEpoch::new(Epoch::from(max_committed_epoch)),
+                                version.id,
+                            )
+                        })
+                        .await;
 
                     let mut control_stream_manager =
                         ControlStreamManager::new(self.context.clone());
 
+                    let reset_start_time = Instant::now();
                     control_stream_manager
-                        .reset(prev_epoch.value().0, active_streaming_nodes.current())
+                        .reset(version_id, active_streaming_nodes.current())
                         .await
                         .inspect_err(|err| {
                             warn!(error = %err.as_report(), "reset compute nodes failed");
                         })?;
+                    info!(elapsed=?reset_start_time.elapsed(), "control stream reset");
 
                     self.context.sink_manager.reset().await;
 
+                    let subscription_info = InflightSubscriptionInfo {
+                        mv_depended_subscriptions: self
+                            .context
+                            .metadata_manager
+                            .get_mv_depended_subscriptions()
+                            .await?,
+                    };
+
                     // update and build all actors.
-                    self.context.update_actors(&info).await.inspect_err(|err| {
-                        warn!(error = %err.as_report(), "update actors failed");
-                    })?;
-                    self.context.build_actors(&info).await.inspect_err(|err| {
-                        warn!(error = %err.as_report(), "build_actors failed");
-                    })?;
+                    self.context
+                        .update_actors(&info, &subscription_info, &active_streaming_nodes)
+                        .await
+                        .inspect_err(|err| {
+                            warn!(error = %err.as_report(), "update actors failed");
+                        })?;
+                    self.context
+                        .build_actors(&info, &active_streaming_nodes)
+                        .await
+                        .inspect_err(|err| {
+                            warn!(error = %err.as_report(), "build_actors failed");
+                        })?;
 
                     // get split assignments for all actors
                     let source_split_assignments =
@@ -380,7 +399,8 @@ impl GlobalBarrierManager {
 
                     // Inject the `Initial` barrier to initialize all executors.
                     let command_ctx = Arc::new(CommandContext::new(
-                        info.clone(),
+                        active_streaming_nodes.current().clone(),
+                        subscription_info.clone(),
                         prev_epoch.clone(),
                         new_epoch.clone(),
                         paused_reason,
@@ -390,11 +410,13 @@ impl GlobalBarrierManager {
                         tracing::Span::current(), // recovery span
                     ));
 
-                    let mut node_to_collect = control_stream_manager.inject_barrier(
+                    let mut node_to_collect = control_stream_manager.inject_command_ctx_barrier(
                         &command_ctx,
-                        &info.fragment_infos,
-                        Some(&info.fragment_infos),
+                        &info,
+                        Some(&info),
+                        HashMap::new(),
                     )?;
+                    debug!(?node_to_collect, "inject initial barrier");
                     while !node_to_collect.is_empty() {
                         let (worker_id, result) = control_stream_manager
                             .next_complete_barrier_response()
@@ -403,9 +425,15 @@ impl GlobalBarrierManager {
                         assert_eq!(resp.epoch, command_ctx.prev_epoch.value().0);
                         assert!(node_to_collect.remove(&worker_id));
                     }
+                    debug!("collected initial barrier");
 
                     (
-                        BarrierManagerState::new(new_epoch, info, command_ctx.next_paused_reason()),
+                        BarrierManagerState::new(
+                            new_epoch,
+                            info,
+                            subscription_info,
+                            command_ctx.next_paused_reason(),
+                        ),
                         active_streaming_nodes,
                         control_stream_manager,
                         tracker,
@@ -453,7 +481,7 @@ impl GlobalBarrierManagerContext {
     async fn migrate_actors(
         &self,
         active_nodes: &mut ActiveStreamingWorkerNodes,
-    ) -> MetaResult<InflightActorInfo> {
+    ) -> MetaResult<InflightGraphInfo> {
         match &self.metadata_manager {
             MetadataManager::V1(_) => self.migrate_actors_v1(active_nodes).await,
             MetadataManager::V2(_) => self.migrate_actors_v2(active_nodes).await,
@@ -463,7 +491,7 @@ impl GlobalBarrierManagerContext {
     async fn migrate_actors_v2(
         &self,
         active_nodes: &mut ActiveStreamingWorkerNodes,
-    ) -> MetaResult<InflightActorInfo> {
+    ) -> MetaResult<InflightGraphInfo> {
         let mgr = self.metadata_manager.as_v2_ref();
 
         // all worker slots used by actors
@@ -489,7 +517,7 @@ impl GlobalBarrierManagerContext {
 
         if expired_worker_slots.is_empty() {
             debug!("no expired worker slots, skipping.");
-            return self.resolve_actor_info(active_nodes).await;
+            return self.resolve_graph_info().await;
         }
 
         debug!("start migrate actors.");
@@ -599,23 +627,25 @@ impl GlobalBarrierManagerContext {
 
         debug!("migrate actors succeed.");
 
-        self.resolve_actor_info(active_nodes).await
+        self.resolve_graph_info().await
     }
 
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
     async fn migrate_actors_v1(
         &self,
         active_nodes: &mut ActiveStreamingWorkerNodes,
-    ) -> MetaResult<InflightActorInfo> {
+    ) -> MetaResult<InflightGraphInfo> {
         let mgr = self.metadata_manager.as_v1_ref();
 
-        let info = self.resolve_actor_info(active_nodes).await?;
+        let info = self.resolve_graph_info().await?;
 
         // 1. get expired workers.
         let expired_workers: HashSet<WorkerId> = info
             .actor_map
             .iter()
-            .filter(|(&worker, actors)| !actors.is_empty() && !info.node_map.contains_key(&worker))
+            .filter(|(&worker, actors)| {
+                !actors.is_empty() && !active_nodes.current().contains_key(&worker)
+            })
             .map(|(&worker, _)| worker)
             .collect();
         if expired_workers.is_empty() {
@@ -635,7 +665,7 @@ impl GlobalBarrierManagerContext {
         migration_plan.delete(self.env.meta_store().as_kv()).await?;
         debug!("migrate actors succeed.");
 
-        self.resolve_actor_info(active_nodes).await
+        self.resolve_graph_info().await
     }
 
     async fn scale_actors(&self, active_nodes: &ActiveStreamingWorkerNodes) -> MetaResult<()> {
@@ -810,7 +840,7 @@ impl GlobalBarrierManagerContext {
     }
 
     async fn scale_actors_v1(&self, active_nodes: &ActiveStreamingWorkerNodes) -> MetaResult<()> {
-        let info = self.resolve_actor_info(active_nodes).await?;
+        let info = self.resolve_graph_info().await?;
 
         let mgr = self.metadata_manager.as_v1_ref();
         debug!("start resetting actors distribution");
@@ -820,8 +850,8 @@ impl GlobalBarrierManagerContext {
             return Ok(());
         }
 
-        let available_parallelism = info
-            .node_map
+        let available_parallelism = active_nodes
+            .current()
             .values()
             .map(|worker_node| worker_node.parallelism as usize)
             .sum();
@@ -1084,7 +1114,12 @@ impl GlobalBarrierManagerContext {
     }
 
     /// Update all actors in compute nodes.
-    async fn update_actors(&self, info: &InflightActorInfo) -> MetaResult<()> {
+    async fn update_actors(
+        &self,
+        info: &InflightGraphInfo,
+        subscription_info: &InflightSubscriptionInfo,
+        active_nodes: &ActiveStreamingWorkerNodes,
+    ) -> MetaResult<()> {
         if info.actor_map.is_empty() {
             tracing::debug!("no actor to update, skipping.");
             return Ok(());
@@ -1094,8 +1129,8 @@ impl GlobalBarrierManagerContext {
             .actor_map
             .iter()
             .map(|(node_id, actors)| {
-                let host = info
-                    .node_map
+                let host = active_nodes
+                    .current()
                     .get(node_id)
                     .ok_or_else(|| anyhow::anyhow!("worker evicted, wait for online."))?
                     .host
@@ -1108,11 +1143,14 @@ impl GlobalBarrierManagerContext {
             .flatten_ok()
             .try_collect()?;
 
-        let mut all_node_actors = self.metadata_manager.all_node_actors(false).await?;
+        let mut all_node_actors = self
+            .metadata_manager
+            .all_node_actors(false, &subscription_info.mv_depended_subscriptions)
+            .await?;
 
         // Check if any actors were dropped after info resolved.
         if all_node_actors.iter().any(|(node_id, node_actors)| {
-            !info.node_map.contains_key(node_id)
+            !active_nodes.current().contains_key(node_id)
                 || info
                     .actor_map
                     .get(node_id)
@@ -1124,7 +1162,7 @@ impl GlobalBarrierManagerContext {
 
         self.stream_rpc_manager
             .broadcast_update_actor_info(
-                &info.node_map,
+                active_nodes.current(),
                 info.actor_map.keys().cloned(),
                 actor_infos.into_iter(),
                 info.actor_map.keys().map(|node_id| {
@@ -1140,7 +1178,11 @@ impl GlobalBarrierManagerContext {
     }
 
     /// Build all actors in compute nodes.
-    async fn build_actors(&self, info: &InflightActorInfo) -> MetaResult<()> {
+    async fn build_actors(
+        &self,
+        info: &InflightGraphInfo,
+        active_nodes: &ActiveStreamingWorkerNodes,
+    ) -> MetaResult<()> {
         if info.actor_map.is_empty() {
             tracing::debug!("no actor to build, skipping.");
             return Ok(());
@@ -1148,7 +1190,7 @@ impl GlobalBarrierManagerContext {
 
         self.stream_rpc_manager
             .build_actors(
-                &info.node_map,
+                active_nodes.current(),
                 info.actor_map.iter().map(|(node_id, actors)| {
                     let actors = actors.iter().cloned().collect();
                     (*node_id, actors)
