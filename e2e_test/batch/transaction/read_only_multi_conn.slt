@@ -7,9 +7,15 @@ insert into t values (1), (2);
 statement ok
 flush;
 
+connection txn
+statement ok
+SET VISIBILITY_MODE TO checkpoint;
+
+connection txn
 statement ok
 start transaction read only;
 
+connection txn
 query I
 select count(*) from t;
 ----
@@ -42,24 +48,29 @@ select count(*) from t;
 3
 
 # ...but not in the read-only transaction
+connection txn
 query I
 select count(*) from t;
 ----
 2
 
+connection txn
 statement ok
 flush;
 
 # still invisible even after flush
+connection txn
 query I
 select count(*) from t;
 ----
 2
 
+connection txn
 statement ok
 commit;
 
 # now visible outside the transaction
+connection txn
 query I
 select count(*) from t;
 ----

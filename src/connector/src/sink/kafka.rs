@@ -61,10 +61,6 @@ const fn _default_retry_backoff() -> Duration {
     Duration::from_millis(100)
 }
 
-const fn _default_message_timeout_ms() -> usize {
-    5000
-}
-
 const fn _default_max_in_flight_requests_per_connection() -> usize {
     5
 }
@@ -150,12 +146,9 @@ pub struct RdKafkaPropertiesProducer {
     /// Produce message timeout.
     /// This value is used to limits the time a produced message waits for
     /// successful delivery (including retries).
-    #[serde(
-        rename = "properties.message.timeout.ms",
-        default = "_default_message_timeout_ms"
-    )]
-    #[serde_as(as = "DisplayFromStr")]
-    message_timeout_ms: usize,
+    #[serde(rename = "properties.message.timeout.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    message_timeout_ms: Option<usize>,
 
     /// The maximum number of unacknowledged requests the client will send on a single connection before blocking.
     #[serde(
@@ -205,7 +198,9 @@ impl RdKafkaPropertiesProducer {
         if let Some(v) = self.request_required_acks {
             c.set("request.required.acks", v.to_string());
         }
-        c.set("message.timeout.ms", self.message_timeout_ms.to_string());
+        if let Some(v) = self.message_timeout_ms {
+            c.set("message.timeout.ms", v.to_string());
+        }
         c.set(
             "max.in.flight.requests.per.connection",
             self.max_in_flight_requests_per_connection.to_string(),
@@ -626,7 +621,10 @@ mod test {
             c.rdkafka_properties_producer.compression_codec,
             Some(CompressionCodec::Zstd)
         );
-        assert_eq!(c.rdkafka_properties_producer.message_timeout_ms, 114514);
+        assert_eq!(
+            c.rdkafka_properties_producer.message_timeout_ms,
+            Some(114514)
+        );
         assert_eq!(
             c.rdkafka_properties_producer
                 .max_in_flight_requests_per_connection,
