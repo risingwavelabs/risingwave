@@ -1,14 +1,14 @@
 # TODO: the test triggers a recovery caused by a known issue: https://github.com/risingwavelabs/risingwave/issues/11915.
 # We should consider using a mechanism designed for testing recovery instead of depending on a bug.
 
-statement error error connecting to server: Connection refused \(os error 61\)
+statement ok
 create table t (v decimal);
 
-statement error error connecting to server: Connection refused \(os error 61\)
+statement ok
 create materialized view mv as select sum(coalesce(pg_sleep(1), v)) from t;
 
 # The bomb will be triggered after 1 seconds of sleep, so the insertion should return successfully.
-statement error error connecting to server: Connection refused \(os error 61\)
+statement ok
 insert into t values (4e28), (4e28);
 
 # Wait for recovery to complete.
@@ -16,7 +16,7 @@ sleep 15s
 
 # Check that there's a log entry for barrier collection failure on the mata node.
 # Extract the message to check that it contains the root cause of the failure.
-query error error connecting to server: Connection refused \(os error 61\)
+query T
 with error as (
     select info->'collectBarrierFail'->'error' #>> '{}' as error
     from rw_catalog.rw_event_logs
@@ -29,6 +29,8 @@ case when error like '%get error from control stream, in worker node %: %Actor %
      else error
 end as result
 from error;
+----
+ok
 
-statement error error connecting to server: Connection refused \(os error 61\)
+statement ok
 drop table t cascade;

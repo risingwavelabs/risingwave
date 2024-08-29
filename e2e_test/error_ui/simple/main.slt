@@ -1,40 +1,76 @@
 query error
 selet 1;
 ----
-error connecting to server: Connection refused (os error 61)
+db error: ERROR: Failed to run the query
+
+Caused by:
+  sql parser error: expected statement, found: selet
+LINE 1: selet 1;
+        ^
 
 
 statement error
 create function int_42() returns int as int_42 using link '555.0.0.1:8815';
 ----
-error connecting to server: Connection refused (os error 61)
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: failed to parse address: http://555.0.0.1:8815
+  2: invalid IPv4 address
+
+
+statement error failed to send requests to UDF service
+create function int_42() returns int as int_42 using link '55.55.55.55:5555';
 
 
 statement error
-create function int_42() returns int as int_42 using link '55.55.55.55:5555';
+alter system set not_exist_key to value;
 ----
-error connecting to server: Connection refused (os error 61)
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service failed: Internal error
+  2: SystemParams error: unrecognized system parameter "not_exist_key"
 
 
 query error
 select v1 + v2 = v3;
 ----
-error connecting to server: Connection refused (os error 61)
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: v1 + v2 = v3
+  2: Item not found: Invalid column: v1
 
 
 query error
 select 1/0;
 ----
-error connecting to server: Connection refused (os error 61)
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: error while evaluating expression `general_div('1', '0')`
+  3: Division by zero
 
 
 query error
 select x/0 from generate_series(1, 3) as g(x);
 ----
-error connecting to server: Connection refused (os error 61)
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: error while evaluating expression `general_div('1', '0')`
+  3: Division by zero
 
 
 statement error
 set rw_implicit_flush to maybe;
 ----
-error connecting to server: Connection refused (os error 61)
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to get/set session config
+  2: Invalid value `maybe` for `rw_implicit_flush`
+  3: Invalid bool
