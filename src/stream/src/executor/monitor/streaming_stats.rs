@@ -62,6 +62,7 @@ pub struct StreamingMetrics {
     actor_idle_cnt: LabelGuardedIntGaugeVec<1>,
 
     // Streaming actor
+    pub actor_count: LabelGuardedIntGaugeVec<1>,
     #[expect(dead_code)]
     actor_memory_usage: LabelGuardedIntGaugeVec<2>,
     actor_in_record_cnt: LabelGuardedIntCounterVec<3>,
@@ -84,7 +85,7 @@ pub struct StreamingMetrics {
     pub merge_barrier_align_duration: RelabeledGuardedHistogramVec<2>,
 
     // Backpressure
-    pub actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
+    pub actor_output_buffer_blocking_duration_ns: RelabeledGuardedIntCounterVec<3>,
     actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
 
     // Streaming Join
@@ -288,6 +289,13 @@ impl StreamingMetrics {
                 registry
             )
             .unwrap();
+        let actor_output_buffer_blocking_duration_ns =
+            RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
+                MetricLevel::Debug,
+                actor_output_buffer_blocking_duration_ns,
+                level,
+                1, // mask the first label `actor_id` if the level is less verbose than `Debug`
+            );
 
         let actor_input_buffer_blocking_duration_ns =
             register_guarded_int_counter_vec_with_registry!(
@@ -402,6 +410,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let actor_count = register_guarded_int_gauge_vec_with_registry!(
+            "stream_actor_count",
+            "Total number of actors (parallelism)",
+            &["fragment_id"],
+            registry
+        )
+        .unwrap();
+
         let actor_memory_usage = register_guarded_int_gauge_vec_with_registry!(
             "actor_memory_usage",
             "Memory usage (bytes)",
@@ -421,7 +437,6 @@ impl StreamingMetrics {
             registry
         )
         .unwrap();
-
         let merge_barrier_align_duration =
             RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
                 MetricLevel::Debug,
@@ -477,7 +492,6 @@ impl StreamingMetrics {
             registry
         )
         .unwrap();
-
         let barrier_align_duration = RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
             MetricLevel::Debug,
             barrier_align_duration,
@@ -505,7 +519,6 @@ impl StreamingMetrics {
             registry
         )
         .unwrap();
-
         let join_matched_join_keys = RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
             MetricLevel::Debug,
             join_matched_join_keys,
@@ -1127,6 +1140,7 @@ impl StreamingMetrics {
             actor_poll_cnt,
             actor_idle_duration,
             actor_idle_cnt,
+            actor_count,
             actor_memory_usage,
             actor_in_record_cnt,
             actor_out_record_cnt,
