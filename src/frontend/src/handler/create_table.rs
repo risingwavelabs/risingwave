@@ -1015,6 +1015,7 @@ pub(super) async fn handle_create_table_plan(
                     &constraints,
                     connect_properties.clone(),
                     wildcard_idx.is_some(),
+                    None,
                 )
                 .await?;
 
@@ -1123,6 +1124,8 @@ async fn derive_schema_for_cdc_table(
     constraints: &Vec<TableConstraint>,
     connect_properties: WithOptionsSecResolved,
     need_auto_schema_map: bool,
+    // original table catalog available in auto schema change process
+    original_catalog: Option<Arc<TableCatalog>>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
     if need_auto_schema_map {
@@ -1154,10 +1157,20 @@ async fn derive_schema_for_cdc_table(
             table.pk_names().clone(),
         ))
     } else {
-        Ok((
-            bind_sql_columns(column_defs)?,
-            bind_sql_pk_names(column_defs, constraints)?,
-        ))
+        let columns = bind_sql_columns(column_defs)?;
+        // For table created by `create table t (*)` the constraint is empty, we need to
+        // retrieve primary key names from original table catalog if available
+        let pk_names = if let Some(original_catalog) = original_catalog {
+            original_catalog
+                .pk
+                .iter()
+                .map(|x| original_catalog.columns[x.column_index].name().to_string())
+                .collect()
+        } else {
+            bind_sql_pk_names(column_defs, constraints)?
+        };
+
+        Ok((columns, pk_names))
     }
 }
 
@@ -1328,6 +1341,7 @@ pub async fn generate_stream_graph_for_table(
                 &constraints,
                 connect_properties.clone(),
                 false,
+                Some(original_catalog.clone()),
             )
             .await?;
 

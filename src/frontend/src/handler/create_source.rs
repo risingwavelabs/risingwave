@@ -54,7 +54,7 @@ use risingwave_connector::source::nexmark::source::{get_event_data_types_with_na
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 pub use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_connector::source::{
-    ConnectorProperties, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
+    ConnectorProperties, AZBLOB_CONNECTOR, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
     KINESIS_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR,
     POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
 };
@@ -362,7 +362,7 @@ pub(crate) async fn bind_columns_from_source(
         (Format::Native, Encode::Native)
         | (Format::Plain, Encode::Bytes)
         | (Format::DebeziumMongo, Encode::Json) => None,
-        (Format::Plain, Encode::Protobuf) => {
+        (Format::Plain, Encode::Protobuf) | (Format::Upsert, Encode::Protobuf) => {
             let (row_schema_location, use_schema_registry) =
                 get_schema_location(&mut format_encode_options_to_consume)?;
             let protobuf_schema = ProtobufSchema {
@@ -1064,7 +1064,10 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Csv, Encode::Json, Encode::Parquet],
                 ),
                 GCS_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Csv, Encode::Json],
+                    Format::Plain => vec![Encode::Csv, Encode::Json, Encode::Parquet],
+                ),
+                AZBLOB_CONNECTOR => hashmap!(
+                    Format::Plain => vec![Encode::Csv, Encode::Json, Encode::Parquet],
                 ),
                 POSIX_FS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv],
