@@ -216,7 +216,7 @@ pub async fn rpc_serve(
                 // here we forcibly specify the number of connections as 1.
                 options.max_connections(1);
                 options.sqlx_slow_statements_logging_settings(
-                    log::LevelFilter::Info,
+                    log::LevelFilter::Warn,
                     Duration::from_secs(1),
                 );
             }
