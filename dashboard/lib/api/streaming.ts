@@ -28,11 +28,29 @@ import {
 } from "../../proto/gen/catalog"
 import {
   ListObjectDependenciesResponse_ObjectDependencies as ObjectDependencies,
+  RelationIdInfos,
   TableFragments,
 } from "../../proto/gen/meta"
 import { ColumnCatalog, Field } from "../../proto/gen/plan_common"
 import { UserInfo } from "../../proto/gen/user"
 import api from "./api"
+
+// NOTE(kwannoel): This can be optimized further, instead of fetching the entire TableFragments struct,
+// We can fetch the fields we need from TableFragments, in a truncated struct.
+export async function getFragmentsByJobId(
+  jobId: number
+): Promise<TableFragments> {
+  let route = "/fragments/job_id/" + jobId.toString()
+  let tableFragments: TableFragments = TableFragments.fromJSON(
+    await api.get(route)
+  )
+  return tableFragments
+}
+
+export async function getRelationIdInfos(): Promise<RelationIdInfos> {
+  let fragmentIds: RelationIdInfos = await api.get("/relation_id_infos")
+  return fragmentIds
+}
 
 export async function getFragments(): Promise<TableFragments[]> {
   let fragmentList: TableFragments[] = (await api.get("/fragments2")).map(

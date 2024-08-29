@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context};
@@ -23,25 +22,24 @@ use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model_v2::StreamingParallelism;
-use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::{PausedReason, Recovery};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
+use risingwave_pb::stream_service::BuildActorInfo;
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, info, warn, Instrument};
 
 use super::{CheckpointControl, TracedEpoch};
-use crate::barrier::command::CommandContext;
 use crate::barrier::info::{InflightGraphInfo, InflightSubscriptionInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::schedule::ScheduledBarriers;
 use crate::barrier::state::BarrierManagerState;
-use crate::barrier::{BarrierKind, Command, GlobalBarrierManager, GlobalBarrierManagerContext};
+use crate::barrier::{BarrierKind, GlobalBarrierManager, GlobalBarrierManagerContext};
 use crate::controller::catalog::ReleaseContext;
 use crate::manager::{ActiveStreamingWorkerNodes, MetadataManager, WorkerId};
 use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
@@ -369,52 +367,38 @@ impl GlobalBarrierManager {
                     };
 
                     // update and build all actors.
-                    self.context
-                        .update_actors(&info, &subscription_info, &active_streaming_nodes)
+                    let node_actors = self
+                        .context
+                        .load_all_actors(&info, &subscription_info, &active_streaming_nodes)
                         .await
                         .inspect_err(|err| {
                             warn!(error = %err.as_report(), "update actors failed");
-                        })?;
-                    self.context
-                        .build_actors(&info, &active_streaming_nodes)
-                        .await
-                        .inspect_err(|err| {
-                            warn!(error = %err.as_report(), "build_actors failed");
                         })?;
 
                     // get split assignments for all actors
                     let source_split_assignments =
                         self.context.source_manager.list_assignments().await;
-                    let command = Command::Plain(Some(Mutation::Add(AddMutation {
+                    let mutation = Mutation::Add(AddMutation {
                         // Actors built during recovery is not treated as newly added actors.
                         actor_dispatchers: Default::default(),
                         added_actors: Default::default(),
                         actor_splits: build_actor_connector_splits(&source_split_assignments),
                         pause: paused_reason.is_some(),
                         subscriptions_to_add: Default::default(),
-                    })));
+                    });
 
                     // Use a different `curr_epoch` for each recovery attempt.
                     let new_epoch = prev_epoch.next();
 
-                    // Inject the `Initial` barrier to initialize all executors.
-                    let command_ctx = Arc::new(CommandContext::new(
-                        active_streaming_nodes.current().clone(),
-                        subscription_info.clone(),
-                        prev_epoch.clone(),
-                        new_epoch.clone(),
-                        paused_reason,
-                        command,
-                        BarrierKind::Initial,
-                        self.context.clone(),
-                        tracing::Span::current(), // recovery span
-                    ));
-
-                    let mut node_to_collect = control_stream_manager.inject_command_ctx_barrier(
-                        &command_ctx,
+                    let mut node_to_collect = control_stream_manager.inject_barrier(
+                        None,
+                        Some(mutation),
+                        (&new_epoch, &prev_epoch),
+                        &BarrierKind::Initial,
                         &info,
                         Some(&info),
                         HashMap::new(),
+                        Some(node_actors),
                     )?;
                     debug!(?node_to_collect, "inject initial barrier");
                     while !node_to_collect.is_empty() {
@@ -422,18 +406,13 @@ impl GlobalBarrierManager {
                             .next_complete_barrier_response()
                             .await;
                         let resp = result?;
-                        assert_eq!(resp.epoch, command_ctx.prev_epoch.value().0);
+                        assert_eq!(resp.epoch, prev_epoch.value().0);
                         assert!(node_to_collect.remove(&worker_id));
                     }
                     debug!("collected initial barrier");
 
                     (
-                        BarrierManagerState::new(
-                            new_epoch,
-                            info,
-                            subscription_info,
-                            command_ctx.next_paused_reason(),
-                        ),
+                        BarrierManagerState::new(new_epoch, info, subscription_info, paused_reason),
                         active_streaming_nodes,
                         control_stream_manager,
                         tracker,
@@ -1114,36 +1093,18 @@ impl GlobalBarrierManagerContext {
     }
 
     /// Update all actors in compute nodes.
-    async fn update_actors(
+    async fn load_all_actors(
         &self,
         info: &InflightGraphInfo,
         subscription_info: &InflightSubscriptionInfo,
         active_nodes: &ActiveStreamingWorkerNodes,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<HashMap<WorkerId, Vec<BuildActorInfo>>> {
         if info.actor_map.is_empty() {
             tracing::debug!("no actor to update, skipping.");
-            return Ok(());
+            return Ok(HashMap::new());
         }
 
-        let actor_infos: Vec<_> = info
-            .actor_map
-            .iter()
-            .map(|(node_id, actors)| {
-                let host = active_nodes
-                    .current()
-                    .get(node_id)
-                    .ok_or_else(|| anyhow::anyhow!("worker evicted, wait for online."))?
-                    .host
-                    .clone();
-                Ok(actors.iter().map(move |&actor_id| ActorInfo {
-                    actor_id,
-                    host: host.clone(),
-                })) as MetaResult<_>
-            })
-            .flatten_ok()
-            .try_collect()?;
-
-        let mut all_node_actors = self
+        let all_node_actors = self
             .metadata_manager
             .all_node_actors(false, &subscription_info.mv_depended_subscriptions)
             .await?;
@@ -1160,45 +1121,7 @@ impl GlobalBarrierManagerContext {
             return Err(anyhow!("actors dropped during update").into());
         }
 
-        self.stream_rpc_manager
-            .broadcast_update_actor_info(
-                active_nodes.current(),
-                info.actor_map.keys().cloned(),
-                actor_infos.into_iter(),
-                info.actor_map.keys().map(|node_id| {
-                    (
-                        *node_id,
-                        all_node_actors.remove(node_id).unwrap_or_default(),
-                    )
-                }),
-            )
-            .await?;
-
-        Ok(())
-    }
-
-    /// Build all actors in compute nodes.
-    async fn build_actors(
-        &self,
-        info: &InflightGraphInfo,
-        active_nodes: &ActiveStreamingWorkerNodes,
-    ) -> MetaResult<()> {
-        if info.actor_map.is_empty() {
-            tracing::debug!("no actor to build, skipping.");
-            return Ok(());
-        }
-
-        self.stream_rpc_manager
-            .build_actors(
-                active_nodes.current(),
-                info.actor_map.iter().map(|(node_id, actors)| {
-                    let actors = actors.iter().cloned().collect();
-                    (*node_id, actors)
-                }),
-            )
-            .await?;
-
-        Ok(())
+        Ok(all_node_actors)
     }
 }
 

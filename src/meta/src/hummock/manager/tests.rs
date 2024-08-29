@@ -151,7 +151,6 @@ async fn test_unpin_snapshot_before() {
                 context_id,
                 HummockSnapshot {
                     committed_epoch: epoch,
-                    current_epoch: epoch,
                 },
             )
             .await
@@ -170,7 +169,6 @@ async fn test_unpin_snapshot_before() {
                 context_id,
                 HummockSnapshot {
                     committed_epoch: epoch2,
-                    current_epoch: epoch2,
                 },
             )
             .await
