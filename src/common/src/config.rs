@@ -24,7 +24,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
-use foyer::{LfuConfig, LruConfig, RecoverMode, S3FifoConfig};
+use foyer::{Compression, LfuConfig, LruConfig, RecoverMode, RuntimeConfig, S3FifoConfig};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -858,7 +858,7 @@ pub struct FileCacheConfig {
     pub indexer_shards: usize,
 
     #[serde(default = "default::file_cache::compression")]
-    pub compression: String,
+    pub compression: Compression,
 
     #[serde(default = "default::file_cache::flush_buffer_threshold_mb")]
     pub flush_buffer_threshold_mb: Option<usize>,
@@ -874,6 +874,9 @@ pub struct FileCacheConfig {
     /// More details, see [`RecoverMode::None`], [`RecoverMode::Quiet`] and [`RecoverMode::Strict`],
     #[serde(default = "default::file_cache::recover_mode")]
     pub recover_mode: RecoverMode,
+
+    #[serde(default = "default::file_cache::runtime_config")]
+    pub runtime_config: RuntimeConfig,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -1689,7 +1692,7 @@ pub mod default {
     }
 
     pub mod file_cache {
-        use foyer::RecoverMode;
+        use foyer::{Compression, RecoverMode, RuntimeConfig, TokioRuntimeConfig};
 
         pub fn dir() -> String {
             "".to_string()
@@ -1723,8 +1726,8 @@ pub mod default {
             64
         }
 
-        pub fn compression() -> String {
-            "none".to_string()
+        pub fn compression() -> Compression {
+            Compression::None
         }
 
         pub fn flush_buffer_threshold_mb() -> Option<usize> {
@@ -1733,6 +1736,10 @@ pub mod default {
 
         pub fn recover_mode() -> RecoverMode {
             RecoverMode::None
+        }
+
+        pub fn runtime_config() -> RuntimeConfig {
+            RuntimeConfig::Unified(TokioRuntimeConfig::default())
         }
     }
 
