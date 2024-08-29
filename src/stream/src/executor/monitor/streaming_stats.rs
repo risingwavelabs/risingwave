@@ -62,6 +62,7 @@ pub struct StreamingMetrics {
     actor_idle_cnt: LabelGuardedIntGaugeVec<1>,
 
     // Streaming actor
+    pub actor_count: LabelGuardedIntGaugeVec<1>,
     #[expect(dead_code)]
     actor_memory_usage: LabelGuardedIntGaugeVec<2>,
     actor_in_record_cnt: LabelGuardedIntCounterVec<3>,
@@ -86,7 +87,6 @@ pub struct StreamingMetrics {
     // Backpressure
     pub actor_output_buffer_blocking_duration_ns: RelabeledGuardedIntCounterVec<3>,
     actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
-    pub dispatcher_count: LabelGuardedIntGaugeVec<2>,
 
     // Streaming Join
     pub join_lookup_miss_count: LabelGuardedIntCounterVec<4>,
@@ -306,14 +306,6 @@ impl StreamingMetrics {
             )
             .unwrap();
 
-        let dispatcher_count = register_guarded_int_gauge_vec_with_registry!(
-            "stream_dispatcher_count",
-            "Total number of dispatchers",
-            &["fragment_id", "downstream_fragment_id"],
-            registry
-        )
-        .unwrap();
-
         let exchange_frag_recv_size = register_guarded_int_counter_vec_with_registry!(
             "stream_exchange_frag_recv_size",
             "Total size of messages that have been received from upstream Fragment",
@@ -414,6 +406,14 @@ impl StreamingMetrics {
             "stream_actor_out_record_cnt",
             "Total number of rows actor sent",
             &["actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let actor_count = register_guarded_int_gauge_vec_with_registry!(
+            "stream_actor_count",
+            "Total number of actors (parallelism)",
+            &["fragment_id"],
             registry
         )
         .unwrap();
@@ -1140,6 +1140,7 @@ impl StreamingMetrics {
             actor_poll_cnt,
             actor_idle_duration,
             actor_idle_cnt,
+            actor_count,
             actor_memory_usage,
             actor_in_record_cnt,
             actor_out_record_cnt,
@@ -1152,7 +1153,6 @@ impl StreamingMetrics {
             merge_barrier_align_duration,
             actor_output_buffer_blocking_duration_ns,
             actor_input_buffer_blocking_duration_ns,
-            dispatcher_count,
             join_lookup_miss_count,
             join_lookup_total_count,
             join_insert_cache_miss_count,

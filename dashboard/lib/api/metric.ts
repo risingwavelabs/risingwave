@@ -52,7 +52,7 @@ function convertToMapAndAgg(
   for (const item of backPressures) {
     const key = `${item.fragmentId}-${item.downstreamFragmentId}`
     mapValue.set(key, (mapValue.get(key) || 0) + item.value)
-    mapNumber.set(key, (mapNumber.get(key) || 0) + item.dispatcherCount)
+    mapNumber.set(key, (mapNumber.get(key) || 0) + item.actorCount)
   }
 
   for (const [key, value] of mapValue) {
@@ -127,7 +127,7 @@ export function calculateCumulativeBp(
   mapResult.forEach((value, key) => {
     const [fragmentId, downstreamFragmentId] = key.split("-").map(Number)
     const backPressureInfo: BackPressureInfo = {
-      dispatcherCount: 1, // the value here has already been averaged by real dispatcher count
+      actorCount: 1, // the value here has already been averaged by real actor count
       fragmentId,
       downstreamFragmentId,
       value,

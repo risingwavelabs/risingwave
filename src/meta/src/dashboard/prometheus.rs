@@ -148,7 +148,7 @@ pub async fn list_prometheus_fragment_back_pressure(
     if let Some(ref client) = srv.prometheus_client {
         let back_pressure_query = format!(
             "sum(rate(stream_actor_output_buffer_blocking_duration_ns{{{}}}[60s])) by (fragment_id, downstream_fragment_id) \
-             / sum(stream_dispatcher_count{{{}}}) by (fragment_id, downstream_fragment_id) \
+             / ignoring (downstream_fragment_id) group_left sum(stream_actor_count{{{}}}) by (fragment_id) \
              / 1000000000",
             srv.prometheus_selector,
             srv.prometheus_selector,

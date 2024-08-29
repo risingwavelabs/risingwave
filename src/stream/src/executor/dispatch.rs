@@ -23,7 +23,7 @@ use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
-use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
+use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::PbDispatcher;
@@ -50,7 +50,6 @@ pub struct DispatchExecutor {
 struct DispatcherWithMetrics {
     dispatcher: DispatcherImpl,
     actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter<3>,
-    dispatcher_count: LabelGuardedIntGauge<2>,
 }
 
 impl DispatcherWithMetrics {
@@ -80,12 +79,6 @@ impl DerefMut for DispatcherWithMetrics {
     }
 }
 
-impl Drop for DispatcherWithMetrics {
-    fn drop(&mut self) {
-        self.dispatcher_count.dec();
-    }
-}
-
 struct DispatchExecutorMetrics {
     actor_id_str: String,
     fragment_id_str: String,
@@ -95,12 +88,6 @@ struct DispatchExecutorMetrics {
 
 impl DispatchExecutorMetrics {
     fn monitor_dispatcher(&self, dispatcher: DispatcherImpl) -> DispatcherWithMetrics {
-        let dispatcher_count = self
-            .metrics
-            .dispatcher_count
-            .with_guarded_label_values(&[&self.fragment_id_str, dispatcher.dispatcher_id_str()]);
-        dispatcher_count.inc();
-
         DispatcherWithMetrics {
             actor_output_buffer_blocking_duration_ns: self
                 .metrics
@@ -110,7 +97,6 @@ impl DispatchExecutorMetrics {
                     &self.fragment_id_str,
                     dispatcher.dispatcher_id_str(),
                 ]),
-            dispatcher_count,
             dispatcher,
         }
     }

@@ -299,15 +299,15 @@ impl MonitorService for MonitorServiceImpl {
             .next()
             .unwrap()
             .take_metric();
-        let dispatcher_count = metrics
-            .dispatcher_count
+        let actor_count = metrics
+            .actor_count
             .collect()
             .into_iter()
             .next()
             .unwrap()
             .take_metric();
 
-        let dispatcher_count: HashMap<_, _> = dispatcher_count
+        let actor_count: HashMap<_, _> = actor_count
             .iter()
             .filter_map(|m| {
                 let fragment_id = m
@@ -317,15 +317,8 @@ impl MonitorService for MonitorServiceImpl {
                     .get_value()
                     .parse::<u32>()
                     .unwrap();
-                let downstream_fragment_id = m
-                    .get_label()
-                    .iter()
-                    .find(|lp| lp.get_name() == "downstream_fragment_id")?
-                    .get_value()
-                    .parse::<u32>()
-                    .unwrap();
                 let count = m.get_gauge().get_value() as u32;
-                Some(((fragment_id, downstream_fragment_id), count))
+                Some((fragment_id, count))
             })
             .collect();
 
@@ -343,11 +336,8 @@ impl MonitorService for MonitorServiceImpl {
                 }
             }
             back_pressure_info.value = label_pairs.get_counter().get_value();
-            back_pressure_info.dispatcher_count = dispatcher_count
-                .get(&(
-                    back_pressure_info.fragment_id,
-                    back_pressure_info.downstream_fragment_id,
-                ))
+            back_pressure_info.actor_count = actor_count
+                .get(&back_pressure_info.fragment_id)
                 .copied()
                 .unwrap_or_default();
             back_pressure_infos.push(back_pressure_info);
