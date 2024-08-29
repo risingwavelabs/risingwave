@@ -34,7 +34,7 @@ import Head from "next/head"
 import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 import FragmentDependencyGraph from "../components/FragmentDependencyGraph"
-import FragmentGraph from "../components/FragmentGraph"
+import DdlGraph from "../components/DdlGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
 import useFetch from "../lib/api/fetch"
@@ -45,7 +45,7 @@ import {
   fetchPrometheusBackPressure,
 } from "../lib/api/metric"
 import {
-  getFragmentsByJobId,
+  getFragmentsByJobId, getRelationDependencies,
   getRelationIdInfos,
   getStreamingJobs,
 } from "../lib/api/streaming"
@@ -199,6 +199,11 @@ interface EmbeddedBackPressureInfo {
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
   const { response: relationIdInfos } = useFetch(getRelationIdInfos)
+  // 1. Get the relation dependendencies.
+  // const { response: relationDeps } = useFetch(getRelationDependencies)
+  // 2. Get the relation -> input fragment_id mapping.
+  // 3. Get the relation -> output fragment_id mapping.
+  // 4. Construct the BP graph for relation ids using 1-3.
 
   const [relationId, setRelationId] = useQueryState("id", parseAsInteger)
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
@@ -236,7 +241,6 @@ export default function Streaming() {
     }
   }, [relationId, relationList, setRelationId])
 
-  // The table fragments of the selected fragment id
   const fragmentDependency = fragmentDependencyCallback()?.fragmentDep
   const fragmentDependencyDag = fragmentDependencyCallback()?.fragmentDepDag
   const fragments = fragmentDependencyCallback()?.fragments
@@ -501,7 +505,7 @@ export default function Streaming() {
         >
           <Text fontWeight="semibold">Fragment Graph</Text>
           {planNodeDependencies && fragmentDependency && (
-            <FragmentGraph
+            <DdlGraph
               selectedFragmentId={selectedFragmentId?.toString()}
               fragmentDependency={fragmentDependency}
               planNodeDependencies={planNodeDependencies}
