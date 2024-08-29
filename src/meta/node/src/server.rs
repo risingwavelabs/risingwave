@@ -80,6 +80,7 @@ use risingwave_rpc_client::ComputeClientPool;
 use sea_orm::{ConnectionTrait, DbBackend, Statement};
 use thiserror_ext::AsReport;
 use tokio::sync::watch;
+use tracing::log;
 
 use crate::backup_restore::BackupManager;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
@@ -214,6 +215,10 @@ pub async fn rpc_serve(
                 // Due to the fact that Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
                 // here we forcibly specify the number of connections as 1.
                 options.max_connections(1);
+                options.sqlx_slow_statements_logging_settings(
+                    log::LevelFilter::Info,
+                    Duration::from_secs(1),
+                );
             }
 
             let conn = sea_orm::Database::connect(options).await?;
