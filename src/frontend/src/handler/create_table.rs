@@ -27,6 +27,7 @@ use risingwave_common::catalog::{
     INITIAL_TABLE_VERSION_ID,
 };
 use risingwave_common::license::Feature;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_connector::source::cdc::build_cdc_table_id;
@@ -760,7 +761,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
     include_column_options: IncludeOption,
-    resolved_table_name: String,
+    resolved_table_name: String, // table name without schema prefix
     database_id: DatabaseId,
     schema_id: SchemaId,
     table_id: TableId,
@@ -1288,6 +1289,7 @@ pub async fn generate_stream_graph_for_table(
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
     cdc_table_info: Option<CdcTableInfo>,
+    new_version_columns: Option<Vec<ColumnCatalog>>,
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
@@ -1336,7 +1338,7 @@ pub async fn generate_stream_graph_for_table(
                 cdc_table.external_table_name.clone(),
             )?;
 
-            let (columns, pk_names) = derive_schema_for_cdc_table(
+            let (mut columns, pk_names) = derive_schema_for_cdc_table(
                 &column_defs,
                 &constraints,
                 connect_properties.clone(),
@@ -1344,6 +1346,19 @@ pub async fn generate_stream_graph_for_table(
                 Some(original_catalog.clone()),
             )
             .await?;
+
+            // If new_version_columns is provided, we are in the process of auto schema change.
+            // update the default value column since the default value column is not set in the
+            // column sql definition.
+            if let Some(new_version_columns) = new_version_columns {
+                for (col, new_version_col) in columns
+                    .iter_mut()
+                    .zip_eq_fast(new_version_columns.into_iter())
+                {
+                    col.column_desc.generated_or_default_column =
+                        new_version_col.column_desc.generated_or_default_column;
+                }
+            }
 
             let (plan, table) = gen_create_table_plan_for_cdc_table(
                 handler_args,

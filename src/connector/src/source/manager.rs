@@ -131,17 +131,12 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             field_descs,
             additional_column,
             // ignored fields below
-            generated_or_default_column,
+            generated_or_default_column: _,
             type_name: _,
             description: _,
             version: _,
         }: &ColumnDesc,
     ) -> Self {
-        debug_assert!(
-            generated_or_default_column.is_none(),
-            "source column should not be generated or default: {:?}",
-            generated_or_default_column.as_ref().unwrap()
-        );
         Self {
             name: name.clone(),
             data_type: data_type.clone(),

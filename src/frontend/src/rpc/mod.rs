@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use pgwire::pg_server::{BoxedError, SessionManager};
 use risingwave_pb::ddl_service::{ReplaceTablePlan, TableSchemaChange};
 use risingwave_pb::frontend_service::frontend_service_server::FrontendService;
@@ -90,16 +91,22 @@ async fn get_new_table_plan(
     // get a session object for the corresponding user and database
     let session = session_mgr.create_dummy_session(database_id, owner)?;
 
-    let new_columns = table_change.columns.into_iter().map(|c| c.into()).collect();
+    let new_version_columns = table_change
+        .columns
+        .into_iter()
+        .map(|c| c.into())
+        .collect_vec();
     let table_name = ObjectName::from(vec![table_name.as_str().into()]);
     let (new_table_definition, original_catalog) =
-        get_new_table_definition_for_cdc_table(&session, table_name.clone(), new_columns).await?;
+        get_new_table_definition_for_cdc_table(&session, table_name.clone(), &new_version_columns)
+            .await?;
     let (_, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
         &session,
         table_name,
         new_table_definition,
         &original_catalog,
         None,
+        Some(new_version_columns),
     )
     .await?;
 

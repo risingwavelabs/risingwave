@@ -58,6 +58,7 @@ pub async fn replace_table_with_definition(
         definition,
         original_catalog,
         source_schema,
+        None,
     )
     .await?;
 
@@ -73,7 +74,7 @@ pub async fn replace_table_with_definition(
 pub async fn get_new_table_definition_for_cdc_table(
     session: &Arc<SessionImpl>,
     table_name: ObjectName,
-    new_columns: Vec<ColumnCatalog>,
+    new_columns: &[ColumnCatalog],
 ) -> Result<(Statement, Arc<TableCatalog>)> {
     let original_catalog = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
@@ -162,6 +163,7 @@ pub async fn get_replace_table_plan(
     definition: Statement,
     original_catalog: &Arc<TableCatalog>,
     source_schema: Option<ConnectorSchema>,
+    new_version_columns: Option<Vec<ColumnCatalog>>, // only provided in auto schema change
 ) -> Result<(
     Option<Source>,
     Table,
@@ -202,6 +204,7 @@ pub async fn get_replace_table_plan(
         on_conflict,
         with_version_column,
         cdc_table_info,
+        new_version_columns,
     )
     .await?;
 
