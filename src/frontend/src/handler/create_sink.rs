@@ -869,10 +869,12 @@ fn bind_sink_format_desc(session: &SessionImpl, value: ConnectorSchema) -> Resul
 
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, Vec<Encode>>>> =
     LazyLock::new(|| {
+        use risingwave_connector::sink::file_sink::azblob::AzblobSink;
         use risingwave_connector::sink::file_sink::fs::FsSink;
         use risingwave_connector::sink::file_sink::gcs::GcsSink;
         use risingwave_connector::sink::file_sink::opendal_sink::FileSink;
         use risingwave_connector::sink::file_sink::s3::S3Sink;
+        use risingwave_connector::sink::file_sink::webhdfs::WebhdfsSink;
         use risingwave_connector::sink::google_pubsub::GooglePubSubSink;
         use risingwave_connector::sink::kafka::KafkaSink;
         use risingwave_connector::sink::kinesis::KinesisSink;
@@ -894,6 +896,12 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Parquet],
                 ),
                 FileSink::<GcsSink>::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Parquet],
+                ),
+                FileSink::<AzblobSink>::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Parquet],
+                ),
+                FileSink::<WebhdfsSink>::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Parquet],
                 ),
                 FileSink::<FsSink>::SINK_NAME => hashmap!(

@@ -157,7 +157,7 @@ impl CompactionTaskValidationRule for IntraCompactionTaskValidationRule {
             let level_select_size = select_level
                 .table_infos
                 .iter()
-                .map(|sst| sst.file_size)
+                .map(|sst| sst.sst_size)
                 .sum::<u64>();
 
             max_level_size = std::cmp::max(max_level_size, level_select_size);

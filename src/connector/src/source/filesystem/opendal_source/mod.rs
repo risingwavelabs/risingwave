@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+pub mod azblob_source;
 pub mod gcs_source;
 pub mod posix_fs_source;
 pub mod s3_source;
@@ -32,6 +33,7 @@ use super::OpendalFsSplit;
 use crate::error::ConnectorResult;
 use crate::source::{SourceProperties, UnknownFields};
 
+pub const AZBLOB_CONNECTOR: &str = "azblob";
 pub const GCS_CONNECTOR: &str = "gcs";
 // The new s3_v2 will use opendal.
 pub const OPENDAL_S3_CONNECTOR: &str = "s3_v2";
@@ -187,4 +189,54 @@ impl SourceProperties for PosixFsProperties {
     type SplitReader = OpendalReader<OpendalPosixFs>;
 
     const SOURCE_NAME: &'static str = POSIX_FS_CONNECTOR;
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
+pub struct AzblobProperties {
+    #[serde(rename = "azblob.container_name")]
+    pub container_name: String,
+
+    #[serde(rename = "azblob.credentials.account_name", default)]
+    pub account_name: Option<String>,
+    #[serde(rename = "azblob.credentials.account_key", default)]
+    pub account_key: Option<String>,
+    #[serde(rename = "azblob.endpoint_url")]
+    pub endpoint_url: String,
+
+    #[serde(rename = "match_pattern", default)]
+    pub match_pattern: Option<String>,
+
+    #[serde(flatten)]
+    pub fs_common: FsSourceCommon,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
+
+    #[serde(rename = "compression_format", default = "Default::default")]
+    pub compression_format: CompressionFormat,
+}
+
+impl UnknownFields for AzblobProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
+}
+
+impl SourceProperties for AzblobProperties {
+    type Split = OpendalFsSplit<OpendalAzblob>;
+    type SplitEnumerator = OpendalEnumerator<OpendalAzblob>;
+    type SplitReader = OpendalReader<OpendalAzblob>;
+
+    const SOURCE_NAME: &'static str = AZBLOB_CONNECTOR;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpendalAzblob;
+
+impl OpendalSource for OpendalAzblob {
+    type Properties = AzblobProperties;
+
+    fn new_enumerator(properties: Self::Properties) -> ConnectorResult<OpendalEnumerator<Self>> {
+        OpendalEnumerator::new_azblob_source(properties)
+    }
 }

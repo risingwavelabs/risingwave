@@ -69,6 +69,7 @@ pub async fn replace_table_with_definition(
     Ok(())
 }
 
+/// Used in auto schema change process
 pub async fn get_new_table_definition_for_cdc_table(
     session: &Arc<SessionImpl>,
     table_name: ObjectName,

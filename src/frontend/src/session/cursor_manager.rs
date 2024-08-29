@@ -320,7 +320,7 @@ impl SubscriptionCursor {
                                 &mut chunk_stream,
                                 formats,
                                 &from_snapshot,
-                                &self.fields,
+                                &fields,
                                 handle_args.session.clone(),
                             );
 

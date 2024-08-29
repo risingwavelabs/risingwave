@@ -29,7 +29,8 @@ use crate::error::ConnectorResult;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use crate::source::filesystem::opendal_source::{
-    OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource, DEFAULT_REFRESH_INTERVAL_SEC,
+    OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
+    DEFAULT_REFRESH_INTERVAL_SEC,
 };
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{
@@ -98,6 +99,12 @@ impl SourceReader {
                 list_interval_sec = get_list_interval_sec(prop.fs_common.refresh_interval_sec);
                 let lister: OpendalEnumerator<OpendalS3> =
                     OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
+                Ok(build_opendal_fs_list_stream(lister, list_interval_sec))
+            }
+            ConnectorProperties::Azblob(prop) => {
+                list_interval_sec = get_list_interval_sec(prop.fs_common.refresh_interval_sec);
+                let lister: OpendalEnumerator<OpendalAzblob> =
+                    OpendalEnumerator::new_azblob_source(*prop)?;
                 Ok(build_opendal_fs_list_stream(lister, list_interval_sec))
             }
             ConnectorProperties::PosixFs(prop) => {

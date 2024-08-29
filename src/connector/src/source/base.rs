@@ -41,7 +41,7 @@ use super::kafka::KafkaMeta;
 use super::kinesis::KinesisMeta;
 use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
-use super::{GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
+use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
 use crate::error::ConnectorResult as Result;
 use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::parser::ParserConfig;
@@ -323,6 +323,9 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
             (SourceFormat::DebeziumMongo, SourceEncode::Json)
         }
         (PbFormatType::Plain, PbEncodeType::Bytes) => (SourceFormat::Plain, SourceEncode::Bytes),
+        (PbFormatType::Upsert, PbEncodeType::Protobuf) => {
+            (SourceFormat::Upsert, SourceEncode::Protobuf)
+        }
         (format, encode) => {
             bail!(
                 "Unsupported combination of format {:?} and encode {:?}",
@@ -385,6 +388,7 @@ impl ConnectorProperties {
                 s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
                     || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
                     || s.eq_ignore_ascii_case(GCS_CONNECTOR)
+                    || s.eq_ignore_ascii_case(AZBLOB_CONNECTOR)
             })
             .unwrap_or(false)
     }
@@ -435,6 +439,7 @@ impl ConnectorProperties {
         matches!(self, ConnectorProperties::Kafka(_))
             || matches!(self, ConnectorProperties::OpendalS3(_))
             || matches!(self, ConnectorProperties::Gcs(_))
+            || matches!(self, ConnectorProperties::Azblob(_))
     }
 }
 
