@@ -243,7 +243,7 @@ pub fn parse_schema_change(
                             let default_val_expr_node = ExprNode {
                                 function_type: ExprType::Unspecified as i32,
                                 return_type: Some(data_type.to_protobuf()),
-                                rex_node: Some(RexNode::Constant((&snapshot_value).to_protobuf())),
+                                rex_node: Some(RexNode::Constant(snapshot_value.to_protobuf())),
                             };
                             ColumnDesc::named_with_default_value(
                                 name,
