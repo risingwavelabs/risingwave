@@ -710,8 +710,6 @@ pub(crate) fn bind_all_columns(
                         is_hidden: false,
                     },
                 ];
-                let non_generated_sql_defined_columns =
-                    non_generated_sql_columns(col_defs_from_sql);
                 if non_generated_sql_defined_columns.len() != 2
                     || non_generated_sql_defined_columns[0].name.real_value() != columns[0].name()
                     || non_generated_sql_defined_columns[1].name.real_value() != columns[1].name()
