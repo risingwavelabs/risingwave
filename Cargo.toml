@@ -125,7 +125,7 @@ axum = "=0.7.4" # TODO: 0.7.5+ does not work with current toolchain
 etcd-client = { package = "madsim-etcd-client", version = "0.6" }
 futures-async-stream = "0.2.9"
 hytra = "0.1"
-rdkafka = { package = "madsim-rdkafka", git = "https://github.com/madsim-rs/madsim.git", rev = "4d77c98", features = [
+rdkafka = { package = "madsim-rdkafka", git = "https://github.com/madsim-rs/madsim.git", rev = "3235309", features = [
     "cmake-build",
 ] }
 hashbrown = { version = "0.14", features = ["ahash", "inline-more", "nightly"] }
