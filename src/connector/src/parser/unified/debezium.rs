@@ -225,7 +225,7 @@ pub fn parse_schema_change(
                         }
                     };
 
-                    // handle default value expression, currently we only support literal expression
+                    // handle default value expression, currently we only support constant expression
                     let column_desc = match col.access_object_field("defaultValueExpression") {
                         Some(default_val_expr_str) if !default_val_expr_str.is_jsonb_null() => {
                             let value_text = default_val_expr_str.as_string().unwrap();

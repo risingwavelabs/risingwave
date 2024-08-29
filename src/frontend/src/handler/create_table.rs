@@ -784,6 +784,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     let (mut columns, pk_column_ids, _row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
 
+    // NOTES: In auto schema change, default value is not provided in column definition.
     bind_sql_column_constraints(
         context.session_ctx(),
         table_name.real_value(),
