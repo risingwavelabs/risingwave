@@ -17,6 +17,7 @@ use core::time::Duration;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use anyhow::{anyhow, Context};
+use futures::future::pending;
 use futures::prelude::Future;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -95,7 +96,7 @@ struct BigQueryFutureManager {
     // `offset_queue` holds the Some corresponding to each future.
     // When we receive a barrier we add a Some(barrier).
     // When we receive a chunk, if the chunk is larger than `MAX_ROW_SIZE`, we split it, and then we add n None and a Some(chunk) to the queue.
-    offset_queue: VecDeque<Option<TruncateOffset>>,
+    offset_queue: VecDeque<(TruncateOffset, usize)>,
     // When we pop a Some(barrier) from the queue, we don't have to wait `resp_stream`, we just truncate.
     // When we pop a Some(chunk) from the queue, we have to wait `resp_stream`.
     // When we pop a None from the queue, we have to wait `resp_stream`, but we don't need to truncate.
@@ -113,27 +114,26 @@ impl BigQueryFutureManager {
         }
     }
 
-    pub fn add_offset(&mut self, offset: TruncateOffset, mut resp_num: usize) {
-        while resp_num > 1 {
-            self.offset_queue.push_back(None);
-            resp_num -= 1;
-        }
-        self.offset_queue.push_back(Some(offset));
+    pub fn add_offset(&mut self, offset: TruncateOffset, resp_num: usize) {
+        self.offset_queue.push_back((offset, resp_num));
     }
 
-    pub async fn next_offset(&mut self) -> Result<Option<TruncateOffset>> {
-        if let Some(Some(TruncateOffset::Barrier { .. })) = self.offset_queue.front() {
-            return Ok(self.offset_queue.pop_front().unwrap());
+    pub async fn next_offset(&mut self) -> Result<TruncateOffset> {
+        if let Some((_offset, remaining_resp_num)) = self.offset_queue.front_mut() {
+            if *remaining_resp_num == 0 {
+                return Ok(self.offset_queue.pop_front().unwrap().0);
+            }
+            while *remaining_resp_num > 0 {
+                self.resp_stream
+                    .next()
+                    .await
+                    .ok_or_else(|| SinkError::BigQuery(anyhow::anyhow!("end of stream")))??;
+                *remaining_resp_num -= 1;
+            }
+            Ok(self.offset_queue.pop_front().unwrap().0)
+        } else {
+            pending().await
         }
-        self.resp_stream
-            .next()
-            .await
-            .ok_or_else(|| SinkError::BigQuery(anyhow::anyhow!("end of stream")))??;
-        self.offset_queue.pop_front().ok_or_else(|| {
-            SinkError::BigQuery(anyhow::anyhow!(
-                "should have pending chunk offset when we receive new response"
-            ))
-        })
     }
 }
 pub struct BigQueryLogSinker {
@@ -161,15 +161,13 @@ impl LogSinker for BigQueryLogSinker {
         loop {
             tokio::select!(
                 offset = self.bigquery_future_manager.next_offset() => {
-                    if let Some(offset) = offset?{
-                        log_reader.truncate(offset)?;
-                    }
+                        log_reader.truncate(offset?)?;
                  }
                  item_result = log_reader.next_item(), if self.bigquery_future_manager.offset_queue.len() <= self.future_num => {
                     let (epoch, item) = item_result?;
                     match item {
                         LogStoreReadItem::StreamChunk { chunk_id, chunk } => {
-                            let resp_num = self.writer.write_chunk(chunk).await?;
+                            let resp_num = self.writer.write_chunk(chunk)?;
                             self.bigquery_future_manager
                                 .add_offset(TruncateOffset::Chunk { epoch, chunk_id },resp_num);
                         }
@@ -669,7 +667,7 @@ impl BigQuerySinkWriter {
         Ok(serialized_rows)
     }
 
-    async fn write_chunk(&mut self, chunk: StreamChunk) -> Result<usize> {
+    fn write_chunk(&mut self, chunk: StreamChunk) -> Result<usize> {
         let serialized_rows = if self.is_append_only {
             self.append_only(chunk)?
         } else {
@@ -699,9 +697,7 @@ impl BigQuerySinkWriter {
                 writer_schema: Some(self.writer_pb_schema.clone()),
                 rows: Some(ProtoRows { serialized_rows }),
             });
-            self.client
-                .append_rows(rows, self.write_stream.clone())
-                .await?;
+            self.client.append_rows(rows, self.write_stream.clone())?;
         }
         Ok(len)
     }
@@ -723,32 +719,39 @@ pub async fn resp_to_stream(
         .map_err(|e| SinkError::BigQuery(e.into()))?
         .into_inner();
     loop {
-        if let Some(append_rows_response) = resp_stream
+        match resp_stream
             .message()
             .await
             .map_err(|e| SinkError::BigQuery(e.into()))?
         {
-            if !append_rows_response.row_errors.is_empty() {
-                return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "bigquery insert error {:?}",
-                    append_rows_response.row_errors
-                )));
-            }
-            if let Some(google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_response::Response::Error(status)) = append_rows_response.response{
+            Some(append_rows_response) => {
+                if !append_rows_response.row_errors.is_empty() {
                     return Err(SinkError::BigQuery(anyhow::anyhow!(
                         "bigquery insert error {:?}",
-                        status
+                        append_rows_response.row_errors
                     )));
                 }
+                if let Some(google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_response::Response::Error(status)) = append_rows_response.response{
+                            return Err(SinkError::BigQuery(anyhow::anyhow!(
+                                "bigquery insert error {:?}",
+                                status
+                            )));
+                        }
+                yield ();
+            }
+            None => {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "bigquery insert error: end of resp stream",
+                )));
+            }
         }
-        yield ();
     }
 }
 
 struct StorageWriterClient {
     #[expect(dead_code)]
     environment: Environment,
-    request_sender: mpsc::Sender<AppendRowsRequest>,
+    request_sender: mpsc::UnboundedSender<AppendRowsRequest>,
 }
 impl StorageWriterClient {
     pub async fn new(
@@ -775,8 +778,8 @@ impl StorageWriterClient {
         .map_err(|e| SinkError::BigQuery(e.into()))?;
         let mut client = conn.conn();
 
-        let (tx, rx) = mpsc::channel(BIGQUERY_SEND_FUTURE_BUFFER_MAX_SIZE);
-        let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+        let (tx, rx) = mpsc::unbounded_channel();
+        let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
 
         let resp = async move { client.append_rows(Request::new(stream)).await };
         let resp_stream = resp_to_stream(resp);
@@ -790,11 +793,7 @@ impl StorageWriterClient {
         ))
     }
 
-    pub async fn append_rows(
-        &mut self,
-        row: AppendRowsRequestRows,
-        write_stream: String,
-    ) -> Result<()> {
+    pub fn append_rows(&mut self, row: AppendRowsRequestRows, write_stream: String) -> Result<()> {
         let append_req = AppendRowsRequest {
             write_stream: write_stream.clone(),
             offset: None,
@@ -804,7 +803,6 @@ impl StorageWriterClient {
         };
         self.request_sender
             .send(append_req)
-            .await
             .map_err(|e| SinkError::BigQuery(e.into()))?;
         Ok(())
     }
