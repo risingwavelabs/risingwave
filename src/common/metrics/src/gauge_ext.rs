@@ -36,6 +36,6 @@ impl IntGauge {
             }
         }
 
-        Guard::create(&self)
+        Guard::create(self)
     }
 }

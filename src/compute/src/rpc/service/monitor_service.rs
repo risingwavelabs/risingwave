@@ -322,29 +322,44 @@ impl MonitorService for MonitorServiceImpl {
             })
             .collect();
 
-        let mut back_pressure_infos: Vec<BackPressureInfo> = Vec::new();
+        let mut back_pressure_infos: HashMap<_, BackPressureInfo> = HashMap::new();
 
         for label_pairs in actor_output_buffer_blocking_duration_ns {
-            let mut back_pressure_info = BackPressureInfo::default();
+            let mut fragment_id = None;
+            let mut downstream_fragment_id = None;
             for label_pair in label_pairs.get_label() {
                 if label_pair.get_name() == "fragment_id" {
-                    back_pressure_info.fragment_id = label_pair.get_value().parse::<u32>().unwrap();
+                    fragment_id = label_pair.get_value().parse::<u32>().ok();
                 }
                 if label_pair.get_name() == "downstream_fragment_id" {
-                    back_pressure_info.downstream_fragment_id =
-                        label_pair.get_value().parse::<u32>().unwrap();
+                    downstream_fragment_id = label_pair.get_value().parse::<u32>().ok();
                 }
             }
-            back_pressure_info.value = label_pairs.get_counter().get_value();
-            back_pressure_info.actor_count = actor_count
-                .get(&back_pressure_info.fragment_id)
-                .copied()
-                .unwrap_or_default();
-            back_pressure_infos.push(back_pressure_info);
+            let Some(fragment_id) = fragment_id else {
+                continue;
+            };
+            let Some(downstream_fragment_id) = downstream_fragment_id else {
+                continue;
+            };
+
+            // When metrics level is Debug, we may have multiple metrics with the same label pairs
+            // (fragment_id, downstream_fragment_id). We need to aggregate them locally.
+            //
+            // Metrics from different compute nodes should be aggregated by the caller.
+            let back_pressure_info = back_pressure_infos
+                .entry((fragment_id, downstream_fragment_id))
+                .or_insert_with(|| BackPressureInfo {
+                    fragment_id,
+                    downstream_fragment_id,
+                    actor_count: actor_count.get(&fragment_id).copied().unwrap_or_default(),
+                    value: 0.,
+                });
+
+            back_pressure_info.value += label_pairs.get_counter().get_value();
         }
 
         Ok(Response::new(GetBackPressureResponse {
-            back_pressure_infos,
+            back_pressure_infos: back_pressure_infos.into_values().collect(),
         }))
     }
 
