@@ -240,6 +240,7 @@ pub fn parse_schema_change(
                                     }},
                                 )?,
                             );
+                            // equivalent to `Literal::to_expr_proto`
                             let default_val_expr_node = ExprNode {
                                 function_type: ExprType::Unspecified as i32,
                                 return_type: Some(data_type.to_protobuf()),
