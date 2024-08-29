@@ -23,7 +23,7 @@ use hytra::TrAdder;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::log::LogSuppresser;
-use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
+use risingwave_common::metrics::{IntGaugeExt, GLOBAL_ERROR_METRICS};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr_context::{expr_context_scope, FRAGMENT_ID};
 use risingwave_expr::ExprError;
@@ -198,7 +198,6 @@ where
         .into()));
 
         let id = self.actor_context.id;
-
         let span_name = format!("Actor {id}");
 
         let new_span = |epoch: Option<EpochPair>| {
@@ -212,6 +211,13 @@ where
             )
         };
         let mut span = new_span(None);
+
+        let actor_count = self
+            .actor_context
+            .streaming_metrics
+            .actor_count
+            .with_guarded_label_values(&[&self.actor_context.fragment_id.to_string()]);
+        let _actor_count_guard = actor_count.inc_guard();
 
         let mut last_epoch: Option<EpochPair> = None;
         let mut stream = Box::pin(Box::new(self.consumer).execute());
