@@ -48,11 +48,10 @@ public class OpensearchBulkProcessorAdapter implements BulkProcessorAdapter {
                                         RequestOptions.DEFAULT,
                                         bulkResponseActionListener),
                         new BulkListener(requestTracker));
-        // Possible feature: move these to config
-        // execute the bulk every 10 000 requests
-        builder.setBulkActions(config.getBulkActions());
-        // flush the bulk every 5mb
-        builder.setBulkSize(new ByteSizeValue(config.getBulkSize(), ByteSizeUnit.KB));
+        // flush the bulk every `batchNumMessages` rows
+        builder.setBulkActions(config.getBatchNumMessages());
+        // flush the bulk every `batchSizeKb` Kb
+        builder.setBulkSize(new ByteSizeValue(config.getBatchSizeKb(), ByteSizeUnit.KB));
         // flush the bulk every 5 seconds whatever the number of requests
         builder.setFlushInterval(TimeValue.timeValueSeconds(5));
         // Set the number of concurrent requests

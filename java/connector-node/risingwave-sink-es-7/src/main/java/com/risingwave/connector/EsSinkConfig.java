@@ -44,11 +44,11 @@ public class EsSinkConfig extends CommonSinkConfig {
     @JsonProperty(value = "retry_on_conflict")
     private Integer retryOnConflict;
 
-    @JsonProperty(value = "bulk_actions")
-    private Integer bulkActions;
+    @JsonProperty(value = "batch_num_messages")
+    private Integer batchNumMessages;
 
-    @JsonProperty(value = "bulk_size")
-    private Integer bulkSize;
+    @JsonProperty(value = "batch_size_kb")
+    private Integer batchSizeKb;
 
     @JsonProperty(value = "concurrent_requests")
     private Integer concurrentRequests;
@@ -107,21 +107,21 @@ public class EsSinkConfig extends CommonSinkConfig {
         return this;
     }
 
-    public Integer getBulkActions() {
-        return this.bulkActions == null ? 1000 : this.bulkActions;
+    public Integer getBatchNumMessages() {
+        return this.batchNumMessages == null ? 1000 : this.batchNumMessages;
     }
 
-    public EsSinkConfig withBulkActions(Integer bulkActions) {
-        this.bulkActions = bulkActions;
+    public EsSinkConfig withBatchNumMessages(Integer batchNumMessages) {
+        this.batchNumMessages = batchNumMessages;
         return this;
     }
 
-    public Integer getBulkSize() {
-        return this.bulkSize == null ? 5 * 1024 : this.bulkSize;
+    public Integer getBatchSizeKb() {
+        return this.batchSizeKb == null ? 5 * 1024 : this.batchSizeKb;
     }
 
-    public EsSinkConfig withBulkSize(Integer bulkSize) {
-        this.bulkSize = bulkSize;
+    public EsSinkConfig withBatchSizeKb(Integer batchSizeKb) {
+        this.batchSizeKb = batchSizeKb;
         return this;
     }
 
