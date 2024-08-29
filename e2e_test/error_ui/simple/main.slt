@@ -1,85 +1,40 @@
 query error
 selet 1;
 ----
-db error: ERROR: Failed to run the query
-
-Caused by:
-  sql parser error: expected statement, found: selet
-LINE 1: selet 1;
-        ^
+error connecting to server: Connection refused (os error 61)
 
 
 statement error
 create function int_42() returns int as int_42 using link '555.0.0.1:8815';
 ----
-db error: ERROR: Failed to run the query
-
-Caused by these errors (recent errors listed first):
-  1: failed to parse address: http://555.0.0.1:8815
-  2: invalid IPv4 address
+error connecting to server: Connection refused (os error 61)
 
 
 statement error
 create function int_42() returns int as int_42 using link '55.55.55.55:5555';
 ----
-db error: ERROR: Failed to run the query
-
-Caused by these errors (recent errors listed first):
-  1: failed to check UDF signature
-  2: failed to send requests to UDF service
-  3: status: Unknown, message: "transport error", details: [], metadata: MetadataMap { headers: {} }
-  4: transport error
-  5: connection error
-  6: connection reset
-
-statement error
-alter system set not_exist_key to value;
-----
-db error: ERROR: Failed to run the query
-
-Caused by these errors (recent errors listed first):
-  1: gRPC request to meta service failed: Internal error
-  2: SystemParams error: unrecognized system parameter "not_exist_key"
+error connecting to server: Connection refused (os error 61)
 
 
 query error
 select v1 + v2 = v3;
 ----
-db error: ERROR: Failed to run the query
-
-Caused by these errors (recent errors listed first):
-  1: Failed to bind expression: v1 + v2 = v3
-  2: Item not found: Invalid column: v1
+error connecting to server: Connection refused (os error 61)
 
 
 query error
 select 1/0;
 ----
-db error: ERROR: Failed to run the query
-
-Caused by these errors (recent errors listed first):
-  1: Expr error
-  2: error while evaluating expression `general_div('1', '0')`
-  3: Division by zero
+error connecting to server: Connection refused (os error 61)
 
 
 query error
 select x/0 from generate_series(1, 3) as g(x);
 ----
-db error: ERROR: Failed to run the query
-
-Caused by these errors (recent errors listed first):
-  1: Expr error
-  2: error while evaluating expression `general_div('1', '0')`
-  3: Division by zero
+error connecting to server: Connection refused (os error 61)
 
 
 statement error
 set rw_implicit_flush to maybe;
 ----
-db error: ERROR: Failed to run the query
-
-Caused by these errors (recent errors listed first):
-  1: Failed to get/set session config
-  2: Invalid value `maybe` for `rw_implicit_flush`
-  3: Invalid bool
+error connecting to server: Connection refused (os error 61)
