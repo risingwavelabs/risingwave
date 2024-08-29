@@ -170,7 +170,12 @@ impl From<&PbFragment> for CustomFragmentInfo {
                 .first()
                 .cloned()
                 .expect("no actor in fragment"),
-            actors: fragment.actors.iter().map(CustomActorInfo::from).collect(),
+            actors: fragment
+                .actors
+                .iter()
+                .map(CustomActorInfo::from)
+                .sorted_by(|actor_a, actor_b| actor_a.actor_id.cmp(&actor_b.actor_id))
+                .collect(),
         }
     }
 }
@@ -302,8 +307,12 @@ pub fn rebalance_actor_vnode(
         .partition(|(actor_id, _)| actors_to_remove.contains(actor_id));
 
     let order_by_bitmap_desc =
-        |(_, bitmap_a): &(ActorId, Bitmap), (_, bitmap_b): &(ActorId, Bitmap)| -> Ordering {
-            bitmap_a.count_ones().cmp(&bitmap_b.count_ones()).reverse()
+        |(id_a, bitmap_a): &(ActorId, Bitmap), (id_b, bitmap_b): &(ActorId, Bitmap)| -> Ordering {
+            bitmap_a
+                .count_ones()
+                .cmp(&bitmap_b.count_ones())
+                .reverse()
+                .then(id_a.cmp(id_b))
         };
 
     let builder_from_bitmap = |bitmap: &Bitmap| -> BitmapBuilder {
