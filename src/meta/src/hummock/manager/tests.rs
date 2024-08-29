@@ -2183,7 +2183,7 @@ async fn test_partition_level() {
     for epoch in 31..100 {
         let mut sst = gen_local_sstable_info(global_sst_id, 10, vec![100]);
         sst.sst_info.file_size = 10 * MB;
-        sst.sst_info.estimated_sst_size = sst.sst_info.file_size;
+        sst.sst_info.sst_size = sst.sst_info.file_size;
         sst.sst_info.uncompressed_file_size = 10 * MB;
         hummock_manager
             .commit_epoch_for_test(
@@ -2207,7 +2207,7 @@ async fn test_partition_level() {
                     level
                         .table_infos
                         .iter()
-                        .map(|sst| sst.estimated_sst_size)
+                        .map(|sst| sst.sst_size)
                         .sum::<u64>()
                 })
                 .sum::<u64>();
@@ -2397,7 +2397,7 @@ async fn test_correct_commit_ssts() {
                 table_ids: vec![1, 2, 3],
                 min_epoch: 20,
                 max_epoch: 20,
-                estimated_sst_size: 100,
+                sst_size: 100,
                 file_size: 100,
                 ..Default::default()
             },
@@ -2418,17 +2418,17 @@ async fn test_correct_commit_ssts() {
         assert_eq!(3, result.len());
 
         let cg_1_sst = result.get(&1).unwrap().get(0).unwrap();
-        assert_eq!(50, cg_1_sst.estimated_sst_size);
+        assert_eq!(50, cg_1_sst.sst_size);
         assert!(cg_1_sst.key_range.right_exclusive);
         assert_eq!(&vec![1], &cg_1_sst.table_ids);
 
         let cg_2_sst = result.get(&2).unwrap().get(0).unwrap();
-        assert_eq!(50, cg_2_sst.estimated_sst_size);
+        assert_eq!(50, cg_2_sst.sst_size);
         assert!(cg_2_sst.key_range.right_exclusive);
         assert_eq!(&vec![2], &cg_2_sst.table_ids);
 
         let cg_3_sst = result.get(&3).unwrap().get(0).unwrap();
-        assert_eq!(50, cg_3_sst.estimated_sst_size);
+        assert_eq!(50, cg_3_sst.sst_size);
         assert!(!cg_3_sst.key_range.right_exclusive);
         assert_eq!(&vec![3], &cg_3_sst.table_ids);
     }
@@ -2466,7 +2466,7 @@ async fn test_correct_commit_ssts() {
                 table_ids: vec![1, 2],
                 min_epoch: 20,
                 max_epoch: 20,
-                estimated_sst_size: 100,
+                sst_size: 100,
                 file_size: 100,
                 ..Default::default()
             },
@@ -2487,12 +2487,12 @@ async fn test_correct_commit_ssts() {
         assert_eq!(2, result.len());
 
         let cg_1_sst = result.get(&1).unwrap().get(0).unwrap();
-        assert_eq!(50, cg_1_sst.estimated_sst_size);
+        assert_eq!(50, cg_1_sst.sst_size);
         assert!(cg_1_sst.key_range.right_exclusive);
         assert_eq!(&vec![1], &cg_1_sst.table_ids);
 
         let cg_2_sst = result.get(&2).unwrap().get(0).unwrap();
-        assert_eq!(50, cg_2_sst.estimated_sst_size);
+        assert_eq!(50, cg_2_sst.sst_size);
         assert!(!cg_2_sst.key_range.right_exclusive);
         assert_eq!(&vec![2], &cg_2_sst.table_ids);
     }

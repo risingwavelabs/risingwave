@@ -506,7 +506,7 @@ impl HummockManager {
         let mut commit_sstables: BTreeMap<u64, Vec<SstableInfo>> = BTreeMap::new();
 
         for (sst, group_table_ids) in &mut sst_to_cg_vec {
-            let estimated_sst_size = sst.sst_info.estimated_sst_size;
+            let sst_size = sst.sst_info.sst_size;
             for (group_id, match_ids) in group_table_ids {
                 let split_key = build_split_key_with_table_id(match_ids.last().unwrap() + 1);
                 let split_type = group_split::need_to_split(&sst.sst_info, split_key.clone());
@@ -529,8 +529,8 @@ impl HummockManager {
                             &mut sst.sst_info,
                             &mut new_sst_id,
                             split_key.clone(),
-                            estimated_sst_size / 2,
-                            estimated_sst_size / 2,
+                            sst_size / 2,
+                            sst_size / 2,
                         );
 
                         // push the left sst to commit_sstables

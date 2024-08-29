@@ -1531,7 +1531,7 @@ pub(crate) mod tests {
                 sstable_store.clone(),
             )
             .await;
-            println!("generate ssts size: {}", sst.estimated_sst_size);
+            println!("generate ssts size: {}", sst.sst_size);
             ssts.push(sst);
         }
         let select_file_count = ssts.len() / 2;
@@ -1880,10 +1880,7 @@ pub(crate) mod tests {
         }
         println!(
             "input data: {}",
-            sst_infos
-                .iter()
-                .map(|sst| sst.estimated_sst_size)
-                .sum::<u64>(),
+            sst_infos.iter().map(|sst| sst.sst_size).sum::<u64>(),
         );
 
         let target_file_size = max_sst_file_size / 4;

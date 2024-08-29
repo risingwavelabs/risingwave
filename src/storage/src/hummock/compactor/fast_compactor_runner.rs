@@ -493,10 +493,10 @@ impl CompactorRunner {
         }
         let mut total_read_bytes = 0;
         for sst in &self.left.sstables {
-            total_read_bytes += sst.estimated_sst_size;
+            total_read_bytes += sst.sst_size;
         }
         for sst in &self.right.sstables {
-            total_read_bytes += sst.estimated_sst_size;
+            total_read_bytes += sst.sst_size;
         }
         self.metrics
             .compact_fast_runner_bytes

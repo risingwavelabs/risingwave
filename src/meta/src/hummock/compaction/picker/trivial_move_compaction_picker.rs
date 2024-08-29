@@ -81,7 +81,7 @@ impl TrivialMovePicker {
             self.pick_trivial_move_sst(select_tables, target_tables, level_handlers, stats)
         {
             return Some(CompactionInput {
-                select_input_size: trivial_move_sst.estimated_sst_size,
+                select_input_size: trivial_move_sst.sst_size,
                 total_file_count: 1,
                 input_levels: vec![
                     InputLevel {

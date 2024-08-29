@@ -209,7 +209,7 @@ impl LevelCompactionPicker {
                     break;
                 }
 
-                target_level_size += sst.estimated_sst_size;
+                target_level_size += sst.sst_size;
             }
 
             if pending_compact {

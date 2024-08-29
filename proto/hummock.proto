@@ -28,7 +28,7 @@ message SstableInfo {
   uint64 uncompressed_file_size = 11;
   uint64 range_tombstone_count = 12;
   BloomFilterType bloom_filter_kind = 13;
-  uint64 estimated_sst_size = 14; // for compaction
+  uint64 sst_size = 14; // for compaction
 }
 
 enum LevelType {

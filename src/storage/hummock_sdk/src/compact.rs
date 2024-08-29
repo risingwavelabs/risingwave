@@ -87,21 +87,21 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
                 }
                 if table.total_key_count != 0 {
                     format!(
-                        "[id: {}, obj_id: {} {}KB estimated_sst_size {}KB stale_ratio {} key_range {:?}]",
+                        "[id: {}, obj_id: {} {}KB sst_size {}KB stale_ratio {} key_range {:?}]",
                         table.sst_id,
                         table.object_id,
                         table.file_size / 1024,
-                        table.estimated_sst_size / 1024,
+                        table.sst_size / 1024,
                         (table.stale_key_count * 100 / table.total_key_count),
                         table.key_range,
                     )
                 } else {
                     format!(
-                        "[id: {}, obj_id: {} {}KB estimated_sst_size {}KB key_range {:?}]",
+                        "[id: {}, obj_id: {} {}KB sst_size {}KB key_range {:?}]",
                         table.sst_id,
                         table.object_id,
                         table.file_size / 1024,
-                        table.estimated_sst_size / 1024,
+                        table.sst_size / 1024,
                         table.key_range,
                     )
                 }
@@ -215,10 +215,8 @@ pub fn estimate_memory_for_compact_task(
             let mut cur_level_max_sst_meta_size = 0;
             for sst in &level.table_infos {
                 let meta_size = sst.file_size - sst.meta_offset;
-                task_max_sst_meta_ratio = std::cmp::max(
-                    task_max_sst_meta_ratio,
-                    meta_size * 100 / sst.estimated_sst_size,
-                );
+                task_max_sst_meta_ratio =
+                    std::cmp::max(task_max_sst_meta_ratio, meta_size * 100 / sst.sst_size);
                 cur_level_max_sst_meta_size = std::cmp::max(meta_size, cur_level_max_sst_meta_size);
             }
             result += max_input_stream_estimated_memory + cur_level_max_sst_meta_size;
@@ -226,10 +224,8 @@ pub fn estimate_memory_for_compact_task(
             for sst in &level.table_infos {
                 let meta_size = sst.file_size - sst.meta_offset;
                 result += max_input_stream_estimated_memory + meta_size;
-                task_max_sst_meta_ratio = std::cmp::max(
-                    task_max_sst_meta_ratio,
-                    meta_size * 100 / sst.estimated_sst_size,
-                );
+                task_max_sst_meta_ratio =
+                    std::cmp::max(task_max_sst_meta_ratio, meta_size * 100 / sst.sst_size);
             }
         }
     }

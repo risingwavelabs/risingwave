@@ -420,7 +420,7 @@ impl HummockVersion {
                     .table_infos
                     .extract_if(|sst_info| sst_info.table_ids.is_empty())
                     .for_each(|sst_info| {
-                        let sstable_file_size = sst_info.estimated_sst_size;
+                        let sstable_file_size = sst_info.sst_size;
                         sub_level.total_file_size -= sstable_file_size;
                         sub_level.uncompressed_file_size -= sst_info.uncompressed_file_size;
                         l0.total_file_size -= sstable_file_size;
@@ -463,7 +463,7 @@ impl HummockVersion {
 
             cur_levels.levels[idx].total_file_size += insert_table_infos
                 .iter()
-                .map(|sst| sst.estimated_sst_size)
+                .map(|sst| sst.sst_size)
                 .sum::<u64>();
             cur_levels.levels[idx].uncompressed_file_size += insert_table_infos
                 .iter()
@@ -480,11 +480,11 @@ impl HummockVersion {
                 .table_infos
                 .extract_if(|sst_info| sst_info.table_ids.is_empty())
                 .for_each(|sst_info| {
-                    level.total_file_size -= sst_info.estimated_sst_size;
+                    level.total_file_size -= sst_info.sst_size;
                     level.uncompressed_file_size -= sst_info.uncompressed_file_size;
                 });
 
-            level.total_file_size = level.table_infos.iter().map(|s| s.estimated_sst_size).sum();
+            level.total_file_size = level.table_infos.iter().map(|s| s.sst_size).sum();
             level.uncompressed_file_size = level
                 .table_infos
                 .iter()
@@ -1145,10 +1145,7 @@ pub fn new_sub_level(
             table_infos
         );
     }
-    let total_file_size = table_infos
-        .iter()
-        .map(|table| table.estimated_sst_size)
-        .sum();
+    let total_file_size = table_infos.iter().map(|table| table.sst_size).sum();
     let uncompressed_file_size = table_infos
         .iter()
         .map(|table| table.uncompressed_file_size)
@@ -1170,7 +1167,7 @@ pub fn add_ssts_to_sub_level(
     insert_table_infos: Vec<SstableInfo>,
 ) {
     insert_table_infos.iter().for_each(|sst| {
-        let sst_file_size = sst.estimated_sst_size;
+        let sst_file_size = sst.sst_size;
 
         l0.sub_levels[sub_level_idx].total_file_size += sst_file_size;
         l0.sub_levels[sub_level_idx].uncompressed_file_size += sst.uncompressed_file_size;
@@ -1254,7 +1251,7 @@ fn level_delete_ssts(
     operand.total_file_size = operand
         .table_infos
         .iter()
-        .map(|table| table.estimated_sst_size)
+        .map(|table| table.sst_size)
         .sum::<u64>();
     operand.uncompressed_file_size = operand
         .table_infos
@@ -1267,7 +1264,7 @@ fn level_delete_ssts(
 fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) {
     operand.total_file_size += insert_table_infos
         .iter()
-        .map(|sst| sst.estimated_sst_size)
+        .map(|sst| sst.sst_size)
         .sum::<u64>();
     operand.uncompressed_file_size += insert_table_infos
         .iter()
@@ -1655,7 +1652,7 @@ mod tests {
                 table_ids: vec![1, 2, 3, 4, 5],
                 uncompressed_file_size: 2,
                 file_size: 100,
-                estimated_sst_size: 100,
+                sst_size: 100,
                 ..Default::default()
             };
 
@@ -1690,7 +1687,7 @@ mod tests {
                 assert!(
                     origin_sst.table_ids.last().unwrap() < branched_sst.table_ids.first().unwrap()
                 );
-                assert!(branched_sst.estimated_sst_size < origin_sst.file_size);
+                assert!(branched_sst.sst_size < origin_sst.file_size);
                 assert_eq!(10, branched_sst.sst_id);
                 assert_eq!(11, origin_sst.sst_id);
                 assert_eq!(&3, branched_sst.table_ids.first().unwrap()); // split table_id to right
@@ -1727,7 +1724,7 @@ mod tests {
                 assert!(
                     origin_sst.table_ids.last().unwrap() == branched_sst.table_ids.first().unwrap()
                 );
-                assert!(branched_sst.estimated_sst_size < origin_sst.file_size);
+                assert!(branched_sst.sst_size < origin_sst.file_size);
                 assert_eq!(10, branched_sst.sst_id);
                 assert_eq!(11, origin_sst.sst_id);
                 assert_eq!(&3, branched_sst.table_ids.first().unwrap()); // split table_id to right
@@ -1806,7 +1803,7 @@ mod tests {
             },
             table_ids,
             file_size: 100,
-            estimated_sst_size: 100,
+            sst_size: 100,
             uncompressed_file_size: 100,
             ..Default::default()
         }
@@ -2021,11 +2018,11 @@ mod tests {
 
             // assert_eq!(3, x.len());
             // assert_eq!(100, x[0].sst_id);
-            // assert_eq!(100, x[0].estimated_sst_size);
+            // assert_eq!(100, x[0].sst_size);
             // assert_eq!(101, x[1].sst_id);
-            // assert_eq!(100, x[1].estimated_sst_size);
+            // assert_eq!(100, x[1].sst_size);
             // assert_eq!(102, x[2].sst_id);
-            // assert_eq!(100, x[2].estimated_sst_size);
+            // assert_eq!(100, x[2].sst_size);
 
             let mut right_l0 = OverlappingLevel {
                 sub_levels: vec![],
@@ -2091,11 +2088,11 @@ mod tests {
 
             assert_eq!(3, x.len());
             assert_eq!(1, x[0].sst_id);
-            assert_eq!(100, x[0].estimated_sst_size);
+            assert_eq!(100, x[0].sst_size);
             assert_eq!(10, x[1].sst_id);
-            assert_eq!(100, x[1].estimated_sst_size);
+            assert_eq!(100, x[1].sst_size);
             assert_eq!(11, x[2].sst_id);
-            assert_eq!(100, x[2].estimated_sst_size);
+            assert_eq!(100, x[2].sst_size);
 
             assert_eq!(0, cg1.levels[0].table_infos.len());
         }
@@ -2142,14 +2139,14 @@ mod tests {
 
             assert_eq!(2, x.len());
             assert_eq!(100, x[0].sst_id);
-            assert_eq!(100 / 2, x[0].estimated_sst_size);
+            assert_eq!(100 / 2, x[0].sst_size);
             assert_eq!(11, x[1].sst_id);
-            assert_eq!(100, x[1].estimated_sst_size);
+            assert_eq!(100, x[1].sst_size);
             assert_eq!(vec![3, 4], x[0].table_ids);
 
             assert_eq!(2, cg1.levels[0].table_infos.len());
             assert_eq!(101, cg1.levels[0].table_infos[1].sst_id);
-            assert_eq!(100 / 2, cg1.levels[0].table_infos[1].estimated_sst_size);
+            assert_eq!(100 / 2, cg1.levels[0].table_infos[1].sst_size);
             assert_eq!(vec![3], cg1.levels[0].table_infos[1].table_ids);
         }
 
@@ -2173,14 +2170,14 @@ mod tests {
 
             assert_eq!(2, x.len());
             assert_eq!(100, x[0].sst_id);
-            assert_eq!(100 / 2, x[0].estimated_sst_size);
+            assert_eq!(100 / 2, x[0].sst_size);
             assert_eq!(11, x[1].sst_id);
-            assert_eq!(100, x[1].estimated_sst_size);
+            assert_eq!(100, x[1].sst_size);
             assert_eq!(vec![4], x[1].table_ids);
 
             assert_eq!(2, cg1.levels[0].table_infos.len());
             assert_eq!(101, cg1.levels[0].table_infos[1].sst_id);
-            assert_eq!(100 / 2, cg1.levels[0].table_infos[1].estimated_sst_size);
+            assert_eq!(100 / 2, cg1.levels[0].table_infos[1].sst_size);
             assert_eq!(vec![3], cg1.levels[0].table_infos[1].table_ids);
         }
     }

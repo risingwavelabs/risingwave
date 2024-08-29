@@ -33,7 +33,7 @@ pub struct SstableInfo {
     pub uncompressed_file_size: u64,
     pub range_tombstone_count: u64,
     pub bloom_filter_kind: PbBloomFilterType,
-    pub estimated_sst_size: u64,
+    pub sst_size: u64,
 }
 
 impl SstableInfo {
@@ -88,10 +88,10 @@ impl From<PbSstableInfo> for SstableInfo {
             range_tombstone_count: pb_sstable_info.range_tombstone_count,
             bloom_filter_kind: PbBloomFilterType::try_from(pb_sstable_info.bloom_filter_kind)
                 .unwrap(),
-            estimated_sst_size: if pb_sstable_info.estimated_sst_size == 0 {
+            sst_size: if pb_sstable_info.sst_size == 0 {
                 pb_sstable_info.file_size
             } else {
-                pb_sstable_info.estimated_sst_size
+                pb_sstable_info.sst_size
             },
         }
     }
@@ -124,10 +124,10 @@ impl From<&PbSstableInfo> for SstableInfo {
             range_tombstone_count: pb_sstable_info.range_tombstone_count,
             bloom_filter_kind: PbBloomFilterType::try_from(pb_sstable_info.bloom_filter_kind)
                 .unwrap(),
-            estimated_sst_size: if pb_sstable_info.estimated_sst_size == 0 {
+            sst_size: if pb_sstable_info.sst_size == 0 {
                 pb_sstable_info.file_size
             } else {
-                pb_sstable_info.estimated_sst_size
+                pb_sstable_info.sst_size
             },
         }
     }
@@ -165,7 +165,7 @@ impl From<SstableInfo> for PbSstableInfo {
             uncompressed_file_size: sstable_info.uncompressed_file_size,
             range_tombstone_count: sstable_info.range_tombstone_count,
             bloom_filter_kind: sstable_info.bloom_filter_kind.into(),
-            estimated_sst_size: sstable_info.estimated_sst_size,
+            sst_size: sstable_info.sst_size,
         }
     }
 }
@@ -199,7 +199,7 @@ impl From<&SstableInfo> for PbSstableInfo {
             uncompressed_file_size: sstable_info.uncompressed_file_size,
             range_tombstone_count: sstable_info.range_tombstone_count,
             bloom_filter_kind: sstable_info.bloom_filter_kind.into(),
-            estimated_sst_size: sstable_info.estimated_sst_size,
+            sst_size: sstable_info.sst_size,
         }
     }
 }

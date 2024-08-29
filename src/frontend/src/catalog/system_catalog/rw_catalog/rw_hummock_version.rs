@@ -113,7 +113,7 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
     for cg in version.levels.into_values() {
         for level in cg.levels.into_iter().chain(cg.l0.sub_levels) {
             for sst in level.table_infos {
-                let estimated_sst_file_size = sst.estimated_sst_size;
+                let estimated_sst_file_size = sst.sst_size;
                 let key_range = &sst.key_range;
                 sstables.push(RwHummockSstable {
                     sstable_id: sst.sst_id as _,

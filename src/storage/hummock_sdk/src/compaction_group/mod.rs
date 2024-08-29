@@ -119,14 +119,14 @@ pub mod group_split {
         {
             // origin_sst_info
             origin_sst_info.key_range = key_range_l.clone();
-            origin_sst_info.estimated_sst_size = left_size;
+            origin_sst_info.sst_size = left_size;
             origin_sst_info.table_ids = table_ids_l;
         }
 
         {
             // new sst
             branch_table_info.key_range = key_range_r.clone();
-            branch_table_info.estimated_sst_size = right_size;
+            branch_table_info.sst_size = right_size;
             branch_table_info.table_ids = table_ids_r;
         }
 
@@ -181,7 +181,7 @@ pub mod group_split {
                         right_sst.push(sst.clone());
                     }
                     SstSplitType::Both => {
-                        let estimated_size = sst.estimated_sst_size;
+                        let estimated_size = sst.sst_size;
                         let branch_sst = split_sst(
                             sst,
                             new_sst_id,
@@ -218,7 +218,7 @@ pub mod group_split {
                 }
                 SstSplitType::Both => {
                     // split the sst
-                    let estimated_size = sst.estimated_sst_size;
+                    let estimated_size = sst.sst_size;
                     let branch_sst = split_sst(
                         sst,
                         new_sst_id,
@@ -297,7 +297,7 @@ pub mod group_split {
             let insert_table_infos = level.table_infos.clone();
             left_levels.levels[idx].total_file_size += insert_table_infos
                 .iter()
-                .map(|sst| sst.estimated_sst_size)
+                .map(|sst| sst.sst_size)
                 .sum::<u64>();
             left_levels.levels[idx].uncompressed_file_size += insert_table_infos
                 .iter()

@@ -210,7 +210,7 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) ->
             table_ids: vec![sst_id as u32, sst_id as u32 * 10000],
             uncompressed_file_size: object_size,
             max_epoch: epoch,
-            estimated_sst_size: object_size,
+            sst_size: object_size,
             ..Default::default()
         });
     }
