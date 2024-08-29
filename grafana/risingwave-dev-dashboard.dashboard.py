@@ -1121,7 +1121,8 @@ def section_streaming_cdc(outer_panels):
     ]
 
 
-def section_streaming_actors(outer_panels):
+def section_streaming_actors(outer_panels: Panels):
+    actor_level_filter = "actor_id!=''"
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -1159,10 +1160,10 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"sum(rate({metric('stream_actor_in_record_cnt')}[$__rate_interval])) by (fragment_id, upstream_fragment_id)",
-                            "fragment {{fragment_id}}<-{{upstream_fragment_id}}",
+                            "fragment total {{fragment_id}}<-{{upstream_fragment_id}}",
                         ),
-                        panels.target_hidden(
-                            f"rate({metric('stream_actor_in_record_cnt')}[$__rate_interval])",
+                        panels.target(
+                            f"rate({metric('stream_actor_in_record_cnt', actor_level_filter)}[$__rate_interval])",
                             "actor {{actor_id}}",
                         ),
                     ],
@@ -1173,10 +1174,10 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"sum(rate({metric('stream_actor_out_record_cnt')}[$__rate_interval])) by (fragment_id)",
-                            "fragment {{fragment_id}}",
+                            "fragment total {{fragment_id}}",
                         ),
-                        panels.target_hidden(
-                            f"rate({metric('stream_actor_out_record_cnt')}[$__rate_interval])",
+                        panels.target(
+                            f"rate({metric('stream_actor_out_record_cnt', actor_level_filter)}[$__rate_interval])",
                             "actor {{actor_id}}",
                         ),
                     ],
@@ -1189,9 +1190,9 @@ def section_streaming_actors(outer_panels):
                             f"sum({metric('stream_memory_usage')}) by (table_id, desc)",
                             "table {{table_id}} desc: {{desc}}",
                         ),
-                        panels.target_hidden(
-                            f"{metric('stream_memory_usage')}",
-                            "table {{table_id}} actor {{actor_id}} desc: {{desc}}",
+                        panels.target(
+                            f"{metric('stream_memory_usage', actor_level_filter)}",
+                            "actor {{actor_id}} table {{table_id}} desc: {{desc}}",
                         ),
                     ],
                 ),

@@ -65,8 +65,8 @@ pub struct StreamingMetrics {
     pub actor_count: LabelGuardedIntGaugeVec<1>,
     #[expect(dead_code)]
     actor_memory_usage: LabelGuardedIntGaugeVec<2>,
-    actor_in_record_cnt: LabelGuardedIntCounterVec<3>,
-    pub actor_out_record_cnt: LabelGuardedIntCounterVec<2>,
+    actor_in_record_cnt: RelabeledGuardedIntCounterVec<3>,
+    pub actor_out_record_cnt: RelabeledGuardedIntCounterVec<2>,
 
     // Source
     pub source_output_row_count: LabelGuardedIntCounterVec<4>,
@@ -396,6 +396,12 @@ impl StreamingMetrics {
             registry
         )
         .unwrap();
+        let actor_in_record_cnt = RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
+            MetricLevel::Debug,
+            actor_in_record_cnt,
+            level,
+            1,
+        );
 
         let actor_out_record_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_out_record_cnt",
@@ -404,6 +410,12 @@ impl StreamingMetrics {
             registry
         )
         .unwrap();
+        let actor_out_record_cnt = RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
+            MetricLevel::Debug,
+            actor_out_record_cnt,
+            level,
+            1,
+        );
 
         let actor_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_actor_count",
@@ -413,6 +425,7 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        // dead code
         let actor_memory_usage = register_guarded_int_gauge_vec_with_registry!(
             "actor_memory_usage",
             "Memory usage (bytes)",
