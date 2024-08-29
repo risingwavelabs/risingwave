@@ -141,7 +141,6 @@ impl HummockMetaClient for MockHummockMetaClient {
                 self.context_id,
                 HummockSnapshot {
                     committed_epoch: pinned_epochs,
-                    current_epoch: pinned_epochs,
                 },
             )
             .await
@@ -198,11 +197,6 @@ impl HummockMetaClient for MockHummockMetaClient {
             })
             .await
             .map_err(mock_err)?;
-        Ok(())
-    }
-
-    async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()> {
-        self.hummock_manager.update_current_epoch(epoch);
         Ok(())
     }
 
