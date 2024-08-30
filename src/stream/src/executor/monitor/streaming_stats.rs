@@ -397,13 +397,8 @@ impl StreamingMetrics {
             &["actor_id", "fragment_id", "upstream_fragment_id"],
             registry
         )
-        .unwrap();
-        let actor_in_record_cnt = RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
-            MetricLevel::Debug,
-            actor_in_record_cnt,
-            level,
-            1,
-        );
+        .unwrap()
+        .relabel_debug_1(level);
 
         let actor_out_record_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_out_record_cnt",
@@ -411,13 +406,8 @@ impl StreamingMetrics {
             &["actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
-        let actor_out_record_cnt = RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
-            MetricLevel::Debug,
-            actor_out_record_cnt,
-            level,
-            1,
-        );
+        .unwrap()
+        .relabel_debug_1(level);
 
         let actor_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_actor_count",

@@ -1122,6 +1122,8 @@ def section_streaming_cdc(outer_panels):
 
 
 def section_streaming_actors(outer_panels: Panels):
+    # The actor_id can be masked due to metrics level settings.
+    # We use this filter to suppress the actor-level panels if applicable.
     actor_level_filter = "actor_id!=''"
     panels = outer_panels.sub_panel()
     return [
