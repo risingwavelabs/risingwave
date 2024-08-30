@@ -41,8 +41,17 @@ public class EsSinkConfig extends CommonSinkConfig {
     @JsonProperty(value = "index_column")
     private String indexColumn;
 
-    @JsonProperty(value = "max_task_num")
-    private Integer maxTaskNum;
+    @JsonProperty(value = "retry_on_conflict")
+    private Integer retryOnConflict;
+
+    @JsonProperty(value = "batch_num_messages")
+    private Integer batchNumMessages;
+
+    @JsonProperty(value = "batch_size_kb")
+    private Integer batchSizeKb;
+
+    @JsonProperty(value = "concurrent_requests")
+    private Integer concurrentRequests;
 
     @JsonCreator
     public EsSinkConfig(@JsonProperty(value = "url") String url) {
@@ -98,12 +107,39 @@ public class EsSinkConfig extends CommonSinkConfig {
         return this;
     }
 
-    public Integer getMaxTaskNum() {
-        return maxTaskNum;
+    public Integer getBatchNumMessages() {
+        return this.batchNumMessages == null ? 1000 : this.batchNumMessages;
     }
 
-    public EsSinkConfig withMaxTaskNum(Integer maxTaskNum) {
-        this.maxTaskNum = maxTaskNum;
+    public EsSinkConfig withBatchNumMessages(Integer batchNumMessages) {
+        this.batchNumMessages = batchNumMessages;
+        return this;
+    }
+
+    public Integer getBatchSizeKb() {
+        return this.batchSizeKb == null ? 5 * 1024 : this.batchSizeKb;
+    }
+
+    public EsSinkConfig withBatchSizeKb(Integer batchSizeKb) {
+        this.batchSizeKb = batchSizeKb;
+        return this;
+    }
+
+    public Integer getRetryOnConflict() {
+        return this.retryOnConflict == null ? 3 : this.retryOnConflict;
+    }
+
+    public EsSinkConfig withRetryOnConflict(Integer retryOnConflict) {
+        this.retryOnConflict = retryOnConflict;
+        return this;
+    }
+
+    public Integer getConcurrentRequests() {
+        return this.concurrentRequests == null ? 1 : this.concurrentRequests;
+    }
+
+    public EsSinkConfig withConcurrentRequests(Integer concurrentRequests) {
+        this.concurrentRequests = concurrentRequests;
         return this;
     }
 }
