@@ -127,6 +127,7 @@ impl SstableStreamIterator {
             .get_stream_for_blocks(
                 self.sstable_info.object_id,
                 &self.block_metas[self.block_idx..],
+                HashSet::from_iter(self.sstable_info.table_ids.iter().cloned()),
             )
             .verbose_instrument_await("stream_iter_get_stream")
             .await?;

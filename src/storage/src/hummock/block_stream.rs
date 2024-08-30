@@ -11,12 +11,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
 use fail::fail_point;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_object_store::object::{MonitoredStreamingReader, ObjectError};
 
 use super::{Block, BlockMeta};
@@ -68,6 +69,8 @@ pub struct BlockDataStream {
     buf: Bytes,
 
     buff_offset: usize,
+
+    existing_table_ids: HashSet<StateTableId>,
 }
 
 impl BlockDataStream {
@@ -81,6 +84,7 @@ impl BlockDataStream {
         byte_stream: MonitoredStreamingReader,
         // Meta data of the SST that is streamed.
         block_metas: Vec<BlockMeta>,
+        existing_table_ids: HashSet<StateTableId>,
     ) -> Self {
         Self {
             buf_reader: byte_stream,
@@ -88,17 +92,32 @@ impl BlockDataStream {
             block_metas,
             buf: Bytes::default(),
             buff_offset: 0,
+            existing_table_ids,
         }
     }
 
     /// Reads the next block from the stream and returns it. Returns `None` if there are no blocks
     /// left to read.
     pub async fn next_block_impl(&mut self) -> HummockResult<Option<(Bytes, usize)>> {
-        if self.block_idx >= self.block_metas.len() {
-            return Ok(None);
+        let mut block_meta = None;
+        while self.block_idx < self.block_metas.len() {
+            if self
+                .existing_table_ids
+                .contains(&self.block_metas[self.block_idx].table_id().table_id())
+            {
+                block_meta = Some(self.block_metas[self.block_idx].clone());
+                break;
+            }
+            self.block_idx += 1;
         }
 
-        let block_meta = &self.block_metas[self.block_idx];
+        let block_meta = match block_meta {
+            Some(meta) => meta,
+            None => {
+                return Ok(None);
+            }
+        };
+
         fail_point!("stream_read_err", |_| Err(ObjectError::internal(
             "stream read error"
         )

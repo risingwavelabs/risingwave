@@ -251,7 +251,7 @@ impl ConcatSstableIterator {
             );
             let block_stream = self
                 .sstable_store
-                .get_stream_for_blocks(sstable.id, &block_metas)
+                .get_stream_for_blocks(sstable.id, &block_metas, existing_table_ids)
                 .verbose_instrument_await("stream_iter_get_stream")
                 .await?;
 
