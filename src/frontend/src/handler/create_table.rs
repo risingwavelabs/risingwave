@@ -1187,6 +1187,7 @@ async fn derive_schema_for_cdc_table(
                     .iter_mut()
                     .zip_eq_fast(new_version_columns.into_iter())
                 {
+                    assert_eq!(col.name(), new_version_col.name());
                     col.column_desc.generated_or_default_column =
                         new_version_col.column_desc.generated_or_default_column;
                 }
