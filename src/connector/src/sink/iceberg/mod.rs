@@ -21,7 +21,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::ops::Deref;
+use std::process::Command;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context};
 use arrow_schema_iceberg::{
@@ -59,6 +61,11 @@ use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use storage_catalog::StorageCatalogConfig;
 use thiserror_ext::AsReport;
+use tokio::sync::oneshot;
+use tokio::task::spawn_blocking;
+use tokio::time::sleep;
+use tokio::{select, spawn};
+use tracing::{debug, error, info};
 use url::Url;
 use with_options::WithOptions;
 
@@ -920,6 +927,7 @@ impl Sink for IcebergSink {
             catalog,
             table,
             partition_type,
+            compaction_runner_guard: None,
         })
     }
 }
@@ -1292,12 +1300,79 @@ pub struct IcebergSinkCommitter {
     catalog: CatalogRef,
     table: Table,
     partition_type: Any,
+    compaction_runner_guard: Option<oneshot::Sender<()>>,
+}
+
+fn get_compact_command(table_name: &str) -> Command {
+    let mut command = Command::new("spark-sql");
+    command.args([
+        "--packages",
+        "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.2,mysql:mysql-connector-java:8.0.33,org.apache.hadoop:hadoop-aws:3.3.2"
+    ]
+        .into_iter()
+        .chain([
+            "spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
+            "spark.sql.catalog.demo=org.apache.iceberg.spark.SparkCatalog",
+            "spark.sql.catalog.demo.type=hadoop",
+            "spark.sql.catalog.demo.warehouse=s3a://hummock001/",
+            "spark.sql.catalog.demo.hadoop.fs.s3a.endpoint=http://127.0.0.1:9301",
+            "spark.sql.catalog.demo.hadoop.fs.s3a.access.key=hummockadmin",
+            "spark.sql.catalog.demo.hadoop.fs.s3a.secret.key=hummockadmin",
+        ].into_iter().flat_map(|conf| ["--conf", conf].into_iter()))
+        .chain(["--S", "-e", &format!("CALL demo.system.rewrite_data_files(table => 'demo.demo_db.`{}`', options => map('rewrite-all', 'true'))", table_name)])
+    );
+    command
+}
+
+async fn run_compaction(table_name: &str) {
+    let mut command = get_compact_command(table_name);
+    debug!(?command, "running compaction");
+    let start_time = Instant::now();
+    match spawn_blocking(move || command.output())
+        .await
+        .map_err(|e| anyhow!(e))
+        .and_then(|result| result.map_err(|e| anyhow!(e)))
+    {
+        Ok(output) => {
+            info!(
+                table_name,
+                stdout = ?String::from_utf8(output.stdout),
+                elapsed = ?start_time.elapsed(),
+                "run compaction successfully"
+            );
+        }
+        Err(e) => {
+            error!(e = ?e.as_report(), "failed to run compaction");
+        }
+    }
+}
+
+fn spawn_compaction_runner(table_name: String) -> oneshot::Sender<()> {
+    let (tx, rx) = oneshot::channel();
+    spawn(async move {
+        select! {
+            _ = rx => {}
+            _ = async {
+                loop {
+                    sleep(Duration::from_secs(60)).await;
+                    run_compaction(&table_name).await;
+                }
+            } => {}
+        }
+    });
+    tx
 }
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for IcebergSinkCommitter {
     async fn init(&mut self) -> Result<()> {
         tracing::info!("Iceberg commit coordinator inited.");
+        assert!(self
+            .compaction_runner_guard
+            .replace(spawn_compaction_runner(
+                self.table.table_name().name.clone()
+            ))
+            .is_none());
         Ok(())
     }
 
