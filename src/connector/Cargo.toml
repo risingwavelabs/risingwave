@@ -67,6 +67,7 @@ google-cloud-googleapis = { version = "0.15", features = ["pubsub", "bigquery"] 
 google-cloud-pubsub = "0.28"
 http = "0.2"
 iceberg = { workspace = true }
+iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
 icelake = { workspace = true }
 indexmap = { version = "2.2.6", features = ["serde"] }
@@ -87,10 +88,12 @@ nexmark = { version = "0.2", features = ["serde"] }
 num-bigint = "0.4"
 opendal = { workspace = true, features = [
     "executors-tokio",
+    "services-azblob",
     "services-fs",
     "services-gcs",
     "services-memory",
     "services-s3",
+    "services-webhdfs",
 ] }
 openssl = "0.10"
 parking_lot = { workspace = true }

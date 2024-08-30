@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
@@ -139,7 +139,7 @@ impl HummockManager {
         for s in &mut sstables {
             add_prost_table_stats_map(
                 &mut table_stats_change,
-                &to_prost_table_stats_map(std::mem::take(&mut s.table_stats)),
+                &to_prost_table_stats_map(s.table_stats.clone()),
             );
         }
 
@@ -158,7 +158,6 @@ impl HummockManager {
         );
 
         let state_table_info = &version.latest_version().state_table_info;
-
         let mut table_compaction_group_mapping = state_table_info.build_table_compaction_group_id();
 
         // Add new table
@@ -221,8 +220,23 @@ impl HummockManager {
                 NewTableFragmentInfo::None => (HashMap::new(), None, None),
             };
 
+        let mut group_members_table_ids: HashMap<u64, BTreeSet<TableId>> = HashMap::new();
+        {
+            // expand group_members_table_ids
+            for (table_id, group_id) in &table_compaction_group_mapping {
+                group_members_table_ids
+                    .entry(*group_id)
+                    .or_default()
+                    .insert(*table_id);
+            }
+        }
+
         let commit_sstables = self
-            .correct_commit_ssts(sstables, &table_compaction_group_mapping)
+            .correct_commit_ssts(
+                sstables,
+                &table_compaction_group_mapping,
+                &group_members_table_ids,
+            )
             .await?;
 
         let modified_compaction_groups: Vec<_> = commit_sstables.keys().cloned().collect();
@@ -319,13 +333,9 @@ impl HummockManager {
         }
 
         let snapshot = if is_visible_table_committed_epoch {
-            let snapshot = HummockSnapshot {
-                committed_epoch,
-                current_epoch: committed_epoch,
-            };
+            let snapshot = HummockSnapshot { committed_epoch };
             let prev_snapshot = self.latest_snapshot.swap(snapshot.into());
             assert!(prev_snapshot.committed_epoch < committed_epoch);
-            assert!(prev_snapshot.current_epoch < committed_epoch);
             Some(snapshot)
         } else {
             None
@@ -379,6 +389,7 @@ impl HummockManager {
         &self,
         sstables: Vec<LocalSstableInfo>,
         table_compaction_group_mapping: &HashMap<TableId, CompactionGroupId>,
+        group_members_table_ids: &HashMap<CompactionGroupId, BTreeSet<TableId>>,
     ) -> Result<BTreeMap<CompactionGroupId, Vec<SstableInfo>>> {
         let mut new_sst_id_number = 0;
         let mut sst_to_cg_vec = Vec::with_capacity(sstables.len());
@@ -413,8 +424,36 @@ impl HummockManager {
         let mut commit_sstables: BTreeMap<u64, Vec<SstableInfo>> = BTreeMap::new();
 
         for (mut sst, group_table_ids) in sst_to_cg_vec {
-            for (group_id, _match_ids) in group_table_ids {
-                let branch_sst = split_sst(&mut sst.sst_info, &mut new_sst_id);
+            for (group_id, match_ids) in group_table_ids {
+                let group_members_table_ids = group_members_table_ids.get(&group_id).unwrap();
+                if match_ids
+                    .iter()
+                    .all(|id| group_members_table_ids.contains(&TableId::new(*id)))
+                {
+                    commit_sstables
+                        .entry(group_id)
+                        .or_default()
+                        .push(sst.sst_info.clone());
+                    continue;
+                }
+
+                let origin_sst_size = sst.sst_info.sst_size;
+                let new_sst_size = match_ids
+                    .iter()
+                    .map(|id| {
+                        let stat = sst.table_stats.get(id).unwrap();
+                        stat.total_compressed_size
+                    })
+                    .sum();
+
+                let branch_sst = split_sst(
+                    &mut sst.sst_info,
+                    &mut new_sst_id,
+                    origin_sst_size - new_sst_size,
+                    new_sst_size,
+                    match_ids,
+                );
+
                 commit_sstables
                     .entry(group_id)
                     .or_default()

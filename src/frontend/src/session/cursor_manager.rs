@@ -47,7 +47,7 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{generic, BatchLogSeqScan};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
-use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
+use crate::scheduler::{DistributedQueryStream, LocalQueryStream, ReadSnapshot};
 use crate::{OptimizerContext, OptimizerContextRef, PgResponseStream, PlanRef, TableCatalog};
 
 pub enum CursorDataChunkStream {
@@ -247,19 +247,14 @@ impl SubscriptionCursor {
             // TODO: is this the right behavior? Should we delay the query stream initiation till the first fetch?
             let (chunk_stream, fields) =
                 Self::initiate_query(None, &dependent_table_id, handle_args.clone()).await?;
-            let pinned_epoch = handle_args
-                .session
-                .get_pinned_snapshot()
-                .ok_or_else(|| {
-                    ErrorCode::InternalError("Fetch Cursor can't find snapshot epoch".to_string())
-                })?
-                .epoch_with_frontend_pinned()
-                .ok_or_else(|| {
-                    ErrorCode::InternalError(
-                        "Fetch Cursor can't support setting an epoch".to_string(),
-                    )
-                })?
-                .0;
+            let pinned_epoch = match handle_args.session.get_pinned_snapshot().ok_or_else(|| {
+                ErrorCode::InternalError("Fetch Cursor can't find snapshot epoch".to_string())
+            })? {
+                ReadSnapshot::FrontendPinned { snapshot, .. } => snapshot.committed_epoch(),
+                ReadSnapshot::Other(_) => {
+                    return Err(ErrorCode::InternalError("Fetch Cursor can't start from specified query epoch. May run `set query_epoch = 0;`".to_string()).into());
+                }
+            };
             let start_timestamp = pinned_epoch;
 
             (
@@ -320,7 +315,7 @@ impl SubscriptionCursor {
                                 &mut chunk_stream,
                                 formats,
                                 &from_snapshot,
-                                &self.fields,
+                                &fields,
                                 handle_args.session.clone(),
                             );
 
@@ -555,8 +550,8 @@ impl SubscriptionCursor {
         } else {
             let op_formats = formats.get(row_len).unwrap_or(&Format::Text);
             let op = pg_value_format(
-                &DataType::Int16,
-                risingwave_common::types::ScalarRefImpl::Int16(1_i16),
+                &DataType::Varchar,
+                risingwave_common::types::ScalarRefImpl::Utf8("Insert"),
                 *op_formats,
                 session_data,
             )?;
@@ -568,7 +563,7 @@ impl SubscriptionCursor {
 
     pub fn build_desc(mut descs: Vec<Field>, from_snapshot: bool) -> Vec<Field> {
         if from_snapshot {
-            descs.push(Field::with_name(DataType::Int16, "op"));
+            descs.push(Field::with_name(DataType::Varchar, "op"));
         }
         descs.push(Field::with_name(DataType::Int64, "rw_timestamp"));
         descs
@@ -749,5 +744,65 @@ impl CursorManager {
         } else {
             Err(ErrorCode::ItemNotFound(format!("Cannot find cursor `{}`", cursor_name)).into())
         }
+    }
+
+    pub async fn get_all_query_cursors(&self) -> (Vec<Row>, Vec<PgFieldDescriptor>) {
+        let cursor_names = self
+            .cursor_map
+            .lock()
+            .await
+            .iter()
+            .filter_map(|(currsor_name, cursor)| {
+                if let Cursor::Query(_cursor) = cursor {
+                    let cursor_name = vec![Some(Bytes::from(currsor_name.clone().into_bytes()))];
+                    Some(Row::new(cursor_name))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        (
+            cursor_names,
+            vec![PgFieldDescriptor::new(
+                "Name".to_string(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            )],
+        )
+    }
+
+    pub async fn get_all_subscription_cursors(&self) -> (Vec<Row>, Vec<PgFieldDescriptor>) {
+        let cursors = self
+            .cursor_map
+            .lock()
+            .await
+            .iter()
+            .filter_map(|(cursor_name, cursor)| {
+                if let Cursor::Subscription(cursor) = cursor {
+                    let cursors = vec![
+                        Some(Bytes::from(cursor_name.clone().into_bytes())),
+                        Some(Bytes::from(cursor.subscription.name.clone().into_bytes())),
+                    ];
+                    Some(Row::new(cursors))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        (
+            cursors,
+            vec![
+                PgFieldDescriptor::new(
+                    "Name".to_string(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+                PgFieldDescriptor::new(
+                    "SubscriptionName".to_string(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+            ],
+        )
     }
 }

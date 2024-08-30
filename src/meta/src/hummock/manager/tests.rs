@@ -41,10 +41,7 @@ use risingwave_pb::hummock::{HummockPinnedSnapshot, HummockPinnedVersion, Hummoc
 use risingwave_pb::meta::add_worker_node_request::Property;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use crate::hummock::compaction::selector::{
-    default_compaction_selector, CompactionSelector, ManualCompactionOption,
-    SpaceReclaimCompactionSelector,
-};
+use crate::hummock::compaction::selector::{default_compaction_selector, ManualCompactionOption};
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
 use crate::hummock::{HummockManager, HummockManagerRef};
@@ -75,6 +72,8 @@ fn gen_sstable_info(sst_id: u64, idx: usize, table_ids: Vec<u32>) -> SstableInfo
         object_id: sst_id,
         min_epoch: 20,
         max_epoch: 20,
+        file_size: 100,
+        sst_size: 100,
         ..Default::default()
     }
 }
@@ -152,7 +151,6 @@ async fn test_unpin_snapshot_before() {
                 context_id,
                 HummockSnapshot {
                     committed_epoch: epoch,
-                    current_epoch: epoch,
                 },
             )
             .await
@@ -171,7 +169,6 @@ async fn test_unpin_snapshot_before() {
                 context_id,
                 HummockSnapshot {
                     committed_epoch: epoch2,
-                    current_epoch: epoch2,
                 },
             )
             .await
@@ -1198,6 +1195,8 @@ async fn test_version_stats() {
         total_key_size: 1000,
         total_value_size: 100,
         total_key_count: 10,
+
+        total_compressed_size: 1024 * 1024,
     };
     let ssts_with_table_ids = vec![vec![1, 2], vec![2, 3]];
     let sst_ids = get_sst_ids(&hummock_manager, ssts_with_table_ids.len() as _).await;
@@ -1215,6 +1214,7 @@ async fn test_version_stats() {
                 },
                 file_size: 1024 * 1024 * 1024,
                 table_ids: table_ids.clone(),
+                sst_size: 1024 * 1024 * 1024,
                 ..Default::default()
             },
             table_stats: table_ids
@@ -1268,6 +1268,7 @@ async fn test_version_stats() {
                 total_key_size: -1000,
                 total_value_size: -100,
                 total_key_count: -10,
+                total_compressed_size: 0, // unused
             },
         ),
         (
@@ -1276,6 +1277,7 @@ async fn test_version_stats() {
                 total_key_size: -1000,
                 total_value_size: -100,
                 total_key_count: -10,
+                total_compressed_size: 0, // unused
             },
         ),
     ]);
@@ -1321,6 +1323,8 @@ async fn test_split_compaction_group_on_commit() {
             table_ids: vec![100, 101],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -1379,11 +1383,6 @@ async fn test_split_compaction_group_on_demand_basic() {
         .unwrap_err();
     assert_eq!("compaction group error: invalid group 100", err.to_string());
 
-    hummock_manager
-        .split_compaction_group(2, &[])
-        .await
-        .unwrap();
-
     let err = hummock_manager
         .split_compaction_group(2, &[100])
         .await
@@ -1413,6 +1412,8 @@ async fn test_split_compaction_group_on_demand_basic() {
             table_ids: vec![100],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -1429,6 +1430,8 @@ async fn test_split_compaction_group_on_demand_basic() {
             table_ids: vec![100, 101],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -1468,7 +1471,7 @@ async fn test_split_compaction_group_on_demand_basic() {
     assert!(new_group_id > StaticCompactionGroupId::End as u64);
     assert_eq!(
         get_compaction_group_object_ids(&current_version, 2),
-        vec![10, 11]
+        Vec::<u64>::new()
     );
     assert_eq!(
         get_compaction_group_object_ids(&current_version, new_group_id),
@@ -1507,6 +1510,8 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
             table_ids: vec![100, 101],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -1596,6 +1601,8 @@ async fn test_split_compaction_group_trivial_expired() {
             table_ids: vec![100],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -1612,6 +1619,8 @@ async fn test_split_compaction_group_trivial_expired() {
                 right: iterator_test_key_of_epoch(101, 100, 20).into(),
                 right_exclusive: false,
             },
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -1652,15 +1661,6 @@ async fn test_split_compaction_group_trivial_expired() {
         .split_compaction_group(2, &[100])
         .await
         .unwrap();
-    let mut selector: Box<dyn CompactionSelector> =
-        Box::<SpaceReclaimCompactionSelector>::default();
-    let (mut normal_tasks, _unscheduled) = hummock_manager
-        .get_compact_tasks_impl(vec![2], 1, &mut selector)
-        .await
-        .unwrap();
-    use crate::hummock::manager::CompactStatus;
-    let reclaim_task = normal_tasks.pop().unwrap();
-    assert!(CompactStatus::is_trivial_reclaim(&reclaim_task));
 
     let current_version = hummock_manager.get_current_version().await;
     let new_group_id = current_version.levels.keys().max().cloned().unwrap();
@@ -1703,6 +1703,8 @@ async fn test_split_compaction_group_trivial_expired() {
                 table_ids: vec![100],
                 min_epoch: 20,
                 max_epoch: 20,
+                file_size: 100,
+                sst_size: 100,
                 ..Default::default()
             }],
             None,
@@ -1762,6 +1764,8 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
             table_ids: vec![100, 101],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -1790,6 +1794,8 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
                         right: iterator_test_key_of_epoch(1, 1, 1).into(),
                         right_exclusive: false,
                     },
+                    file_size: 100,
+                    sst_size: 100,
                     ..Default::default()
                 },
                 SstableInfo {
@@ -1801,6 +1807,8 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
                         right: iterator_test_key_of_epoch(1, 2, 2).into(),
                         right_exclusive: false,
                     },
+                    file_size: 100,
+                    sst_size: 100,
                     ..Default::default()
                 },
             ],
@@ -1831,7 +1839,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
         current_version.get_compaction_group_levels(2).levels[base_level - 1]
             .table_infos
             .len(),
-        2
+        1
     );
 
     assert_eq!(
@@ -1842,7 +1850,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
     assert_eq!(
         current_version.get_compaction_group_levels(2).levels[base_level - 1].table_infos[0]
             .table_ids,
-        vec![100, 101]
+        vec![101]
     );
     assert_eq!(
         current_version
@@ -1858,7 +1866,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
             .levels[base_level - 1]
             .table_infos[0]
             .table_ids,
-        vec![100, 101]
+        vec![100]
     );
     assert_eq!(
         current_version
@@ -1895,6 +1903,8 @@ async fn test_compaction_task_expiration_due_to_split_group() {
             table_ids: vec![100, 101],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -1911,6 +1921,8 @@ async fn test_compaction_task_expiration_due_to_split_group() {
             table_ids: vec![101],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -2020,38 +2032,15 @@ async fn test_move_tables_between_compaction_group() {
         current_version.get_compaction_group_levels(2).levels[base_level - 1]
             .table_infos
             .len(),
-        3
+        2
     );
 
     let level = &current_version
         .get_compaction_group_levels(new_group_id)
         .levels[base_level - 1];
     assert_eq!(level.table_infos[0].table_ids, vec![100]);
-    assert_eq!(level.table_infos[1].table_ids, vec![100, 101]);
+    assert_eq!(level.table_infos[1].table_ids, vec![100]);
     assert_eq!(level.table_infos.len(), 2);
-
-    let mut selector: Box<dyn CompactionSelector> =
-        Box::<SpaceReclaimCompactionSelector>::default();
-
-    let compaction_task = hummock_manager
-        .get_compact_task(2, &mut selector)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 1);
-    assert_eq!(compaction_task.input_ssts[0].table_infos[0].object_id, 12);
-    assert_eq!(compaction_task.existing_table_ids, vec![101]);
-
-    let ret = hummock_manager
-        .report_compact_task(
-            compaction_task.task_id,
-            TaskStatus::Success,
-            vec![gen_sstable_info(20, 2, vec![101])],
-            None,
-        )
-        .await
-        .unwrap();
-    assert!(ret);
 }
 
 #[tokio::test]
@@ -2110,11 +2099,13 @@ async fn test_gc_stats() {
         hummock_manager.create_version_checkpoint(0).await.unwrap(),
         0
     );
+
     assert_eq_gc_stats(0, 0, 6, 3, 2, 4);
     hummock_manager
         .unpin_version_before(context_id, HummockVersionId::MAX)
         .await
         .unwrap();
+
     assert_eq_gc_stats(0, 0, 6, 3, 2, 4);
     assert_eq!(
         hummock_manager.create_version_checkpoint(0).await.unwrap(),
@@ -2174,6 +2165,7 @@ async fn test_partition_level() {
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;
+
     let new_group_id = current_version.levels.keys().max().cloned().unwrap();
     assert_eq!(
         current_version
@@ -2190,7 +2182,9 @@ async fn test_partition_level() {
     for epoch in 31..100 {
         let mut sst = gen_local_sstable_info(global_sst_id, 10, vec![100]);
         sst.sst_info.file_size = 10 * MB;
+        sst.sst_info.sst_size = 10 * MB;
         sst.sst_info.uncompressed_file_size = 10 * MB;
+
         hummock_manager
             .commit_epoch_for_test(
                 epoch,
@@ -2213,10 +2207,11 @@ async fn test_partition_level() {
                     level
                         .table_infos
                         .iter()
-                        .map(|sst| sst.file_size)
+                        .map(|sst| sst.sst_size)
                         .sum::<u64>()
                 })
                 .sum::<u64>();
+            sst.sst_size = sst.file_size;
             global_sst_id += 1;
             let ret = hummock_manager
                 .report_compact_task(task.task_id, TaskStatus::Success, vec![sst], None)
@@ -2274,6 +2269,8 @@ async fn test_unregister_moved_table() {
             table_ids: vec![100],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -2290,6 +2287,8 @@ async fn test_unregister_moved_table() {
             table_ids: vec![100, 101],
             min_epoch: 20,
             max_epoch: 20,
+            file_size: 100,
+            sst_size: 100,
             ..Default::default()
         },
         table_stats: Default::default(),
@@ -2318,7 +2317,7 @@ async fn test_unregister_moved_table() {
     assert_eq!(current_version.levels.len(), 3);
     assert_eq!(
         get_compaction_group_object_ids(&current_version, 2),
-        vec![10, 11]
+        vec![11]
     );
     assert_eq!(
         get_compaction_group_object_ids(&current_version, new_group_id),
@@ -2352,7 +2351,7 @@ async fn test_unregister_moved_table() {
     assert!(!current_version.levels.contains_key(&new_group_id));
     assert_eq!(
         get_compaction_group_object_ids(&current_version, 2),
-        vec![10, 11]
+        vec![11]
     );
     assert_eq!(
         current_version

@@ -265,22 +265,8 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         })
     }
 
-    fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-        let _span = TraceSpan::new_seal_span(epoch, is_checkpoint, self.storage_type);
-        self.inner.seal_epoch(epoch, is_checkpoint);
-    }
-
     async fn new_local(&self, options: NewLocalOptions) -> Self::Local {
         TracedStateStore::new_local(self.inner.new_local(options.clone()).await, options)
-    }
-
-    fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-        let span = TraceSpan::new_validate_read_epoch_span(epoch);
-        let res = self.inner.validate_read_epoch(epoch);
-        span.may_send_result(OperationResult::ValidateReadEpoch(
-            res.as_ref().map(|o| *o).into(),
-        ));
-        res
     }
 }
 

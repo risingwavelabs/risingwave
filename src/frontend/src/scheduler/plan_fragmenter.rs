@@ -33,7 +33,9 @@ use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{VirtualNode, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
-use risingwave_connector::source::filesystem::opendal_source::{OpendalGcs, OpendalS3};
+use risingwave_connector::source::filesystem::opendal_source::{
+    OpendalAzblob, OpendalGcs, OpendalS3,
+};
 use risingwave_connector::source::iceberg::{IcebergSplitEnumerator, IcebergTimeTravelInfo};
 use risingwave_connector::source::kafka::KafkaSplitEnumerator;
 use risingwave_connector::source::reader::reader::build_opendal_fs_list_for_batch;
@@ -327,6 +329,15 @@ impl SourceScanInfo {
                 let stream = build_opendal_fs_list_for_batch(lister);
                 let batch_res: Vec<_> = stream.try_collect().await?;
                 let res = batch_res.into_iter().map(SplitImpl::Gcs).collect_vec();
+
+                Ok(SourceScanInfo::Complete(res))
+            }
+            ConnectorProperties::Azblob(prop) => {
+                let lister: OpendalEnumerator<OpendalAzblob> =
+                    OpendalEnumerator::new_azblob_source(*prop)?;
+                let stream = build_opendal_fs_list_for_batch(lister);
+                let batch_res: Vec<_> = stream.try_collect().await?;
+                let res = batch_res.into_iter().map(SplitImpl::Azblob).collect_vec();
 
                 Ok(SourceScanInfo::Complete(res))
             }
@@ -740,7 +751,9 @@ impl StageGraph {
             let task_parallelism = match &stage.source_info {
                 Some(SourceScanInfo::Incomplete(source_fetch_info)) => {
                     match source_fetch_info.connector {
-                        ConnectorProperties::Gcs(_) | ConnectorProperties::OpendalS3(_) => (min(
+                        ConnectorProperties::Gcs(_)
+                        | ConnectorProperties::OpendalS3(_)
+                        | ConnectorProperties::Azblob(_) => (min(
                             complete_source_info.split_info().unwrap().len() as u32,
                             (self.batch_parallelism / 2) as u32,
                         ))
