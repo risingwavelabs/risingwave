@@ -27,7 +27,8 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
-    BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitId, SplitImpl, SplitMetaData,
+    BackfillInfo, BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
+    SplitMetaData,
 };
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
@@ -43,6 +44,7 @@ use crate::executor::{AddMutation, UpdateMutation};
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub enum BackfillState {
     /// `None` means not started yet. It's the initial state.
+    /// XXX: perhaps we can also set to low-watermark instead of `None`
     Backfilling(Option<String>),
     /// Backfill is stopped at this offset (inclusive). Source needs to filter out messages before this offset.
     SourceCachingUp(String),
@@ -90,6 +92,8 @@ pub struct SourceBackfillExecutorInner<S: StateStore> {
 
 /// Local variables used in the backfill stage.
 ///
+/// See <https://github.com/risingwavelabs/risingwave/issues/18299> for a state diagram about how it works.
+///
 /// Note: all off the fields should contain all available splits, and we can `unwrap()` safely when `get()`.
 #[derive(Debug)]
 struct BackfillStage {
@@ -99,8 +103,8 @@ struct BackfillStage {
     /// Note: the offsets are not updated. Should use `state`'s offset to update before using it (`get_latest_unfinished_splits`).
     splits: Vec<SplitImpl>,
     /// The latest offset from upstream (inclusive). After we reach this offset, we can stop backfilling.
-    /// TODO: initialize this with high watermark so that we can finish backfilling even when upstream
-    /// doesn't emit any data.
+    /// This is initialized with the latest available offset in the connector (if the connector provides the ability to fetch it)
+    /// so that we can finish backfilling even when upstream doesn't emit any data.
     target_offsets: HashMap<SplitId, Option<String>>,
 }
 
@@ -259,7 +263,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         &self,
         source_desc: &SourceDesc,
         splits: Vec<SplitImpl>,
-    ) -> StreamExecutorResult<BoxChunkSourceStream> {
+    ) -> StreamExecutorResult<(BoxChunkSourceStream, HashMap<SplitId, BackfillInfo>)> {
         let column_ids = source_desc
             .columns
             .iter()
@@ -278,12 +282,22 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             source_desc.source.config.clone(),
             None,
         );
-        let stream = source_desc
+
+        // We will check watermark to decide whether we need to backfill.
+        // e.g., when there's a Kafka topic-partition without any data,
+        // we don't need to backfill at all. But if we do not check here,
+        // the executor can only know it's finished when data coming in.
+        // For blocking DDL, this would be annoying.
+
+        let (stream, backfill_info) = source_desc
             .source
-            .build_stream(Some(splits), column_ids, Arc::new(source_ctx))
+            .build_stream_for_backfill(Some(splits), column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)?;
-        Ok(apply_rate_limit(stream, self.rate_limit_rps).boxed())
+        Ok((
+            apply_rate_limit(stream, self.rate_limit_rps).boxed(),
+            backfill_info,
+        ))
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -347,13 +361,25 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         // Return the ownership of `stream_source_core` to the source executor.
         self.stream_source_core = core;
 
-        let source_chunk_reader = self
+        let (source_chunk_reader, backfill_info) = self
             .build_stream_source_reader(
                 &source_desc,
                 backfill_stage.get_latest_unfinished_splits()?,
             )
             .instrument_await("source_build_reader")
             .await?;
+        for (split_id, info) in &backfill_info {
+            match info {
+                BackfillInfo::NoDataToBackfill => {
+                    *backfill_stage.states.get_mut(split_id).unwrap() = BackfillState::Finished;
+                }
+                BackfillInfo::HasDataToBackfill { latest_offset } => {
+                    // Note: later we will override it with the offset from the source message, and it's possible to become smaller than this value.
+                    *backfill_stage.target_offsets.get_mut(split_id).unwrap() =
+                        Some(latest_offset.clone());
+                }
+            }
+        }
 
         fn select_strategy(_: &mut ()) -> PollNext {
             futures::stream::PollNext::Left
@@ -432,7 +458,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 self.actor_ctx.fragment_id.to_string(),
                             ]);
 
-                            let reader = self
+                            let (reader, _backfill_info) = self
                                 .build_stream_source_reader(
                                     &source_desc,
                                     backfill_stage.get_latest_unfinished_splits()?,
@@ -514,7 +540,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     );
 
                                     // Replace the source reader with a new one of the new state.
-                                    let reader = self
+                                    let (reader, _backfill_info) = self
                                         .build_stream_source_reader(
                                             &source_desc,
                                             latest_unfinished_splits,
@@ -647,6 +673,14 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                             _ => {}
                         }
                     }
+                    self.backfill_state_store
+                        .set_states(
+                            splits
+                                .iter()
+                                .map(|s| (s.clone(), BackfillState::Finished))
+                                .collect(),
+                        )
+                        .await?;
                     self.backfill_state_store
                         .state_store
                         .commit(barrier.epoch)
