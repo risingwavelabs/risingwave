@@ -78,7 +78,7 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-foyer = { git = "https://github.com/foyer-rs/foyer", rev = "7eeb783", features = [
+foyer = { git = "https://github.com/foyer-rs/foyer", rev = "f2f80cf", features = [
     "mtrace",
     "nightly",
 ] }
@@ -183,7 +183,6 @@ tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git"
     "profiling",
     "stats",
 ], rev = "64a2d9" }
-# TODO(http-bump): bump to use tonic 0.12 once minitrace-opentelemetry is updated
 opentelemetry = "0.24"
 opentelemetry-otlp = "0.17"
 opentelemetry_sdk = { version = "0.24", default-features = false }
