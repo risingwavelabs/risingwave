@@ -385,7 +385,7 @@ async fn test_failpoints_compactor_iterator_recreate() {
     let kv_iter =
         (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
     let (data, meta) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter).await;
-    let info = put_sst(
+    let mut info = put_sst(
         table_id,
         data.clone(),
         meta.clone(),
@@ -394,6 +394,8 @@ async fn test_failpoints_compactor_iterator_recreate() {
     )
     .await
     .unwrap();
+
+    info.table_ids.push(table_id as u32);
 
     let mut stats = StoreLocalStatistic::default();
 
