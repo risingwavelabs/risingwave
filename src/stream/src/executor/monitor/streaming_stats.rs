@@ -23,7 +23,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
     LabelGuardedGauge, LabelGuardedGaugeVec, LabelGuardedHistogramVec, LabelGuardedIntCounter,
-    LabelGuardedIntCounterVec, LabelGuardedIntGauge, LabelGuardedIntGaugeVec,
+    LabelGuardedIntCounterVec, LabelGuardedIntGauge, LabelGuardedIntGaugeVec, MetricVecRelabelExt,
     RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
@@ -288,14 +288,9 @@ impl StreamingMetrics {
                 &["actor_id", "fragment_id", "downstream_fragment_id"],
                 registry
             )
-            .unwrap();
-        let actor_output_buffer_blocking_duration_ns =
-            RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
-                MetricLevel::Debug,
-                actor_output_buffer_blocking_duration_ns,
-                level,
-                1, // mask the first label `actor_id` if the level is less verbose than `Debug`
-            );
+            .unwrap()
+            // mask the first label `actor_id` if the level is less verbose than `Debug`
+            .relabel_debug_1(level);
 
         let actor_input_buffer_blocking_duration_ns =
             register_guarded_int_counter_vec_with_registry!(
@@ -436,14 +431,8 @@ impl StreamingMetrics {
             &["actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
-        let merge_barrier_align_duration =
-            RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
-                MetricLevel::Debug,
-                merge_barrier_align_duration,
-                level,
-                1,
-            );
+        .unwrap()
+        .relabel_debug_1(level);
 
         let join_lookup_miss_count = register_guarded_int_counter_vec_with_registry!(
             "stream_join_lookup_miss_count",
@@ -491,13 +480,8 @@ impl StreamingMetrics {
             &["actor_id", "fragment_id", "wait_side", "executor"],
             registry
         )
-        .unwrap();
-        let barrier_align_duration = RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
-            MetricLevel::Debug,
-            barrier_align_duration,
-            level,
-            1,
-        );
+        .unwrap()
+        .relabel_debug_1(level);
 
         let join_cached_entry_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_join_cached_entry_count",
@@ -518,13 +502,8 @@ impl StreamingMetrics {
             &["actor_id", "fragment_id", "table_id"],
             registry
         )
-        .unwrap();
-        let join_matched_join_keys = RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
-            MetricLevel::Debug,
-            join_matched_join_keys,
-            level,
-            1,
-        );
+        .unwrap()
+        .relabel_debug_1(level);
 
         let agg_lookup_miss_count = register_guarded_int_counter_vec_with_registry!(
             "stream_agg_lookup_miss_count",
