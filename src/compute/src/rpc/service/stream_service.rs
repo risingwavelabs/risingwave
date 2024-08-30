@@ -19,7 +19,6 @@ use risingwave_pb::stream_service::*;
 use risingwave_storage::dispatch_state_store;
 use risingwave_stream::error::StreamError;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
-use thiserror_ext::AsReport;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
@@ -40,62 +39,6 @@ impl StreamServiceImpl {
 impl StreamService for StreamServiceImpl {
     type StreamingControlStreamStream =
         impl Stream<Item = std::result::Result<StreamingControlStreamResponse, tonic::Status>>;
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn update_actors(
-        &self,
-        request: Request<UpdateActorsRequest>,
-    ) -> std::result::Result<Response<UpdateActorsResponse>, Status> {
-        let req = request.into_inner();
-        let res = self.mgr.update_actors(req.actors).await;
-        match res {
-            Err(e) => {
-                error!(error = %e.as_report(), "failed to update stream actor");
-                Err(e.into())
-            }
-            Ok(()) => Ok(Response::new(UpdateActorsResponse { status: None })),
-        }
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn build_actors(
-        &self,
-        request: Request<BuildActorsRequest>,
-    ) -> std::result::Result<Response<BuildActorsResponse>, Status> {
-        let req = request.into_inner();
-
-        let actor_id = req.actor_id;
-        let res = self.mgr.build_actors(actor_id).await;
-        match res {
-            Err(e) => {
-                error!(error = %e.as_report(), "failed to build actors");
-                Err(e.into())
-            }
-            Ok(()) => Ok(Response::new(BuildActorsResponse {
-                request_id: req.request_id,
-                status: None,
-            })),
-        }
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn broadcast_actor_info_table(
-        &self,
-        request: Request<BroadcastActorInfoTableRequest>,
-    ) -> std::result::Result<Response<BroadcastActorInfoTableResponse>, Status> {
-        let req = request.into_inner();
-
-        let res = self.mgr.update_actor_info(req.info).await;
-        match res {
-            Err(e) => {
-                error!(error = %e.as_report(), "failed to update actor info table actor");
-                Err(e.into())
-            }
-            Ok(()) => Ok(Response::new(BroadcastActorInfoTableResponse {
-                status: None,
-            })),
-        }
-    }
 
     #[cfg_attr(coverage, coverage(off))]
     async fn drop_actors(

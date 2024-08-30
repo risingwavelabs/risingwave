@@ -30,7 +30,7 @@ use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 #[derive(Debug, Clone)]
 pub struct OpendalEnumerator<Src: OpendalSource> {
-    pub(crate) op: Operator,
+    pub op: Operator,
     // prefix is used to reduce the number of objects to be listed
     pub(crate) prefix: Option<String>,
     pub(crate) matcher: Option<glob::Pattern>,
@@ -72,7 +72,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         let object_lister = self
             .op
             .lister_with(prefix)
-            .recursive(true)
+            .recursive(false)
             .metakey(Metakey::ContentLength | Metakey::LastModified)
             .await?;
         let stream = stream::unfold(object_lister, |mut object_lister| async move {
