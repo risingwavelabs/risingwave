@@ -67,6 +67,7 @@ if __name__ == "__main__":
     formatted_batch1 = FORMATTER[fmt](data_batch1)
     upload_to_s3_bucket(config, client, run_id, formatted_batch1, 0)
 
+    # config in do_test that fs source's list interval is 1s
     do_test(
         config, len(data_batch1), ITEM_NUM_PER_FILE, run_id, fmt, need_drop_table=False
     )
@@ -84,3 +85,6 @@ if __name__ == "__main__":
     # clean up s3 files
     for idx, _ in enumerate(data):
         client.remove_object(config["S3_BUCKET"], _s3(idx, 0))
+
+    if success_flag == False:
+        exit(1)
