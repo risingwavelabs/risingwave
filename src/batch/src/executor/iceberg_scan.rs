@@ -136,7 +136,7 @@ impl IcebergScanExecutor {
             let record_batch = record_batch.map_err(BatchError::Iceberg)?;
             let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
             for row in chunk.rows(){
-                if let Some(ScalarRefImpl::Int64(i)) = row.datum_at(0){
+                if let Some(ScalarRefImpl::Int32(i)) = row.datum_at(0){
                     map.insert(i,1);   
                 }else{
                     unreachable!();
@@ -151,17 +151,21 @@ impl IcebergScanExecutor {
             let record_batch = record_batch.map_err(BatchError::Iceberg)?;
             let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
             for row in chunk.rows(){
-                if let Some(ScalarRefImpl::Int64(i)) = row.datum_at(0){
+                if let Some(ScalarRefImpl::Int32(i)) = row.datum_at(0){
                     if !map.contains_key(&i) {
-                        data_chunk_builder.append_one_row_no_finish(row);
+                        if let Some(chunk) = data_chunk_builder.append_one_row(row){
+                            debug_assert_eq!(chunk.data_types(), data_types);
+                            yield chunk;
+                        }
                     } 
                 }else{
                     unreachable!();
                 }
             }
-            
-            debug_assert_eq!(chunk.data_types(), data_types);
-            yield data_chunk_builder.build_data_chunk();
+            if let Some(chunk) = data_chunk_builder.consume_all(){
+                debug_assert_eq!(chunk.data_types(), data_types);
+                yield chunk;
+            }
         }
     }
 }

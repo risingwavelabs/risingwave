@@ -248,7 +248,14 @@ impl IcebergSplitEnumerator {
             .build()
             .map_err(|e| anyhow!(e))?;
 
-        let delete_file_scan_stream = scan.plan_eq_delete_files().await.map_err(|e| anyhow!(e))?;
+        let delete_scan = table
+            .scan()
+            .snapshot_id(snapshot_id)
+            .select(vec![schema.names().get(0).unwrap()])
+            .build()
+            .map_err(|e| anyhow!(e))?;
+
+        let delete_file_scan_stream = delete_scan.plan_eq_delete_files().await.map_err(|e| anyhow!(e))?;
         let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
 
         #[for_await]
