@@ -17,6 +17,9 @@ use std::sync::Arc;
 use arrow_array_iceberg::RecordBatch;
 use deltalake::parquet::arrow::async_reader::AsyncFileReader;
 use futures_async_stream::try_stream;
+use itertools::Itertools;
+use parquet::arrow::parquet_to_arrow_schema;
+use parquet::file::metadata::FileMetaData;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
 use risingwave_common::bail;
@@ -214,7 +217,7 @@ impl ParquetParser {
 pub async fn get_total_row_nums_for_parquet_file(
     parquet_file_name: &str,
     source_desc: SourceDesc,
-) -> ConnectorResult<usize> {
+) -> ConnectorResult<Option<usize>> {
     let total_row_num = match source_desc.source.config {
         ConnectorProperties::Gcs(prop) => {
             let connector: OpendalEnumerator<OpendalGcs> =
@@ -228,12 +231,17 @@ pub async fn get_total_row_nums_for_parquet_file(
                 .await?
                 .compat();
 
-            reader
+            let file_metadata = reader
                 .get_metadata()
                 .await
                 .map_err(anyhow::Error::from)?
-                .file_metadata()
-                .num_rows()
+                .file_metadata();
+            let is_schema_valid = is_schema_valid(source_desc, file_metadata)?;
+            if is_schema_valid{
+                return Ok(Some(file_metadata.num_rows() as usize));
+            }else{
+                return Ok(None);
+            }
         }
         ConnectorProperties::OpendalS3(prop) => {
             let connector: OpendalEnumerator<OpendalS3> =
@@ -246,12 +254,17 @@ pub async fn get_total_row_nums_for_parquet_file(
                 .into_futures_async_read(..)
                 .await?
                 .compat();
-            reader
-                .get_metadata()
-                .await
-                .map_err(anyhow::Error::from)?
-                .file_metadata()
-                .num_rows()
+            let file_metadata = reader
+            .get_metadata()
+            .await
+            .map_err(anyhow::Error::from)?
+            .file_metadata();
+        let is_schema_valid = is_schema_valid(source_desc, file_metadata)?;
+        if is_schema_valid{
+            return Ok(Some(file_metadata.num_rows() as usize));
+        }else{
+            return Ok(None);
+        }
         }
 
         ConnectorProperties::PosixFs(prop) => {
@@ -265,14 +278,46 @@ pub async fn get_total_row_nums_for_parquet_file(
                 .into_futures_async_read(..)
                 .await?
                 .compat();
-            reader
-                .get_metadata()
-                .await
-                .map_err(anyhow::Error::from)?
-                .file_metadata()
-                .num_rows()
+            let file_metadata = reader
+            .get_metadata()
+            .await
+            .map_err(anyhow::Error::from)?
+            .file_metadata();
+        let a =  file_metadata.schema_descr();
+        let is_schema_valid = is_schema_valid(source_desc, file_metadata)?;
+        if is_schema_valid{
+            return Ok(Some(file_metadata.num_rows() as usize));
+        }else{
+            return Ok(None);
+        }
         }
         other => bail!("Unsupported source: {:?}", other),
     };
-    Ok(total_row_num as usize)
+}
+
+pub fn is_schema_valid(
+    source_desc: SourceDesc,
+    metadata: &FileMetaData,
+) -> ConnectorResult<bool> {
+    let parquet_column_names = metadata
+        .schema_descr()
+        .columns()
+        .iter()
+        .map(|c| c.name())
+        .collect_vec();
+    let converted_arrow_schema =
+        parquet_to_arrow_schema(metadata.schema_descr(), metadata.key_value_metadata())?;
+    for column in source_desc.columns {
+        if let Some(pos) = parquet_column_names
+            .iter()
+            .position(|&name| name == column.name)
+        {
+            let arrow_field =
+                IcebergArrowConvert.to_arrow_field(&column.name, &column.data_type)?;
+            if &arrow_field == converted_arrow_schema.field(pos) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
