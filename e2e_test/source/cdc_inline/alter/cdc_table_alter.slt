@@ -169,7 +169,7 @@ SELECT id,name,description,weight FROM my_products order by id limit 3
 ----
 101 scooter Small 2-wheel scooter 10.50
 102 car battery 12V car battery 12.50
-103 12-pack drill 12-pack of drill bits with sizes ranging from #40 to #3 NULL
+103 12-pack drill 12-pack of drill bits with sizes ranging from #40 to #3 1.1
 
 query ITTT
 SELECT order_id,order_date,customer_name,product_id,order_status,order_comment FROM my_orders order by order_id limit 2
