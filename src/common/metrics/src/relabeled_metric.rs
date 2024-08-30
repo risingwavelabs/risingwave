@@ -102,6 +102,17 @@ where
             relabel_num,
         )
     }
+
+    /// Equivalent to [`RelabeledMetricVec::with_metric_level_relabel_n`] with `metric_level` set to
+    /// `MetricLevel::Debug` and `relabel_num` set to 1.
+    pub fn relabel_debug_1(self, relabel_threshold: MetricLevel) -> RelabeledMetricVec<M> {
+        RelabeledMetricVec::with_metric_level_relabel_n(
+            MetricLevel::Debug,
+            self,
+            relabel_threshold,
+            1,
+        )
+    }
 }
 
 impl<T: MetricVecBuilder> RelabeledMetricVec<MetricVec<T>> {
