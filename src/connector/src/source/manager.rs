@@ -138,17 +138,12 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             version: _,
         }: &ColumnDesc,
     ) -> Self {
-        match generated_or_default_column {
-            Some(option) => {
-                debug_assert!(
-                    matches!(option, GeneratedOrDefaultColumn::DefaultColumn(_)),
-                    "source column should not be generated: {:?}",
-                    generated_or_default_column.as_ref().unwrap()
-                )
-            }
-            None => {
-                // do nothing
-            }
+        if let Some(option) = generated_or_default_column {
+            debug_assert!(
+                matches!(option, GeneratedOrDefaultColumn::DefaultColumn(_)),
+                "source column should not be generated: {:?}",
+                generated_or_default_column.as_ref().unwrap()
+            )
         }
 
         Self {
