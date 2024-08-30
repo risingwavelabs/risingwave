@@ -16,12 +16,15 @@ use std::mem;
 
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
+use hashbrown::HashMap;
 use iceberg::scan::FileScanTask;
 use iceberg::spec::TableMetadata;
 use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::DataType;
+use risingwave_common::row::Row;
+use risingwave_common::types::{DataType, ScalarRefImpl};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::iceberg::{IcebergProperties, IcebergSplit};
 use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
@@ -39,6 +42,7 @@ pub struct IcebergScanExecutor {
     snapshot_id: Option<i64>,
     table_meta: TableMetadata,
     file_scan_tasks: Vec<FileScanTask>,
+    delete_file_scan_tasks: Vec<FileScanTask>,
     batch_size: usize,
     schema: Schema,
     identity: String,
@@ -64,6 +68,7 @@ impl IcebergScanExecutor {
         snapshot_id: Option<i64>,
         table_meta: TableMetadata,
         file_scan_tasks: Vec<FileScanTask>,
+        delete_file_scan_tasks: Vec<FileScanTask>,
         batch_size: usize,
         schema: Schema,
         identity: String,
@@ -73,6 +78,7 @@ impl IcebergScanExecutor {
             snapshot_id,
             table_meta,
             file_scan_tasks,
+            delete_file_scan_tasks,
             batch_size,
             schema,
             identity,
@@ -107,12 +113,55 @@ impl IcebergScanExecutor {
             .read(Box::pin(file_scan_stream))
             .map_err(BatchError::Iceberg)?;
 
-        #[for_await]
-        for record_batch in record_batch_stream {
+        let delete_file_scan_tasks = mem::take(&mut self.delete_file_scan_tasks);
+        let delete_file_scan_stream = {
+            #[try_stream]
+            async move {
+                for delete_file_scan_task in delete_file_scan_tasks {
+                    yield delete_file_scan_task;
+                }
+            }
+        };
+
+        let reader = table
+            .reader_builder()
+            .with_batch_size(self.batch_size)
+            .build();
+
+        let mut delete_record_batch_stream = reader
+            .read(Box::pin(delete_file_scan_stream))
+            .map_err(BatchError::Iceberg)?;
+        let mut map = HashMap::new();
+        for record_batch in delete_record_batch_stream.next().await {
             let record_batch = record_batch.map_err(BatchError::Iceberg)?;
             let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+            for row in chunk.rows(){
+                if let Some(ScalarRefImpl::Int64(i)) = row.datum_at(0){
+                    map.insert(i,1);   
+                }else{
+                    unreachable!();
+                }
+            }
+        }
+        let mut data_chunk_builder =
+            DataChunkBuilder::new(data_types.clone(), self.batch_size);
+        #[for_await]
+        for record_batch in record_batch_stream {
+            // let vis_array = self.expr.eval(&data_chunk).await?;
+            let record_batch = record_batch.map_err(BatchError::Iceberg)?;
+            let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+            for row in chunk.rows(){
+                if let Some(ScalarRefImpl::Int64(i)) = row.datum_at(0){
+                    if !map.contains_key(&i) {
+                        data_chunk_builder.append_one_row_no_finish(row);
+                    } 
+                }else{
+                    unreachable!();
+                }
+            }
+            
             debug_assert_eq!(chunk.data_types(), data_types);
-            yield chunk;
+            yield data_chunk_builder.build_data_chunk();
         }
     }
 }
@@ -171,6 +220,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
                 Some(split.snapshot_id),
                 split.table_meta.deserialize(),
                 split.files.into_iter().map(|x| x.deserialize()).collect(),
+                split.delete_files.into_iter().map(|x| x.deserialize()).collect(),
                 source.context.get_config().developer.chunk_size,
                 schema,
                 source.plan_node().get_identity().clone(),

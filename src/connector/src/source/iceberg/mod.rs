@@ -144,6 +144,7 @@ pub struct IcebergSplit {
     pub snapshot_id: i64,
     pub table_meta: TableMetadataJsonStr,
     pub files: Vec<IcebergFileScanTaskJsonStr>,
+    pub delete_files: Vec<IcebergFileScanTaskJsonStr>,
 }
 
 impl SplitMetaData for IcebergSplit {
@@ -238,6 +239,7 @@ impl IcebergSplitEnumerator {
             },
         };
         let mut files = vec![];
+        let mut delete_files = vec![];
 
         let scan = table
             .scan()
@@ -246,12 +248,19 @@ impl IcebergSplitEnumerator {
             .build()
             .map_err(|e| anyhow!(e))?;
 
+        let delete_file_scan_stream = scan.plan_eq_delete_files().await.map_err(|e| anyhow!(e))?;
         let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
 
         #[for_await]
         for task in file_scan_stream {
             let task = task.map_err(|e| anyhow!(e))?;
             files.push(IcebergFileScanTaskJsonStr::serialize(&task));
+        }
+
+        #[for_await]
+        for delete_task in delete_file_scan_stream {
+            let delete_task = delete_task.map_err(|e| anyhow!(e))?;
+            delete_files.push(IcebergFileScanTaskJsonStr::serialize(&delete_task));
         }
 
         let table_meta = TableMetadataJsonStr::serialize(table.metadata());
@@ -269,6 +278,7 @@ impl IcebergSplitEnumerator {
                 snapshot_id,
                 table_meta: table_meta.clone(),
                 files: files[start..end].to_vec(),
+                delete_files: delete_files.to_vec(),
             };
             splits.push(split);
         }

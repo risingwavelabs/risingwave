@@ -175,7 +175,7 @@ impl DataChunkBuilder {
         }
     }
 
-    fn append_one_row_no_finish(&mut self, row: impl Row) {
+    pub fn append_one_row_no_finish(&mut self, row: impl Row) {
         assert!(self.buffered_count < self.batch_size);
         self.ensure_builders();
         self.do_append_one_row_from_datums(row.iter());
@@ -215,7 +215,7 @@ impl DataChunkBuilder {
         }
     }
 
-    fn build_data_chunk(&mut self) -> DataChunk {
+    pub fn build_data_chunk(&mut self) -> DataChunk {
         let mut finished_array_builders = vec![];
         swap(&mut finished_array_builders, &mut self.array_builders);
         let cardinality = self.buffered_count;
