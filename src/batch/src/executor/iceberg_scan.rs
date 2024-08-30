@@ -93,30 +93,10 @@ impl IcebergScanExecutor {
             .await?;
         let data_types = self.schema.data_types();
 
-        let file_scan_tasks = mem::take(&mut self.file_scan_tasks);
-
-        let file_scan_stream = {
-            #[try_stream]
-            async move {
-                for file_scan_task in file_scan_tasks {
-                    yield file_scan_task;
-                }
-            }
-        };
-
-        let reader = table
-            .reader_builder()
-            .with_batch_size(self.batch_size)
-            .build();
-
-        let record_batch_stream = reader
-            .read(Box::pin(file_scan_stream))
-            .map_err(BatchError::Iceberg)?;
-
         let delete_file_scan_tasks = mem::take(&mut self.delete_file_scan_tasks);
-        let mut map = HashMap::new();
+        let mut map: HashMap<i32, i64> = HashMap::new();
         for delete_file_scan_task in delete_file_scan_tasks {
-            let sequence_number = delete_file_scan_task.sequence_number;
+            let sequence_number = delete_file_scan_task.sequence_number();
             let reader = table
                 .reader_builder()
                 .with_batch_size(self.batch_size)
@@ -124,30 +104,33 @@ impl IcebergScanExecutor {
             let delete_file_scan_stream = {
                 #[try_stream]
                 async move {
-                        yield delete_file_scan_task;
+                    yield delete_file_scan_task;
                 }
             };
             let mut delete_record_batch_stream = reader
                 .read(Box::pin(delete_file_scan_stream))
                 .map_err(BatchError::Iceberg)?;
-            for record_batch in delete_record_batch_stream.next().await {
+            while let Some(record_batch) = delete_record_batch_stream.next().await {
                 let record_batch = record_batch.map_err(BatchError::Iceberg)?;
                 let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
-                for row in chunk.rows(){
-                    if let Some(ScalarRefImpl::Int32(i)) = row.datum_at(0){
-                        map.insert(i,sequence_number);
-                    }else{
+                for row in chunk.rows() {
+                    if let Some(ScalarRefImpl::Int32(i)) = row.datum_at(0) {
+                        if let Some(s) = map.get(&i) {
+                            map.insert(i, *s.max(&sequence_number.clone()));
+                        } else {
+                            map.insert(i, sequence_number);
+                        }
+                    } else {
                         unreachable!();
                     }
                 }
             }
         }
 
-        let mut data_chunk_builder =
-            DataChunkBuilder::new(data_types.clone(), self.batch_size);
-
+        let mut data_chunk_builder = DataChunkBuilder::new(data_types.clone(), self.batch_size);
+        let file_scan_tasks = mem::take(&mut self.file_scan_tasks);
         for file_scan_task in file_scan_tasks {
-            let sequence_number = file_scan_tasks.sequence_number;
+            let sequence_number = file_scan_task.sequence_number();
             let reader = table
                 .reader_builder()
                 .with_batch_size(self.batch_size)
@@ -155,58 +138,32 @@ impl IcebergScanExecutor {
             let file_scan_task_stream = {
                 #[try_stream]
                 async move {
-                        yield file_scan_task;
+                    yield file_scan_task;
                 }
             };
             let mut record_batch_stream = reader
                 .read(Box::pin(file_scan_task_stream))
                 .map_err(BatchError::Iceberg)?;
-            for record_batch in record_batch_stream.next().await {
-                //
+            while let Some(record_batch) = record_batch_stream.next().await {
                 let record_batch = record_batch.map_err(BatchError::Iceberg)?;
                 let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
-                for row in chunk.rows(){
-                    if let Some(ScalarRefImpl::Int32(i)) = row.datum_at(0){
-                        // if !map.contains_key(&i) {
-                        //     if let Some(chunk) = data_chunk_builder.append_one_row(row){
-                        //         debug_assert_eq!(chunk.data_types(), data_types);
-                        //         yield chunk;
-                        //     }
-                        // } 
-                        
-                    }else{
-                        unreachable!();
-                    }
-                }
-                if let Some(chunk) = data_chunk_builder.consume_all(){
-                    debug_assert_eq!(chunk.data_types(), data_types);
-                    yield chunk;
-                }
-            }
-        }
-
-        let mut data_chunk_builder =
-            DataChunkBuilder::new(data_types.clone(), self.batch_size);
-        #[for_await]
-        for record_batch in record_batch_stream {
-            // let vis_array = self.expr.eval(&data_chunk).await?;
-            let record_batch = record_batch.map_err(BatchError::Iceberg)?;
-            let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
-            for row in chunk.rows(){
-                if let Some(ScalarRefImpl::Int32(i)) = row.datum_at(0){
-                    if !map.contains_key(&i) {
-                        if let Some(chunk) = data_chunk_builder.append_one_row(row){
+                for row in chunk.rows() {
+                    if let Some(ScalarRefImpl::Int32(i)) = row.datum_at(0) {
+                        if let Some(s) = map.get(&i)
+                            && s > &sequence_number
+                        {
+                        } else if let Some(chunk) = data_chunk_builder.append_one_row(row) {
                             debug_assert_eq!(chunk.data_types(), data_types);
                             yield chunk;
                         }
-                    } 
-                }else{
-                    unreachable!();
+                    } else {
+                        unreachable!();
+                    }
                 }
-            }
-            if let Some(chunk) = data_chunk_builder.consume_all(){
-                debug_assert_eq!(chunk.data_types(), data_types);
-                yield chunk;
+                if let Some(chunk) = data_chunk_builder.consume_all() {
+                    debug_assert_eq!(chunk.data_types(), data_types);
+                    yield chunk;
+                }
             }
         }
     }
@@ -266,7 +223,11 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
                 Some(split.snapshot_id),
                 split.table_meta.deserialize(),
                 split.files.into_iter().map(|x| x.deserialize()).collect(),
-                split.delete_files.into_iter().map(|x| x.deserialize()).collect(),
+                split
+                    .delete_files
+                    .into_iter()
+                    .map(|x| x.deserialize())
+                    .collect(),
                 source.context.get_config().developer.chunk_size,
                 schema,
                 source.plan_node().get_identity().clone(),

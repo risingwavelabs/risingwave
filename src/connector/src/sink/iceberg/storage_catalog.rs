@@ -296,7 +296,7 @@ impl Catalog for StorageCatalog {
             names.push(table.name.to_string());
             format!("{}/{}", self.warehouse, names.join("/"))
         };
-        
+
         // Check if the metadata directory exists
         let metadata_path = format!("{table_path}/metadata/version-hint.text");
 

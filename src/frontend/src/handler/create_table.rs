@@ -42,7 +42,11 @@ use risingwave_pb::plan_common::{
 };
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
-use risingwave_sqlparser::ast::{CdcTableInfo, ColumnDef, ColumnOption, CompatibleSourceSchema, ConnectorSchema, CreateSink, CreateSinkStatement, CreateSourceStatement, DataType as AstDataType, ExplainOptions, Format, Ident, ObjectName, OnConflict, SourceWatermark, SqlOption, TableConstraint, Value, WithProperties};
+use risingwave_sqlparser::ast::{
+    CdcTableInfo, ColumnDef, ColumnOption, CompatibleSourceSchema, ConnectorSchema, CreateSink,
+    CreateSinkStatement, CreateSourceStatement, DataType as AstDataType, ExplainOptions, Format,
+    Ident, ObjectName, OnConflict, SourceWatermark, TableConstraint, WithProperties,
+};
 use risingwave_sqlparser::parser::IncludeOption;
 use thiserror_ext::AsReport;
 
@@ -1231,11 +1235,15 @@ pub async fn handle_create_table(
         .create_table(source, table, graph, job_type)
         .await?;
 
-    if let Some(engine) = engine && "iceberg".eq_ignore_ascii_case(&engine) {
-        let with_properties =  WithProperties(vec![]);
+    if let Some(engine) = engine
+        && "iceberg".eq_ignore_ascii_case(&engine)
+    {
+        let with_properties = WithProperties(vec![]);
         let create_sink_stmt = CreateSinkStatement {
             if_not_exists: false,
-            sink_name: ObjectName::from(vec![Ident::from(("__iceberg_sink_".to_string() + &table_name.real_value()).as_str())]),
+            sink_name: ObjectName::from(vec![Ident::from(
+                ("__iceberg_sink_".to_string() + &table_name.real_value()).as_str(),
+            )]),
             with_properties,
             sink_from: CreateSink::From(table_name.clone()),
             columns: vec![],
@@ -1243,7 +1251,7 @@ pub async fn handle_create_table(
             sink_schema: None,
             into_table_name: None,
         };
-        let mut handler_args= handler_args.clone();
+        let mut handler_args = handler_args.clone();
         let mut with = BTreeMap::new();
         // connector = 'iceberg',
         // type='upsert',
@@ -1264,7 +1272,10 @@ pub async fn handle_create_table(
         with.insert("type".to_string(), "upsert".to_string());
         with.insert("catalog.type".to_string(), "storage".to_string());
         with.insert("warehouse.path".to_string(), "s3a://hummock001".to_string());
-        with.insert("s3.endpoint".to_string(), "http://127.0.0.1:9301".to_string());
+        with.insert(
+            "s3.endpoint".to_string(),
+            "http://127.0.0.1:9301".to_string(),
+        );
         with.insert("s3.access.key".to_string(), "hummockadmin".to_string());
         with.insert("s3.secret.key".to_string(), "hummockadmin".to_string());
         with.insert("s3.region".to_string(), "us-east-1".to_string());
@@ -1275,12 +1286,13 @@ pub async fn handle_create_table(
         handler_args.with_options = WithOptions::new_with_options(with);
         create_sink::handle_create_sink(handler_args.clone(), create_sink_stmt).await?;
 
-
         let create_source_stmt = CreateSourceStatement {
             temporary: false,
             if_not_exists: false,
             columns: vec![],
-            source_name: ObjectName::from(vec![Ident::from(("__iceberg_source_".to_string() + &table_name.real_value()).as_str())]),
+            source_name: ObjectName::from(vec![Ident::from(
+                ("__iceberg_source_".to_string() + &table_name.real_value()).as_str(),
+            )]),
             wildcard_idx: None,
             constraints: vec![],
             with_properties: WithProperties(vec![]),
@@ -1294,7 +1306,10 @@ pub async fn handle_create_table(
         with.insert("connector".to_string(), "iceberg".to_string());
         with.insert("catalog.type".to_string(), "storage".to_string());
         with.insert("warehouse.path".to_string(), "s3a://hummock001".to_string());
-        with.insert("s3.endpoint".to_string(), "http://127.0.0.1:9301".to_string());
+        with.insert(
+            "s3.endpoint".to_string(),
+            "http://127.0.0.1:9301".to_string(),
+        );
         with.insert("s3.access.key".to_string(), "hummockadmin".to_string());
         with.insert("s3.secret.key".to_string(), "hummockadmin".to_string());
         with.insert("s3.region".to_string(), "us-east-1".to_string());

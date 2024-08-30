@@ -129,19 +129,24 @@ impl Binder {
                         .catalog
                         .get_created_table_by_name(&self.db_name, schema_path, table_name)
                     {
-                         if table_catalog.iceberg_engine() {
-                             if let Ok((source_catalog, _)) =
-                                 self.catalog
-                                     .get_source_by_name(&self.db_name, schema_path, &table_catalog.iceberg_source_name().unwrap())
-                             {
-                                 self.resolve_source_relation(&source_catalog.clone(), as_of)
-                             } else {
-                                 // This should only happen when create table and then create sink before the source is created
-                                 self.resolve_table_relation(table_catalog.clone(), schema_name, as_of)?
-                             }
-                         } else {
-                             self.resolve_table_relation(table_catalog.clone(), schema_name, as_of)?
-                         }
+                        if table_catalog.iceberg_engine() {
+                            if let Ok((source_catalog, _)) = self.catalog.get_source_by_name(
+                                &self.db_name,
+                                schema_path,
+                                &table_catalog.iceberg_source_name().unwrap(),
+                            ) {
+                                self.resolve_source_relation(&source_catalog.clone(), as_of)
+                            } else {
+                                // This should only happen when create table and then create sink before the source is created
+                                self.resolve_table_relation(
+                                    table_catalog.clone(),
+                                    schema_name,
+                                    as_of,
+                                )?
+                            }
+                        } else {
+                            self.resolve_table_relation(table_catalog.clone(), schema_name, as_of)?
+                        }
                     } else if let Ok((source_catalog, _)) =
                         self.catalog
                             .get_source_by_name(&self.db_name, schema_path, table_name)
@@ -190,11 +195,13 @@ impl Binder {
                                     schema.get_created_table_by_name(table_name)
                                 {
                                     if table_catalog.iceberg_engine() {
-                                        if let Some(source_catalog) =
-                                            schema.get_source_by_name(&table_catalog.iceberg_source_name().unwrap())
-                                        {
-                                            return Ok(self
-                                                .resolve_source_relation(&source_catalog.clone(), as_of));
+                                        if let Some(source_catalog) = schema.get_source_by_name(
+                                            &table_catalog.iceberg_source_name().unwrap(),
+                                        ) {
+                                            return Ok(self.resolve_source_relation(
+                                                &source_catalog.clone(),
+                                                as_of,
+                                            ));
                                         } else {
                                             // This should only happen when create table and then create sink before the source is created
                                             return self.resolve_table_relation(

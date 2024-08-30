@@ -86,14 +86,9 @@ impl Distill for LogicalIcebergScan {
 
 impl ColPrunable for LogicalIcebergScan {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
-        if required_cols.is_empty() {
-            let mapping =
-                ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
-            // If reuqiured_cols is empty, we use the first column of iceberg to avoid the empty schema.
-            LogicalProject::with_mapping(self.clone_with_required_cols(&[0]).into(), mapping).into()
-        } else {
-            self.clone_with_required_cols(required_cols).into()
-        }
+        // TODO: support column pruning for iceberg scan
+        let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
+        LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
 
