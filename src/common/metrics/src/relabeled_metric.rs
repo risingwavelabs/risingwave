@@ -74,6 +74,36 @@ impl<M> RelabeledMetricVec<M> {
     }
 }
 
+#[easy_ext::ext(MetricVecRelabelExt)]
+impl<M> M
+where
+    M: Sized,
+{
+    /// Equivalent to [`RelabeledMetricVec::with_metric_level`].
+    pub fn relabel(
+        self,
+        metric_level: MetricLevel,
+        relabel_threshold: MetricLevel,
+    ) -> RelabeledMetricVec<M> {
+        RelabeledMetricVec::with_metric_level(metric_level, self, relabel_threshold)
+    }
+
+    /// Equivalent to [`RelabeledMetricVec::with_metric_level_relabel_n`].
+    pub fn relabel_n(
+        self,
+        metric_level: MetricLevel,
+        relabel_threshold: MetricLevel,
+        relabel_num: usize,
+    ) -> RelabeledMetricVec<M> {
+        RelabeledMetricVec::with_metric_level_relabel_n(
+            metric_level,
+            self,
+            relabel_threshold,
+            relabel_num,
+        )
+    }
+}
+
 impl<T: MetricVecBuilder> RelabeledMetricVec<MetricVec<T>> {
     pub fn with_label_values(&self, vals: &[&str]) -> T::M {
         if self.metric_level > self.relabel_threshold {
@@ -89,8 +119,7 @@ impl<T: MetricVecBuilder> RelabeledMetricVec<MetricVec<T>> {
 }
 
 impl<T: MetricVecBuilder, const N: usize> RelabeledMetricVec<LabelGuardedMetricVec<T, N>> {
-    // TODO: shall we rename this to `with_guarded_label_values`?
-    pub fn with_label_values(&self, vals: &[&str; N]) -> LabelGuardedMetric<T::M, N> {
+    pub fn with_guarded_label_values(&self, vals: &[&str; N]) -> LabelGuardedMetric<T::M, N> {
         if self.metric_level > self.relabel_threshold {
             // relabel first n labels to empty string
             let mut relabeled_vals = *vals;
