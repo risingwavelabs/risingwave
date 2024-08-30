@@ -22,6 +22,7 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
+use cluster_limit_service_client::ClusterLimitServiceClient;
 use either::Either;
 use futures::stream::BoxStream;
 use lru::LruCache;
@@ -1641,6 +1642,7 @@ struct GrpcMetaClientCore {
     cloud_client: CloudServiceClient<Channel>,
     sink_coordinate_client: SinkCoordinationRpcClient,
     event_log_client: EventLogServiceClient<Channel>,
+    cluster_limit_client: ClusterLimitServiceClient<Channel>,
 }
 
 impl GrpcMetaClientCore {
@@ -1668,6 +1670,7 @@ impl GrpcMetaClientCore {
         let cloud_client = CloudServiceClient::new(channel.clone());
         let sink_coordinate_client = SinkCoordinationServiceClient::new(channel.clone());
         let event_log_client = EventLogServiceClient::new(channel);
+        let cluster_limit_client = ClusterLimitServiceClient::new(channel);
 
         GrpcMetaClientCore {
             cluster_client,
@@ -1687,6 +1690,7 @@ impl GrpcMetaClientCore {
             cloud_client,
             sink_coordinate_client,
             event_log_client,
+            cluster_limit_client,
         }
     }
 }

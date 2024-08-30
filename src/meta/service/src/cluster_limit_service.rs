@@ -16,17 +16,16 @@ use std::collections::HashSet;
 
 use itertools::Itertools;
 use risingwave_common::license::LicenseManager;
-use risingwave_meta::manager::{MetaSrvEnv, MetadataManager, WorkerId};
-use risingwave_pb::meta::cluster_limit_service_server::ClusterLimitService;
-use risingwave_pb::meta::{
-    GetClusterLimitsRequest, GetClusterLimitsResponse, PbActorCountPerParallelism,
-    PbWorkerActorCount, WorkerActorCount,
+use risingwave_common::util::cluster_limit::{
+    ActorCountPerParallelism, WorkerActorCount, FREE_TIER_ACTOR_CNT_HARD_LIMIT,
+    FREE_TIER_ACTOR_CNT_SOFT_LIMIT,
 };
+use risingwave_meta::manager::{MetaSrvEnv, MetadataManager, WorkerId};
+use risingwave_meta::MetaResult;
+use risingwave_pb::meta::cluster_limit_service_server::ClusterLimitService;
+use risingwave_pb::meta::{GetClusterLimitsRequest, GetClusterLimitsResponse};
 use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
-
-const FREE_TIER_ACTOR_CNT_SOFT_LIMIT: usize = 25;
-const FREE_TIER_ACTOR_CNT_HARD_LIMIT: usize = 100;
 
 #[derive(Clone)]
 pub struct ClusterLimitServiceImpl {
@@ -42,7 +41,7 @@ impl ClusterLimitServiceImpl {
         }
     }
 
-    async fn get_active_actor_limit(&self) -> Option<PbActorCountPerParallelism> {
+    async fn get_active_actor_limit(&self) -> MetaResult<Option<ActorCountPerParallelism>> {
         let (soft, hard) = match LicenseManager::get().tier() {
             Ok(Tier::Paid) => (
                 self.env.opts.actor_cnt_per_parallelism_soft_limit,
@@ -69,7 +68,7 @@ impl ClusterLimitServiceImpl {
             .into_iter()
             .map(|e| (e.id, e.parallelism()))
             .collect();
-        let worker_actor_count: HashSet<WorkerId, PbWorkerActorCount> = self
+        let worker_actor_count: HashSet<WorkerId, WorkerActorCount> = self
             .metadata_manager
             .worker_actor_count()
             .await?
@@ -80,7 +79,7 @@ impl ClusterLimitServiceImpl {
                     .map(|parallelism| {
                         (
                             worker_id,
-                            PbWorkerActorCount {
+                            WorkerActorCount {
                                 actor_count,
                                 parallelism,
                             },
@@ -89,7 +88,17 @@ impl ClusterLimitServiceImpl {
             })
             .collect();
 
-        
+        let limit = ActorCountPerParallelism {
+            worker_id_to_actor_count: worker_actor_count,
+            hard_limit,
+            soft_limit,
+        };
+
+        if limit.exceed_limit() {
+            Ok(Some(limit))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -100,37 +109,15 @@ impl ClusterLimitService for ClusterLimitServiceImpl {
         &self,
         request: Request<GetClusterLimitsRequest>,
     ) -> Result<Response<GetClusterLimitsResponse>, Status> {
-        // let req = request.into_inner();
-        // let info = req
-        //     .info
-        //     .into_iter()
-        //     .filter_map(|node_info| node_info.info)
-        //     .collect_vec();
-        // let result = match &self.metadata_manager {
-        //     MetadataManager::V1(mgr) => mgr.cluster_manager.heartbeat(req.node_id, info).await,
-        //     MetadataManager::V2(mgr) => {
-        //         mgr.cluster_controller
-        //             .heartbeat(req.node_id as _, info)
-        //             .await
-        //     }
-        // };
-
-        // match result {
-        //     Ok(_) => Ok(Response::new(HeartbeatResponse { status: None })),
-        //     Err(e) => {
-        //         if e.is_invalid_worker() {
-        //             return Ok(Response::new(HeartbeatResponse {
-        //                 status: Some(risingwave_pb::common::Status {
-        //                     code: risingwave_pb::common::status::Code::UnknownWorker as i32,
-        //                     message: e.to_report_string(),
-        //                 }),
-        //             }));
-        //         }
-        //         Err(e.into())
-        //     }
-        // }
-        Ok(Response::new(GetClusterLimitsResponse {
-            active_limits: None,
-        }))
+        // TODO: support more limits
+        match self.get_active_actor_limit().await {
+            Ok(Some(limit)) => Ok(Response::new(GetClusterLimitsResponse {
+                active_limits: vec![limit.into()],
+            })),
+            Ok(None) => Ok(Response::new(GetClusterLimitsResponse {
+                active_limits: vec![],
+            })),
+            Err(e) => Err(e.into()),
+        }
     }
 }
