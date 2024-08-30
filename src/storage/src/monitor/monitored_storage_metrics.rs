@@ -343,8 +343,14 @@ impl MonitoredStorageMetrics {
     }
 
     fn local_get_metrics(&self, table_label: &str) -> LocalGetMetrics {
-        let get_duration = self.get_duration.with_guarded_label_values(&[table_label]).local();
-        let get_key_size = self.get_key_size.with_guarded_label_values(&[table_label]).local();
+        let get_duration = self
+            .get_duration
+            .with_guarded_label_values(&[table_label])
+            .local();
+        let get_key_size = self
+            .get_key_size
+            .with_guarded_label_values(&[table_label])
+            .local();
         let get_value_size = self
             .get_value_size
             .with_guarded_label_values(&[table_label])
