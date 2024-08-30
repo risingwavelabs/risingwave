@@ -60,7 +60,6 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         };
 
         let compression_format = gcs_properties.compression_format;
-
         Ok(Self {
             op,
             prefix,

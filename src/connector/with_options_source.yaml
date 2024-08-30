@@ -25,6 +25,10 @@ AzblobProperties:
     field_type: CompressionFormat
     required: false
     default: Default::default
+  - name: recursive_scan
+    field_type: bool
+    required: false
+    default: Default::default
 DatagenProperties:
   fields:
   - name: datagen.split.num
@@ -71,6 +75,10 @@ GcsProperties:
     default: Default::default
   - name: compression_format
     field_type: CompressionFormat
+    required: false
+    default: Default::default
+  - name: recursive_scan
+    field_type: bool
     required: false
     default: Default::default
 IcebergProperties:
@@ -819,6 +827,10 @@ OpendalS3Properties:
     comments: The following are only supported by `s3_v2` (opendal) source.
     required: false
     default: Default::default
+  - name: recursive_scan
+    field_type: bool
+    required: false
+    default: Default::default
 PosixFsProperties:
   fields:
   - name: posix_fs.root
@@ -832,6 +844,10 @@ PosixFsProperties:
     default: Default::default
   - name: compression_format
     field_type: CompressionFormat
+    required: false
+    default: Default::default
+  - name: recursive_scan
+    field_type: bool
     required: false
     default: Default::default
 PubsubProperties:

@@ -86,24 +86,28 @@ impl SourceReader {
         let config = self.config.clone();
         match config {
             ConnectorProperties::Gcs(prop) => {
+                let recursive_scan = prop.fs_common.recursive_scan.unwrap_or_default();
                 let lister: OpendalEnumerator<OpendalGcs> =
                     OpendalEnumerator::new_gcs_source(*prop)?;
-                Ok(build_opendal_fs_list_stream(lister))
+                Ok(build_opendal_fs_list_stream(lister, recursive_scan))
             }
             ConnectorProperties::OpendalS3(prop) => {
+                let recursive_scan = prop.fs_common.recursive_scan.unwrap_or_default();
                 let lister: OpendalEnumerator<OpendalS3> =
                     OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
-                Ok(build_opendal_fs_list_stream(lister))
+                Ok(build_opendal_fs_list_stream(lister, recursive_scan))
             }
             ConnectorProperties::Azblob(prop) => {
+                let recursive_scan = prop.fs_common.recursive_scan.unwrap_or_default();
                 let lister: OpendalEnumerator<OpendalAzblob> =
                     OpendalEnumerator::new_azblob_source(*prop)?;
-                Ok(build_opendal_fs_list_stream(lister))
+                Ok(build_opendal_fs_list_stream(lister, recursive_scan))
             }
             ConnectorProperties::PosixFs(prop) => {
+                let recursive_scan = prop.fs_common.recursive_scan.unwrap_or_default();
                 let lister: OpendalEnumerator<OpendalPosixFs> =
                     OpendalEnumerator::new_posix_fs_source(*prop)?;
-                Ok(build_opendal_fs_list_stream(lister))
+                Ok(build_opendal_fs_list_stream(lister, recursive_scan))
             }
             other => bail!("Unsupported source: {:?}", other),
         }
@@ -185,9 +189,12 @@ impl SourceReader {
 }
 
 #[try_stream(boxed, ok = FsPageItem, error = crate::error::ConnectorError)]
-async fn build_opendal_fs_list_stream<Src: OpendalSource>(lister: OpendalEnumerator<Src>) {
+async fn build_opendal_fs_list_stream<Src: OpendalSource>(
+    lister: OpendalEnumerator<Src>,
+    recursive_scan: bool,
+) {
     let matcher = lister.get_matcher();
-    let mut object_metadata_iter = lister.list().await?;
+    let mut object_metadata_iter = lister.list(recursive_scan).await?;
 
     while let Some(list_res) = object_metadata_iter.next().await {
         match list_res {
@@ -212,9 +219,12 @@ async fn build_opendal_fs_list_stream<Src: OpendalSource>(lister: OpendalEnumera
 }
 
 #[try_stream(boxed, ok = OpendalFsSplit<Src>,  error = crate::error::ConnectorError)]
-pub async fn build_opendal_fs_list_for_batch<Src: OpendalSource>(lister: OpendalEnumerator<Src>) {
+pub async fn build_opendal_fs_list_for_batch<Src: OpendalSource>(
+    lister: OpendalEnumerator<Src>,
+    recursive_scan: bool,
+) {
     let matcher = lister.get_matcher();
-    let mut object_metadata_iter = lister.list().await?;
+    let mut object_metadata_iter = lister.list(recursive_scan).await?;
 
     while let Some(list_res) = object_metadata_iter.next().await {
         match list_res {

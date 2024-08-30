@@ -20,6 +20,7 @@ pub mod posix_fs_source;
 pub mod s3_source;
 
 use serde::Deserialize;
+use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
 pub mod opendal_enumerator;
 pub mod opendal_reader;
@@ -37,6 +38,14 @@ pub const GCS_CONNECTOR: &str = "gcs";
 // The new s3_v2 will use opendal.
 pub const OPENDAL_S3_CONNECTOR: &str = "s3_v2";
 pub const POSIX_FS_CONNECTOR: &str = "posix_fs";
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
+pub struct FsSourceCommon {
+    #[serde(rename = "recursive_scan", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub recursive_scan: Option<bool>,
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
 pub struct GcsProperties {
@@ -59,6 +68,9 @@ pub struct GcsProperties {
 
     #[serde(rename = "compression_format", default = "Default::default")]
     pub compression_format: CompressionFormat,
+
+    #[serde(flatten)]
+    pub fs_common: FsSourceCommon,
 }
 
 impl UnknownFields for GcsProperties {
@@ -125,6 +137,9 @@ pub struct OpendalS3Properties {
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
+
+    #[serde(flatten)]
+    pub fs_common: FsSourceCommon,
 }
 
 impl UnknownFields for OpendalS3Properties {
@@ -155,6 +170,9 @@ pub struct PosixFsProperties {
     pub unknown_fields: HashMap<String, String>,
     #[serde(rename = "compression_format", default = "Default::default")]
     pub compression_format: CompressionFormat,
+
+    #[serde(flatten)]
+    pub fs_common: FsSourceCommon,
 }
 
 impl UnknownFields for PosixFsProperties {
@@ -191,6 +209,8 @@ pub struct AzblobProperties {
 
     #[serde(rename = "compression_format", default = "Default::default")]
     pub compression_format: CompressionFormat,
+    #[serde(flatten)]
+    pub fs_common: FsSourceCommon,
 }
 
 impl UnknownFields for AzblobProperties {

@@ -66,13 +66,13 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
 }
 
 impl<Src: OpendalSource> OpendalEnumerator<Src> {
-    pub async fn list(&self) -> ConnectorResult<ObjectMetadataIter> {
+    pub async fn list(&self, recursive_scan: bool) -> ConnectorResult<ObjectMetadataIter> {
         let prefix = self.prefix.as_deref().unwrap_or("/");
 
         let object_lister = self
             .op
             .lister_with(prefix)
-            .recursive(false)
+            .recursive(recursive_scan)
             .metakey(Metakey::ContentLength | Metakey::LastModified)
             .await?;
         let stream = stream::unfold(object_lister, |mut object_lister| async move {
