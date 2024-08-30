@@ -29,6 +29,7 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::{can_concat, compact_task_to_string, EpochWithGap, LocalSstableInfo};
 
+use super::iterator::filter_block_metas;
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
@@ -234,6 +235,7 @@ impl ConcatSstableIterator {
         self.cur_idx = idx;
         if self.cur_idx < self.sstables.len() {
             let sstable_info = &self.sstables[self.cur_idx];
+            let existing_table_ids = HashSet::from_iter(sstable_info.table_ids.iter().cloned());
             let sstable = self
                 .sstable_store
                 .sstable(sstable_info, &mut self.stats)
@@ -242,9 +244,14 @@ impl ConcatSstableIterator {
             let stats_ptr = self.stats.remote_io_time.clone();
             let now = Instant::now();
             self.task_progress.inc_num_pending_read_io();
+            let block_metas = filter_block_metas(
+                &sstable.meta.block_metas,
+                &existing_table_ids,
+                sstable_info.key_range.clone(),
+            );
             let block_stream = self
                 .sstable_store
-                .get_stream_for_blocks(sstable.id, &sstable.meta.block_metas)
+                .get_stream_for_blocks(sstable.id, &block_metas)
                 .verbose_instrument_await("stream_iter_get_stream")
                 .await?;
 

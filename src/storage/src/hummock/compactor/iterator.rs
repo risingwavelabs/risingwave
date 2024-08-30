@@ -86,12 +86,12 @@ impl SstableStreamIterator {
     pub fn new(
         block_metas: Vec<BlockMeta>,
         sstable_info: SstableInfo,
-        existing_table_ids: HashSet<StateTableId>,
         stats: &StoreLocalStatistic,
         task_progress: Arc<TaskProgress>,
         sstable_store: SstableStoreRef,
         max_io_retry_times: usize,
     ) -> Self {
+        let existing_table_ids = HashSet::from_iter(sstable_info.table_ids.iter().cloned());
         // filter the block meta with key range
         let block_metas = filter_block_metas(
             &block_metas,
@@ -461,7 +461,6 @@ impl ConcatSstableIterator {
                 let mut sstable_iter = SstableStreamIterator::new(
                     block_metas,
                     table_info.clone(),
-                    self.existing_table_ids.clone(),
                     &self.stats,
                     self.task_progress.clone(),
                     self.sstable_store.clone(),
