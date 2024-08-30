@@ -147,15 +147,8 @@ impl ColumnDesc {
         default_val: DefaultColumnDesc,
     ) -> ColumnDesc {
         ColumnDesc {
-            data_type,
-            column_id,
-            name: name.into(),
-            field_descs: vec![],
-            type_name: String::new(),
             generated_or_default_column: Some(GeneratedOrDefaultColumn::DefaultColumn(default_val)),
-            description: None,
-            additional_column: AdditionalColumn { column_type: None },
-            version: ColumnDescVersion::Pr13707,
+            ..Self::named(name, column_id, data_type)
         }
     }
 
