@@ -149,6 +149,7 @@ impl OpendalSinkBackend for S3Sink {
         //     && properties.batching_strategy.inactivity_interval.is_none()
         if properties.batching_strategy.max_row_count.is_none()
             && properties.batching_strategy.max_file_size.is_none()
+            && properties.batching_strategy.rollover_seconds.is_none()
         {
             return None;
         }
@@ -171,6 +172,10 @@ impl OpendalSinkBackend for S3Sink {
                 .max_row_count
                 .and_then(|s| s.parse().ok()),
             max_file_size: properties.batching_strategy.max_file_size,
+            rollover_seconds: properties
+                .batching_strategy
+                .rollover_seconds
+                .and_then(|s| s.parse().ok()),
         })
     }
 }

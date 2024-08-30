@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 use std::num::NonZeroU64;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
 use arrow_schema_iceberg::SchemaRef;
@@ -28,7 +28,7 @@ use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde::Deserialize;
-use serde_with::serde_as;
+use serde_with::{serde_as, DisplayFromStr};
 use tokio_util::compat::{Compat, FuturesAsyncWriteCompatExt};
 use with_options::WithOptions;
 
@@ -185,6 +185,7 @@ pub struct OpenDalSinkWriter {
     pub(crate) batching_strategy: Option<BatchingStrategy>,
     current_bached_row_num: usize,
     current_writer_idx: usize,
+    created_time: SystemTime,
 }
 
 /// The `FileWriterEnum` enum represents different types of file writers used for various sink
@@ -241,6 +242,38 @@ impl SinkWriter for OpenDalSinkWriter {
     /// When a checkpoint arrives, the force commit is performed to write the data to the file.
     /// In the future if flush and checkpoint is decoupled, we should enable sink decouple accordingly.
     async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
+        println!(
+            "self.duration_seconds_since_creation() = {:?}",
+            self.duration_seconds_since_creation()
+        );
+        if self.batching_strategy.is_some()
+            && self.duration_seconds_since_creation()
+                >= self
+                    .batching_strategy
+                    .clone()
+                    .unwrap()
+                    .rollover_seconds
+                    .unwrap_or(u64::MAX)
+            && let Some(sink_writer) = self.sink_writer.take()
+        {
+            match sink_writer {
+                FileWriterEnum::ParquetFileWriter(w) => {
+                    if w.bytes_written() > 0 {
+                        let metadata = w.close().await?;
+                        tracing::info!(
+                            "Writer {:?}_{:?} finish write file, metadata: {:?}",
+                            self.executor_id,
+                            self.current_writer_idx,
+                            metadata
+                        );
+                        self.current_bached_row_num = 0;
+                        self.current_writer_idx += 1;
+
+                        self.create_sink_writer(self.current_writer_idx).await?;
+                    }
+                }
+            };
+        }
         Ok(())
     }
 }
@@ -256,6 +289,7 @@ impl OpenDalSinkWriter {
         engine_type: EngineType,
         batching_strategy: Option<BatchingStrategy>,
     ) -> Result<Self> {
+        println!("batching_strategy = {:?}", batching_strategy);
         let arrow_schema = convert_rw_schema_to_arrow_schema(rw_schema)?;
         Ok(Self {
             schema: Arc::new(arrow_schema),
@@ -271,7 +305,15 @@ impl OpenDalSinkWriter {
             batching_strategy,
             current_bached_row_num: 0,
             current_writer_idx: 0,
+            created_time: SystemTime::now(),
         })
+    }
+
+    fn duration_seconds_since_creation(&self) -> u64 {
+        let now = SystemTime::now();
+        now.duration_since(self.created_time)
+            .expect("Time went backwards")
+            .as_secs()
     }
 
     async fn create_object_writer(&mut self, writer_idx: usize) -> Result<OpendalWriter> {
@@ -336,13 +378,19 @@ impl OpenDalSinkWriter {
                 let batch_row_nums = batch.num_rows();
                 w.write(&batch).await?;
                 self.current_bached_row_num += batch_row_nums;
-                if self.current_bached_row_num
-                    >= self
-                        .batching_strategy
-                        .clone()
-                        .unwrap()
-                        .max_row_count
-                        .unwrap()
+                if self
+                    .batching_strategy
+                    .clone()
+                    .unwrap()
+                    .max_row_count
+                    .is_some()
+                    && self.current_bached_row_num
+                        >= self
+                            .batching_strategy
+                            .clone()
+                            .unwrap()
+                            .max_row_count
+                            .unwrap()
                     && let Some(sink_writer) = self.sink_writer.take()
                 {
                     match sink_writer {
@@ -394,6 +442,7 @@ pub struct BatchingStrategy {
     // pub inactivity_interval: Option<Duration>,
     pub max_row_count: Option<usize>,
     pub max_file_size: Option<usize>,
+    pub rollover_seconds: Option<u64>,
 }
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -407,4 +456,6 @@ pub struct FileSinkBatchingStrategy {
     pub max_row_count: Option<String>,
     #[serde(rename = "max_file_size")]
     pub max_file_size: Option<usize>,
+    #[serde(rename = "rollover_seconds")]
+    pub rollover_seconds: Option<String>,
 }

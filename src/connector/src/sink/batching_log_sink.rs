@@ -124,11 +124,8 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for BatchingLogSinkerOf<W> {
                             sink_writer.abort().await?;
                             return Err(e);
                         }
-                        Ok(true) => {
-
-                        }
-                        Ok(false) => {
-                        }
+                        Ok(true) => {}
+                        Ok(false) => {}
                     }
                 }
                 LogStoreReadItem::Barrier { is_checkpoint } => {

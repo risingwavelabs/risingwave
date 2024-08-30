@@ -146,6 +146,10 @@ impl OpendalSinkBackend for GcsSink {
                 .max_row_count
                 .and_then(|s| s.parse().ok()),
             max_file_size: properties.batching_strategy.max_file_size,
+            rollover_seconds: properties
+                .batching_strategy
+                .rollover_seconds
+                .and_then(|s| s.parse().ok()),
         })
     }
 }
