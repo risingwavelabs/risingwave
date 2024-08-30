@@ -23,6 +23,7 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compact_task::CompactTask;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -52,12 +53,12 @@ pub struct BlockStreamIterator {
     /// The downloading stream.
     block_stream: BlockDataStream,
 
-    next_block_index: usize,
-
-    /// For key sanity check of divided SST and debugging
+    // /// For key sanity check of divided SST and debugging
     sstable: TableHolder,
     iter: Option<BlockIterator>,
     task_progress: Arc<TaskProgress>,
+
+    existing_table_ids: HashSet<StateTableId>,
 }
 
 impl BlockStreamIterator {
@@ -79,28 +80,51 @@ impl BlockStreamIterator {
         sstable: TableHolder,
         block_stream: BlockDataStream,
         task_progress: Arc<TaskProgress>,
+        existing_table_ids: HashSet<StateTableId>,
     ) -> Self {
         Self {
             block_stream,
-            next_block_index: 0,
+            // next_block_index: 0,
             sstable,
             iter: None,
             task_progress,
+            existing_table_ids,
         }
     }
 
     /// Wrapper function for `self.block_stream.next()` which allows us to measure the time needed.
     async fn download_next_block(&mut self) -> HummockResult<Option<(Bytes, Vec<u8>, BlockMeta)>> {
-        let (data, _) = match self.block_stream.next_block_impl().await? {
-            None => return Ok(None),
-            Some(ret) => ret,
-        };
-        let meta = self.sstable.meta.block_metas[self.next_block_index].clone();
+        let data;
+        loop {
+            match self.block_stream.next_block_impl().await? {
+                None => return Ok(None),
+                Some(ret) => {
+                    let block_meta = self
+                        .block_stream
+                        .block_meta(self.block_stream.block_index())
+                        .unwrap();
+                    if !self
+                        .existing_table_ids
+                        .contains(&block_meta.table_id().table_id())
+                    {
+                        continue;
+                    }
+
+                    data = ret.0;
+                    break;
+                }
+            };
+        }
+
+        let meta = self
+            .block_stream
+            .block_meta(self.block_stream.block_index())
+            .unwrap()
+            .clone();
         let filter_block = self
             .sstable
             .filter_reader
-            .get_block_raw_filter(self.next_block_index);
-        self.next_block_index += 1;
+            .get_block_raw_filter(self.block_stream.block_index());
         Ok(Some((data, filter_block, meta)))
     }
 
@@ -113,25 +137,34 @@ impl BlockStreamIterator {
     }
 
     fn next_block_smallest(&self) -> &[u8] {
-        self.sstable.meta.block_metas[self.next_block_index]
+        let next_block_index = self.block_stream.block_index() + 1;
+        &self
+            .block_stream
+            .block_meta(next_block_index)
+            .unwrap()
             .smallest_key
-            .as_ref()
     }
 
     fn next_block_largest(&self) -> &[u8] {
-        if self.next_block_index + 1 < self.sstable.meta.block_metas.len() {
-            self.sstable.meta.block_metas[self.next_block_index + 1]
+        let next_block_index = self.block_stream.block_index() + 1;
+        if next_block_index < self.block_stream.block_metas().len() {
+            &self
+                .block_stream
+                .block_meta(next_block_index)
+                .unwrap()
                 .smallest_key
-                .as_ref()
         } else {
             self.sstable.meta.largest_key.as_ref()
         }
     }
 
     fn current_block_largest(&self) -> Vec<u8> {
-        if self.next_block_index < self.sstable.meta.block_metas.len() {
+        let next_block_idx = self.block_stream.block_index() + 1;
+        if next_block_idx < self.block_stream.block_metas().len() {
             let mut largest_key = FullKey::decode(
-                self.sstable.meta.block_metas[self.next_block_index]
+                self.block_stream
+                    .block_meta(next_block_idx)
+                    .unwrap()
                     .smallest_key
                     .as_ref(),
             );
@@ -147,7 +180,7 @@ impl BlockStreamIterator {
         match self.iter.as_ref() {
             Some(iter) => iter.key(),
             None => FullKey::decode(
-                self.sstable.meta.block_metas[self.next_block_index]
+                self.sstable.meta.block_metas[self.block_stream.block_index() + 1]
                     .smallest_key
                     .as_ref(),
             ),
@@ -155,7 +188,8 @@ impl BlockStreamIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.iter.is_some() || self.next_block_index < self.sstable.meta.block_metas.len()
+        self.iter.is_some()
+            || self.block_stream.block_index() < self.block_stream.block_metas().len()
     }
 }
 
@@ -251,7 +285,7 @@ impl ConcatSstableIterator {
             );
             let block_stream = self
                 .sstable_store
-                .get_stream_for_blocks(sstable.id, &block_metas, existing_table_ids)
+                .get_stream_for_blocks(sstable.id, &block_metas)
                 .verbose_instrument_await("stream_iter_get_stream")
                 .await?;
 
@@ -259,8 +293,12 @@ impl ConcatSstableIterator {
             let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
             stats_ptr.fetch_add(add as u64, atomic::Ordering::Relaxed);
 
-            let sstable_iter =
-                BlockStreamIterator::new(sstable, block_stream, self.task_progress.clone());
+            let sstable_iter = BlockStreamIterator::new(
+                sstable,
+                block_stream,
+                self.task_progress.clone(),
+                existing_table_ids,
+            );
             self.sstable_iter = Some(sstable_iter);
         }
         Ok(())

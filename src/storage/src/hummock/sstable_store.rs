@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::clone::Clone;
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -25,7 +25,6 @@ use foyer::{
 };
 use futures::{future, StreamExt};
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
@@ -652,7 +651,6 @@ impl SstableStore {
         &self,
         object_id: HummockSstableObjectId,
         metas: &[BlockMeta],
-        existing_table_ids: HashSet<StateTableId>,
     ) -> HummockResult<BlockDataStream> {
         fail_point!("get_stream_err");
         let data_path = self.get_sst_data_path(object_id);
@@ -674,11 +672,7 @@ impl SstableStore {
                 )))
             }
         };
-        Ok(BlockDataStream::new(
-            reader,
-            metas.to_vec(),
-            existing_table_ids,
-        ))
+        Ok(BlockDataStream::new(reader, metas.to_vec()))
     }
 
     pub fn data_recent_filter(
