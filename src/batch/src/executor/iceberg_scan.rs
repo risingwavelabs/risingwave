@@ -114,35 +114,77 @@ impl IcebergScanExecutor {
             .map_err(BatchError::Iceberg)?;
 
         let delete_file_scan_tasks = mem::take(&mut self.delete_file_scan_tasks);
-        let delete_file_scan_stream = {
-            #[try_stream]
-            async move {
-                for delete_file_scan_task in delete_file_scan_tasks {
-                    yield delete_file_scan_task;
-                }
-            }
-        };
-
-        let reader = table
-            .reader_builder()
-            .with_batch_size(self.batch_size)
-            .build();
-
-        let mut delete_record_batch_stream = reader
-            .read(Box::pin(delete_file_scan_stream))
-            .map_err(BatchError::Iceberg)?;
         let mut map = HashMap::new();
-        for record_batch in delete_record_batch_stream.next().await {
-            let record_batch = record_batch.map_err(BatchError::Iceberg)?;
-            let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
-            for row in chunk.rows(){
-                if let Some(ScalarRefImpl::Int32(i)) = row.datum_at(0){
-                    map.insert(i,1);   
-                }else{
-                    unreachable!();
+        for delete_file_scan_task in delete_file_scan_tasks {
+            let sequence_number = delete_file_scan_task.sequence_number;
+            let reader = table
+                .reader_builder()
+                .with_batch_size(self.batch_size)
+                .build();
+            let delete_file_scan_stream = {
+                #[try_stream]
+                async move {
+                        yield delete_file_scan_task;
+                }
+            };
+            let mut delete_record_batch_stream = reader
+                .read(Box::pin(delete_file_scan_stream))
+                .map_err(BatchError::Iceberg)?;
+            for record_batch in delete_record_batch_stream.next().await {
+                let record_batch = record_batch.map_err(BatchError::Iceberg)?;
+                let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+                for row in chunk.rows(){
+                    if let Some(ScalarRefImpl::Int32(i)) = row.datum_at(0){
+                        map.insert(i,sequence_number);
+                    }else{
+                        unreachable!();
+                    }
                 }
             }
         }
+
+        let mut data_chunk_builder =
+            DataChunkBuilder::new(data_types.clone(), self.batch_size);
+
+        for file_scan_task in file_scan_tasks {
+            let sequence_number = file_scan_tasks.sequence_number;
+            let reader = table
+                .reader_builder()
+                .with_batch_size(self.batch_size)
+                .build();
+            let file_scan_task_stream = {
+                #[try_stream]
+                async move {
+                        yield file_scan_task;
+                }
+            };
+            let mut record_batch_stream = reader
+                .read(Box::pin(file_scan_task_stream))
+                .map_err(BatchError::Iceberg)?;
+            for record_batch in record_batch_stream.next().await {
+                //
+                let record_batch = record_batch.map_err(BatchError::Iceberg)?;
+                let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+                for row in chunk.rows(){
+                    if let Some(ScalarRefImpl::Int32(i)) = row.datum_at(0){
+                        // if !map.contains_key(&i) {
+                        //     if let Some(chunk) = data_chunk_builder.append_one_row(row){
+                        //         debug_assert_eq!(chunk.data_types(), data_types);
+                        //         yield chunk;
+                        //     }
+                        // } 
+                        
+                    }else{
+                        unreachable!();
+                    }
+                }
+                if let Some(chunk) = data_chunk_builder.consume_all(){
+                    debug_assert_eq!(chunk.data_types(), data_types);
+                    yield chunk;
+                }
+            }
+        }
+
         let mut data_chunk_builder =
             DataChunkBuilder::new(data_types.clone(), self.batch_size);
         #[for_await]
