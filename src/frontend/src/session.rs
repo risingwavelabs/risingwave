@@ -47,7 +47,7 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{
-    load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
+    load_config, AsyncStackTraceOption, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
 };
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::secret::LocalSecretManager;
@@ -70,6 +70,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::meta::add_worker_node_request::Property as AddWorkerNodeProperty;
+use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::Object;
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
@@ -108,7 +109,7 @@ use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::{FrontendMetrics, GLOBAL_FRONTEND_METRICS};
 use crate::observer::FrontendObserverNode;
-use crate::rpc::FrontendServiceImpl;
+use crate::rpc::{FrontendServiceImpl, MonitorServiceImpl};
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::{
     DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
@@ -383,9 +384,19 @@ impl FrontendEnv {
             tracing::info!("Telemetry didn't start due to config");
         }
 
+        let await_tree_config = match &config.frontend.developer.async_stack_trace {
+            AsyncStackTraceOption::Off => None,
+            c => await_tree::ConfigBuilder::default()
+                .verbose(c.is_verbose().unwrap())
+                .build()
+                .ok(),
+        };
+        let await_tree_reg = await_tree_config.map(|c| await_tree::Registry::new(c));
+        let monitor_srv = MonitorServiceImpl::new(await_tree_reg);
         tokio::spawn(async move {
             tonic::transport::Server::builder()
                 .add_service(HealthServer::new(health_srv))
+                .add_service(MonitorServiceServer::new(monitor_srv))
                 .add_service(FrontendServiceServer::new(frontend_srv))
                 .serve(frontend_rpc_addr)
                 .await

@@ -16,9 +16,16 @@ use pgwire::pg_server::{BoxedError, SessionManager};
 use risingwave_pb::ddl_service::{ReplaceTablePlan, TableSchemaChange};
 use risingwave_pb::frontend_service::frontend_service_server::FrontendService;
 use risingwave_pb::frontend_service::{GetTableReplacePlanRequest, GetTableReplacePlanResponse};
+use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
+use risingwave_pb::monitor_service::{
+    AnalyzeHeapRequest, AnalyzeHeapResponse, GetBackPressureRequest, GetBackPressureResponse,
+    HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
+    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
+    StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
+};
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_sqlparser::ast::ObjectName;
-use tonic::{Request as RpcRequest, Response as RpcResponse, Status};
+use tonic::{Request as RpcRequest, Request, Response as RpcResponse, Response, Status};
 
 use crate::error::RwError;
 use crate::handler::{get_new_table_definition_for_cdc_table, get_replace_table_plan};
@@ -110,4 +117,94 @@ async fn get_new_table_plan(
         source: None, // none for cdc table
         job_type: job_type as _,
     })
+}
+
+pub struct MonitorServiceImpl {
+    await_tree_reg: Option<await_tree::Registry>,
+}
+
+pub mod await_tree_key {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub enum Frontend {
+        Query { task_id: u64 },
+    }
+}
+
+impl MonitorServiceImpl {
+    pub fn new(await_tree_reg: Option<await_tree::Registry>) -> Self {
+        Self { await_tree_reg }
+    }
+}
+
+#[async_trait::async_trait]
+impl MonitorService for MonitorServiceImpl {
+    async fn stack_trace(
+        &self,
+        _request: Request<StackTraceRequest>,
+    ) -> Result<Response<StackTraceResponse>, Status> {
+        let compaction_task_traces = match &self.await_tree_reg {
+            None => Default::default(),
+            Some(await_tree_reg) => await_tree_reg
+                .collect::<await_tree_key::Frontend>()
+                .into_iter()
+                .map(|(k, v)| (format!("{k:?}"), v.to_string()))
+                .collect(),
+        };
+        Ok(Response::new(StackTraceResponse {
+            compaction_task_traces,
+            ..Default::default()
+        }))
+    }
+
+    async fn profiling(
+        &self,
+        _request: Request<ProfilingRequest>,
+    ) -> Result<Response<ProfilingResponse>, Status> {
+        Err(Status::unimplemented("profiling unimplemented in frontend"))
+    }
+
+    async fn heap_profiling(
+        &self,
+        _request: Request<HeapProfilingRequest>,
+    ) -> Result<Response<HeapProfilingResponse>, Status> {
+        Err(Status::unimplemented(
+            "Heap profiling unimplemented in frontend",
+        ))
+    }
+
+    async fn list_heap_profiling(
+        &self,
+        _request: Request<ListHeapProfilingRequest>,
+    ) -> Result<Response<ListHeapProfilingResponse>, Status> {
+        Err(Status::unimplemented(
+            "Heap profiling unimplemented in frontend",
+        ))
+    }
+
+    async fn analyze_heap(
+        &self,
+        _request: Request<AnalyzeHeapRequest>,
+    ) -> Result<Response<AnalyzeHeapResponse>, Status> {
+        Err(Status::unimplemented(
+            "Heap profiling unimplemented in frontend",
+        ))
+    }
+
+    async fn get_back_pressure(
+        &self,
+        _request: Request<GetBackPressureRequest>,
+    ) -> Result<Response<GetBackPressureResponse>, Status> {
+        Err(Status::unimplemented(
+            "Get Back Pressure unimplemented in frontend",
+        ))
+    }
+
+    async fn tiered_cache_tracing(
+        &self,
+        _: Request<TieredCacheTracingRequest>,
+    ) -> Result<Response<TieredCacheTracingResponse>, Status> {
+        Err(Status::unimplemented(
+            "Tiered Cache Tracing unimplemented in frontend",
+        ))
+    }
 }

@@ -150,6 +150,10 @@ pub struct RwConfig {
 
     #[serde(default)]
     #[config_doc(nested)]
+    pub frontend: FrontendConfig,
+
+    #[serde(default)]
+    #[config_doc(nested)]
     pub streaming: StreamingConfig,
 
     #[serde(default)]
@@ -169,6 +173,7 @@ pub struct RwConfig {
 serde_with::with_prefix!(meta_prefix "meta_");
 serde_with::with_prefix!(streaming_prefix "stream_");
 serde_with::with_prefix!(batch_prefix "batch_");
+serde_with::with_prefix!(frontend_prefix "frontend_");
 
 #[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
 pub enum MetaBackend {
@@ -551,6 +556,14 @@ pub struct BatchConfig {
     /// Enable the spill out to disk feature for batch queries.
     #[serde(default = "default::batch::enable_spill")]
     pub enable_spill: bool,
+}
+
+/// The section `[frontend]` in `risingwave.toml`.
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct FrontendConfig {
+    #[serde(default, with = "frontend_prefix")]
+    #[config_doc(omitted)]
+    pub developer: FrontendDeveloperConfig,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -1055,6 +1068,16 @@ pub struct BatchDeveloperConfig {
     /// If not specified, the value of `server.connection_pool_size` will be used.
     #[serde(default = "default::developer::batch_exchange_connection_pool_size")]
     exchange_connection_pool_size: Option<u16>,
+}
+
+/// The subsections `[frontend.developer]`.
+///
+/// It is put at [`FrontendConfig::developer`].
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct FrontendDeveloperConfig {
+    /// Enable async stack tracing through `await-tree` for compactor.
+    #[serde(default = "default::developer::frontend_async_stack_trace")]
+    pub async_stack_trace: AsyncStackTraceOption,
 }
 
 macro_rules! define_system_config {
@@ -1781,6 +1804,8 @@ pub mod default {
     }
 
     pub mod developer {
+        use crate::config::AsyncStackTraceOption;
+
         pub fn meta_cached_traces_num() -> u32 {
             256
         }
@@ -1910,6 +1935,10 @@ pub mod default {
 
         pub fn stream_enable_auto_schema_change() -> bool {
             true
+        }
+
+        pub fn frontend_async_stack_trace() -> AsyncStackTraceOption {
+            AsyncStackTraceOption::default()
         }
     }
 
