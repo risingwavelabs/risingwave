@@ -32,6 +32,7 @@ use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use crate::source::filesystem::opendal_source::{
     OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
+    DEFAULT_REFRESH_INTERVAL_SEC,
 };
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{
@@ -85,21 +86,27 @@ impl SourceReader {
 
     pub fn get_source_list(&self) -> ConnectorResult<BoxTryStream<FsPageItem>> {
         let config = self.config.clone();
+        let list_interval_sec: u64;
+        let get_list_interval_sec =
+            |interval: Option<u64>| -> u64 { interval.unwrap_or(DEFAULT_REFRESH_INTERVAL_SEC) };
         match config {
             ConnectorProperties::Gcs(prop) => {
+                list_interval_sec = get_list_interval_sec(prop.fs_common.refresh_interval_sec);
                 let lister: OpendalEnumerator<OpendalGcs> =
                     OpendalEnumerator::new_gcs_source(*prop)?;
-                Ok(build_opendal_fs_list_stream(lister))
+                Ok(build_opendal_fs_list_stream(lister, list_interval_sec))
             }
             ConnectorProperties::OpendalS3(prop) => {
+                list_interval_sec = get_list_interval_sec(prop.fs_common.refresh_interval_sec);
                 let lister: OpendalEnumerator<OpendalS3> =
                     OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
-                Ok(build_opendal_fs_list_stream(lister))
+                Ok(build_opendal_fs_list_stream(lister, list_interval_sec))
             }
             ConnectorProperties::PosixFs(prop) => {
+                list_interval_sec = get_list_interval_sec(prop.fs_common.refresh_interval_sec);
                 let lister: OpendalEnumerator<OpendalPosixFs> =
                     OpendalEnumerator::new_posix_fs_source(*prop)?;
-                Ok(build_opendal_fs_list_stream(lister))
+                Ok(build_opendal_fs_list_stream(lister, list_interval_sec))
             }
             other => bail!("Unsupported source: {:?}", other),
         }
@@ -183,29 +190,35 @@ impl SourceReader {
 }
 
 #[try_stream(boxed, ok = FsPageItem, error = crate::error::ConnectorError)]
-async fn build_opendal_fs_list_stream<Src: OpendalSource>(lister: OpendalEnumerator<Src>) {
-    let matcher = lister.get_matcher();
-    let mut object_metadata_iter = lister.list().await?;
+async fn build_opendal_fs_list_stream<Src: OpendalSource>(
+    lister: OpendalEnumerator<Src>,
+    list_interval_sec: u64,
+) {
+    loop {
+        let matcher = lister.get_matcher();
+        let mut object_metadata_iter = lister.list().await?;
 
-    while let Some(list_res) = object_metadata_iter.next().await {
-        match list_res {
-            Ok(res) => {
-                if matcher
-                    .as_ref()
-                    .map(|m| m.matches(&res.name))
-                    .unwrap_or(true)
-                {
-                    yield res
-                } else {
-                    // Currrntly due to the lack of prefix list, we just skip the unmatched files.
-                    continue;
+        while let Some(list_res) = object_metadata_iter.next().await {
+            match list_res {
+                Ok(res) => {
+                    if matcher
+                        .as_ref()
+                        .map(|m| m.matches(&res.name))
+                        .unwrap_or(true)
+                    {
+                        yield res
+                    } else {
+                        // Currrntly due to the lack of prefix list, we just skip the unmatched files.
+                        continue;
+                    }
+                }
+                Err(err) => {
+                    tracing::error!(error = %err.as_report(), "list object fail");
+                    return Err(err);
                 }
             }
-            Err(err) => {
-                tracing::error!(error = %err.as_report(), "list object fail");
-                return Err(err);
-            }
         }
+        tokio::time::sleep(std::time::Duration::from_secs(list_interval_sec)).await;
     }
 }
 
