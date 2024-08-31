@@ -84,7 +84,6 @@ impl BlockStreamIterator {
     ) -> Self {
         Self {
             block_stream,
-            // next_block_index: 0,
             sstable,
             iter: None,
             task_progress,
@@ -94,33 +93,34 @@ impl BlockStreamIterator {
 
     /// Wrapper function for `self.block_stream.next()` which allows us to measure the time needed.
     async fn download_next_block(&mut self) -> HummockResult<Option<(Bytes, Vec<u8>, BlockMeta)>> {
-        let data;
-        loop {
-            match self.block_stream.next_block_impl().await? {
-                None => return Ok(None),
-                Some(ret) => {
-                    let block_meta = self
-                        .block_stream
-                        .block_meta(self.block_stream.block_index())
-                        .unwrap();
-                    if !self
-                        .existing_table_ids
-                        .contains(&block_meta.table_id().table_id())
-                    {
-                        continue;
+        let (data, meta) = {
+            let block_data;
+            let mut block_meta;
+            loop {
+                // try next block
+                match self.block_stream.next_block_impl().await? {
+                    None => return Ok(None),
+                    Some((data, _uncompressed_size)) => {
+                        block_meta = self
+                            .block_stream
+                            .block_meta(self.block_stream.block_index())
+                            .unwrap();
+                        if !self
+                            .existing_table_ids
+                            .contains(&block_meta.table_id().table_id())
+                        {
+                            continue;
+                        }
+
+                        block_data = data;
+                        break;
                     }
-
-                    data = ret.0;
-                    break;
                 }
-            };
-        }
+            }
 
-        let meta = self
-            .block_stream
-            .block_meta(self.block_stream.block_index())
-            .unwrap()
-            .clone();
+            (block_data, block_meta.clone())
+        };
+
         let filter_block = self
             .sstable
             .filter_reader
@@ -137,20 +137,19 @@ impl BlockStreamIterator {
     }
 
     fn next_block_smallest(&self) -> &[u8] {
-        let next_block_index = self.block_stream.block_index() + 1;
         &self
             .block_stream
-            .block_meta(next_block_index)
+            .block_meta(self.next_block_index())
             .unwrap()
             .smallest_key
     }
 
     fn next_block_largest(&self) -> &[u8] {
-        let next_block_index = self.block_stream.block_index() + 1;
-        if next_block_index < self.block_stream.block_metas().len() {
+        let next_block_index = self.next_block_index();
+        if next_block_index + 1 < self.block_stream.block_metas().len() {
             &self
                 .block_stream
-                .block_meta(next_block_index)
+                .block_meta(next_block_index + 1)
                 .unwrap()
                 .smallest_key
         } else {
@@ -159,7 +158,7 @@ impl BlockStreamIterator {
     }
 
     fn current_block_largest(&self) -> Vec<u8> {
-        let next_block_idx = self.block_stream.block_index() + 1;
+        let next_block_idx = self.next_block_index();
         if next_block_idx < self.block_stream.block_metas().len() {
             let mut largest_key = FullKey::decode(
                 self.block_stream
@@ -180,7 +179,7 @@ impl BlockStreamIterator {
         match self.iter.as_ref() {
             Some(iter) => iter.key(),
             None => FullKey::decode(
-                self.sstable.meta.block_metas[self.block_stream.block_index() + 1]
+                self.sstable.meta.block_metas[self.next_block_index()]
                     .smallest_key
                     .as_ref(),
             ),
@@ -188,8 +187,11 @@ impl BlockStreamIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.iter.is_some()
-            || self.block_stream.block_index() < self.block_stream.block_metas().len()
+        self.iter.is_some() || self.next_block_index() < self.block_stream.block_metas().len()
+    }
+
+    fn next_block_index(&self) -> usize {
+        self.block_stream.block_index() + 1
     }
 }
 
