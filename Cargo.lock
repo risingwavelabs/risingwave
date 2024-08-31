@@ -4883,8 +4883,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.11.0"
-source = "git+https://github.com/foyer-rs/foyer?rev=f2f80cf#f2f80cf871c0a4bd34b8dbb54e10c5193f2b97dd"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fbfb935508e73f9dfff9c09b60f872585549b09c240df3b101e20c113da25bbd"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -4900,10 +4901,10 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.9.0"
-source = "git+https://github.com/foyer-rs/foyer?rev=f2f80cf#f2f80cf871c0a4bd34b8dbb54e10c5193f2b97dd"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5b7ef0fc9c9203275ede122c91efd1dc32836544692a029e02a6fa722c47ccf"
 dependencies = [
- "bitvec",
  "bytes",
  "cfg-if",
  "crossbeam",
@@ -4916,14 +4917,14 @@ dependencies = [
  "nix 0.29.0",
  "parking_lot 0.12.1",
  "pin-project",
- "rustversion",
  "serde",
 ]
 
 [[package]]
 name = "foyer-intrusive"
-version = "0.9.0"
-source = "git+https://github.com/foyer-rs/foyer?rev=f2f80cf#f2f80cf871c0a4bd34b8dbb54e10c5193f2b97dd"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "febcfbb70ec6654bbaa373993f49ea32779393b86ee5ae247a1837ebc7daa30f"
 dependencies = [
  "foyer-common",
  "itertools 0.13.0",
@@ -4931,8 +4932,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.7.0"
-source = "git+https://github.com/foyer-rs/foyer?rev=f2f80cf#f2f80cf871c0a4bd34b8dbb54e10c5193f2b97dd"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ed3edafc5395b42424af73014132f2a55cc69ad5fe4f281c1f94d2a36a0f524"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.6.0",
@@ -4953,8 +4955,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.10.0"
-source = "git+https://github.com/foyer-rs/foyer?rev=f2f80cf#f2f80cf871c0a4bd34b8dbb54e10c5193f2b97dd"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b2815f2977e8627f88d2d7e15ac9ced966d0f9a4de82e958d09b21141ccf261"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
