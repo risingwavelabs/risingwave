@@ -364,7 +364,7 @@ impl MetadataManager {
                 .await),
             MetadataManager::V2(mgr) => {
                 mgr.cluster_controller
-                    .list_active_serving_compute_nodes()
+                    .list_active_serving_workers()
                     .await
             }
         }
