@@ -17,7 +17,7 @@ create source s_before_produce (v1 int, v2 varchar) with (
 statement ok
 create materialized view mv_before_produce as select * from s_before_produce;
 
-sleep 1s
+sleep 2s
 
 # All partitions starts with backfill_info: NoDataToBackfill, so it finishes immediately.
 system ok
