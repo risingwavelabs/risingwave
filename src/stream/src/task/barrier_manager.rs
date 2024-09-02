@@ -52,7 +52,6 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{HummockVersionId, LocalSstableInfo, SyncResult};
-use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::streaming_control_stream_request::{InitRequest, Request};
 use risingwave_pb::stream_service::streaming_control_stream_response::{
@@ -214,18 +213,6 @@ pub(super) enum LocalActorOperation {
     DropActors {
         actors: Vec<ActorId>,
         result_sender: oneshot::Sender<()>,
-    },
-    UpdateActors {
-        actors: Vec<BuildActorInfo>,
-        result_sender: oneshot::Sender<StreamResult<()>>,
-    },
-    BuildActors {
-        actors: Vec<ActorId>,
-        result_sender: oneshot::Sender<StreamResult<()>>,
-    },
-    UpdateActorInfo {
-        new_actor_infos: Vec<ActorInfo>,
-        result_sender: oneshot::Sender<StreamResult<()>>,
     },
     TakeReceiver {
         ids: UpDownActorIds,
@@ -431,6 +418,14 @@ impl LocalBarrierWorker {
         match request.request.expect("should not be empty") {
             Request::InjectBarrier(req) => {
                 let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
+                self.update_actor_info(req.broadcast_info)?;
+                let actors = req
+                    .actors_to_build
+                    .iter()
+                    .map(|actor| actor.actor.as_ref().unwrap().actor_id)
+                    .collect_vec();
+                self.update_actors(req.actors_to_build)?;
+                self.start_create_actors(&actors)?;
                 self.send_barrier(
                     &barrier,
                     req.actor_ids_to_collect.into_iter().collect(),
@@ -505,23 +500,6 @@ impl LocalBarrierWorker {
             } => {
                 self.drop_actors(&actors);
                 let _ = result_sender.send(());
-            }
-            LocalActorOperation::UpdateActors {
-                actors,
-                result_sender,
-            } => {
-                let result = self.update_actors(actors);
-                let _ = result_sender.send(result);
-            }
-            LocalActorOperation::BuildActors {
-                actors,
-                result_sender,
-            } => self.start_create_actors(&actors, result_sender),
-            LocalActorOperation::UpdateActorInfo {
-                new_actor_infos,
-                result_sender,
-            } => {
-                let _ = result_sender.send(self.update_actor_info(new_actor_infos));
             }
             LocalActorOperation::TakeReceiver { ids, result_sender } => {
                 let _ = result_sender.send(self.current_shared_context.take_receiver(ids));
@@ -1092,6 +1070,8 @@ pub(crate) mod barrier_test_utils {
                             table_ids_to_sync: vec![],
                             partial_graph_id: u32::MAX,
                             actor_ids_to_pre_sync_barrier_mutation: vec![],
+                            broadcast_info: vec![],
+                            actors_to_build: vec![],
                         },
                     )),
                 }))

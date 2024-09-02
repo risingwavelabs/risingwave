@@ -56,7 +56,7 @@ use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, ColumnId, DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
+use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::create_source::{
     bind_columns_from_source, bind_connector_props, bind_create_source_or_table_with_connector,
     bind_source_watermark, handle_addition_columns, UPSTREAM_SOURCE_KEY,
@@ -329,9 +329,10 @@ pub fn bind_sql_column_constraints(
                     // so the rewritten expression should almost always be pure and we directly call `fold_const`
                     // here. Actually we do not require purity of the expression here since we're only to get a
                     // snapshot value.
-                    let rewritten_expr_impl =
-                        InlineNowProcTime::new(session.pinned_snapshot().epoch())
-                            .rewrite_expr(expr_impl.clone());
+                    let rewritten_expr_impl = session
+                        .pinned_snapshot()
+                        .inline_now_proc_time()
+                        .rewrite_expr(expr_impl.clone());
 
                     if let Some(snapshot_value) = rewritten_expr_impl.try_fold_const() {
                         let snapshot_value = snapshot_value?;
@@ -1015,6 +1016,7 @@ pub(super) async fn handle_create_table_plan(
                     &constraints,
                     connect_properties.clone(),
                     wildcard_idx.is_some(),
+                    None,
                 )
                 .await?;
 
@@ -1123,6 +1125,8 @@ async fn derive_schema_for_cdc_table(
     constraints: &Vec<TableConstraint>,
     connect_properties: WithOptionsSecResolved,
     need_auto_schema_map: bool,
+    // original table catalog available in auto schema change process
+    original_catalog: Option<Arc<TableCatalog>>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
     if need_auto_schema_map {
@@ -1154,10 +1158,20 @@ async fn derive_schema_for_cdc_table(
             table.pk_names().clone(),
         ))
     } else {
-        Ok((
-            bind_sql_columns(column_defs)?,
-            bind_sql_pk_names(column_defs, constraints)?,
-        ))
+        let columns = bind_sql_columns(column_defs)?;
+        // For table created by `create table t (*)` the constraint is empty, we need to
+        // retrieve primary key names from original table catalog if available
+        let pk_names = if let Some(original_catalog) = original_catalog {
+            original_catalog
+                .pk
+                .iter()
+                .map(|x| original_catalog.columns[x.column_index].name().to_string())
+                .collect()
+        } else {
+            bind_sql_pk_names(column_defs, constraints)?
+        };
+
+        Ok((columns, pk_names))
     }
 }
 
@@ -1328,6 +1342,7 @@ pub async fn generate_stream_graph_for_table(
                 &constraints,
                 connect_properties.clone(),
                 false,
+                Some(original_catalog.clone()),
             )
             .await?;
 

@@ -35,7 +35,7 @@ use crate::barrier::{
 };
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob};
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
-use crate::stream::{to_build_actor_info, SourceManagerRef};
+use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
 pub type GlobalStreamManagerRef = Arc<GlobalStreamManager>;
@@ -291,12 +291,6 @@ impl GlobalStreamManager {
                         // try to cancel buffered creating command.
                         if self.barrier_scheduler.try_cancel_scheduled_create(table_id) {
                             tracing::debug!("cancelling streaming job {table_id} in buffer queue.");
-                            let node_actors = table_fragments.worker_actor_ids();
-                            let cluster_info =
-                                self.metadata_manager.get_streaming_cluster_info().await?;
-                            self.stream_rpc_manager
-                                .drop_actors(&cluster_info.worker_nodes, node_actors.into_iter())
-                                .await?;
 
                             if let MetadataManager::V1(mgr) = &self.metadata_manager {
                                 mgr.fragment_manager
@@ -334,66 +328,6 @@ impl GlobalStreamManager {
         bail!("receiver failed to get notification version for finished stream job")
     }
 
-    async fn build_actors(
-        &self,
-        table_fragments: &TableFragments,
-        building_locations: &Locations,
-        existing_locations: &Locations,
-        subscription_depend_table_id: TableId,
-    ) -> MetaResult<()> {
-        let actor_map = table_fragments.actor_map();
-
-        // Actors on each stream node will need to know where their upstream lies. `actor_info`
-        // includes such information. It contains:
-        // 1. actors in the current create-streaming-job request.
-        // 2. all upstream actors.
-        let actor_infos_to_broadcast = building_locations
-            .actor_infos()
-            .chain(existing_locations.actor_infos());
-
-        let building_worker_actors = building_locations.worker_actors();
-        let subscriptions = self
-            .metadata_manager
-            .get_mv_depended_subscriptions()
-            .await?;
-
-        // We send RPC request in two stages.
-        // The first stage does 2 things: broadcast actor info, and send local actor ids to
-        // different WorkerNodes. Such that each WorkerNode knows the overall actor
-        // allocation, but not actually builds it. We initialize all channels in this stage.
-        self.stream_rpc_manager
-            .broadcast_update_actor_info(
-                &building_locations.worker_locations,
-                building_worker_actors.keys().cloned(),
-                actor_infos_to_broadcast,
-                building_worker_actors.iter().map(|(worker_id, actors)| {
-                    let stream_actors = actors
-                        .iter()
-                        .map(|actor_id| {
-                            to_build_actor_info(
-                                actor_map[actor_id].clone(),
-                                &subscriptions,
-                                subscription_depend_table_id,
-                            )
-                        })
-                        .collect::<Vec<_>>();
-                    (*worker_id, stream_actors)
-                }),
-            )
-            .await?;
-
-        // In the second stage, each [`WorkerNode`] builds local actors and connect them with
-        // channels.
-        self.stream_rpc_manager
-            .build_actors(
-                &building_locations.worker_locations,
-                building_worker_actors.into_iter(),
-            )
-            .await?;
-
-        Ok(())
-    }
-
     async fn create_streaming_job_impl(
         &self,
         table_fragments: TableFragments,
@@ -401,8 +335,6 @@ impl GlobalStreamManager {
             streaming_job,
             dispatchers,
             upstream_root_actors,
-            building_locations,
-            existing_locations,
             definition,
             create_type,
             ddl_type,
@@ -415,27 +347,14 @@ impl GlobalStreamManager {
         let mut replace_table_command = None;
         let mut replace_table_id = None;
 
-        self.build_actors(
-            &table_fragments,
-            &building_locations,
-            &existing_locations,
-            table_fragments.table_id(),
-        )
-        .await?;
         tracing::debug!(
             table_id = %table_fragments.table_id(),
             "built actors finished"
         );
 
-        if let Some((streaming_job, context, table_fragments)) = replace_table_job_info {
-            self.build_actors(
-                &table_fragments,
-                &context.building_locations,
-                &context.existing_locations,
-                context.old_table_fragments.table_id(),
-            )
-            .await?;
+        let need_pause = replace_table_job_info.is_some();
 
+        if let Some((streaming_job, context, table_fragments)) = replace_table_job_info {
             match &self.metadata_manager {
                 MetadataManager::V1(mgr) => {
                     // Add table fragments to meta store with state: `State::Initial`.
@@ -516,7 +435,15 @@ impl GlobalStreamManager {
             }
         };
         let result: MetaResult<NotificationVersion> = try {
-            self.barrier_scheduler.run_command(command).await?;
+            if need_pause {
+                // Special handling is required when creating sink into table, we need to pause the stream to avoid data loss.
+                self.barrier_scheduler
+                    .run_config_change_command_with_pause(command)
+                    .await?;
+            } else {
+                self.barrier_scheduler.run_command(command).await?;
+            }
+
             tracing::debug!(?streaming_job, "first barrier collected for stream job");
             let result = self
                 .metadata_manager
@@ -552,20 +479,11 @@ impl GlobalStreamManager {
             old_table_fragments,
             merge_updates,
             dispatchers,
-            building_locations,
-            existing_locations,
             dummy_id,
             streaming_job,
+            ..
         }: ReplaceTableContext,
     ) -> MetaResult<()> {
-        self.build_actors(
-            &table_fragments,
-            &building_locations,
-            &existing_locations,
-            old_table_fragments.table_id(),
-        )
-        .await?;
-
         let dummy_table_id = table_fragments.table_id();
         let init_split_assignment = self.source_manager.allocate_splits(&dummy_table_id).await?;
 
@@ -898,51 +816,6 @@ mod tests {
         type StreamingControlStreamStream =
             impl Stream<Item = std::result::Result<StreamingControlStreamResponse, tonic::Status>>;
 
-        async fn update_actors(
-            &self,
-            request: Request<risingwave_pb::stream_service::UpdateActorsRequest>,
-        ) -> std::result::Result<Response<UpdateActorsResponse>, Status> {
-            let req = request.into_inner();
-            let mut guard = self.inner.actor_streams.lock().unwrap();
-            for actor in req.get_actors() {
-                let actor = actor.actor.as_ref().unwrap();
-                guard.insert(actor.get_actor_id(), actor.clone());
-            }
-
-            Ok(Response::new(UpdateActorsResponse { status: None }))
-        }
-
-        async fn build_actors(
-            &self,
-            request: Request<BuildActorsRequest>,
-        ) -> std::result::Result<Response<BuildActorsResponse>, Status> {
-            let req = request.into_inner();
-            let mut guard = self.inner.actor_ids.lock().unwrap();
-            for id in req.get_actor_id() {
-                guard.insert(*id);
-            }
-
-            Ok(Response::new(BuildActorsResponse {
-                request_id: "".to_string(),
-                status: None,
-            }))
-        }
-
-        async fn broadcast_actor_info_table(
-            &self,
-            request: Request<risingwave_pb::stream_service::BroadcastActorInfoTableRequest>,
-        ) -> std::result::Result<Response<BroadcastActorInfoTableResponse>, Status> {
-            let req = request.into_inner();
-            let mut guard = self.inner.actor_infos.lock().unwrap();
-            for info in req.get_info() {
-                guard.insert(info.get_actor_id(), info.get_host()?.clone());
-            }
-
-            Ok(Response::new(BroadcastActorInfoTableResponse {
-                status: None,
-            }))
-        }
-
         async fn drop_actors(
             &self,
             _request: Request<DropActorsRequest>,
@@ -972,6 +845,24 @@ mod tests {
                             }));
                         }
                         streaming_control_stream_request::Request::InjectBarrier(req) => {
+                            {
+                                let mut guard = inner.actor_infos.lock().unwrap();
+                                for info in req.broadcast_info {
+                                    guard.insert(
+                                        info.get_actor_id(),
+                                        info.get_host().unwrap().clone(),
+                                    );
+                                }
+                            }
+                            {
+                                let mut guard = inner.actor_streams.lock().unwrap();
+                                let mut actor_ids = inner.actor_ids.lock().unwrap();
+                                for actor in req.actors_to_build {
+                                    let actor = actor.actor.as_ref().unwrap();
+                                    assert!(actor_ids.insert(actor.actor_id));
+                                    guard.insert(actor.get_actor_id(), actor.clone());
+                                }
+                            }
                             let _ = tx.send(Ok(StreamingControlStreamResponse {
                                 response: Some(
                                     streaming_control_stream_response::Response::CompleteBarrier(

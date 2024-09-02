@@ -260,6 +260,12 @@ macro_rules! derive_array_from_blob {
                 Self(vec![])
             }
         }
+
+        impl sea_orm::sea_query::Nullable for $struct_name {
+            fn null() -> Value {
+                Value::Bytes(None)
+            }
+        }
     };
 }
 

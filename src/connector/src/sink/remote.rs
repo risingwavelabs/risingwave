@@ -75,9 +75,7 @@ macro_rules! def_remote_sink {
             { ElasticSearch, ElasticSearchSink, "elasticsearch" }
             { Opensearch, OpenSearchSink, "opensearch"}
             { Cassandra, CassandraSink, "cassandra" }
-            { Jdbc, JdbcSink, "jdbc", |desc| {
-                desc.sink_type.is_append_only()
-            } }
+            { Jdbc, JdbcSink, "jdbc" }
             { DeltaLake, DeltaLakeSink, "deltalake" }
             { HttpJava, HttpJavaSink, "http" }
         }
@@ -119,7 +117,7 @@ def_remote_sink!();
 pub trait RemoteSinkTrait: Send + Sync + 'static {
     const SINK_NAME: &'static str;
     fn default_sink_decouple(_desc: &SinkDesc) -> bool {
-        false
+        true
     }
 }
 

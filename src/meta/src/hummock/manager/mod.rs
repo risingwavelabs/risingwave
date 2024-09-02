@@ -276,7 +276,6 @@ impl HummockManager {
             compactor_manager,
             latest_snapshot: ArcSwap::from_pointee(HummockSnapshot {
                 committed_epoch: INVALID_EPOCH,
-                current_epoch: INVALID_EPOCH,
             }),
             event_sender: tx,
             delete_object_tracker: Default::default(),
@@ -432,7 +431,6 @@ impl HummockManager {
         self.latest_snapshot.store(
             HummockSnapshot {
                 committed_epoch: redo_state.visible_table_committed_epoch(),
-                current_epoch: redo_state.visible_table_committed_epoch(),
             }
             .into(),
         );

@@ -356,6 +356,16 @@ impl MetadataManager {
         }
     }
 
+    pub async fn list_active_serving_compute_nodes(&self) -> MetaResult<Vec<PbWorkerNode>> {
+        match self {
+            MetadataManager::V1(mgr) => Ok(mgr
+                .cluster_manager
+                .list_active_serving_compute_nodes()
+                .await),
+            MetadataManager::V2(mgr) => mgr.cluster_controller.list_active_serving_workers().await,
+        }
+    }
+
     pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<TableId>> {
         match self {
             MetadataManager::V1(mgr) => {
@@ -901,6 +911,8 @@ impl MetadataManager {
 }
 
 impl MetadataManager {
+    /// Wait for job finishing notification in `TrackingJob::pre_finish`.
+    /// The progress is updated per barrier.
     pub(crate) async fn wait_streaming_job_finished(
         &self,
         job: &StreamingJob,

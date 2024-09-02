@@ -165,7 +165,7 @@ pub fn parse_schema_change(
 ) -> AccessResult<SchemaChangeEnvelope> {
     let mut schema_changes = vec![];
 
-    let upstream_ddl = accessor
+    let upstream_ddl: String = accessor
         .access(&[UPSTREAM_DDL], &DataType::Varchar)?
         .to_owned_datum()
         .unwrap()

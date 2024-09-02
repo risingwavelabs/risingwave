@@ -191,7 +191,7 @@ impl IntraCompactionPicker {
                 for level_select_table in &input.sstable_infos {
                     let level_select_size = level_select_table
                         .iter()
-                        .map(|sst| sst.file_size)
+                        .map(|sst| sst.sst_size)
                         .sum::<u64>();
 
                     max_level_size = std::cmp::max(max_level_size, level_select_size);
@@ -291,7 +291,7 @@ impl IntraCompactionPicker {
                 .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
                 .is_empty());
 
-            let select_input_size = select_sst.file_size;
+            let select_input_size = select_sst.sst_size;
             let input_levels = vec![
                 InputLevel {
                     level_idx: 0,
