@@ -468,7 +468,6 @@ async fn test_failpoints_fast_compactor_iterator_recreate() {
     let mut stats = StoreLocalStatistic::default();
 
     let table = sstable_store.sstable(&info, &mut stats).await.unwrap();
-    println!("table {:?}", table);
     let mut sstable_iter = BlockStreamIterator::new(
         table,
         Arc::new(TaskProgress::default()),
