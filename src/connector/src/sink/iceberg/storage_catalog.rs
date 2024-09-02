@@ -257,7 +257,11 @@ impl Catalog for StorageCatalog {
         let table_path = {
             let mut names = table.namespace.clone().inner();
             names.push(table.name.to_string());
-            format!("{}/{}", self.warehouse, names.join("/"))
+            if self.warehouse.ends_with('/') {
+                format!("{}{}", self.warehouse, names.join("/"))
+            } else {
+                format!("{}/{}", self.warehouse, names.join("/"))
+            }
         };
         let path = if self.is_version_hint_exist(&table_path).await? {
             let version_hint = self.read_version_hint(&table_path).await?;
@@ -294,11 +298,13 @@ impl Catalog for StorageCatalog {
         let table_path = {
             let mut names = table.namespace.clone().inner();
             names.push(table.name.to_string());
-            format!("{}/{}", self.warehouse, names.join("/"))
+            if self.warehouse.ends_with('/') {
+                format!("{}{}", self.warehouse, names.join("/"))
+            } else {
+                format!("{}/{}", self.warehouse, names.join("/"))
+            }
         };
-        
-        // Check if the metadata directory exists
-        let metadata_path = format!("{table_path}/metadata");
+        let metadata_path = format!("{table_path}/metadata/version-hint.text");
         self.file_io.is_exist(&metadata_path).await.map_err(|err| {
             Error::new(
                 ErrorKind::Unexpected,
