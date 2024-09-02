@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::iter::repeat_with;
 use std::ops::{Deref, DerefMut};
+use std::time::Duration;
 
 use futures::TryStreamExt;
 use itertools::Itertools;
@@ -51,6 +52,13 @@ struct DispatcherWithMetrics {
     actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter<3>,
 }
 
+impl DispatcherWithMetrics {
+    pub fn record_output_buffer_blocking_duration(&self, duration: Duration) {
+        let ns = duration.as_nanos() as u64;
+        self.actor_output_buffer_blocking_duration_ns.inc_by(ns);
+    }
+}
+
 impl Debug for DispatcherWithMetrics {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.dispatcher.fmt(f)
@@ -71,20 +79,20 @@ impl DerefMut for DispatcherWithMetrics {
     }
 }
 
-struct DispatcherMetrics {
+struct DispatchExecutorMetrics {
     actor_id_str: String,
     fragment_id_str: String,
     metrics: Arc<StreamingMetrics>,
     actor_out_record_cnt: LabelGuardedIntCounter<2>,
 }
 
-impl DispatcherMetrics {
+impl DispatchExecutorMetrics {
     fn monitor_dispatcher(&self, dispatcher: DispatcherImpl) -> DispatcherWithMetrics {
         DispatcherWithMetrics {
             actor_output_buffer_blocking_duration_ns: self
                 .metrics
                 .actor_output_buffer_blocking_duration_ns
-                .with_guarded_label_values(&[
+                .with_label_values(&[
                     &self.actor_id_str,
                     &self.fragment_id_str,
                     dispatcher.dispatcher_id_str(),
@@ -98,7 +106,7 @@ struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherWithMetrics>,
     actor_id: u32,
     context: Arc<SharedContext>,
-    metrics: DispatcherMetrics,
+    metrics: DispatchExecutorMetrics,
 }
 
 impl DispatchExecutorInner {
@@ -112,9 +120,7 @@ impl DispatchExecutorInner {
                     .try_for_each_concurrent(limit, |dispatcher| async {
                         let start_time = Instant::now();
                         dispatcher.dispatch_watermark(watermark.clone()).await?;
-                        dispatcher
-                            .actor_output_buffer_blocking_duration_ns
-                            .inc_by(start_time.elapsed().as_nanos() as u64);
+                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
                         StreamResult::Ok(())
                     })
                     .await?;
@@ -125,9 +131,7 @@ impl DispatchExecutorInner {
                     .try_for_each_concurrent(limit, |dispatcher| async {
                         let start_time = Instant::now();
                         dispatcher.dispatch_data(chunk.clone()).await?;
-                        dispatcher
-                            .actor_output_buffer_blocking_duration_ns
-                            .inc_by(start_time.elapsed().as_nanos() as u64);
+                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
                         StreamResult::Ok(())
                     })
                     .await?;
@@ -147,9 +151,7 @@ impl DispatchExecutorInner {
                         dispatcher
                             .dispatch_barrier(barrier.clone().into_dispatcher())
                             .await?;
-                        dispatcher
-                            .actor_output_buffer_blocking_duration_ns
-                            .inc_by(start_time.elapsed().as_nanos() as u64);
+                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
                         StreamResult::Ok(())
                     })
                     .await?;
@@ -361,7 +363,7 @@ impl DispatchExecutor {
         let actor_out_record_cnt = metrics
             .actor_out_record_cnt
             .with_guarded_label_values(&[&actor_id_str, &fragment_id_str]);
-        let metrics = DispatcherMetrics {
+        let metrics = DispatchExecutorMetrics {
             actor_id_str,
             fragment_id_str,
             metrics,

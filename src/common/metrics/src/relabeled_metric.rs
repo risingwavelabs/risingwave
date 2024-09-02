@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::{MetricVec, MetricVecBuilder};
+use prometheus::core::{Collector, MetricVec, MetricVecBuilder};
 use prometheus::{HistogramVec, IntCounterVec};
 
 use crate::{
@@ -89,6 +89,7 @@ impl<T: MetricVecBuilder> RelabeledMetricVec<MetricVec<T>> {
 }
 
 impl<T: MetricVecBuilder, const N: usize> RelabeledMetricVec<LabelGuardedMetricVec<T, N>> {
+    // TODO: shall we rename this to `with_guarded_label_values`?
     pub fn with_label_values(&self, vals: &[&str; N]) -> LabelGuardedMetric<T::M, N> {
         if self.metric_level > self.relabel_threshold {
             // relabel first n labels to empty string
@@ -99,6 +100,16 @@ impl<T: MetricVecBuilder, const N: usize> RelabeledMetricVec<LabelGuardedMetricV
             return self.metric.with_guarded_label_values(&relabeled_vals);
         }
         self.metric.with_guarded_label_values(vals)
+    }
+}
+
+impl<T: Collector> Collector for RelabeledMetricVec<T> {
+    fn desc(&self) -> Vec<&prometheus::core::Desc> {
+        self.metric.desc()
+    }
+
+    fn collect(&self) -> Vec<prometheus::proto::MetricFamily> {
+        self.metric.collect()
     }
 }
 
