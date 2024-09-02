@@ -181,7 +181,7 @@ impl BackfillStage {
             }
             BackfillState::Finished => {
                 vis = true;
-                // This split's backfilling is finisehd, we are waiting for other splits
+                // This split's backfilling is finished, we are waiting for other splits
             }
         }
         if matches!(state, BackfillState::Backfilling(_)) {
