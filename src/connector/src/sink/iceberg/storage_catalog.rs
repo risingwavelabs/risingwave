@@ -308,7 +308,7 @@ impl Catalog for StorageCatalog {
         self.file_io.is_exist(&metadata_path).await.map_err(|err| {
             Error::new(
                 ErrorKind::Unexpected,
-                format!("Failed to check if table exists: {}", err),
+                format!("Failed to check if table exists: {}", err.as_report()),
             )
         })
     }
