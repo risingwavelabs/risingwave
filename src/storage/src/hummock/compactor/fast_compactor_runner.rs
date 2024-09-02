@@ -162,7 +162,13 @@ impl BlockStreamIterator {
                     tracing::warn!(
                         "fast compact retry create stream for sstable {} times, sstinfo={}",
                         self.io_retry_times,
-                        self.sst_debug_info()
+                        format!(
+                            "object_id={}, sst_id={}, meta_offset={}, table_ids={:?}",
+                            self.sstable_info.object_id,
+                            self.sstable_info.sst_id,
+                            self.sstable_info.meta_offset,
+                            self.sstable_info.table_ids
+                        )
                     );
                 }
             }
