@@ -194,14 +194,12 @@ impl SharedContext {
         &self.config
     }
 
-    pub fn drop_actors(&self, actors: &[ActorId]) {
+    pub fn drop_actor(&self, actor_id: ActorId) {
         self.channel_map
             .lock()
-            .retain(|(up_id, _), _| !actors.contains(up_id));
+            .retain(|(up_id, _), _| actor_id != *up_id);
         let mut actor_infos = self.actor_infos.write();
-        for actor_id in actors {
-            actor_infos.remove(actor_id);
-        }
+        actor_infos.remove(&actor_id);
     }
 }
 

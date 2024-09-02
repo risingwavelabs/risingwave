@@ -49,7 +49,7 @@ use tokio::sync::{oneshot, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
-use crate::barrier::{Command, Reschedule, StreamRpcManager};
+use crate::barrier::{Command, Reschedule};
 use crate::controller::scale::RescheduleWorkingSet;
 use crate::manager::{
     IdCategory, IdGenManagerImpl, LocalNotification, MetaSrvEnv, MetadataManager,
@@ -437,8 +437,6 @@ pub struct ScaleController {
 
     pub source_manager: SourceManagerRef,
 
-    pub stream_rpc_manager: StreamRpcManager,
-
     pub env: MetaSrvEnv,
 
     pub reschedule_lock: RwLock<()>,
@@ -448,11 +446,9 @@ impl ScaleController {
     pub fn new(
         metadata_manager: &MetadataManager,
         source_manager: SourceManagerRef,
-        stream_rpc_manager: StreamRpcManager,
         env: MetaSrvEnv,
     ) -> Self {
         Self {
-            stream_rpc_manager,
             metadata_manager: metadata_manager.clone(),
             source_manager,
             env,

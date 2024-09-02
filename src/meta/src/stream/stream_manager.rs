@@ -31,7 +31,7 @@ use tracing::Instrument;
 use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
-    ReplaceTablePlan, SnapshotBackfillInfo, StreamRpcManager,
+    ReplaceTablePlan, SnapshotBackfillInfo,
 };
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob};
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
@@ -203,8 +203,6 @@ pub struct GlobalStreamManager {
     creating_job_info: CreatingStreamingJobInfoRef,
 
     pub scale_controller: ScaleControllerRef,
-
-    pub stream_rpc_manager: StreamRpcManager,
 }
 
 impl GlobalStreamManager {
@@ -213,7 +211,6 @@ impl GlobalStreamManager {
         metadata_manager: MetadataManager,
         barrier_scheduler: BarrierScheduler,
         source_manager: SourceManagerRef,
-        stream_rpc_manager: StreamRpcManager,
         scale_controller: ScaleControllerRef,
     ) -> MetaResult<Self> {
         Ok(Self {
@@ -223,7 +220,6 @@ impl GlobalStreamManager {
             source_manager,
             creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
             scale_controller,
-            stream_rpc_manager,
         })
     }
 
@@ -816,13 +812,6 @@ mod tests {
         type StreamingControlStreamStream =
             impl Stream<Item = std::result::Result<StreamingControlStreamResponse, tonic::Status>>;
 
-        async fn drop_actors(
-            &self,
-            _request: Request<DropActorsRequest>,
-        ) -> std::result::Result<Response<DropActorsResponse>, Status> {
-            Ok(Response::new(DropActorsResponse::default()))
-        }
-
         async fn streaming_control_stream(
             &self,
             request: Request<Streaming<StreamingControlStreamRequest>>,
@@ -989,11 +978,9 @@ mod tests {
 
             let (sink_manager, _) = SinkCoordinatorManager::start_worker();
 
-            let stream_rpc_manager = StreamRpcManager::new(env.clone());
             let scale_controller = Arc::new(ScaleController::new(
                 &metadata_manager,
                 source_manager.clone(),
-                stream_rpc_manager.clone(),
                 env.clone(),
             ));
 
@@ -1005,7 +992,6 @@ mod tests {
                 source_manager.clone(),
                 sink_manager,
                 meta_metrics.clone(),
-                stream_rpc_manager.clone(),
                 scale_controller.clone(),
             )
             .await;
@@ -1015,7 +1001,6 @@ mod tests {
                 metadata_manager,
                 barrier_scheduler.clone(),
                 source_manager.clone(),
-                stream_rpc_manager,
                 scale_controller.clone(),
             )?;
 
