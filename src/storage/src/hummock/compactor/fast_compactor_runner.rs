@@ -158,6 +158,12 @@ impl BlockStreamIterator {
                     self.block_stream.take();
                     self.io_retry_times += 1;
                     fail_point!("create_stream_err");
+
+                    tracing::warn!(
+                        "fast compact retry create stream for sstable {} times, sstinfo={}",
+                        self.io_retry_times,
+                        self.sst_debug_info()
+                    );
                 }
             }
         }
