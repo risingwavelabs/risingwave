@@ -755,7 +755,11 @@ impl IcebergSink {
                 .map(|column| {
                     let mut arrow_field = IcebergArrowConvert
                         .to_arrow_field(&column.name, &column.data_type)
-                        .map_err(|e| SinkError::Iceberg(anyhow!(e))).context(format!("failed to convert {}: {} to arrow type", &column.name, &column.data_type))?;
+                        .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                        .context(format!(
+                            "failed to convert {}: {} to arrow type",
+                            &column.name, &column.data_type
+                        ))?;
                     let mut metadata = HashMap::new();
                     metadata.insert(
                         PARQUET_FIELD_ID_META_KEY.to_string(),
@@ -771,7 +775,8 @@ impl IcebergSink {
                 .collect::<Result<Vec<ArrowField>>>()?;
             let arrow_schema = arrow_schema_iceberg::Schema::new(arrow_fields);
             let iceberg_schema = iceberg::arrow::arrow_schema_to_schema(&arrow_schema)
-                .map_err(|e| SinkError::Iceberg(anyhow!(e))).context("failed to convert arrow schema to iceberg schema")?;
+                .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                .context("failed to convert arrow schema to iceberg schema")?;
 
             let location = {
                 let mut names = namespace.clone().inner();
@@ -788,7 +793,8 @@ impl IcebergSink {
             catalog
                 .create_table(&namespace, table_creation)
                 .await
-                .map_err(|e| SinkError::Iceberg(anyhow!(e))).context("failed to create iceberg table")?;
+                .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                .context("failed to create iceberg table")?;
         }
         Ok(())
     }
