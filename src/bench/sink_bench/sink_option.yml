@@ -100,8 +100,8 @@ Starrocks:
 BigQuery:
   connector: 'bigquery'
   type: 'append-only'
-  bigquery.local.path: '/home/xxhx/.ssh/rwc-playground-7e95d326dfd2.json'
-  bigquery.project: 'rwc-playground'
-  bigquery.dataset: 'test_123'
-  bigquery.table: 't2'
+  bigquery.local.path: 'xxx.json'
+  bigquery.project: 'xxx'
+  bigquery.dataset: 'test_bigquery_sink'
+  bigquery.table: 'table_bench'
   force_append_only: 'true'

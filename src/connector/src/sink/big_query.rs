@@ -94,12 +94,12 @@ pub struct BigQueryCommon {
 
 struct BigQueryFutureManager {
     // `offset_queue` holds the Some corresponding to each future.
-    // When we receive a barrier we add a Some(barrier).
-    // When we receive a chunk, if the chunk is larger than `MAX_ROW_SIZE`, we split it, and then we add n None and a Some(chunk) to the queue.
+    // When TruncateOffset is barrier, the num is 0, we don't need to wait for the return of `resp_stream`.
+    // When TruncateOffset is chunk:
+    // 1. chunk has no rows. we didn't send, the num is 0, we don't need to wait for the return of `resp_stream`.
+    // 2. chunk is less than `MAX_ROW_SIZE`, we only sent once, the num is 1 and we only have to wait once for `resp_stream`.
+    // 3. chunk is less than `MAX_ROW_SIZE`, we only sent n, the num is n and we need to wait n times for r.
     offset_queue: VecDeque<(TruncateOffset, usize)>,
-    // When we pop a Some(barrier) from the queue, we don't have to wait `resp_stream`, we just truncate.
-    // When we pop a Some(chunk) from the queue, we have to wait `resp_stream`.
-    // When we pop a None from the queue, we have to wait `resp_stream`, but we don't need to truncate.
     resp_stream: Pin<Box<dyn Stream<Item = Result<()>> + Send>>,
 }
 impl BigQueryFutureManager {
