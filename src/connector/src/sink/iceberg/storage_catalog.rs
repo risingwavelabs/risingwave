@@ -225,7 +225,11 @@ impl Catalog for StorageCatalog {
         let table_path = {
             let mut names = table_ident.namespace.clone().inner();
             names.push(table_ident.name.to_string());
-            format!("{}/{}", self.warehouse, names.join("/"))
+            if self.warehouse.ends_with('/') {
+                format!("{}{}", self.warehouse, names.join("/"))
+            } else {
+                format!("{}/{}", self.warehouse, names.join("/"))
+            }
         };
 
         // Create the metadata directory

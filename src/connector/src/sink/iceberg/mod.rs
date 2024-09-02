@@ -781,7 +781,11 @@ impl IcebergSink {
             let location = {
                 let mut names = namespace.clone().inner();
                 names.push(self.config.table_name.to_string());
-                format!("{}/{}", self.config.path, names.join("/"))
+                if self.config.path.ends_with('/') {
+                    format!("{}{}", self.config.path, names.join("/"))
+                } else {
+                    format!("{}/{}", self.config.path, names.join("/"))
+                }
             };
 
             let table_creation = TableCreation::builder()

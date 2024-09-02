@@ -348,6 +348,10 @@ IcebergConfig:
     comments: Commit every n(>0) checkpoints, default is 10.
     required: false
     default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
+  - name: create_table_if_not_exists
+    field_type: bool
+    required: false
+    default: Default::default
 KafkaConfig:
   fields:
   - name: properties.bootstrap.server
