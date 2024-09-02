@@ -242,6 +242,9 @@ impl ConcatSstableIterator {
             let stats_ptr = self.stats.remote_io_time.clone();
             let now = Instant::now();
             self.task_progress.inc_num_pending_read_io();
+
+            // Fast compact only support the single table compaction.(not split sst)
+            // So we don't need to filter the block_metas with table_id and key_range
             let block_stream = self
                 .sstable_store
                 .get_stream_for_blocks(sstable.id, &sstable.meta.block_metas)

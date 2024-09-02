@@ -533,6 +533,12 @@ pub fn optimize_by_copy_block(compact_task: &CompactTask, context: &CompactorCon
         .iter()
         .any(|(_, table_option)| table_option.retention_seconds.is_some_and(|ttl| ttl > 0));
 
+    let has_split_sst = compact_task
+        .input_ssts
+        .iter()
+        .flat_map(|level| level.table_infos.iter())
+        .any(|sst| sst.sst_id != sst.object_id);
+
     let compact_table_ids: HashSet<u32> = HashSet::from_iter(
         compact_task
             .input_ssts
@@ -546,6 +552,7 @@ pub fn optimize_by_copy_block(compact_task: &CompactTask, context: &CompactorCon
         && all_ssts_are_blocked_filter
         && !has_tombstone
         && !has_ttl
+        && !has_split_sst
         && single_table
         && compact_task.target_level > 0
         && compact_task.input_ssts.len() == 2
