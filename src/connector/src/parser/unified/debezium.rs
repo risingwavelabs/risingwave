@@ -87,7 +87,6 @@ pub const DEBEZIUM_READ_OP: &str = "r";
 pub const DEBEZIUM_CREATE_OP: &str = "c";
 pub const DEBEZIUM_UPDATE_OP: &str = "u";
 pub const DEBEZIUM_DELETE_OP: &str = "d";
-pub const DEBEZIUM_TRUNCATE_OP: &str = "t";
 
 pub const DEBEZIUM_TRANSACTION_STATUS_BEGIN: &str = "BEGIN";
 pub const DEBEZIUM_TRANSACTION_STATUS_COMMIT: &str = "END";
