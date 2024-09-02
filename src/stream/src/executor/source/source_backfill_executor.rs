@@ -612,10 +612,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         }
 
         let mut splits: HashSet<SplitId> = backfill_stage.states.keys().cloned().collect();
-        tracing::info!(
-            actor_id = self.actor_ctx.id,
-            "source backfill finished. Enter forward stage"
-        );
+
         // All splits finished backfilling. Now we only forward the source data.
         #[for_await]
         for msg in input {
@@ -672,19 +669,13 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
     /// Otherwise if we break early, but after rescheduling, an unfinished split is migrated to
     /// this actor, we still need to backfill it.
     async fn backfill_finished(&self, states: &BackfillStates) -> StreamExecutorResult<bool> {
-        let persisted_states = self.backfill_state_store.scan().await?;
-        let actor_id = self.actor_ctx.id;
-        tracing::debug!(
-            actor_id,
-            "checking whether source backfill is finished, persisted_states: {:?}, states: {:?}",
-            persisted_states,
-            states
-        );
         Ok(states
             .values()
             .all(|state| matches!(state, BackfillState::Finished))
-            && !persisted_states.is_empty()
-            && persisted_states
+            && self
+                .backfill_state_store
+                .scan()
+                .await?
                 .into_iter()
                 .all(|state| matches!(state, BackfillState::Finished)))
     }
@@ -840,10 +831,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                             BackfillState::Finished => {}
                             _ => {
                                 return Err(anyhow::anyhow!(
-                                    "Unexpected backfill state in update_state_if_changed_forward_stage: {:?}, target_splits: {:?}, current_splits: {:?}",
-                                    backfill_state,
-                                    target_splits,
-                                    current_splits
+                                    "Unexpected backfill state: {:?}",
+                                    backfill_state
                                 )
                                 .into());
                             }
