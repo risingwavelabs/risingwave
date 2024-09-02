@@ -189,9 +189,13 @@ impl SstableStreamIterator {
     /// `self.block_iter` to `None`.
     async fn next_block(&mut self) -> HummockResult<()> {
         // Check if we want and if we can load the next block.
+        let now = Instant::now();
+        let _time_stat = scopeguard::guard(self.stats_ptr.clone(), |stats_ptr: Arc<AtomicU64>| {
+            let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+            stats_ptr.fetch_add(add as u64, atomic::Ordering::Relaxed);
+        });
         if self.block_idx < self.block_metas.len() {
             loop {
-                let now = Instant::now();
                 let ret = match &mut self.block_stream {
                     Some(block_stream) => block_stream.next_block().await,
                     None => {
@@ -199,7 +203,6 @@ impl SstableStreamIterator {
                         continue;
                     }
                 };
-                let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
                 match ret {
                     Ok(Some(block)) => {
                         let mut block_iter =
@@ -219,8 +222,6 @@ impl SstableStreamIterator {
                         fail_point!("create_stream_err");
                     }
                 }
-                self.stats_ptr
-                    .fetch_add(add as u64, atomic::Ordering::Relaxed);
             }
         }
         self.block_idx = self.block_metas.len();
