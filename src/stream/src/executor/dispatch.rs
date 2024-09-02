@@ -92,7 +92,7 @@ impl DispatchExecutorMetrics {
             actor_output_buffer_blocking_duration_ns: self
                 .metrics
                 .actor_output_buffer_blocking_duration_ns
-                .with_label_values(&[
+                .with_guarded_label_values(&[
                     &self.actor_id_str,
                     &self.fragment_id_str,
                     dispatcher.dispatcher_id_str(),

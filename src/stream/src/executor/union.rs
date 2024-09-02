@@ -106,7 +106,7 @@ async fn merge(
     let mut watermark_buffers = BTreeMap::<usize, BufferedWatermarks<usize>>::new();
 
     let mut start_time = Instant::now();
-    let barrier_align = metrics.barrier_align_duration.with_label_values(&[
+    let barrier_align = metrics.barrier_align_duration.with_guarded_label_values(&[
         &actor_id.to_string(),
         &fragment_id.to_string(),
         "",
