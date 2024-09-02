@@ -1473,6 +1473,7 @@ mod test {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
             commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
+            create_table_if_not_exists: false,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);
