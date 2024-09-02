@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::ops::Bound::Unbounded;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -392,6 +391,7 @@ async fn test_failpoints_compactor_iterator_recreate() {
         meta.clone(),
         sstable_store.clone(),
         default_writer_opt_for_test(),
+        vec![table_id as u32],
     )
     .await
     .unwrap();
@@ -402,7 +402,6 @@ async fn test_failpoints_compactor_iterator_recreate() {
     let mut sstable_iter = SstableStreamIterator::new(
         table.meta.block_metas.clone(),
         info,
-        HashSet::from_iter(std::iter::once(0)),
         &stats,
         Arc::new(TaskProgress::default()),
         sstable_store,
