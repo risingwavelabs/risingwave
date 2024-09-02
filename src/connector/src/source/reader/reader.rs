@@ -31,8 +31,7 @@ use crate::error::ConnectorResult;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use crate::source::filesystem::opendal_source::{
-    OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
-    DEFAULT_REFRESH_INTERVAL_SEC,
+    OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource, DEFAULT_REFRESH_INTERVAL_SEC,
 };
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{
