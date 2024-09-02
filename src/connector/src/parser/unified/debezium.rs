@@ -365,13 +365,16 @@ where
                         return Ok(ChangeEventOperation::Upsert)
                     }
                     DEBEZIUM_DELETE_OP => return Ok(ChangeEventOperation::Delete),
-                    DEBEZIUM_TRUNCATE_OP => {
+                    _ => {
                         return Err(super::AccessError::Undefined {
-                            name: "op WKXLOG TRUNCATE operation is not supported yet.".into(),
+                            name: format!(
+                                "WKXLOG unknown operation is not supported yet, op: {}",
+                                op
+                            )
+                            .into(),
                             path: Default::default(),
                         });
                     }
-                    _ => (),
                 }
             }
             Err(super::AccessError::Undefined {
