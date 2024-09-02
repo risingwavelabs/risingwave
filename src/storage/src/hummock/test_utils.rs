@@ -123,6 +123,7 @@ pub fn gen_dummy_sst_info(
         uncompressed_file_size: file_size,
         min_epoch: epoch,
         max_epoch: epoch,
+        sst_size: file_size,
         ..Default::default()
     }
 }
@@ -174,6 +175,7 @@ pub async fn put_sst(
     mut meta: SstableMeta,
     sstable_store: SstableStoreRef,
     mut options: SstableWriterOptions,
+    table_ids: Vec<u32>,
 ) -> HummockResult<SstableInfo> {
     options.policy = CachePolicy::NotFill;
     let mut writer = sstable_store
@@ -198,6 +200,7 @@ pub async fn put_sst(
         file_size: meta.estimated_size as u64,
         meta_offset: meta.meta_offset,
         uncompressed_file_size: meta.estimated_size as u64,
+        table_ids,
         ..Default::default()
     };
     let writer_output = writer.finish(meta).await?;

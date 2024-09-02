@@ -121,10 +121,6 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
             .await
     }
 
-    async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()> {
-        self.meta_client.update_current_epoch(epoch).await
-    }
-
     async fn subscribe_compaction_event(
         &self,
     ) -> Result<(

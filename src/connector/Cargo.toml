@@ -88,10 +88,12 @@ nexmark = { version = "0.2", features = ["serde"] }
 num-bigint = "0.4"
 opendal = { workspace = true, features = [
     "executors-tokio",
+    "services-azblob",
     "services-fs",
     "services-gcs",
     "services-memory",
     "services-s3",
+    "services-webhdfs",
 ] }
 openssl = "0.10"
 parking_lot = { workspace = true }

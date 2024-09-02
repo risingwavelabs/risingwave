@@ -1053,7 +1053,6 @@ async fn test_multiple_epoch_sync() {
         .storage
         .start_epoch(epoch4, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch4, SealCurrentEpochOptions::for_test());
-    test_env.storage.seal_epoch(epoch1, false);
     let sync_result2 = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
     let sync_result3 = test_env.storage.seal_and_sync_epoch(epoch3).await.unwrap();
     test_get().await;
@@ -2530,6 +2529,8 @@ async fn test_commit_multi_epoch() {
         sst_id: 11,
         object_id: 1,
         table_ids: vec![existing_table_id.table_id],
+        file_size: 100,
+        sst_size: 100,
         ..Default::default()
     };
 
@@ -2578,6 +2579,8 @@ async fn test_commit_multi_epoch() {
         sst_id: 22,
         object_id: 2,
         table_ids: vec![existing_table_id.table_id],
+        file_size: 100,
+        sst_size: 100,
         ..Default::default()
     };
 
@@ -2629,6 +2632,8 @@ async fn test_commit_multi_epoch() {
         sst_id: 33,
         object_id: 3,
         table_ids: vec![new_table_id.table_id],
+        file_size: 100,
+        sst_size: 100,
         ..Default::default()
     };
 
@@ -2671,6 +2676,8 @@ async fn test_commit_multi_epoch() {
         sst_id: 44,
         object_id: 4,
         table_ids: vec![new_table_id.table_id],
+        file_size: 100,
+        sst_size: 100,
         ..Default::default()
     };
 
@@ -2711,6 +2718,8 @@ async fn test_commit_multi_epoch() {
         sst_id: 55,
         object_id: 5,
         table_ids: vec![existing_table_id.table_id, new_table_id.table_id],
+        file_size: 100,
+        sst_size: 100,
         ..Default::default()
     };
 

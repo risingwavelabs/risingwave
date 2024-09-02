@@ -938,24 +938,15 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn try_unregister(&self) {}
 
     async fn pin_snapshot(&self) -> RpcResult<HummockSnapshot> {
-        Ok(HummockSnapshot {
-            committed_epoch: 0,
-            current_epoch: 0,
-        })
+        Ok(HummockSnapshot { committed_epoch: 0 })
     }
 
     async fn get_snapshot(&self) -> RpcResult<HummockSnapshot> {
-        Ok(HummockSnapshot {
-            committed_epoch: 0,
-            current_epoch: 0,
-        })
+        Ok(HummockSnapshot { committed_epoch: 0 })
     }
 
     async fn flush(&self, _checkpoint: bool) -> RpcResult<HummockSnapshot> {
-        Ok(HummockSnapshot {
-            committed_epoch: 0,
-            current_epoch: 0,
-        })
+        Ok(HummockSnapshot { committed_epoch: 0 })
     }
 
     async fn wait(&self) -> RpcResult<()> {

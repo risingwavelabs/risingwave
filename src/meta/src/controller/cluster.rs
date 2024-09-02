@@ -85,7 +85,7 @@ impl From<WorkerInfo> for PbWorkerNode {
                 is_streaming: p.is_streaming,
                 is_serving: p.is_serving,
                 is_unschedulable: p.is_unschedulable,
-                internal_rpc_host_addr: p.internal_rpc_host_addr.clone(),
+                internal_rpc_host_addr: p.internal_rpc_host_addr.clone().unwrap_or_default(),
             }),
             transactional_id: info.0.transaction_id.map(|id| id as _),
             resource: info.2.resource,
@@ -696,6 +696,23 @@ impl ClusterControllerInner {
                 self.update_worker_ttl(worker.worker_id, ttl)?;
                 self.update_resource_and_started_at(worker.worker_id, resource)?;
                 Ok(worker.worker_id)
+            } else if worker.worker_type == WorkerType::Frontend && property.is_none() {
+                let worker_property = worker_property::ActiveModel {
+                    worker_id: Set(worker.worker_id),
+                    parallelism: Set(add_property
+                        .worker_node_parallelism
+                        .try_into()
+                        .expect("invalid parallelism")),
+                    is_streaming: Set(add_property.is_streaming),
+                    is_serving: Set(add_property.is_serving),
+                    is_unschedulable: Set(add_property.is_unschedulable),
+                    internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
+                };
+                WorkerProperty::insert(worker_property).exec(&txn).await?;
+                txn.commit().await?;
+                self.update_worker_ttl(worker.worker_id, ttl)?;
+                self.update_resource_and_started_at(worker.worker_id, resource)?;
+                Ok(worker.worker_id)
             } else {
                 self.update_worker_ttl(worker.worker_id, ttl)?;
                 self.update_resource_and_started_at(worker.worker_id, resource)?;
@@ -724,7 +741,7 @@ impl ClusterControllerInner {
                 is_streaming: Set(add_property.is_streaming),
                 is_serving: Set(add_property.is_serving),
                 is_unschedulable: Set(add_property.is_unschedulable),
-                internal_rpc_host_addr: Set(add_property.internal_rpc_host_addr),
+                internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
             };
             WorkerProperty::insert(property).exec(&txn).await?;
         }

@@ -76,7 +76,10 @@ use crate::error::ConnectorResult;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkCommitCoordinator, SinkDecouple, SinkParam};
-use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
+use crate::{
+    deserialize_bool_from_string, deserialize_optional_bool_from_string,
+    deserialize_optional_string_seq_from_string,
+};
 
 /// This iceberg sink is WIP. When it ready, we will change this name to "iceberg".
 pub const ICEBERG_SINK: &str = "iceberg";
@@ -129,9 +132,9 @@ pub struct IcebergConfig {
     #[serde(
         rename = "s3.path.style.access",
         default,
-        deserialize_with = "deserialize_bool_from_string"
+        deserialize_with = "deserialize_optional_bool_from_string"
     )]
-    pub path_style_access: bool,
+    pub path_style_access: Option<bool>,
 
     #[serde(
         rename = "primary_key",
@@ -281,10 +284,12 @@ impl IcebergConfig {
             "iceberg.table.io.secret_access_key".to_string(),
             self.secret_key.clone().to_string(),
         );
-        iceberg_configs.insert(
-            "iceberg.table.io.enable_virtual_host_style".to_string(),
-            (!self.path_style_access).to_string(),
-        );
+        if let Some(path_style_access) = self.path_style_access {
+            iceberg_configs.insert(
+                "iceberg.table.io.enable_virtual_host_style".to_string(),
+                (!path_style_access).to_string(),
+            );
+        }
 
         let (bucket, root) = {
             let url = Url::parse(&self.path).map_err(|e| SinkError::Iceberg(anyhow!(e)))?;
@@ -424,10 +429,13 @@ impl IcebergConfig {
                 "s3.secret-access-key".to_string(),
                 self.secret_key.clone().to_string(),
             );
-            java_catalog_configs.insert(
-                "s3.path-style-access".to_string(),
-                self.path_style_access.to_string(),
-            );
+
+            if let Some(path_style_access) = self.path_style_access {
+                java_catalog_configs.insert(
+                    "s3.path-style-access".to_string(),
+                    path_style_access.to_string(),
+                );
+            }
             if matches!(self.catalog_type.as_deref(), Some("glue")) {
                 java_catalog_configs.insert(
                     "client.credentials-provider".to_string(),
@@ -756,18 +764,20 @@ impl Sink for IcebergSink {
 
     fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
         let commit_checkpoint_interval =
-            if let Some(interval) = desc.properties.get("commit_checkpoint_interval") {
-                interval
-                    .parse::<u64>()
-                    .unwrap_or(DEFAULT_COMMIT_CHECKPOINT_INTERVAL)
-            } else {
-                DEFAULT_COMMIT_CHECKPOINT_INTERVAL
-            };
+            desc.properties
+                .get("commit_checkpoint_interval")
+                .map(|interval| {
+                    interval
+                        .parse::<u64>()
+                        .unwrap_or(DEFAULT_COMMIT_CHECKPOINT_INTERVAL)
+                });
 
         match user_specified {
             SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => {
-                if commit_checkpoint_interval > 1 {
+                if let Some(commit_checkpoint_interval) = commit_checkpoint_interval
+                    && commit_checkpoint_interval > 1
+                {
                     return Err(SinkError::Config(anyhow!(
                         "config conflict: Iceberg config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
                     )));
@@ -1385,7 +1395,7 @@ mod test {
             endpoint: Some("http://127.0.0.1:9301".to_string()),
             access_key: "hummockadmin".to_string(),
             secret_key: "hummockadmin".to_string(),
-            path_style_access: true,
+            path_style_access: Some(true),
             primary_key: Some(vec!["v1".to_string()]),
             java_catalog_props: [("jdbc.user", "admin"), ("jdbc.password", "123456")]
                 .into_iter()

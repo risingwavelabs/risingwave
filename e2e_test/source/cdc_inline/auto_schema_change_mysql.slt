@@ -42,6 +42,7 @@ distribution key id NULL NULL
 table description rw_customers NULL NULL
 
 
+# add column
 system ok
 mysql -e "
   USE mytest;
@@ -64,6 +65,57 @@ primary key id NULL NULL
 distribution key id NULL NULL
 table description rw_customers NULL NULL
 
+# rename column on upstream will not be replicated, since we do not support rename column
+system ok
+mysql -e "
+  USE mytest;
+  ALTER TABLE customers RENAME COLUMN v1 TO v11;
+  ALTER TABLE customers CHANGE COLUMN v2 v22 decimal(5,2);
+"
+
+sleep 3s
+
+# table schema unchanges, since we reject rename column
+query TTTT
+describe rw_customers;
+----
+id bigint false NULL
+modified timestamp without time zone false NULL
+custinfo jsonb false NULL
+v1 character varying false NULL
+v2 double precision false NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description rw_customers NULL NULL
+
+# revert column rename on upstream
+system ok
+mysql -e "
+  USE mytest;
+  ALTER TABLE customers RENAME COLUMN v11 TO v1;
+  ALTER TABLE customers CHANGE COLUMN v22 v2 double(5,2);
+"
+
+# drop columns
+system ok
+mysql -e "
+  USE mytest;
+  ALTER TABLE customers DROP COLUMN modified;
+  ALTER TABLE customers DROP COLUMN v1;
+  ALTER TABLE customers DROP COLUMN v2;
+"
+
+sleep 3s
+
+# modified column should be dropped
+query TTTT
+describe rw_customers;
+----
+id bigint false NULL
+custinfo jsonb false NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description rw_customers NULL NULL
 
 statement ok
 drop source mysql_source cascade;

@@ -228,7 +228,6 @@ async fn flush_imms(
         compactor_context,
         sstable_object_id_manager,
         payload,
-        task_info.compaction_group_index,
         filter_key_extractor_manager,
     )
     .verbose_instrument_await("shared_buffer_compact")

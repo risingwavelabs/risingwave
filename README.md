@@ -33,7 +33,7 @@
     <img alt="Slack" src="https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack" />
   </a>
   <a
-    href="https://twitter.com/risingwavelabs"
+    href="https://x.com/risingwavelabs"
     target="_blank"
   >
     <img alt="X" src="https://img.shields.io/twitter/follow/risingwavelabs" />
@@ -46,9 +46,9 @@
   </a>
 </div>
 
-RisingWave is a Postgres-compatible SQL engine engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b>, <b>analyzing</b>, and <b>managing</b> real-time event streaming data.
+RisingWave is a Postgres-compatible SQL database engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b>, <b>analyzing</b>, and <b>managing</b> real-time event streaming data.
 
-RisingWave can <b>ingest</b> millions of events per second, seamlessly <b>join and analyze</b> live data streams with historical tables, <b>serve</b> ad-hoc queries in real-time, and <b>deliver</b> fresh, consistent results.
+RisingWave can <b>ingest</b> millions of events per second, continuously <b>join and analyze</b> live data streams with historical tables, <b>serve</b> ad-hoc queries in real-time, and <b>deliver</b> fresh, consistent results wherever needed.
 
 ![RisingWave](./docs/dev/src/images/architecture_20240814.png)
 
@@ -62,13 +62,13 @@ curl https://risingwave.com/sh | sh
 To learn about other installation options, such as using a Docker image, see [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
 
 ## When is RisingWave the perfect fit?
-RisingWave is the ideal solution for building event-driven applications. Choose RisingWave when you want to:
+RisingWave is the ideal solution for:
 
-* Ingest data from real-time sources like Kafka streams, database CDC, and more.
-* Perform complex queries (such as joins, aggregations, and time windowing) on the fly.
-* Interactively and concurrently explore consistent, up-to-the-moment results.
-* Seamlessly send results to downstream systems.
-* Process streaming and batch data using the same codebase.
+* Managing real-time data sources like Kafka streams, database CDC, and more.
+* Executing complex, on-the-fly queries, including joins, aggregations, and time windowing.
+* Interactively and concurrently exploring consistent, up-to-the-moment results.
+* Seamlessly delivering results to downstream systems.
+* Processing both streaming and batch data with a unified codebase.
 
 
 ## In what use cases does RisingWave excel?
