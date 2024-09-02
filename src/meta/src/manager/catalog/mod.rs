@@ -3673,7 +3673,9 @@ impl CatalogManager {
         let mut dependencies = vec![];
         for table in core.tables.values() {
             let table_type = table.get_table_type().unwrap();
-            let job_status = table.get_stream_job_status().unwrap();
+            let job_status = table
+                .get_stream_job_status()
+                .unwrap_or(PbStreamJobStatus::Created);
             if table_type != TableType::Internal && job_status != StreamJobStatus::Creating {
                 for referenced in &table.dependent_relations {
                     dependencies.push(PbObjectDependencies {
