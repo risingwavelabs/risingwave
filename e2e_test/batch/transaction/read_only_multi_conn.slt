@@ -1,9 +1,11 @@
 statement ok
 create table t (v int);
 
+connection txn
 statement ok
 insert into t values (1), (2);
 
+connection txn
 statement ok
 flush;
 
