@@ -40,6 +40,7 @@ use risingwave_pb::stream_plan::{
 };
 use risingwave_pb::stream_service::BuildActorInfo;
 use tokio::sync::{RwLock, RwLockReadGuard};
+use tracing::error;
 
 use crate::barrier::Reschedule;
 use crate::manager::cluster::WorkerId;
@@ -797,6 +798,20 @@ impl FragmentManager {
         let mut fragment_infos = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
+        {
+            let mut actor_map = BTreeMap::new();
+            for (table_id, fragments) in map {
+                actor_map.insert(
+                    table_id,
+                    fragments
+                        .fragments
+                        .values()
+                        .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
+                        .collect_vec(),
+                );
+            }
+            error!(?actor_map, "load_all_actors");
+        }
         for fragments in map.values() {
             for fragment in fragments.fragments.values() {
                 let info = InflightFragmentInfo {
@@ -970,6 +985,20 @@ impl FragmentManager {
         let mut actor_maps = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
+        {
+            let mut actor_map = BTreeMap::new();
+            for (table_id, fragments) in map {
+                actor_map.insert(
+                    table_id,
+                    fragments
+                        .fragments
+                        .values()
+                        .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
+                        .collect_vec(),
+                );
+            }
+            error!(?actor_map, "all_node_actors");
+        }
         for fragments in map.values() {
             let table_id = fragments.table_id();
             for (node_id, actors) in fragments.worker_actors(include_inactive) {
