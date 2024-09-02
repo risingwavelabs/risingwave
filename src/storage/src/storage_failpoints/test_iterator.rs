@@ -391,6 +391,7 @@ async fn test_failpoints_compactor_iterator_recreate() {
         meta.clone(),
         sstable_store.clone(),
         default_writer_opt_for_test(),
+        vec![table_id as u32],
     )
     .await
     .unwrap();
