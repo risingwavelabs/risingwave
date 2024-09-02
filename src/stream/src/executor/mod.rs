@@ -383,15 +383,23 @@ impl Barrier {
             .map_or(false, |actors| actors.contains(&actor_id))
     }
 
-    /// Get the split assignments for the actor with `actor_id`.
-    pub fn split_assignment(&self, actor_id: ActorId) -> Option<&[SplitImpl]> {
+    /// Get the initial split assignments for the actor with `actor_id`.
+    ///
+    /// This should only be called on the initial barrier received by the executor. It must be
+    ///
+    /// - `Add` mutation when it's a new streaming job, or recovery.
+    /// - `Update` mutation when it's created for scaling.
+    /// - `AddAndUpdate` mutation when it's created for sink-into-table.
+    ///
+    /// Note that `SourceChangeSplit` is **not** included, because it's only used for changing splits
+    /// of existing executors.
+    pub fn initial_split_assignment(&self, actor_id: ActorId) -> Option<&[SplitImpl]> {
         match self.mutation.as_deref()? {
             Mutation::Update(UpdateMutation { actor_splits, .. })
             | Mutation::Add(AddMutation {
                 splits: actor_splits,
                 ..
-            })
-            | Mutation::SourceChangeSplit(actor_splits) => actor_splits.get(&actor_id),
+            }) => actor_splits.get(&actor_id),
 
             Mutation::AddAndUpdate(
                 AddMutation {
@@ -404,10 +412,18 @@ impl Barrier {
                 },
             ) => add_actor_splits
                 .get(&actor_id)
-                .or_else(|| update_actor_splits.get(&actor_id)), // `Add` and `Update` should apply to different fragments,
-                                                                 // so we don't need to merge them.
+                // `Add` and `Update` should apply to different fragments, so we don't need to merge them.
+                .or_else(|| update_actor_splits.get(&actor_id)),
 
-            _ => None,
+            _ => {
+                if cfg!(debug_assertions) {
+                    panic!(
+                        "the initial mutation of the barrier should not be {:?}",
+                        self.mutation
+                    );
+                }
+                None
+            }
         }
         .map(|s| s.as_slice())
     }
