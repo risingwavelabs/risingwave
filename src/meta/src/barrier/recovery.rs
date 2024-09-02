@@ -1121,6 +1121,15 @@ impl GlobalBarrierManagerContext {
             return Err(anyhow!("actors dropped during update").into());
         }
 
+        {
+            for (node_id, actors) in &info.actor_map {
+                if !actors.is_empty() && !all_node_actors.contains_key(node_id) {
+                    // TODO: remove it
+                    panic!("invalid: {} {:?}", node_id, actors);
+                }
+            }
+        }
+
         Ok(all_node_actors)
     }
 }
