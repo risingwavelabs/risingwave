@@ -1,3 +1,5 @@
+set sink_decouple = false;
+
 CREATE TABLE
   personnel (id integer, name varchar);
 

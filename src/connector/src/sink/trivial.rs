@@ -67,7 +67,7 @@ impl<T: TrivialSinkName> Sink for TrivialSink<T> {
     const SINK_NAME: &'static str = T::SINK_NAME;
 
     // Disable sink decoupling for all trivial sinks because it introduces overhead without any benefit
-    fn is_sink_decouple(_desc: &SinkDesc, _user_specified: &SinkDecouple) -> Result<bool> {
+    fn is_sink_decouple(_desc: &mut SinkDesc, _user_specified: &SinkDecouple) -> Result<bool> {
         Ok(false)
     }
 

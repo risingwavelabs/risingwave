@@ -66,8 +66,8 @@ use self::prometheus::monitored_base_file_writer::MonitoredBaseFileWriterBuilder
 use self::prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
 use super::catalog::desc::SinkDesc;
 use super::decouple_checkpoint_log_sink::{
-    default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
-    DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
+    default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf, COMMIT_CHECKPOINT_INTERVAL,
+    DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
 };
 use super::{
     Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
@@ -762,25 +762,29 @@ impl Sink for IcebergSink {
 
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        let commit_checkpoint_interval =
-            desc.properties
-                .get("commit_checkpoint_interval")
-                .map(|interval| {
-                    interval
-                        .parse::<u64>()
-                        .unwrap_or(DEFAULT_COMMIT_CHECKPOINT_INTERVAL)
-                });
+    fn is_sink_decouple(desc: &mut SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        let commit_checkpoint_interval = desc.properties.get(COMMIT_CHECKPOINT_INTERVAL);
 
         match user_specified {
             SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => {
-                if let Some(commit_checkpoint_interval) = commit_checkpoint_interval
-                    && commit_checkpoint_interval > 1
-                {
-                    return Err(SinkError::Config(anyhow!(
-                        "config conflict: Iceberg config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
-                    )));
+                if let Some(interval) = commit_checkpoint_interval {
+                    let commit_checkpoint_interval = interval.parse::<u64>().map_err(|e| {
+                        SinkError::Config(anyhow!(
+                            "Convert `commit_checkpoint_interval` to u64 error: {:?}",
+                            e
+                        ))
+                    })?;
+                    if commit_checkpoint_interval > 1 {
+                        return Err(SinkError::Config(anyhow!(
+                            "config conflict: Iceberg config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
+                        )));
+                    }
+                } else {
+                    desc.properties.insert(
+                        COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                        DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE.to_string(),
+                    );
                 }
                 Ok(false)
             }

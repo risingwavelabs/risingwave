@@ -1,4 +1,7 @@
 statement ok
+set sink_decouple = false;
+
+statement ok
 create table t5 (v1 smallint primary key, v2 int, v3 bigint, v4 float, v5 double, v6 decimal, v7 varchar, v8 timestamp, v9 boolean);
 
 # Upsert jdbc sink must specify primary_key

@@ -1,3 +1,5 @@
+set sink_decouple = false;
+
 CREATE SINK bhv_es7_sink
 FROM
     bhv_mv WITH (

@@ -1,3 +1,5 @@
+set sink_decouple = false;
+
 create secret doris_secret with (backend = 'meta') as '123456';
 
 CREATE SINK bhv_doris_sink

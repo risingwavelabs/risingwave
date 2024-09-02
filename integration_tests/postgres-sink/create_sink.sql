@@ -1,3 +1,5 @@
+set sink_decouple = false;
+
 CREATE SINK target_count_postgres_sink
 FROM
     target_count WITH (

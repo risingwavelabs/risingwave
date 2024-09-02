@@ -1,4 +1,7 @@
 statement ok
+set sink_decouple = false;
+
+statement ok
 create table t1(
     a smallint,
     b int,

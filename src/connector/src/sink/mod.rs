@@ -372,7 +372,7 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     type Coordinator: SinkCommitCoordinator;
 
     /// `user_specified` is the value of `sink_decouple` config.
-    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+    fn is_sink_decouple(_desc: &mut SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
             SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => Ok(false),

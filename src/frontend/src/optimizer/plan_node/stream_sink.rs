@@ -212,7 +212,7 @@ impl StreamSink {
         partition_info: Option<PartitionComputeInfo>,
     ) -> Result<Self> {
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
-        let (input, sink) = Self::derive_sink_desc(
+        let (input, mut sink) = Self::derive_sink_desc(
             input,
             user_distributed_by,
             name,
@@ -242,7 +242,7 @@ impl StreamSink {
                             unsupported_sink(TABLE_SINK)
                         } else {
                             SinkType::is_sink_decouple(
-                                &sink,
+                                &mut sink,
                                 &input.ctx().session_ctx().config().sink_decouple(),
                             )
                         }

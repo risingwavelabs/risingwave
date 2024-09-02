@@ -144,7 +144,7 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
 
     const SINK_NAME: &'static str = R::SINK_NAME;
 
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+    fn is_sink_decouple(desc: &mut SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
             SinkDecouple::Default => Ok(R::default_sink_decouple(desc)),
             SinkDecouple::Enable => Ok(true),

@@ -1,3 +1,5 @@
+set sink_decouple = false;
+
 create sink delta_lake_sink from source
 with (
     connector = 'deltalake',

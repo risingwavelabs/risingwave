@@ -1,3 +1,5 @@
+set sink_decouple = false;
+
 CREATE SINK mqtt_sink
 FROM
   personnel

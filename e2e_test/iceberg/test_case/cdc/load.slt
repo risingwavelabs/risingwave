@@ -1,4 +1,6 @@
 # CDC source basic test
+statement ok
+set sink_decouple = false;
 
 statement ok
 create source mysql_mydb with (

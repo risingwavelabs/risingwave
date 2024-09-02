@@ -1,3 +1,5 @@
+set sink_decouple = false;
+
 CREATE SINK bhv_clickhouse_sink
 FROM
     bhv_mv WITH (

@@ -44,8 +44,8 @@ use with_options::WithOptions;
 use super::catalog::desc::SinkDesc;
 use super::coordinate::CoordinatedSinkWriter;
 use super::decouple_checkpoint_log_sink::{
-    default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
-    DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
+    default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf, COMMIT_CHECKPOINT_INTERVAL,
+    DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
 };
 use super::writer::SinkWriter;
 use super::{
@@ -285,23 +285,29 @@ impl Sink for DeltaLakeSink {
 
     const SINK_NAME: &'static str = DELTALAKE_SINK;
 
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        let commit_checkpoint_interval =
-            if let Some(interval) = desc.properties.get("commit_checkpoint_interval") {
-                interval
-                    .parse::<u64>()
-                    .unwrap_or(DEFAULT_COMMIT_CHECKPOINT_INTERVAL)
-            } else {
-                DEFAULT_COMMIT_CHECKPOINT_INTERVAL
-            };
+    fn is_sink_decouple(desc: &mut SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        let commit_checkpoint_interval = desc.properties.get(COMMIT_CHECKPOINT_INTERVAL);
 
         match user_specified {
             SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => {
-                if commit_checkpoint_interval > 1 {
-                    return Err(SinkError::Config(anyhow!(
-                        "config conflict: DeltaLake config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
-                    )));
+                if let Some(interval) = commit_checkpoint_interval {
+                    let commit_checkpoint_interval = interval.parse::<u64>().map_err(|e| {
+                        SinkError::Config(anyhow!(
+                            "Convert `commit_checkpoint_interval` to u64 error: {:?}",
+                            e
+                        ))
+                    })?;
+                    if commit_checkpoint_interval > 1 {
+                        return Err(SinkError::Config(anyhow!(
+                            "config conflict: DeltaLake config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
+                        )));
+                    }
+                } else {
+                    desc.properties.insert(
+                        COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                        DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE.to_string(),
+                    );
                 }
                 Ok(false)
             }
