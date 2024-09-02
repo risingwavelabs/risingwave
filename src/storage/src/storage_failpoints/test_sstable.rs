@@ -104,6 +104,7 @@ async fn test_failpoints_vacuum_and_metadata() {
         meta.clone(),
         sstable_store.clone(),
         default_writer_opt_for_test(),
+        vec![table_id as u32],
     )
     .await;
     assert!(result.is_err());
@@ -118,6 +119,7 @@ async fn test_failpoints_vacuum_and_metadata() {
         meta,
         sstable_store.clone(),
         default_writer_opt_for_test(),
+        vec![table_id as u32],
     )
     .await
     .unwrap();
