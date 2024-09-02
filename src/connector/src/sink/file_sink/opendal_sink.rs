@@ -222,6 +222,8 @@ impl SinkWriter for OpenDalSinkWriter {
         chunk: StreamChunk,
         chunk_id: usize,
     ) -> Result<bool> {
+        self.try_finish_write_via_rollover_interval().await?;
+
         if self.sink_writer.is_none() {
             self.create_sink_writer(self.current_writer_idx).await?;
         }
@@ -242,38 +244,7 @@ impl SinkWriter for OpenDalSinkWriter {
     /// When a checkpoint arrives, the force commit is performed to write the data to the file.
     /// In the future if flush and checkpoint is decoupled, we should enable sink decouple accordingly.
     async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
-        println!(
-            "self.duration_seconds_since_creation() = {:?}",
-            self.duration_seconds_since_creation()
-        );
-        if self.batching_strategy.is_some()
-            && self.duration_seconds_since_creation()
-                >= self
-                    .batching_strategy
-                    .clone()
-                    .unwrap()
-                    .rollover_seconds
-                    .unwrap_or(u64::MAX)
-            && let Some(sink_writer) = self.sink_writer.take()
-        {
-            match sink_writer {
-                FileWriterEnum::ParquetFileWriter(w) => {
-                    if w.bytes_written() > 0 {
-                        let metadata = w.close().await?;
-                        tracing::info!(
-                            "Writer {:?}_{:?} finish write file, metadata: {:?}",
-                            self.executor_id,
-                            self.current_writer_idx,
-                            metadata
-                        );
-                        self.current_bached_row_num = 0;
-                        self.current_writer_idx += 1;
-
-                        self.create_sink_writer(self.current_writer_idx).await?;
-                    }
-                }
-            };
-        }
+        self.try_finish_write_via_rollover_interval().await?;
         Ok(())
     }
 }
@@ -289,7 +260,6 @@ impl OpenDalSinkWriter {
         engine_type: EngineType,
         batching_strategy: Option<BatchingStrategy>,
     ) -> Result<Self> {
-        println!("batching_strategy = {:?}", batching_strategy);
         let arrow_schema = convert_rw_schema_to_arrow_schema(rw_schema)?;
         Ok(Self {
             schema: Arc::new(arrow_schema),
@@ -309,7 +279,82 @@ impl OpenDalSinkWriter {
         })
     }
 
-    fn duration_seconds_since_creation(&self) -> u64 {
+    async fn try_finish_write_via_rollover_interval(&mut self) -> Result<()> {
+        if self.batching_strategy.is_some()
+            && self.duration_seconds_since_writer_created()
+                >= self
+                    .batching_strategy
+                    .clone()
+                    .unwrap()
+                    .rollover_seconds
+                    .unwrap_or(u64::MAX)
+            && let Some(sink_writer) = self.sink_writer.take()
+        {
+            match sink_writer {
+                FileWriterEnum::ParquetFileWriter(w) => {
+                    if w.bytes_written() > 0 {
+                        let metadata = w.close().await?;
+                        tracing::info!(
+                            "The duration {:?}s of writing to this file has exceeded the rollover_interval, writer {:?}_{:?}_{:?} finish write file, metadata: {:?}",
+                            self.duration_seconds_since_writer_created(),
+                            self.created_time
+                            .duration_since(UNIX_EPOCH)
+                            .expect("Time went backwards")
+                            .as_secs(),
+                            self.executor_id,
+                            self.current_writer_idx,
+                            metadata
+                        );
+                        self.current_writer_idx += 1;
+                    }
+                }
+            };
+        }
+
+        Ok(())
+    }
+
+    async fn try_finish_write_via_batched_rows(&mut self) -> Result<bool> {
+        if self
+            .batching_strategy
+            .clone()
+            .unwrap()
+            .max_row_count
+            .is_some()
+            && self.current_bached_row_num
+                >= self
+                    .batching_strategy
+                    .clone()
+                    .unwrap()
+                    .max_row_count
+                    .unwrap()
+            && let Some(sink_writer) = self.sink_writer.take()
+        {
+            match sink_writer {
+                FileWriterEnum::ParquetFileWriter(w) => {
+                    let metadata = w.close().await?;
+                    tracing::info!(
+                                "The number of written rows {} has reached the preset max_row_count, writer {:?}_{:?}_{:?} finish write file, metadata: {:?}",
+                                self.current_bached_row_num,
+                                self.created_time
+                                .duration_since(UNIX_EPOCH)
+                                .expect("Time went backwards")
+                                .as_secs(),
+                                self.executor_id,
+                                self.current_writer_idx,
+                                metadata
+                            );
+                    self.current_bached_row_num = 0;
+                }
+            };
+            self.current_writer_idx += 1;
+
+            return Ok(true);
+        }
+        return Ok(false);
+    }
+
+    fn duration_seconds_since_writer_created(&self) -> u64 {
         let now = SystemTime::now();
         now.duration_since(self.created_time)
             .expect("Time went backwards")
@@ -329,11 +374,27 @@ impl OpenDalSinkWriter {
             // For the local fs sink, the data will be automatically written to the defined path.
             // Therefore, there is no need to specify the path in the file name.
             EngineType::Fs => {
-                format!("{}_{}.{}", self.executor_id, writer_idx, suffix)
+                format!(
+                    "{}_{}_{}.{}",
+                    self.executor_id,
+                    self.created_time
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Time went backwards")
+                        .as_secs(),
+                    writer_idx,
+                    suffix
+                )
             }
             _ => format!(
-                "{}/{}_{}.{}",
-                self.write_path, self.executor_id, writer_idx, suffix,
+                "{}/{}_{}_{}.{}",
+                self.write_path,
+                self.executor_id,
+                self.created_time
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Time went backwards")
+                    .as_secs(),
+                writer_idx,
+                suffix,
             ),
         };
         tracing::info!("create new writer, file name: {:?}", object_name);
@@ -358,6 +419,9 @@ impl OpenDalSinkWriter {
                         Some(props.build()),
                     )?,
                 ));
+                self.current_bached_row_num = 0;
+
+                self.created_time = SystemTime::now();
             }
             _ => unimplemented!(),
         }
@@ -365,7 +429,7 @@ impl OpenDalSinkWriter {
         Ok(())
     }
 
-    async fn append_only(&mut self, chunk: StreamChunk) -> Result<(bool)> {
+    async fn append_only(&mut self, chunk: StreamChunk) -> Result<bool> {
         let (data_chunk, _) = chunk.compact().into_parts();
         match self
             .sink_writer
@@ -378,42 +442,10 @@ impl OpenDalSinkWriter {
                 let batch_row_nums = batch.num_rows();
                 w.write(&batch).await?;
                 self.current_bached_row_num += batch_row_nums;
-                if self
-                    .batching_strategy
-                    .clone()
-                    .unwrap()
-                    .max_row_count
-                    .is_some()
-                    && self.current_bached_row_num
-                        >= self
-                            .batching_strategy
-                            .clone()
-                            .unwrap()
-                            .max_row_count
-                            .unwrap()
-                    && let Some(sink_writer) = self.sink_writer.take()
-                {
-                    match sink_writer {
-                        FileWriterEnum::ParquetFileWriter(w) => {
-                            let metadata = w.close().await?;
-                            tracing::info!(
-                                "Writer {:?}_{:?} finish write file, metadata: {:?}",
-                                self.executor_id,
-                                self.current_writer_idx,
-                                metadata
-                            );
-                            self.current_bached_row_num = 0;
-                        }
-                    };
-                    self.current_writer_idx += 1;
-
-                    self.create_sink_writer(self.current_writer_idx).await?;
-                    return Ok(true);
-                }
+                let res = self.try_finish_write_via_batched_rows().await?;
+                return Ok(res);
             }
         }
-
-        Ok(false)
     }
 }
 
