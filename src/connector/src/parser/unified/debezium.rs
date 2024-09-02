@@ -87,6 +87,7 @@ pub const DEBEZIUM_READ_OP: &str = "r";
 pub const DEBEZIUM_CREATE_OP: &str = "c";
 pub const DEBEZIUM_UPDATE_OP: &str = "u";
 pub const DEBEZIUM_DELETE_OP: &str = "d";
+pub const DEBEZIUM_TRUNCATE_OP: &str = "t";
 
 pub const DEBEZIUM_TRANSACTION_STATUS_BEGIN: &str = "BEGIN";
 pub const DEBEZIUM_TRANSACTION_STATUS_COMMIT: &str = "END";
@@ -364,6 +365,12 @@ where
                         return Ok(ChangeEventOperation::Upsert)
                     }
                     DEBEZIUM_DELETE_OP => return Ok(ChangeEventOperation::Delete),
+                    DEBEZIUM_TRUNCATE_OP => {
+                        return Err(super::AccessError::Undefined {
+                            name: "op WKXLOG TRUNCATE operation is not supported yet.".into(),
+                            path: Default::default(),
+                        });
+                    }
                     _ => (),
                 }
             }
