@@ -876,6 +876,7 @@ mod tests {
 
     use super::*;
     use crate::executor::source::{default_source_internal_table, SourceStateTableHandler};
+    use crate::executor::AddMutation;
 
     const MOCK_SOURCE_NAME: &str = "mock_source";
 
