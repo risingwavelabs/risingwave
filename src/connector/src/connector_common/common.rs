@@ -192,13 +192,25 @@ pub struct KafkaCommon {
     #[serde(rename = "properties.ssl.ca.location")]
     ssl_ca_location: Option<String>,
 
+    /// CA certificate string (PEM format) for verifying the broker's key.
+    #[serde(rename = "properties.ssl.ca.pem")]
+    ssl_ca_pem: Option<String>,
+
     /// Path to client's certificate file (PEM).
     #[serde(rename = "properties.ssl.certificate.location")]
     ssl_certificate_location: Option<String>,
 
+    /// Client's public key string (PEM format) used for authentication.
+    #[serde(rename = "properties.ssl.certificate.pem")]
+    ssl_certificate_pem: Option<String>,
+
     /// Path to client's private key file (PEM).
     #[serde(rename = "properties.ssl.key.location")]
     ssl_key_location: Option<String>,
+
+    /// Client's private key string (PEM format) used for authentication.
+    #[serde(rename = "properties.ssl.key.pem")]
+    ssl_key_pem: Option<String>,
 
     /// Passphrase of client's private key.
     #[serde(rename = "properties.ssl.key.password")]
@@ -325,11 +337,20 @@ impl KafkaCommon {
         if let Some(ssl_ca_location) = self.ssl_ca_location.as_ref() {
             config.set("ssl.ca.location", ssl_ca_location);
         }
+        if let Some(ssl_ca_pem) = self.ssl_ca_pem.as_ref() {
+            config.set("ssl.ca.pem", ssl_ca_pem);
+        }
         if let Some(ssl_certificate_location) = self.ssl_certificate_location.as_ref() {
             config.set("ssl.certificate.location", ssl_certificate_location);
         }
+        if let Some(ssl_certificate_pem) = self.ssl_certificate_pem.as_ref() {
+            config.set("ssl.certificate.pem", ssl_certificate_pem);
+        }
         if let Some(ssl_key_location) = self.ssl_key_location.as_ref() {
             config.set("ssl.key.location", ssl_key_location);
+        }
+        if let Some(ssl_key_pem) = self.ssl_key_pem.as_ref() {
+            config.set("ssl.key.pem", ssl_key_pem);
         }
         if let Some(ssl_key_password) = self.ssl_key_password.as_ref() {
             config.set("ssl.key.password", ssl_key_password);
