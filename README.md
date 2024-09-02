@@ -64,11 +64,11 @@ To learn about other installation options, such as using a Docker image, see [Qu
 ## When is RisingWave the perfect fit?
 RisingWave is the ideal solution for:
 
-* Handling real-time data sources like Kafka streams, database CDC, and more.
-* Performing complex, on-the-fly queries such as joins, aggregations, and time windowing.
-* Interactively and concurrently explore consistent, up-to-the-moment results.
-* Seamlessly send results to downstream systems.
-* Processing streaming and batch data using the same codebase.
+* Managing real-time data sources like Kafka streams, database CDC, and more.
+* Executing complex, on-the-fly queries, including joins, aggregations, and time windowing.
+* Interactively and concurrently exploring consistent, up-to-the-moment results.
+* Seamlessly delivering results to downstream systems.
+* Processing both streaming and batch data with a unified codebase.
 
 
 ## In what use cases does RisingWave excel?
