@@ -35,6 +35,7 @@ select count(*) > 0 from mv;
 t
 
 # the result from batch query and materialized view should be the same
+skipif in-memory
 connection txn
 query T
 select * from v
