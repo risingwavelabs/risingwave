@@ -710,6 +710,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     yield Message::Barrier(barrier);
                 }
                 Message::Chunk(chunk) => {
+                    // FIXME: consider SourceCatchingUp here?
                     yield Message::Chunk(chunk);
                 }
                 Message::Watermark(watermark) => {
@@ -721,19 +722,15 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
 
     /// All splits finished backfilling.
     ///
-    /// We check all splits for the source, including other actors' splits here, before going to the forward stage.
-    /// Otherwise if we break early, but after rescheduling, an unfinished split is migrated to
-    /// this actor, we still need to backfill it.
+    /// Note: we don't need to consider split migration (online scaling) here, so we can just check the splits assigned to this actor.
+    /// - For foreground DDL, scaling is not allowed during backfilling.
+    /// - For background DDL, scaling is skipped when backfilling is not finished, and can be triggered by recreating actors during recovery.
+    ///
+    /// See <https://github.com/risingwavelabs/risingwave/issues/18300> for more details.
     async fn backfill_finished(&self, states: &BackfillStates) -> StreamExecutorResult<bool> {
         Ok(states
             .values()
-            .all(|state| matches!(state, BackfillState::Finished))
-            && self
-                .backfill_state_store
-                .scan()
-                .await?
-                .into_iter()
-                .all(|state| matches!(state, BackfillState::Finished)))
+            .all(|state| matches!(state, BackfillState::Finished)))
     }
 
     /// For newly added splits, we do not need to backfill and can directly forward from upstream.
@@ -792,7 +789,10 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     }
                     Some(backfill_state) => {
                         // Migrated split. Backfill if unfinished.
-                        // TODO: disallow online scaling during backfilling.
+                        debug_assert!(
+                            false,
+                            "split migration during backfill stage should not happen"
+                        );
                         target_state.insert(split_id, backfill_state);
                     }
                 }
@@ -883,6 +883,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     }
                     Some(backfill_state) => {
                         // Migrated split. It should also be finished since we are in forwarding stage.
+                        // FIXME: it's still possible to have SourceCatchingUp here if we want to consider it as finished..?
                         match backfill_state {
                             BackfillState::Finished => {}
                             _ => {

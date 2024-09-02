@@ -55,30 +55,6 @@ impl<S: StateStore> BackfillStateTableHandler<S> {
             .map_err(StreamExecutorError::from)
     }
 
-    /// XXX: we might get stale data for other actors' writes, but it's fine?
-    pub async fn scan(&self) -> StreamExecutorResult<Vec<BackfillState>> {
-        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
-
-        let state_table_iter = self
-            .state_store
-            .iter_with_prefix(None::<OwnedRow>, sub_range, Default::default())
-            .await?;
-        pin_mut!(state_table_iter);
-
-        let mut ret = vec![];
-        while let Some(item) = state_table_iter.next().await {
-            let row = item?.into_owned_row();
-            let state = match row.datum_at(1) {
-                Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                    BackfillState::restore_from_json(jsonb_ref.to_owned_scalar())?
-                }
-                _ => unreachable!(),
-            };
-            ret.push(state);
-        }
-        Ok(ret)
-    }
-
     async fn set(&mut self, key: SplitId, state: BackfillState) -> StreamExecutorResult<()> {
         let row = [
             Some(Self::string_to_scalar(key.as_ref())),
