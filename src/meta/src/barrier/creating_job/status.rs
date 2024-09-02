@@ -19,6 +19,7 @@ use std::sync::Arc;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
+use risingwave_pb::stream_service::BuildActorInfo;
 
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::InflightGraphInfo;
@@ -39,6 +40,7 @@ pub(super) enum CreatingStreamingJobStatus {
         /// The `prev_epoch` of pending non checkpoint barriers
         pending_non_checkpoint_barriers: Vec<u64>,
         snapshot_backfill_actors: HashMap<WorkerId, HashSet<ActorId>>,
+        actors_to_create: Option<HashMap<WorkerId, Vec<BuildActorInfo>>>,
     },
     ConsumingLogStore {
         graph_info: InflightGraphInfo,
@@ -51,6 +53,13 @@ pub(super) enum CreatingStreamingJobStatus {
     Finishing {
         start_consume_upstream_epoch: u64,
     },
+}
+
+pub(super) struct CreatingJobInjectBarrierInfo {
+    pub curr_epoch: TracedEpoch,
+    pub prev_epoch: TracedEpoch,
+    pub kind: BarrierKind,
+    pub new_actors: Option<HashMap<WorkerId, Vec<BuildActorInfo>>>,
 }
 
 impl CreatingStreamingJobStatus {
@@ -84,14 +93,10 @@ impl CreatingStreamingJobStatus {
     /// return
     /// - Some(vec[(`curr_epoch`, `prev_epoch`, `barrier_kind`)]) of barriers to newly inject
     /// - Some(`graph_info`) when the status should transit to `ConsumingLogStore`
-    #[expect(clippy::type_complexity)]
     pub(super) fn may_inject_fake_barrier(
         &mut self,
         is_checkpoint: bool,
-    ) -> Option<(
-        Vec<(TracedEpoch, TracedEpoch, BarrierKind)>,
-        Option<InflightGraphInfo>,
-    )> {
+    ) -> Option<(Vec<CreatingJobInjectBarrierInfo>, Option<InflightGraphInfo>)> {
         if let CreatingStreamingJobStatus::ConsumingSnapshot {
             prev_epoch_fake_physical_time,
             pending_commands,
@@ -99,27 +104,32 @@ impl CreatingStreamingJobStatus {
             graph_info,
             pending_non_checkpoint_barriers,
             ref backfill_epoch,
+            actors_to_create,
             ..
         } = self
         {
             if create_mview_tracker.has_pending_finished_jobs() {
+                assert!(actors_to_create.is_none());
                 pending_non_checkpoint_barriers.push(*backfill_epoch);
 
                 let prev_epoch = Epoch::from_physical_time(*prev_epoch_fake_physical_time);
-                let barriers_to_inject = [(
-                    TracedEpoch::new(Epoch(*backfill_epoch)),
-                    TracedEpoch::new(prev_epoch),
-                    BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers)),
-                )]
-                .into_iter()
-                .chain(pending_commands.drain(..).map(|command_ctx| {
-                    (
-                        command_ctx.curr_epoch.clone(),
-                        command_ctx.prev_epoch.clone(),
-                        command_ctx.kind.clone(),
-                    )
-                }))
-                .collect();
+                let barriers_to_inject =
+                    [CreatingJobInjectBarrierInfo {
+                        curr_epoch: TracedEpoch::new(Epoch(*backfill_epoch)),
+                        prev_epoch: TracedEpoch::new(prev_epoch),
+                        kind: BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers)),
+                        new_actors: None,
+                    }]
+                    .into_iter()
+                    .chain(pending_commands.drain(..).map(|command_ctx| {
+                        CreatingJobInjectBarrierInfo {
+                            curr_epoch: command_ctx.curr_epoch.clone(),
+                            prev_epoch: command_ctx.prev_epoch.clone(),
+                            kind: command_ctx.kind.clone(),
+                            new_actors: None,
+                        }
+                    }))
+                    .collect();
 
                 let graph_info = take(graph_info);
                 Some((barriers_to_inject, Some(graph_info)))
@@ -135,7 +145,15 @@ impl CreatingStreamingJobStatus {
                 } else {
                     BarrierKind::Barrier
                 };
-                Some((vec![(curr_epoch, prev_epoch, kind)], None))
+                Some((
+                    vec![CreatingJobInjectBarrierInfo {
+                        curr_epoch,
+                        prev_epoch,
+                        kind,
+                        new_actors: actors_to_create.take(),
+                    }],
+                    None,
+                ))
             }
         } else {
             None

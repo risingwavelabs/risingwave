@@ -324,10 +324,6 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         }
     }
 
-    fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-        self.inner.seal_epoch(epoch, is_checkpoint);
-    }
-
     fn monitored(
         self,
         _storage_metrics: Arc<MonitoredStorageMetrics>,
@@ -343,10 +339,6 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
                 .await,
             self.storage_metrics.clone(),
         )
-    }
-
-    fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-        self.inner.validate_read_epoch(epoch)
     }
 }
 

@@ -356,18 +356,12 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
 
     fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture;
 
-    /// update max current epoch in storage.
-    fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
-
     /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
     fn monitored(self, storage_metrics: Arc<MonitoredStorageMetrics>) -> MonitoredStateStore<Self> {
         MonitoredStateStore::new(self, storage_metrics)
     }
 
     fn new_local(&self, option: NewLocalOptions) -> impl Future<Output = Self::Local> + Send + '_;
-
-    /// Validates whether store can serve `epoch` at the moment.
-    fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
 }
 
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data

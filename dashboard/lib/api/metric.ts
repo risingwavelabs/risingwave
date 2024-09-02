@@ -15,7 +15,10 @@
  *
  */
 import { Metrics, MetricsSample } from "../../components/metrics"
-import { GetBackPressureResponse } from "../../proto/gen/monitor_service"
+import {
+  BackPressureInfo,
+  GetBackPressureResponse,
+} from "../../proto/gen/monitor_service"
 import api from "./api"
 
 export interface BackPressuresMetrics {
@@ -28,13 +31,6 @@ export async function fetchPrometheusBackPressure() {
     "/metrics/fragment/prometheus_back_pressures"
   )
   return res
-}
-
-export interface BackPressureInfo {
-  actorId: number
-  fragmentId: number
-  downstreamFragmentId: number
-  value: number
 }
 
 export interface BackPressureRateInfo {
@@ -55,14 +51,8 @@ function convertToMapAndAgg(
   const map = new Map<string, number>()
   for (const item of backPressures) {
     const key = `${item.fragmentId}-${item.downstreamFragmentId}`
-    if (mapValue.has(key) && mapNumber.has(key)) {
-      // add || tp avoid NaN and pass check
-      mapValue.set(key, (mapValue.get(key) || 0) + item.value)
-      mapNumber.set(key, (mapNumber.get(key) || 0) + 1)
-    } else {
-      mapValue.set(key, item.value)
-      mapNumber.set(key, 1)
-    }
+    mapValue.set(key, (mapValue.get(key) || 0) + item.value)
+    mapNumber.set(key, (mapNumber.get(key) || 0) + item.actorCount)
   }
 
   for (const [key, value] of mapValue) {
@@ -137,7 +127,7 @@ export function calculateCumulativeBp(
   mapResult.forEach((value, key) => {
     const [fragmentId, downstreamFragmentId] = key.split("-").map(Number)
     const backPressureInfo: BackPressureInfo = {
-      actorId: 0,
+      actorCount: 1, // the value here has already been averaged by real actor count
       fragmentId,
       downstreamFragmentId,
       value,
@@ -161,19 +151,6 @@ export function calculateBPRate(
   return convertToBackPressureMetrics(convertFromMapAndAgg(result))
 }
 
-export const BackPressureInfo = {
-  fromJSON: (object: any) => {
-    return {
-      actorId: isSet(object.actorId) ? Number(object.actorId) : 0,
-      fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
-      downstreamFragmentId: isSet(object.downstreamFragmentId)
-        ? Number(object.downstreamFragmentId)
-        : 0,
-      value: isSet(object.value) ? Number(object.value) : 0,
-    }
-  },
-}
-
 // Get back pressure from meta node -> compute node
 export async function fetchEmbeddedBackPressure() {
   const response: GetBackPressureResponse = await api.get(
@@ -181,7 +158,6 @@ export async function fetchEmbeddedBackPressure() {
   )
   let backPressureInfos: BackPressureInfo[] =
     response.backPressureInfos?.map(BackPressureInfo.fromJSON) ?? []
-  backPressureInfos = backPressureInfos.sort((a, b) => a.actorId - b.actorId)
   return backPressureInfos
 }
 

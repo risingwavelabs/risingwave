@@ -287,27 +287,27 @@ impl MonitoredStorageMetrics {
     ) -> LocalIterMetricsInner {
         let iter_init_duration = self
             .iter_init_duration
-            .with_label_values(&[table_label, iter_type])
+            .with_guarded_label_values(&[table_label, iter_type])
             .local();
         let iter_counts = self
             .iter_counts
-            .with_label_values(&[table_label, iter_type])
+            .with_guarded_label_values(&[table_label, iter_type])
             .local();
         let iter_scan_duration = self
             .iter_scan_duration
-            .with_label_values(&[table_label, iter_type])
+            .with_guarded_label_values(&[table_label, iter_type])
             .local();
         let iter_item = self
             .iter_item
-            .with_label_values(&[table_label, iter_type])
+            .with_guarded_label_values(&[table_label, iter_type])
             .local();
         let iter_size = self
             .iter_size
-            .with_label_values(&[table_label, iter_type])
+            .with_guarded_label_values(&[table_label, iter_type])
             .local();
         let iter_in_progress_counts = self
             .iter_in_progress_counts
-            .with_label_values(&[table_label, iter_type]);
+            .with_guarded_label_values(&[table_label, iter_type]);
 
         LocalIterMetricsInner {
             iter_init_duration,
@@ -343,11 +343,17 @@ impl MonitoredStorageMetrics {
     }
 
     fn local_get_metrics(&self, table_label: &str) -> LocalGetMetrics {
-        let get_duration = self.get_duration.with_label_values(&[table_label]).local();
-        let get_key_size = self.get_key_size.with_label_values(&[table_label]).local();
+        let get_duration = self
+            .get_duration
+            .with_guarded_label_values(&[table_label])
+            .local();
+        let get_key_size = self
+            .get_key_size
+            .with_guarded_label_values(&[table_label])
+            .local();
         let get_value_size = self
             .get_value_size
-            .with_label_values(&[table_label])
+            .with_guarded_label_values(&[table_label])
             .local();
 
         LocalGetMetrics {

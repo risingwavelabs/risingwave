@@ -55,9 +55,9 @@ message AnalyzeHeapResponse {
 message GetBackPressureRequest {}
 
 message BackPressureInfo {
-  uint32 actor_id = 1;
-  uint32 fragment_id = 2;
-  uint32 downstream_fragment_id = 3;
+  uint32 fragment_id = 1;
+  uint32 downstream_fragment_id = 2;
+  uint32 actor_count = 3;
   double value = 4;
 }
 
