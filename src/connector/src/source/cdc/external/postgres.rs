@@ -101,9 +101,6 @@ impl PostgresExternalTable {
             });
 
         if config.ssl_mode == SslMode::VerifyCa || config.ssl_mode == SslMode::VerifyFull {
-            if let Some(ref cert) = config.ssl_cert {
-                options = options.ssl_client_cert(cert.as_str());
-            }
             if let Some(ref root_cert) = config.ssl_root_cert {
                 options = options.ssl_root_cert(root_cert.as_str());
             }
@@ -299,6 +296,12 @@ impl PostgresExternalTableReader {
             .port(config.port.parse::<u16>().unwrap())
             .dbname(&config.database);
 
+        let (_verify_ca, verify_hostname) = match config.ssl_mode {
+            SslMode::VerifyCa => (true, false),
+            SslMode::VerifyFull => (true, true),
+            _ => (false, false),
+        };
+
         #[cfg(not(madsim))]
         let connector = match config.ssl_mode {
             SslMode::Disabled => {
@@ -326,11 +329,23 @@ impl PostgresExternalTableReader {
                 builder.set_verify(SslVerifyMode::NONE);
                 MaybeMakeTlsConnector::Tls(MakeTlsConnector::new(builder.build()))
             }
+
             SslMode::VerifyCa | SslMode::VerifyFull => {
                 pg_config.ssl_mode(tokio_postgres::config::SslMode::Require);
                 let mut builder = SslConnector::builder(SslMethod::tls())?;
-                builder.set_verify(SslVerifyMode::PEER);
-                MaybeMakeTlsConnector::Tls(MakeTlsConnector::new(builder.build()))
+                if let Some(ssl_root_cert) = config.ssl_root_cert {
+                    builder
+                        .set_ca_file(ssl_root_cert)
+                        .map_err(|e| anyhow!(format!("bad ssl root cert error: {}", e)))?;
+                }
+                let mut connector = MakeTlsConnector::new(builder.build());
+                if !verify_hostname {
+                    connector.set_callback(|config, _| {
+                        config.set_verify_hostname(false);
+                        Ok(())
+                    });
+                }
+                MaybeMakeTlsConnector::Tls(connector)
             }
         };
         #[cfg(madsim)]

@@ -32,7 +32,6 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_pb::secret::PbSecretRef;
 use serde_derive::{Deserialize, Serialize};
-use tracing::info;
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::mysql_row_to_owned_row;
@@ -213,11 +212,6 @@ pub struct ExternalTableConfig {
     #[serde(rename = "ssl.mode", default = "Default::default")]
     #[serde(alias = "debezium.database.sslmode")]
     pub ssl_mode: SslMode,
-
-    /// `ssl.cert` specifies the path to the client certificate file.
-    #[serde(rename = "ssl.cert")]
-    #[serde(alias = "debezium.database.sslcert")]
-    pub ssl_cert: Option<String>,
 
     #[serde(rename = "ssl.root.cert")]
     #[serde(alias = "debezium.database.sslrootcert")]
