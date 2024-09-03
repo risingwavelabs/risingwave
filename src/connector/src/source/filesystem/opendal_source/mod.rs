@@ -19,6 +19,7 @@ pub mod posix_fs_source;
 pub mod s3_source;
 
 use serde::Deserialize;
+use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
 pub mod opendal_enumerator;
 pub mod opendal_reader;
@@ -35,6 +36,16 @@ pub const GCS_CONNECTOR: &str = "gcs";
 pub const OPENDAL_S3_CONNECTOR: &str = "s3_v2";
 pub const POSIX_FS_CONNECTOR: &str = "posix_fs";
 
+pub const DEFAULT_REFRESH_INTERVAL_SEC: u64 = 60;
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
+pub struct FsSourceCommon {
+    #[serde(rename = "refresh.interval.sec")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub refresh_interval_sec: Option<u64>,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
 pub struct GcsProperties {
     #[serde(rename = "gcs.bucket_name")]
@@ -50,6 +61,9 @@ pub struct GcsProperties {
 
     #[serde(rename = "match_pattern", default)]
     pub match_pattern: Option<String>,
+
+    #[serde(flatten)]
+    pub fs_common: FsSourceCommon,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
@@ -118,6 +132,9 @@ pub struct OpendalS3Properties {
     pub assume_role: Option<String>,
 
     #[serde(flatten)]
+    pub fs_common: FsSourceCommon,
+
+    #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
 }
 
@@ -144,6 +161,9 @@ pub struct PosixFsProperties {
     /// The regex pattern to match files under root directory.
     #[serde(rename = "match_pattern", default)]
     pub match_pattern: Option<String>,
+
+    #[serde(flatten)]
+    pub fs_common: FsSourceCommon,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
