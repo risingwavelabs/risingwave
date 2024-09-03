@@ -10996,7 +10996,10 @@ name = "risingwave_license"
 version = "1.11.0-alpha"
 dependencies = [
  "expect-test",
+ "jsonbb",
  "jsonwebtoken",
+ "risingwave_pb",
+ "risingwave_telemetry_event",
  "serde",
  "thiserror",
  "thiserror-ext",
