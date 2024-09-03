@@ -569,15 +569,6 @@ mod tests {
         );
 
         // No stream chunk
-        // let msg = simple_agg.next().await.unwrap().unwrap();
-        // assert_eq!(
-        //     *msg.as_chunk().unwrap(),
-        //     StreamChunk::from_pretty(
-        //         "  I   I   I  I
-        //         U- 0   .   .  .
-        //         U+ 0   .   .  ."
-        //     )
-        // );
         assert_matches!(
             simple_agg.next().await.unwrap().unwrap(),
             Message::Barrier { .. }
