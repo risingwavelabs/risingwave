@@ -19,6 +19,7 @@ use anyhow::anyhow;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
@@ -969,40 +970,41 @@ impl DdlService for DdlServiceImpl {
             for table in tables {
                 // Since we only support `ADD` and `DROP` column, we check whether the new columns and the original columns
                 // is a subset of the other.
-                let original_column_names: HashSet<String> = HashSet::from_iter(
-                    table
-                        .columns
-                        .iter()
-                        .map(|col| ColumnCatalog::from(col.clone()).column_desc.name),
-                );
-                let new_column_names: HashSet<String> = HashSet::from_iter(
-                    table_change
-                        .columns
-                        .iter()
-                        .map(|col| ColumnCatalog::from(col.clone()).column_desc.name),
-                );
-                if !(original_column_names.is_subset(&new_column_names)
-                    || original_column_names.is_superset(&new_column_names))
+                let original_columns: HashSet<(String, DataType)> =
+                    HashSet::from_iter(table.columns.iter().map(|col| {
+                        let col = ColumnCatalog::from(col.clone());
+                        let data_type = col.data_type().clone();
+                        (col.column_desc.name, data_type)
+                    }));
+                let new_columns: HashSet<(String, DataType)> =
+                    HashSet::from_iter(table_change.columns.iter().map(|col| {
+                        let col = ColumnCatalog::from(col.clone());
+                        let data_type = col.data_type().clone();
+                        (col.column_desc.name, data_type)
+                    }));
+
+                if !(original_columns.is_subset(&new_columns)
+                    || original_columns.is_superset(&new_columns))
                 {
                     tracing::warn!(target: "auto_schema_change",
                                     table_id = table.id,
                                     cdc_table_id = table.cdc_table_id,
                                     upstraem_ddl = table_change.upstream_ddl,
-                                    original_columns = ?original_column_names,
-                                    new_columns = ?new_column_names,
+                                    original_columns = ?original_columns,
+                                    new_columns = ?new_columns,
                                     "New columns should be a subset or superset of the original columns, since only `ADD COLUMN` and `DROP COLUMN` is supported");
                     return Err(Status::invalid_argument(
                         "New columns should be a subset or superset of the original columns",
                     ));
                 }
                 // skip the schema change if there is no change to original columns
-                if original_column_names == new_column_names {
+                if original_columns == new_columns {
                     tracing::warn!(target: "auto_schema_change",
                                    table_id = table.id,
                                    cdc_table_id = table.cdc_table_id,
                                    upstraem_ddl = table_change.upstream_ddl,
-                                    original_columns = ?original_column_names,
-                                    new_columns = ?new_column_names,
+                                    original_columns = ?original_columns,
+                                    new_columns = ?new_columns,
                                    "No change to columns, skipping the schema change");
                     continue;
                 }
