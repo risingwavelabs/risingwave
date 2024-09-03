@@ -576,9 +576,6 @@ impl ManagedBarrierState {
         actor_ids_to_pre_sync_barrier: HashSet<ActorId>,
     ) -> StreamResult<()> {
         let actor_to_stop = barrier.all_stop_actors();
-        if let Some(actor_to_stop) = actor_to_stop {
-            error!(?actor_to_stop, epoch = ?barrier.epoch, "stop actors");
-        }
         let is_stop_actor = |actor_id| {
             actor_to_stop
                 .map(|actors| actors.contains(&actor_id))
@@ -641,10 +638,6 @@ impl ManagedBarrierState {
                     new_actors.insert(*actor_id);
                 }
             }
-        }
-
-        if !new_actors.is_empty() {
-            error!(?new_actors, epoch = ?barrier.epoch, "create actors");
         }
 
         // Note: it's important to issue barrier to actor after issuing to graph to ensure that

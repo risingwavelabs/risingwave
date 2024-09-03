@@ -615,7 +615,6 @@ impl LocalBarrierWorker {
 
     /// Reset all internal states.
     pub(super) fn reset_state(&mut self) {
-        error!("reset barrier worker");
         *self = Self::new(self.actor_manager.clone());
     }
 
