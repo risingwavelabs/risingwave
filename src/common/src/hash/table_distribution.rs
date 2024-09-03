@@ -13,21 +13,23 @@
 // limitations under the License.
 
 use std::mem::replace;
-use std::ops::Deref;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_pb::plan_common::StorageTableDesc;
 use tracing::warn;
 
 use crate::array::{Array, DataChunk, PrimitiveArray};
-use crate::bitmap::{Bitmap, BitmapBuilder};
+use crate::bitmap::Bitmap;
 use crate::hash::VirtualNode;
 use crate::row::Row;
 use crate::util::iter_util::ZipEqFast;
 
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
 pub const DEFAULT_VNODE: VirtualNode = VirtualNode::ZERO;
+pub use DEFAULT_VNODE as SINGLETON_VNODE;
+
+use super::VnodeBitmapExt;
 
 #[derive(Debug, Clone)]
 enum ComputeVnode {
@@ -51,8 +53,6 @@ pub struct TableDistribution {
     /// Virtual nodes that the table is partitioned into.
     vnodes: Arc<Bitmap>,
 }
-
-pub const SINGLETON_VNODE: VirtualNode = DEFAULT_VNODE;
 
 impl TableDistribution {
     pub fn new_from_storage_table_desc(
@@ -85,9 +85,9 @@ impl TableDistribution {
             ComputeVnode::Singleton
         };
 
-        let vnodes = vnodes.unwrap_or_else(Self::singleton_vnode_bitmap);
+        let vnodes = vnodes.unwrap_or_else(|| Bitmap::singleton().into());
         if let ComputeVnode::Singleton = &compute_vnode {
-            if &vnodes != Self::singleton_vnode_bitmap_ref() && &vnodes != Self::all_vnodes_ref() {
+            if !vnodes.is_singleton() && !vnodes.all() {
                 warn!(
                     ?vnodes,
                     "singleton distribution get non-singleton vnode bitmap"
@@ -105,39 +105,13 @@ impl TableDistribution {
         matches!(&self.compute_vnode, ComputeVnode::Singleton)
     }
 
-    pub fn singleton_vnode_bitmap_ref() -> &'static Arc<Bitmap> {
-        /// A bitmap that only the default vnode is set.
-        static SINGLETON_VNODES: LazyLock<Arc<Bitmap>> = LazyLock::new(|| {
-            let mut vnodes = BitmapBuilder::zeroed(VirtualNode::COUNT);
-            vnodes.set(SINGLETON_VNODE.to_index(), true);
-            vnodes.finish().into()
-        });
-
-        SINGLETON_VNODES.deref()
-    }
-
-    pub fn singleton_vnode_bitmap() -> Arc<Bitmap> {
-        Self::singleton_vnode_bitmap_ref().clone()
-    }
-
-    pub fn all_vnodes_ref() -> &'static Arc<Bitmap> {
-        /// A bitmap that all vnodes are set.
-        static ALL_VNODES: LazyLock<Arc<Bitmap>> =
-            LazyLock::new(|| Bitmap::ones(VirtualNode::COUNT).into());
-        &ALL_VNODES
-    }
-
-    pub fn all_vnodes() -> Arc<Bitmap> {
-        Self::all_vnodes_ref().clone()
-    }
-
     /// Distribution that accesses all vnodes, mainly used for tests.
-    pub fn all(dist_key_in_pk_indices: Vec<usize>) -> Self {
+    pub fn all(dist_key_in_pk_indices: Vec<usize>, vnode_count: usize) -> Self {
         Self {
             compute_vnode: ComputeVnode::DistKeyIndices {
                 dist_key_in_pk_indices,
             },
-            vnodes: Self::all_vnodes(),
+            vnodes: Bitmap::ones(vnode_count).into(),
         }
     }
 
@@ -145,12 +119,12 @@ impl TableDistribution {
     pub fn singleton() -> Self {
         Self {
             compute_vnode: ComputeVnode::Singleton,
-            vnodes: Self::singleton_vnode_bitmap(),
+            vnodes: Bitmap::singleton().into(),
         }
     }
 
     pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-        if self.is_singleton() && &new_vnodes != Self::singleton_vnode_bitmap_ref() {
+        if self.is_singleton() && !new_vnodes.is_singleton() {
             warn!(?new_vnodes, "update vnode on singleton distribution");
         }
         assert_eq!(self.vnodes.len(), new_vnodes.len());
