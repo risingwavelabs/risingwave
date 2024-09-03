@@ -443,7 +443,13 @@ impl LocalBarrierWorker {
                     .map_err(|e| (actor_id, e))?;
             }
             #[cfg(test)]
-            LocalBarrierEvent::Flush(sender) => sender.send(()).unwrap(),
+            LocalBarrierEvent::Flush(sender) => {
+                use futures::FutureExt;
+                while let Some(request) = self.control_stream_handle.next_request().now_or_never() {
+                    self.handle_streaming_control_request(request).unwrap();
+                }
+                sender.send(()).unwrap()
+            }
         }
         Ok(())
     }
