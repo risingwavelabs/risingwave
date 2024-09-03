@@ -39,7 +39,7 @@ use super::{apply_rate_limit, get_split_offset_col_idx};
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 use crate::executor::source::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
-use crate::executor::{AddMutation, UpdateMutation};
+use crate::executor::UpdateMutation;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum BackfillState {
@@ -245,20 +245,10 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         };
 
         let mut owned_splits = Vec::default();
-        if let Some(mutation) = barrier.mutation.as_ref() {
-            match mutation.as_ref() {
-                Mutation::Add(AddMutation { splits, .. })
-                | Mutation::Update(UpdateMutation {
-                    actor_splits: splits,
-                    ..
-                }) => {
-                    if let Some(splits) = splits.get(&self.actor_ctx.id) {
-                        owned_splits.clone_from(splits);
-                    }
-                }
-                _ => {}
-            }
+        if let Some(splits) = barrier.initial_split_assignment(self.actor_ctx.id) {
+            owned_splits = splits.to_vec();
         }
+
         self.backfill_state_store.init_epoch(barrier.epoch);
 
         let mut backfill_states: BackfillStates = HashMap::new();
