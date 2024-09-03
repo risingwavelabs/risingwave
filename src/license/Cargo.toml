@@ -15,7 +15,10 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
+jsonbb = { workspace = true }
 jsonwebtoken = "9"
+risingwave_pb = { workspace = true }
+risingwave_telemetry_event = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 thiserror-ext = { workspace = true }
