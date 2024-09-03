@@ -23,8 +23,6 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-export RPK_BROKERS="message_queue:29092"
-
 download_and_prepare_rw "$profile" source
 
 # Change process number limit

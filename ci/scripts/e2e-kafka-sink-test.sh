@@ -3,6 +3,8 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+export RPK_BROKERS="message_queue:29092"
+
 rpk topic create test-rw-sink-append-only
 rpk topic create test-rw-sink-upsert
 rpk topic create test-rw-sink-upsert-schema
