@@ -70,7 +70,9 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             intermediate_state_table,
             distinct_dedup_tables,
             watermark_epoch: params.watermark_epoch,
-            extra: SimpleAggExecutorExtraArgs {},
+            extra: SimpleAggExecutorExtraArgs {
+                must_output_per_barrier: false,
+            },
         })?;
 
         Ok((params.info, exec).into())
