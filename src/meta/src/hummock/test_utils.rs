@@ -166,6 +166,7 @@ pub fn generate_test_sstables_with_table_id(
 ) -> Vec<SstableInfo> {
     let mut sst_info = vec![];
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
+        let object_size = 2;
         sst_info.push(SstableInfo {
             object_id: sst_id,
             sst_id,
@@ -184,10 +185,11 @@ pub fn generate_test_sstables_with_table_id(
                 )),
                 right_exclusive: false,
             },
-            file_size: 2,
+            file_size: object_size,
             table_ids: vec![table_id],
-            uncompressed_file_size: 2,
+            uncompressed_file_size: object_size,
             max_epoch: epoch,
+            sst_size: object_size,
             ..Default::default()
         });
     }
@@ -197,6 +199,7 @@ pub fn generate_test_sstables_with_table_id(
 pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) -> Vec<SstableInfo> {
     let mut sst_info = vec![];
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
+        let object_size = 2;
         sst_info.push(SstableInfo {
             object_id: sst_id,
             sst_id,
@@ -205,10 +208,11 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) ->
                 right: Bytes::from(iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch)),
                 right_exclusive: false,
             },
-            file_size: 2,
+            file_size: object_size,
             table_ids: vec![sst_id as u32, sst_id as u32 * 10000],
-            uncompressed_file_size: 2,
+            uncompressed_file_size: object_size,
             max_epoch: epoch,
+            sst_size: object_size,
             ..Default::default()
         });
     }

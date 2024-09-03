@@ -16,6 +16,8 @@ insert into t2 values (1, 3), (1, 5), (4, 10);
 statement ok
 create materialized view t3 as select v1, count(*) as v2 from t2 group by v1;
 
+sleep 1s
+
 query IIII
 select * from t1 left join t3 on t1.v1 = t3.v1 order by t1.v1, t1.v2;
 ----
@@ -78,6 +80,8 @@ insert into t2 values ('do', 'gww'), ('f', 'flow'), ('hi', 'hello');
 statement ok
 create materialized view t3 as select count(*) as v1, v2 from t2 group by v2;
 
+sleep 1s
+
 query IIII
 select * from t1 left join t3 on t1.v2 = t3.v2;
 ----
@@ -136,6 +140,8 @@ create table t5 (v1 decimal);
 statement ok
 create materialized view t6 as select v1, count(*) as v2 from t5 group by v1;
 
+sleep 1s
+
 statement ok
 insert into t1 values (2);
 
@@ -193,6 +199,8 @@ create table t2 (v1 int);
 statement ok
 create materialized view t3 as select v1 from t2 group by v1;
 
+sleep 1s
+
 statement ok
 insert into t1 values (null);
 
@@ -233,6 +241,8 @@ create table t2(c int, d int);
 statement ok
 create index idx on t2(c) include(d);
 
+sleep 1s
+
 statement ok
 insert into t1 values (1,222);
 
@@ -260,6 +270,8 @@ create table t (v int);
 
 statement ok
 create materialized view mv as select v from t order by v limit 10;
+
+sleep 1s
 
 statement ok
 insert into t values (1);

@@ -25,7 +25,7 @@ use crate::catalog::ColumnId;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 
 const OP_NAME: &str = "op";
-const OP_TYPE: DataType = DataType::Int16;
+const OP_TYPE: DataType = DataType::Varchar;
 
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]

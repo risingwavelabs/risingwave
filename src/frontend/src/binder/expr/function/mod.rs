@@ -163,7 +163,7 @@ impl Binder {
                     InputRef::new(i, DataType::List(Box::new(expr.return_type()))).into()
                 })
                 .collect_vec();
-            let scalar: ExprImpl = if let Ok(schema) = self.first_valid_schema()
+            let scalar_func_expr = if let Ok(schema) = self.first_valid_schema()
                 && let Some(func) = schema.get_function_by_name_inputs(&func_name, &mut array_args)
             {
                 if !func.kind.is_scalar() {
@@ -172,13 +172,17 @@ impl Binder {
                     )
                     .into());
                 }
-                UserDefinedFunction::new(func.clone(), array_args).into()
+                if func.language == "sql" {
+                    self.bind_sql_udf(func.clone(), array_args)?
+                } else {
+                    UserDefinedFunction::new(func.clone(), array_args).into()
+                }
             } else {
                 self.bind_builtin_scalar_function(&func_name, array_args, arg_list.variadic)?
             };
 
             // now this is either an aggregate/window function call
-            Some(AggKind::WrapScalar(scalar.to_expr_proto()))
+            Some(AggKind::WrapScalar(scalar_func_expr.to_expr_proto()))
         } else {
             None
         };
@@ -214,7 +218,7 @@ impl Binder {
                     over.is_some(),
                     format!("`OVER` is not allowed in {} call", name)
                 );
-                return self.bind_sql_udf(func, arg_list.args);
+                return self.bind_sql_udf(func, args);
             }
 
             // now `func` is a non-SQL user-defined scalar/aggregate/table function
@@ -228,6 +232,7 @@ impl Binder {
         } else if let Some(ref udf) = udf
             && udf.kind.is_aggregate()
         {
+            assert_ne!(udf.language, "sql", "SQL UDAF is not supported yet");
             Some(AggKind::UserDefined(udf.as_ref().into()))
         } else if let Ok(kind) = AggKind::from_str(&func_name) {
             Some(kind)
@@ -451,7 +456,7 @@ impl Binder {
     fn bind_sql_udf(
         &mut self,
         func: Arc<FunctionCatalog>,
-        args: Vec<FunctionArg>,
+        args: Vec<ExprImpl>,
     ) -> Result<ExprImpl> {
         if func.body.is_none() {
             return Err(
@@ -483,30 +488,15 @@ impl Binder {
 
         // The actual inline logic for sql udf
         // Note that we will always create new udf context for each sql udf
-        let Ok(context) = UdfContext::create_udf_context(&args, &func) else {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "failed to create the `udf_context`, please recheck your function definition and syntax".to_string()
-            )
-            .into());
-        };
-
         let mut udf_context = HashMap::new();
-        for (c, e) in context {
-            // Note that we need to bind the args before actual delve in the function body
-            // This will update the context in the subsequent inner calling function
-            // e.g.,
-            // - create function print(INT) returns int language sql as 'select $1';
-            // - create function print_add_one(INT) returns int language sql as 'select print($1 + 1)';
-            // - select print_add_one(1); # The result should be 2 instead of 1.
-            // Without the pre-binding here, the ($1 + 1) will not be correctly populated,
-            // causing the result to always be 1.
-            let Ok(e) = self.bind_expr(e) else {
-                return Err(ErrorCode::BindError(
-                    "failed to bind the argument, please recheck the syntax".to_string(),
-                )
-                .into());
-            };
-            udf_context.insert(c, e);
+        for (i, arg) in args.into_iter().enumerate() {
+            if func.arg_names[i].is_empty() {
+                // unnamed argument, use `$1`, `$2` as the name
+                udf_context.insert(format!("${}", i + 1), arg);
+            } else {
+                // named argument
+                udf_context.insert(func.arg_names[i].clone(), arg);
+            }
         }
         self.udf_context.update_context(udf_context);
 

@@ -16,12 +16,10 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
-use futures::StreamExt;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
-use postgres_types::FromSql;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema;
@@ -424,46 +422,8 @@ async fn execute(
     let stmt_type = plan_fragmenter_result.stmt_type;
 
     let query_start_time = Instant::now();
-    let (mut row_stream, pg_descs) =
+    let (row_stream, pg_descs) =
         create_stream(session.clone(), plan_fragmenter_result, formats).await?;
-
-    let row_cnt: Option<i32> = match stmt_type {
-        StatementType::SELECT
-        | StatementType::INSERT_RETURNING
-        | StatementType::DELETE_RETURNING
-        | StatementType::UPDATE_RETURNING => None,
-
-        StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            let first_row_set = row_stream.next().await;
-            let first_row_set = match first_row_set {
-                None => {
-                    return Err(RwError::from(ErrorCode::InternalError(
-                        "no affected rows in output".to_string(),
-                    )))
-                }
-                Some(row) => row?,
-            };
-            let affected_rows_str = first_row_set[0].values()[0]
-                .as_ref()
-                .expect("compute node should return affected rows in output");
-            if let Format::Binary = first_field_format {
-                Some(
-                    i64::from_sql(&postgres_types::Type::INT8, affected_rows_str)
-                        .unwrap()
-                        .try_into()
-                        .expect("affected rows count large than i64"),
-                )
-            } else {
-                Some(
-                    String::from_utf8(affected_rows_str.to_vec())
-                        .unwrap()
-                        .parse()
-                        .unwrap_or_default(),
-                )
-            }
-        }
-        _ => unreachable!(),
-    };
 
     // We need to do some post work after the query is finished and before the `Complete` response
     // it sent. This is achieved by the `callback` in `PgResponse`.
@@ -510,7 +470,7 @@ async fn execute(
     };
 
     Ok(PgResponse::builder(stmt_type)
-        .row_cnt_opt(row_cnt)
+        .row_cnt_format_opt(Some(first_field_format))
         .values(row_stream, pg_descs)
         .callback(callback)
         .into())

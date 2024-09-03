@@ -879,7 +879,7 @@ def section_streaming(outer_panels):
                     "The figure shows the number of rows written into each materialized view per second.",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_mview_input_row_count')}[$__rate_interval])) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
+                            f"sum(rate({table_metric('stream_mview_input_row_count')}[$__rate_interval])) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
                             "mview {{table_id}} {{table_name}}",
                         ),
                     ],
@@ -889,7 +889,7 @@ def section_streaming(outer_panels):
                     "The figure shows the number of rows written into each materialized view per second.",
                     [
                         panels.target(
-                            f"rate({metric('stream_mview_input_row_count')}[$__rate_interval]) * on(fragment_id, table_id) group_left(table_name) {metric('table_info')}",
+                            f"rate({table_metric('stream_mview_input_row_count')}[$__rate_interval]) * on(fragment_id, table_id) group_left(table_name) {metric('table_info')}",
                             "mview {{table_id}} {{table_name}} - actor {{actor_id}} fragment_id {{fragment_id}}",
                         ),
                     ],
@@ -1081,12 +1081,50 @@ def section_streaming_cdc(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Auto Schema Change Failure Count",
+                    "Total number of failed auto schema change attempts of CDC Table",
+                    [
+                        panels.target(
+                            f"sum({metric('auto_schema_change_failure_cnt')}) by (table_id, table_name)",
+                            "{{table_id}} - {{table_name}}",
+                            )
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_count(
+                    "Auto Schema Change Success Count",
+                    "Total number of succeeded auto schema change of CDC Table",
+                    [
+                        panels.target(
+                            f"sum({metric('auto_schema_change_success_cnt')}) by (table_id, table_name)",
+                            "{{table_id}} - {{table_name}}",
+                        )
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_latency(
+                    "Auto Schema Change Latency (sec)",
+                    "Latency of Auto Schema Change Process",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('auto_schema_change_latency_bucket')}[$__rate_interval])) by (le, table_id, table_name))",
+                                f"lag p{legend}" + "{{table_id}} - {{table_name}}",
+                                ),
+                            [50, 99, "max"],
+                        ),
+                    ],
+                ),
             ],
         ),
     ]
 
 
-def section_streaming_actors(outer_panels):
+def section_streaming_actors(outer_panels: Panels):
+    # The actor_id can be masked due to metrics level settings.
+    # We use this filter to suppress the actor-level panels if applicable.
+    actor_level_filter = "actor_id!=''"
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -1098,8 +1136,15 @@ def section_streaming_actors(outer_panels):
                     "much time it takes an actor to process a message, i.e. a barrier, a watermark or rows of data, "
                     "on average. Then we divide this duration by 1 second and show it as a percentage.",
                     [
+                        # The metrics might be pre-aggregated locally on each compute node when `actor_id` is masked due to metrics level settings.
+                        # Thus to calculate the average, we need to manually divide the actor count.
+                        #
+                        # Note: actor_count is equal to the number of dispatchers for a given downstream fragment,
+                        # this holds true as long as we don't support multiple edges between two fragments.
                         panels.target(
-                            f"avg(rate({metric('stream_actor_output_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, downstream_fragment_id) / 1000000000",
+                            f"sum(rate({metric('stream_actor_output_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, downstream_fragment_id) \
+                            / ignoring (downstream_fragment_id) group_left sum({metric('stream_actor_count')}) by (fragment_id) \
+                            / 1000000000",
                             "fragment {{fragment_id}}->{{downstream_fragment_id}}",
                         ),
                     ],
@@ -1120,10 +1165,10 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"sum(rate({metric('stream_actor_in_record_cnt')}[$__rate_interval])) by (fragment_id, upstream_fragment_id)",
-                            "fragment {{fragment_id}}<-{{upstream_fragment_id}}",
+                            "fragment total {{fragment_id}}<-{{upstream_fragment_id}}",
                         ),
-                        panels.target_hidden(
-                            f"rate({metric('stream_actor_in_record_cnt')}[$__rate_interval])",
+                        panels.target(
+                            f"rate({metric('stream_actor_in_record_cnt', actor_level_filter)}[$__rate_interval])",
                             "actor {{actor_id}}",
                         ),
                     ],
@@ -1134,10 +1179,10 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"sum(rate({metric('stream_actor_out_record_cnt')}[$__rate_interval])) by (fragment_id)",
-                            "fragment {{fragment_id}}",
+                            "fragment total {{fragment_id}}",
                         ),
-                        panels.target_hidden(
-                            f"rate({metric('stream_actor_out_record_cnt')}[$__rate_interval])",
+                        panels.target(
+                            f"rate({metric('stream_actor_out_record_cnt', actor_level_filter)}[$__rate_interval])",
                             "actor {{actor_id}}",
                         ),
                     ],
@@ -1148,11 +1193,11 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"sum({metric('stream_memory_usage')}) by (table_id, desc)",
-                            "table {{table_id}} desc: {{desc}}",
+                            "table total {{table_id}}: {{desc}}",
                         ),
-                        panels.target_hidden(
-                            f"{metric('stream_memory_usage')}",
-                            "table {{table_id}} actor {{actor_id}} desc: {{desc}}",
+                        panels.target(
+                            f"{metric('stream_memory_usage', actor_level_filter)}",
+                            "actor {{actor_id}} table {{table_id}}: {{desc}}",
                         ),
                     ],
                 ),
@@ -1192,13 +1237,13 @@ def section_streaming_actors(outer_panels):
                             f"sum(rate({table_metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, fragment_id)",
                             "total cached count - table {{table_id}} fragment {{fragment_id}}",
                         ),
-                        panels.target_hidden(
-                            f"rate({table_metric('stream_materialize_cache_hit_count')}[$__rate_interval])",
-                            "cache hit count - table {{table_id}} actor {{actor_id}}",
+                        panels.target(
+                            f"rate({table_metric('stream_materialize_cache_hit_count', actor_level_filter)}[$__rate_interval])",
+                            "cache hit count - actor {{actor_id}} table {{table_id}} fragment {{fragment_id}}",
                         ),
-                        panels.target_hidden(
-                            f"rate({table_metric('stream_materialize_cache_total_count')}[$__rate_interval])",
-                            "total cached count - table {{table_id}} actor {{actor_id}}",
+                        panels.target(
+                            f"rate({table_metric('stream_materialize_cache_total_count', actor_level_filter)}[$__rate_interval])",
+                            "total cached count - actor {{actor_id}} table {{table_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -1291,12 +1336,15 @@ def section_streaming_actors(outer_panels):
                     "Executor Barrier Align Per Second",
                     "",
                     [
+                        # The metrics might be pre-aggregated locally on each compute node when `actor_id` is masked due to metrics level settings.
+                        # Thus to calculate the average, we need to manually divide the actor count.
                         panels.target(
-                            f"avg(rate({metric('stream_barrier_align_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id,wait_side, executor)",
-                            "fragment {{fragment_id}} {{wait_side}} {{executor}}",
+                            f"sum(rate({metric('stream_barrier_align_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id, wait_side, executor) \
+                            / ignoring (wait_side, executor) group_left sum({metric('stream_actor_count')}) by (fragment_id)",
+                            "fragment avg {{fragment_id}} {{wait_side}} {{executor}}",
                         ),
-                        panels.target_hidden(
-                            f"rate({metric('stream_barrier_align_duration_ns')}[$__rate_interval]) / 1000000000",
+                        panels.target(
+                            f"rate({metric('stream_barrier_align_duration_ns', actor_level_filter)}[$__rate_interval]) / 1000000000",
                             "actor {{actor_id}} fragment {{fragment_id}} {{wait_side}} {{executor}}",
                         ),
                     ],
@@ -1526,25 +1574,11 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"sum(rate({metric('stream_executor_row_count')}[$__rate_interval])) by (executor_identity, fragment_id)",
-                            "{{executor_identity}} fragment {{fragment_id}}",
+                            "{{executor_identity}} fragment total {{fragment_id}}",
                         ),
-                        panels.target_hidden(
-                            f"rate({metric('stream_executor_row_count')}[$__rate_interval])",
-                            "{{executor_identity}} actor {{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes(
-                    "Actor Memory Usage (TaskLocalAlloc)",
-                    "The actor-level memory usage statistics reported by TaskLocalAlloc. (Disabled by default)",
-                    [
                         panels.target(
-                            f"sum({metric('actor_memory_usage')}) by (fragment_id)",
-                            "fragment {{fragment_id}}",
-                        ),
-                        panels.target_hidden(
-                            f"{metric('actor_memory_usage')}",
-                            "actor {{actor_id}}",
+                            f"rate({metric('stream_executor_row_count', actor_level_filter)}[$__rate_interval])",
+                            "{{executor_identity}} actor {{actor_id}}",
                         ),
                     ],
                 ),

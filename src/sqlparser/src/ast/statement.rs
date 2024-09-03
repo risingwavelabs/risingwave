@@ -634,7 +634,7 @@ impl fmt::Display for CreateSubscriptionStatement {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DeclareCursor {
     Query(Box<Query>),
-    Subscription(ObjectName, Option<Since>),
+    Subscription(ObjectName, Since),
 }
 
 impl fmt::Display for DeclareCursor {
@@ -890,6 +890,7 @@ pub enum Since {
     TimestampMsNum(u64),
     ProcessTime,
     Begin,
+    Full,
 }
 
 impl fmt::Display for Since {
@@ -899,6 +900,7 @@ impl fmt::Display for Since {
             TimestampMsNum(ts) => write!(f, " SINCE {}", ts),
             ProcessTime => write!(f, " SINCE PROCTIME()"),
             Begin => write!(f, " SINCE BEGIN()"),
+            Full => write!(f, " FULL"),
         }
     }
 }

@@ -33,8 +33,10 @@ For example:
 
 ```bash
 ./risedev d
-sqllogictest -p 4566 -d dev './e2e_test/nexmark/create_tables.slt.part'
-sqllogictest -p 4566 -d dev './e2e_test/streaming/nexmark/create_views.slt.part'
+./risedev slt  e2e_test/nexmark/create_sources.slt.part
+./risedev psql -c 'CREATE TABLE dimension (v1 int);'
+./risedev psql -c 'CREATE MATERIALIZED VIEW mv AS SELECT auction.* FROM dimension join auction on auction.id-auction.id = dimension.v1;'
+./risedev psql -c 'INSERT INTO dimension select 0 from generate_series(1, 50);'
 ```
 
 Install dependencies and start the development server.

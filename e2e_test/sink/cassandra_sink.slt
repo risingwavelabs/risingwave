@@ -11,6 +11,9 @@ statement ok
 CREATE TABLE t7 ("TEST_V1" int primary key, "TEST_V2" int, "TEST_V3" int);
 
 statement ok
+set sink_decouple = false;
+
+statement ok
 CREATE SINK s6
 FROM
     t6 WITH (

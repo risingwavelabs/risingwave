@@ -38,23 +38,26 @@ use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
 use serde_derive::{Deserialize, Serialize};
-use serde_with::serde_as;
+use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
 
 use super::catalog::desc::SinkDesc;
 use super::coordinate::CoordinatedSinkWriter;
-use super::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
+use super::decouple_checkpoint_log_sink::{
+    default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
+    DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
+};
 use super::writer::SinkWriter;
 use super::{
     Result, Sink, SinkCommitCoordinator, SinkError, SinkParam, SinkWriterParam,
     SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
-use crate::deserialize_optional_u64_from_string;
 
 pub const DELTALAKE_SINK: &str = "deltalake";
 pub const DEFAULT_REGION: &str = "us-east-1";
 pub const GCS_SERVICE_ACCOUNT: &str = "service_account_key";
 
+#[serde_as]
 #[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct DeltaLakeCommon {
     #[serde(rename = "s3.access.key")]
@@ -69,10 +72,12 @@ pub struct DeltaLakeCommon {
     pub s3_endpoint: Option<String>,
     #[serde(rename = "gcs.service.account")]
     pub gcs_service_account: Option<String>,
-    /// Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
-    #[serde(default, deserialize_with = "deserialize_optional_u64_from_string")]
-    pub commit_checkpoint_interval: Option<u64>,
+    /// Commit every n(>0) checkpoints, default is 10.
+    #[serde(default = "default_commit_checkpoint_interval")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub commit_checkpoint_interval: u64,
 }
+
 impl DeltaLakeCommon {
     pub async fn create_deltalake_client(&self) -> Result<DeltaTable> {
         let table = match Self::get_table_url(&self.location)? {
@@ -281,26 +286,25 @@ impl Sink for DeltaLakeSink {
     const SINK_NAME: &'static str = DELTALAKE_SINK;
 
     fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        let config_decouple = if let Some(interval) =
-            desc.properties.get("commit_checkpoint_interval")
-            && interval.parse::<u64>().unwrap_or(0) > 1
-        {
-            true
-        } else {
-            false
-        };
+        let commit_checkpoint_interval =
+            if let Some(interval) = desc.properties.get("commit_checkpoint_interval") {
+                interval
+                    .parse::<u64>()
+                    .unwrap_or(DEFAULT_COMMIT_CHECKPOINT_INTERVAL)
+            } else {
+                DEFAULT_COMMIT_CHECKPOINT_INTERVAL
+            };
 
         match user_specified {
-            SinkDecouple::Default => Ok(config_decouple),
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => {
-                if config_decouple {
+                if commit_checkpoint_interval > 1 {
                     return Err(SinkError::Config(anyhow!(
                         "config conflict: DeltaLake config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
                     )));
                 }
                 Ok(false)
             }
-            SinkDecouple::Enable => Ok(true),
         }
     }
 
@@ -328,7 +332,7 @@ impl Sink for DeltaLakeSink {
         .await?;
 
         let commit_checkpoint_interval =
-            NonZeroU64::new(self.config.common.commit_checkpoint_interval.unwrap_or(1)).expect(
+            NonZeroU64::new(self.config.common.commit_checkpoint_interval).expect(
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
             );
 
@@ -380,9 +384,9 @@ impl Sink for DeltaLakeSink {
                 )));
             }
         }
-        if self.config.common.commit_checkpoint_interval == Some(0) {
+        if self.config.common.commit_checkpoint_interval == 0 {
             return Err(SinkError::Config(anyhow!(
-                "commit_checkpoint_interval must be greater than 0"
+                "`commit_checkpoint_interval` must be greater than 0"
             )));
         }
         Ok(())

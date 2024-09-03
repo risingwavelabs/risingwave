@@ -411,9 +411,9 @@ impl HummockVersion {
                     .table_infos
                     .extract_if(|sst_info| sst_info.table_ids.is_empty())
                     .for_each(|sst_info| {
-                        sub_level.total_file_size -= sst_info.file_size;
+                        sub_level.total_file_size -= sst_info.sst_size;
                         sub_level.uncompressed_file_size -= sst_info.uncompressed_file_size;
-                        l0.total_file_size -= sst_info.file_size;
+                        l0.total_file_size -= sst_info.sst_size;
                         l0.uncompressed_file_size -= sst_info.uncompressed_file_size;
                     });
                 if insert_table_infos.is_empty() {
@@ -440,7 +440,7 @@ impl HummockVersion {
                 split_sst_info_for_level(&member_table_ids, level, &mut new_sst_id);
             cur_levels.levels[idx].total_file_size += insert_table_infos
                 .iter()
-                .map(|sst| sst.file_size)
+                .map(|sst| sst.sst_size)
                 .sum::<u64>();
             cur_levels.levels[idx].uncompressed_file_size += insert_table_infos
                 .iter()
@@ -457,7 +457,7 @@ impl HummockVersion {
                 .table_infos
                 .extract_if(|sst_info| sst_info.table_ids.is_empty())
                 .for_each(|sst_info| {
-                    level.total_file_size -= sst_info.file_size;
+                    level.total_file_size -= sst_info.sst_size;
                     level.uncompressed_file_size -= sst_info.uncompressed_file_size;
                 });
         }
@@ -1013,7 +1013,13 @@ fn split_sst_info_for_level(
             .cloned()
             .collect_vec();
         if !removed_table_ids.is_empty() {
-            let branch_sst = split_sst(sst_info, new_sst_id);
+            let branch_sst = split_sst(
+                sst_info,
+                new_sst_id,
+                sst_info.sst_size / 2,
+                sst_info.sst_size / 2,
+                member_table_ids.iter().cloned().collect_vec(),
+            );
             insert_table_infos.push(branch_sst);
         }
     }
@@ -1070,7 +1076,7 @@ pub fn new_sub_level(
             table_infos
         );
     }
-    let total_file_size = table_infos.iter().map(|table| table.file_size).sum();
+    let total_file_size = table_infos.iter().map(|table| table.sst_size).sum();
     let uncompressed_file_size = table_infos
         .iter()
         .map(|table| table.uncompressed_file_size)
@@ -1092,9 +1098,9 @@ pub fn add_ssts_to_sub_level(
     insert_table_infos: Vec<SstableInfo>,
 ) {
     insert_table_infos.iter().for_each(|sst| {
-        l0.sub_levels[sub_level_idx].total_file_size += sst.file_size;
+        l0.sub_levels[sub_level_idx].total_file_size += sst.sst_size;
         l0.sub_levels[sub_level_idx].uncompressed_file_size += sst.uncompressed_file_size;
-        l0.total_file_size += sst.file_size;
+        l0.total_file_size += sst.sst_size;
         l0.uncompressed_file_size += sst.uncompressed_file_size;
     });
     l0.sub_levels[sub_level_idx]
@@ -1174,7 +1180,7 @@ fn level_delete_ssts(
     operand.total_file_size = operand
         .table_infos
         .iter()
-        .map(|table| table.file_size)
+        .map(|table| table.sst_size)
         .sum::<u64>();
     operand.uncompressed_file_size = operand
         .table_infos
@@ -1187,7 +1193,7 @@ fn level_delete_ssts(
 fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) {
     operand.total_file_size += insert_table_infos
         .iter()
-        .map(|sst| sst.file_size)
+        .map(|sst| sst.sst_size)
         .sum::<u64>();
     operand.uncompressed_file_size += insert_table_infos
         .iter()
@@ -1327,10 +1333,35 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
     res
 }
 
-pub fn split_sst(sst_info: &mut SstableInfo, new_sst_id: &mut u64) -> SstableInfo {
+pub fn split_sst(
+    sst_info: &mut SstableInfo,
+    new_sst_id: &mut u64,
+    old_sst_size: u64,
+    new_sst_size: u64,
+    new_sst_table_ids: Vec<u32>,
+) -> SstableInfo {
     let mut branch_table_info = sst_info.clone();
     branch_table_info.sst_id = *new_sst_id;
+    branch_table_info.sst_size = new_sst_size;
+
     sst_info.sst_id = *new_sst_id + 1;
+    sst_info.sst_size = old_sst_size;
+
+    {
+        // related github.com/risingwavelabs/risingwave/pull/17898/
+        // This is a temporary implementation that will update `table_ids`` based on the new split rule after PR 17898
+
+        let set1: HashSet<_> = sst_info.table_ids.iter().cloned().collect();
+        let set2: HashSet<_> = new_sst_table_ids.iter().cloned().collect();
+        let intersection: Vec<_> = set1.intersection(&set2).cloned().collect();
+
+        // Update table_ids
+        branch_table_info.table_ids = intersection;
+        sst_info
+            .table_ids
+            .retain(|table_id| !branch_table_info.table_ids.contains(table_id));
+    }
+
     *new_sst_id += 1;
 
     branch_table_info

@@ -54,7 +54,7 @@ use risingwave_connector::source::nexmark::source::{get_event_data_types_with_na
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 pub use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_connector::source::{
-    ConnectorProperties, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
+    ConnectorProperties, AZBLOB_CONNECTOR, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
     KINESIS_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR,
     POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
 };
@@ -362,7 +362,7 @@ pub(crate) async fn bind_columns_from_source(
         (Format::Native, Encode::Native)
         | (Format::Plain, Encode::Bytes)
         | (Format::DebeziumMongo, Encode::Json) => None,
-        (Format::Plain, Encode::Protobuf) => {
+        (Format::Plain, Encode::Protobuf) | (Format::Upsert, Encode::Protobuf) => {
             let (row_schema_location, use_schema_registry) =
                 get_schema_location(&mut format_encode_options_to_consume)?;
             let protobuf_schema = ProtobufSchema {
@@ -697,6 +697,7 @@ pub(crate) fn bind_all_columns(
                 "Schema definition is required, either from SQL or schema registry.".to_string(),
             )));
         }
+        let non_generated_sql_defined_columns = non_generated_sql_columns(col_defs_from_sql);
         match (&source_schema.format, &source_schema.row_encode) {
             (Format::DebeziumMongo, Encode::Json) => {
                 let mut columns = vec![
@@ -709,8 +710,6 @@ pub(crate) fn bind_all_columns(
                         is_hidden: false,
                     },
                 ];
-                let non_generated_sql_defined_columns =
-                    non_generated_sql_columns(col_defs_from_sql);
                 if non_generated_sql_defined_columns.len() != 2
                     || non_generated_sql_defined_columns[0].name.real_value() != columns[0].name()
                     || non_generated_sql_defined_columns[1].name.real_value() != columns[1].name()
@@ -758,12 +757,25 @@ pub(crate) fn bind_all_columns(
                 Ok(columns)
             }
             (Format::Plain, Encode::Bytes) => {
-                if cols_from_sql.len() != 1 || cols_from_sql[0].data_type() != &DataType::Bytea {
-                    return Err(RwError::from(ProtocolError(
-                        "ENCODE BYTES only accepts one BYTEA type column".to_string(),
-                    )));
+                let err = Err(RwError::from(ProtocolError(
+                    "ENCODE BYTES only accepts one BYTEA type column".to_string(),
+                )));
+                if non_generated_sql_defined_columns.len() == 1 {
+                    // ok to unwrap `data_type`` since it was checked at `bind_sql_columns`
+                    let col_data_type = bind_data_type(
+                        non_generated_sql_defined_columns[0]
+                            .data_type
+                            .as_ref()
+                            .unwrap(),
+                    )?;
+                    if col_data_type == DataType::Bytea {
+                        Ok(cols_from_sql)
+                    } else {
+                        err
+                    }
+                } else {
+                    err
                 }
-                Ok(cols_from_sql)
             }
             (_, _) => Ok(cols_from_sql),
         }
@@ -1064,7 +1076,10 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Csv, Encode::Json, Encode::Parquet],
                 ),
                 GCS_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Csv, Encode::Json],
+                    Format::Plain => vec![Encode::Csv, Encode::Json, Encode::Parquet],
+                ),
+                AZBLOB_CONNECTOR => hashmap!(
+                    Format::Plain => vec![Encode::Csv, Encode::Json, Encode::Parquet],
                 ),
                 POSIX_FS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv],

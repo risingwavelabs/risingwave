@@ -1,6 +1,29 @@
 # THIS FILE IS AUTO_GENERATED. DO NOT EDIT
 # UPDATE WITH: ./risedev generate-with-options
 
+AzblobConfig:
+  fields:
+  - name: azblob.container_name
+    field_type: String
+    required: true
+  - name: azblob.path
+    field_type: String
+    comments: The directory where the sink file is located.
+    required: true
+  - name: azblob.credentials.account_name
+    field_type: String
+    required: false
+    default: Default::default
+  - name: azblob.credentials.account_key
+    field_type: String
+    required: false
+    default: Default::default
+  - name: azblob.endpoint_url
+    field_type: String
+    required: true
+  - name: r#type
+    field_type: String
+    required: true
 BigQueryConfig:
   fields:
   - name: bigquery.local.path
@@ -98,9 +121,9 @@ ClickHouseConfig:
     required: false
   - name: commit_checkpoint_interval
     field_type: u64
-    comments: Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
+    comments: Commit every n(>0) checkpoints, default is 10.
     required: false
-    default: Default::default
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
   - name: r#type
     field_type: String
     required: true
@@ -126,9 +149,9 @@ DeltaLakeConfig:
     required: false
   - name: commit_checkpoint_interval
     field_type: u64
-    comments: Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
+    comments: Commit every n(>0) checkpoints, default is 10.
     required: false
-    default: Default::default
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
   - name: r#type
     field_type: String
     required: true
@@ -322,8 +345,9 @@ IcebergConfig:
     required: false
   - name: commit_checkpoint_interval
     field_type: u64
+    comments: Commit every n(>0) checkpoints, default is 10.
     required: false
-    default: Default::default
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
 KafkaConfig:
   fields:
   - name: properties.bootstrap.server
@@ -507,7 +531,6 @@ KafkaConfig:
       This value is used to limits the time a produced message waits for
       successful delivery (including retries).
     required: false
-    default: '5000'
   - name: properties.max.in.flight.requests.per.connection
     field_type: usize
     comments: The maximum number of unacknowledged requests the client will send on a single connection before blocking.
@@ -988,13 +1011,25 @@ StarrocksConfig:
       to Starrocks at every n checkpoints by leveraging the
       [StreamLoad Transaction API](https://docs.starrocks.io/docs/loading/Stream_Load_transaction_interface/),
       also, in this time, the `sink_decouple` option should be enabled as well.
-      Defaults to 1 if commit_checkpoint_interval <= 0
+      Defaults to 10 if commit_checkpoint_interval <= 0
     required: false
-    default: Default::default
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
   - name: starrocks.partial_update
     field_type: String
     comments: Enable partial update
     required: false
+  - name: r#type
+    field_type: String
+    required: true
+WebhdfsConfig:
+  fields:
+  - name: webhdfs.endpoint
+    field_type: String
+    required: true
+  - name: webhdfs.path
+    field_type: String
+    comments: The directory where the sink file is located.
+    required: true
   - name: r#type
     field_type: String
     required: true

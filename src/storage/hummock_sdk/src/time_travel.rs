@@ -60,6 +60,7 @@ fn stripped_sstable_info(origin: &SstableInfo) -> SstableInfo {
         uncompressed_file_size: Default::default(),
         range_tombstone_count: Default::default(),
         bloom_filter_kind: Default::default(),
+        sst_size: Default::default(),
     }
 }
 

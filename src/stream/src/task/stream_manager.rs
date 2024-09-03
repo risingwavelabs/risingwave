@@ -42,7 +42,6 @@ use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::{dispatch_state_store, StateStore};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
-use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tonic::Status;
 
@@ -225,33 +224,6 @@ impl LocalStreamManager {
             .await
     }
 
-    pub async fn update_actors(&self, actors: Vec<BuildActorInfo>) -> StreamResult<()> {
-        self.actor_op_tx
-            .send_and_await(|result_sender| LocalActorOperation::UpdateActors {
-                actors,
-                result_sender,
-            })
-            .await?
-    }
-
-    pub async fn build_actors(&self, actors: Vec<ActorId>) -> StreamResult<()> {
-        self.actor_op_tx
-            .send_and_await(|result_sender| LocalActorOperation::BuildActors {
-                actors,
-                result_sender,
-            })
-            .await?
-    }
-
-    pub async fn update_actor_info(&self, new_actor_infos: Vec<ActorInfo>) -> StreamResult<()> {
-        self.actor_op_tx
-            .send_and_await(|result_sender| LocalActorOperation::UpdateActorInfo {
-                new_actor_infos,
-                result_sender,
-            })
-            .await?
-    }
-
     pub async fn take_receiver(&self, ids: UpDownActorIds) -> StreamResult<Receiver> {
         self.actor_op_tx
             .send_and_await(|result_sender| LocalActorOperation::TakeReceiver {
@@ -326,31 +298,18 @@ impl LocalBarrierWorker {
 
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
     /// now.
-    pub(super) fn start_create_actors(
-        &mut self,
-        actors: &[ActorId],
-        result_sender: oneshot::Sender<StreamResult<()>>,
-    ) {
-        let actors: Vec<_> = {
-            let actor_result = actors
-                .iter()
-                .map(|actor_id| {
-                    self.actor_manager_state
-                        .actors
-                        .remove(actor_id)
-                        .ok_or_else(|| anyhow!("No such actor with actor id:{}", actor_id))
-                })
-                .try_collect();
-            match actor_result {
-                Ok(actors) => actors,
-                Err(e) => {
-                    let _ = result_sender.send(Err(e.into()));
-                    return;
-                }
-            }
-        };
+    pub(super) fn start_create_actors(&mut self, actors: &[ActorId]) -> StreamResult<()> {
+        let actors: Vec<_> = actors
+            .iter()
+            .map(|actor_id| {
+                self.actor_manager_state
+                    .actors
+                    .remove(actor_id)
+                    .ok_or_else(|| anyhow!("No such actor with actor id:{}", actor_id))
+            })
+            .try_collect()?;
         self.spawn_actors(actors);
-        let _ = result_sender.send(Ok(()));
+        Ok(())
     }
 }
 
