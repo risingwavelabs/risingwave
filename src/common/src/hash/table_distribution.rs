@@ -75,7 +75,7 @@ impl TableDistribution {
     ) -> Self {
         let compute_vnode = if let Some(vnode_col_idx_in_pk) = vnode_col_idx_in_pk {
             ComputeVnode::VnodeColumnIndex {
-                vnodes: vnodes.expect("vnodes must be `Some` as vnode column is set"),
+                vnodes: vnodes.unwrap_or_else(|| Bitmap::singleton().into()),
                 vnode_col_idx_in_pk,
             }
         } else if !dist_key_in_pk_indices.is_empty() {
@@ -139,7 +139,7 @@ impl TableDistribution {
         match &self.compute_vnode {
             ComputeVnode::DistKeyIndices { vnodes, .. } => vnodes,
             ComputeVnode::VnodeColumnIndex { vnodes, .. } => vnodes,
-            ComputeVnode::Singleton => &*SINGLETON_VNODES,
+            ComputeVnode::Singleton => &SINGLETON_VNODES,
         }
     }
 
