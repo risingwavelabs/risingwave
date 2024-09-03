@@ -21,20 +21,23 @@ use std::mem::take;
 use std::sync::Arc;
 use std::time::Duration;
 
+use itertools::Itertools;
 use prometheus::HistogramTimer;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::stream_service::BarrierCompleteResponse;
+use risingwave_pb::stream_service::{BarrierCompleteResponse, BuildActorInfo};
 use tracing::{debug, info};
 
 use crate::barrier::command::CommandContext;
 use crate::barrier::creating_job::barrier_control::{
     CreatingStreamingJobBarrierControl, CreatingStreamingJobBarrierType,
 };
-use crate::barrier::creating_job::status::CreatingStreamingJobStatus;
+use crate::barrier::creating_job::status::{
+    CreatingJobInjectBarrierInfo, CreatingStreamingJobStatus,
+};
 use crate::barrier::info::InflightGraphInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
@@ -89,6 +92,8 @@ impl CreatingStreamingJobControl {
         let table_id = info.table_fragments.table_id();
         let table_id_str = format!("{}", table_id.table_id);
 
+        let actors_to_create = info.table_fragments.actors_to_create();
+
         Self {
             info,
             snapshot_backfill_info,
@@ -103,6 +108,23 @@ impl CreatingStreamingJobControl {
                 backfill_epoch,
                 pending_non_checkpoint_barriers: vec![],
                 snapshot_backfill_actors,
+                actors_to_create: Some(
+                    actors_to_create
+                        .into_iter()
+                        .map(|(worker_id, actors)| {
+                            (
+                                worker_id,
+                                actors
+                                    .into_iter()
+                                    .map(|actor| BuildActorInfo {
+                                        actor: Some(actor),
+                                        related_subscriptions: Default::default(),
+                                    })
+                                    .collect_vec(),
+                            )
+                        })
+                        .collect(),
+                ),
             },
             upstream_lag: metrics
                 .snapshot_backfill_lag
@@ -256,7 +278,13 @@ impl CreatingStreamingJobControl {
                 .active_graph_info()
                 .expect("must exist when having barriers to inject");
             let table_id = self.info.table_fragments.table_id();
-            for (curr_epoch, prev_epoch, kind) in barriers_to_inject {
+            for CreatingJobInjectBarrierInfo {
+                curr_epoch,
+                prev_epoch,
+                kind,
+                new_actors,
+            } in barriers_to_inject
+            {
                 let node_to_collect = control_stream_manager.inject_barrier(
                     Some(table_id),
                     None,
@@ -265,6 +293,7 @@ impl CreatingStreamingJobControl {
                     graph_info,
                     Some(graph_info),
                     HashMap::new(),
+                    new_actors,
                 )?;
                 self.barrier_control.enqueue_epoch(
                     prev_epoch.value().0,
@@ -329,6 +358,7 @@ impl CreatingStreamingJobControl {
                     graph_info,
                     Some(graph_info),
                     HashMap::new(),
+                    None,
                 )?;
                 self.barrier_control.enqueue_epoch(
                     command_ctx.prev_epoch.value().0,
@@ -375,6 +405,7 @@ impl CreatingStreamingJobControl {
                         Some(graph_info)
                     },
                     HashMap::new(),
+                    None,
                 )?;
                 let prev_epoch = command_ctx.prev_epoch.value().0;
                 self.barrier_control.enqueue_epoch(

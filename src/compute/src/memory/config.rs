@@ -43,7 +43,8 @@ const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
 const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
 
 /// The proportion of compute memory used for batch processing.
-const COMPUTE_BATCH_MEMORY_PROPORTION: f64 = 0.3;
+const COMPUTE_BATCH_MEMORY_PROPORTION_FOR_STREAMING: f64 = 0.3;
+const COMPUTE_BATCH_MEMORY_PROPORTION_FOR_SERVING: f64 = 0.6;
 
 /// Each compute node reserves some memory for stack and code segment of processes, allocation
 /// overhead, network buffer, etc. based on gradient reserve memory proportion. The reserve memory
@@ -299,8 +300,12 @@ pub fn storage_memory_config(
     }
 }
 
-pub fn batch_mem_limit(compute_memory_bytes: usize) -> u64 {
-    (compute_memory_bytes as f64 * COMPUTE_BATCH_MEMORY_PROPORTION) as u64
+pub fn batch_mem_limit(compute_memory_bytes: usize, is_serving_node: bool) -> u64 {
+    if is_serving_node {
+        (compute_memory_bytes as f64 * COMPUTE_BATCH_MEMORY_PROPORTION_FOR_SERVING) as u64
+    } else {
+        (compute_memory_bytes as f64 * COMPUTE_BATCH_MEMORY_PROPORTION_FOR_STREAMING) as u64
+    }
 }
 
 #[cfg(test)]

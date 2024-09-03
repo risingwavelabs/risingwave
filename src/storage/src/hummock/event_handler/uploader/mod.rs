@@ -37,7 +37,7 @@ use risingwave_common::must_match;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarks, VnodeWatermark, WatermarkDirection,
 };
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use task_manager::{TaskManager, UploadingTaskStatus};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
@@ -88,7 +88,6 @@ pub struct UploadTaskInfo {
     pub task_size: usize,
     pub epochs: Vec<HummockEpoch>,
     pub imm_ids: HashMap<LocalInstanceId, Vec<ImmId>>,
-    pub compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
 }
 
 impl Display for UploadTaskInfo {
@@ -249,7 +248,6 @@ impl UploadingTask {
             task_size,
             epochs,
             imm_ids,
-            compaction_group_index: context.pinned_version.compaction_group_index(),
         };
         context
             .buffer_tracker

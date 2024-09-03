@@ -41,7 +41,7 @@ use super::{
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::{AddMutation, UpdateMutation};
+use crate::executor::UpdateMutation;
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
@@ -316,17 +316,8 @@ impl<S: StateStore> FsSourceExecutor<S> {
         let start_with_paused = barrier.is_pause_on_startup();
 
         let mut boot_state = Vec::default();
-        if let Some(
-            Mutation::Add(AddMutation { splits, .. })
-            | Mutation::Update(UpdateMutation {
-                actor_splits: splits,
-                ..
-            }),
-        ) = barrier.mutation.as_deref()
-        {
-            if let Some(splits) = splits.get(&self.actor_ctx.id) {
-                boot_state.clone_from(splits);
-            }
+        if let Some(splits) = barrier.initial_split_assignment(self.actor_ctx.id) {
+            boot_state = splits.to_vec();
         }
 
         self.stream_source_core

@@ -1,6 +1,33 @@
 # THIS FILE IS AUTO_GENERATED. DO NOT EDIT
 # UPDATE WITH: ./risedev generate-with-options
 
+AzblobProperties:
+  fields:
+  - name: azblob.container_name
+    field_type: String
+    required: true
+  - name: azblob.credentials.account_name
+    field_type: String
+    required: false
+    default: Default::default
+  - name: azblob.credentials.account_key
+    field_type: String
+    required: false
+    default: Default::default
+  - name: azblob.endpoint_url
+    field_type: String
+    required: true
+  - name: match_pattern
+    field_type: String
+    required: false
+    default: Default::default
+  - name: refresh.interval.sec
+    field_type: u64
+    required: false
+  - name: compression_format
+    field_type: CompressionFormat
+    required: false
+    default: Default::default
 DatagenProperties:
   fields:
   - name: datagen.split.num
@@ -45,6 +72,9 @@ GcsProperties:
     field_type: String
     required: false
     default: Default::default
+  - name: refresh.interval.sec
+    field_type: u64
+    required: false
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -795,6 +825,9 @@ OpendalS3Properties:
     comments: The following are only supported by `s3_v2` (opendal) source.
     required: false
     default: Default::default
+  - name: refresh.interval.sec
+    field_type: u64
+    required: false
 PosixFsProperties:
   fields:
   - name: posix_fs.root
@@ -806,6 +839,9 @@ PosixFsProperties:
     comments: The regex pattern to match files under root directory.
     required: false
     default: Default::default
+  - name: refresh.interval.sec
+    field_type: u64
+    required: false
   - name: compression_format
     field_type: CompressionFormat
     required: false
