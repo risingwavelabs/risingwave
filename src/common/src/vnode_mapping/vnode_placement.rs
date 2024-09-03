@@ -123,7 +123,7 @@ pub fn place_vnode(
         }
         None => {
             // No hint is provided, assign all vnodes to `temp_pu`.
-            for vnode in VirtualNode::all() {
+            for vnode in VirtualNode::all(VirtualNode::COUNT) {
                 temp_slot.balance += 1;
                 temp_slot.builder.set(vnode.to_index(), true);
             }
