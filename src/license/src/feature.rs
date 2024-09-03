@@ -146,7 +146,7 @@ impl Feature {
             }
         };
 
-        report_telemetry(self.get_feature_name(), check_res.is_ok());
+        report_telemetry(&self, self.get_feature_name(), check_res.is_ok());
 
         check_res
     }

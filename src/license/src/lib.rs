@@ -23,8 +23,8 @@ pub use manager::*;
 use risingwave_pb::telemetry::PbTelemetryEventStage;
 use risingwave_telemetry_event::report_event_common;
 
-pub(crate) fn report_telemetry(feature_name: &str, success_flag: bool) {
-    if !feature_name.eq_ignore_ascii_case("TestPaid") {
+pub(crate) fn report_telemetry(feature: &Feature, feature_name: &str, success_flag: bool) {
+    if matches!(feature, Feature::TestPaid) {
         let mut attr_builder = jsonbb::Builder::<Vec<u8>>::new();
         attr_builder.begin_object();
         attr_builder.add_string("success");
