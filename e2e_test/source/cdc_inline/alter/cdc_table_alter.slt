@@ -131,13 +131,13 @@ select order_id, product_id, shipment_id from enriched_orders order by order_id;
 system ok
 mysql -e "
   USE testdb1;
-  ALTER TABLE products ADD COLUMN weight DECIMAL(10, 2) NOT NULL DEFAULT 0.0;
+  ALTER TABLE products ADD COLUMN weight DECIMAL(10, 2) NOT NULL DEFAULT 1.1;
   ALTER TABLE orders ADD COLUMN order_comment VARCHAR(255);
 "
 
 # alter cdc tables
 statement ok
-ALTER TABLE my_products ADD COLUMN weight DECIMAL;
+ALTER TABLE my_products ADD COLUMN weight DECIMAL DEFAULT 1.1;
 
 statement ok
 ALTER TABLE my_orders ADD COLUMN order_comment VARCHAR;
@@ -148,9 +148,9 @@ sleep 3s
 query ITTT
 SELECT id,name,description,weight FROM my_products order by id limit 3
 ----
-101 scooter Small 2-wheel scooter NULL
-102 car battery 12V car battery NULL
-103 12-pack drill 12-pack of drill bits with sizes ranging from #40 to #3 NULL
+101 scooter Small 2-wheel scooter 1.1
+102 car battery 12V car battery 1.1
+103 12-pack drill 12-pack of drill bits with sizes ranging from #40 to #3 1.1
 
 
 # update mysql tables
@@ -169,7 +169,7 @@ SELECT id,name,description,weight FROM my_products order by id limit 3
 ----
 101 scooter Small 2-wheel scooter 10.50
 102 car battery 12V car battery 12.50
-103 12-pack drill 12-pack of drill bits with sizes ranging from #40 to #3 NULL
+103 12-pack drill 12-pack of drill bits with sizes ranging from #40 to #3 1.1
 
 query ITTT
 SELECT order_id,order_date,customer_name,product_id,order_status,order_comment FROM my_orders order by order_id limit 2

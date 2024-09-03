@@ -58,6 +58,7 @@ pub async fn replace_table_with_definition(
         definition,
         original_catalog,
         source_schema,
+        None,
     )
     .await?;
 
@@ -73,7 +74,7 @@ pub async fn replace_table_with_definition(
 pub async fn get_new_table_definition_for_cdc_table(
     session: &Arc<SessionImpl>,
     table_name: ObjectName,
-    new_columns: Vec<ColumnCatalog>,
+    new_columns: &[ColumnCatalog],
 ) -> Result<(Statement, Arc<TableCatalog>)> {
     let original_catalog = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
@@ -96,22 +97,24 @@ pub async fn get_new_table_definition_for_cdc_table(
         "source schema should be None for CDC table"
     );
 
-    let orig_column_map: HashMap<String, ColumnDef> = HashMap::from_iter(
-        original_columns
+    let orig_column_catalog: HashMap<String, ColumnCatalog> = HashMap::from_iter(
+        original_catalog
+            .columns()
             .iter()
-            .map(|col| (col.name.real_value(), col.clone())),
+            .map(|col| (col.name().to_string(), col.clone())),
     );
 
     // update the original columns with new version columns
     let mut new_column_defs = vec![];
-    for col in new_columns {
-        // if the column exists in the original definitoins, use the original column definition.
+    for new_col in new_columns {
+        // if the column exists in the original catalog, use it to construct the column definition.
         // since we don't support altering the column type right now
-        if let Some(original_col) = orig_column_map.get(col.name()) {
-            new_column_defs.push(original_col.clone());
+        if let Some(original_col) = orig_column_catalog.get(new_col.name()) {
+            let ty = to_ast_data_type(original_col.data_type())?;
+            new_column_defs.push(ColumnDef::new(original_col.name().into(), ty, None, vec![]));
         } else {
-            let ty = to_ast_data_type(col.data_type())?;
-            new_column_defs.push(ColumnDef::new(col.name().into(), ty, None, vec![]));
+            let ty = to_ast_data_type(new_col.data_type())?;
+            new_column_defs.push(ColumnDef::new(new_col.name().into(), ty, None, vec![]));
         }
     }
     *original_columns = new_column_defs;
@@ -162,6 +165,7 @@ pub async fn get_replace_table_plan(
     definition: Statement,
     original_catalog: &Arc<TableCatalog>,
     source_schema: Option<ConnectorSchema>,
+    new_version_columns: Option<Vec<ColumnCatalog>>, // only provided in auto schema change
 ) -> Result<(
     Option<Source>,
     Table,
@@ -202,6 +206,7 @@ pub async fn get_replace_table_plan(
         on_conflict,
         with_version_column,
         cdc_table_info,
+        new_version_columns,
     )
     .await?;
 
