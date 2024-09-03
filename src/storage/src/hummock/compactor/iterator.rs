@@ -21,7 +21,7 @@ use std::time::Instant;
 use await_tree::InstrumentAwait;
 use fail::fail_point;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey};
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::KeyComparator;

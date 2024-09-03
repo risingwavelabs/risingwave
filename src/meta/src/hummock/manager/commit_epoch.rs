@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::ops::Deref;
+use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
-use risingwave_hummock_sdk::compaction_group::group_split::{self, split_sst};
+use risingwave_hummock_sdk::compaction_group::group_split::split_sst;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, to_prost_table_stats_map, PbTableStatsMap,
@@ -201,14 +203,16 @@ impl HummockManager {
                         &mut table_compaction_group_mapping,
                     )?;
 
-                    on_handle_add_new_table(
-                        state_table_info,
-                        &mv_table_id,
-                        new_compaction_group_id,
-                        &mut table_compaction_group_mapping,
-                    )?;
-                    new_table_ids.extend(internal_table_ids);
-                    new_table_ids.push(mv_table_id);
+                    if let Some(mv_table_id) = mv_table_id {
+                        on_handle_add_new_table(
+                            state_table_info,
+                            &[mv_table_id],
+                            new_compaction_group_id,
+                            &mut table_compaction_group_mapping,
+                        )?;
+                        new_table_ids.extend(internal_table_ids);
+                        new_table_ids.push(mv_table_id);
+                    }
                 }
                 NewTableFragmentInfo::NewCompactionGroup { table_ids } => {
                     on_handle_add_new_table(
@@ -221,69 +225,15 @@ impl HummockManager {
                 }
                 NewTableFragmentInfo::None => unreachable!(),
             }
+
+            new_tables = Some((
+                new_table_ids,
+                new_compaction_group_id,
+                compaction_group_config.as_ref().unwrap().clone(),
+            ));
         }
 
         // Add new table
-        // let (new_table_ids, new_compaction_group, compaction_group_manager_txn) =
-        //     match new_table_fragment_info {
-        //         // NewTableFragmentInfo::Normal {
-        //         //     mv_table_id,
-        //         //     internal_table_ids,
-        //         // } => {
-        //         //     let mut new_table_ids = HashMap::new();
-        //         //     on_handle_add_new_table(
-        //         //         state_table_info,
-        //         //         &internal_table_ids,
-        //         //         StaticCompactionGroupId::StateDefault as u64,
-        //         //         &mut table_compaction_group_mapping,
-        //         //         &mut new_table_ids,
-        //         //     )?;
-
-        //         //     on_handle_add_new_table(
-        //         //         state_table_info,
-        //         //         &mv_table_id,
-        //         //         StaticCompactionGroupId::MaterializedView as u64,
-        //         //         &mut table_compaction_group_mapping,
-        //         //         &mut new_table_ids,
-        //         //     )?;
-        //         //     (new_table_ids, None, None)
-        //         // }
-        //         NewTableFragmentInfo::Normal
-        //         | NewTableFragmentInfo::NewCompactionGroup { table_ids } => {
-        //             let compaction_group_manager_guard =
-        //                 self.compaction_group_manager.write().await;
-        //             let compaction_group_config =
-        //                 compaction_group_manager_guard.default_compaction_config();
-        //             let mut compaction_group_manager =
-        //                 CompactionGroupManager::start_owned_compaction_groups_txn(
-        //                     compaction_group_manager_guard,
-        //                 );
-        //             let mut new_table_ids = HashMap::new();
-        //             let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
-        //             compaction_group_manager.insert(
-        //                 new_compaction_group_id,
-        //                 CompactionGroup {
-        //                     group_id: new_compaction_group_id,
-        //                     compaction_config: compaction_group_config.clone(),
-        //                 },
-        //             );
-
-        //             on_handle_add_new_table(
-        //                 state_table_info,
-        //                 &table_ids,
-        //                 new_compaction_group_id,
-        //                 &mut table_compaction_group_mapping,
-        //                 // &mut new_table_ids,
-        //             )?;
-        //             (
-        //                 new_table_ids,
-        //                 Some((new_compaction_group_id, (*compaction_group_config).clone())),
-        //                 Some(compaction_group_manager),
-        //             )
-        //         }
-        //         NewTableFragmentInfo::None => (HashMap::new(), None, None),
-        //     };
-
         let mut group_members_table_ids: HashMap<u64, BTreeSet<TableId>> = HashMap::new();
         {
             // expand group_members_table_ids
@@ -309,7 +259,6 @@ impl HummockManager {
             committed_epoch,
             &tables_to_commit,
             is_visible_table_committed_epoch,
-            new_compaction_group,
             commit_sstables,
             new_tables,
             new_table_watermarks,

@@ -729,8 +729,8 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 tombstone_reclaim_ratio = 16;
       CompressionAlgorithm compression_algorithm = 17;
       uint32 max_l0_compact_level_count = 18;
-      uint32 split_weight_by_vnode = 19;
-      uint64 sst_allowed_trivial_move_min_size = 20;
+      uint64 sst_allowed_trivial_move_min_size = 19;
+      uint32 split_weight_by_vnode = 20;
     }
   }
   repeated uint64 compaction_group_ids = 1;

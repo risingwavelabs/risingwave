@@ -120,7 +120,6 @@ impl<'a> HummockVersionTransaction<'a> {
         committed_epoch: HummockEpoch,
         tables_to_commit: &HashSet<TableId>,
         is_visible_table_committed_epoch: bool,
-        new_compaction_group: Option<(CompactionGroupId, CompactionConfig)>,
         commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>>,
         new_tables: Option<(Vec<TableId>, CompactionGroupId, CompactionConfig)>,
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
@@ -133,32 +132,7 @@ impl<'a> HummockVersionTransaction<'a> {
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
 
-        if let Some((compaction_group_id, compaction_group_config)) = new_compaction_group {
-            {
-                let group_deltas = &mut new_version_delta
-                    .group_deltas
-                    .entry(compaction_group_id)
-                    .or_default()
-                    .group_deltas;
-
-                for table_id in &table_ids {
-                    new_table_ids.insert(*table_id, compaction_group_id);
-                }
-
-                #[expect(deprecated)]
-                group_deltas.push(GroupDelta::GroupConstruct(GroupConstruct {
-                    group_config: Some(compaction_group_config.clone()),
-                    group_id: compaction_group_id,
-                    parent_group_id: StaticCompactionGroupId::NewCompactionGroup
-                        as CompactionGroupId,
-                    new_sst_start_id: 0, // No need to set it when `NewCompactionGroup`
-                    table_ids: vec![],
-                    version: CompatibilityVersion::NoMemberTableIds as i32,
-                    split_key: None,
-                }));
-            }
-        }
-
+        let mut new_table_ids = HashMap::new();
         if let Some((table_ids, compaction_group_id, compaction_group_config)) = new_tables {
             let group_deltas = &mut new_version_delta
                 .group_deltas
