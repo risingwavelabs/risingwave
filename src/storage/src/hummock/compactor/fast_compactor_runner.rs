@@ -21,6 +21,7 @@ use std::time::Instant;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
+use fail::fail_point;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::key::FullKey;
@@ -49,7 +50,7 @@ use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 /// Iterates over the KV-pairs of an SST while downloading it.
 pub struct BlockStreamIterator {
     /// The downloading stream.
-    block_stream: BlockDataStream,
+    block_stream: Option<BlockDataStream>,
 
     next_block_index: usize,
 
@@ -57,6 +58,13 @@ pub struct BlockStreamIterator {
     sstable: TableHolder,
     iter: Option<BlockIterator>,
     task_progress: Arc<TaskProgress>,
+
+    // For block stream recreate
+    sstable_store: SstableStoreRef,
+    sstable_info: SstableInfo,
+    io_retry_times: usize,
+    max_io_retry_times: usize,
+    stats_ptr: Arc<AtomicU64>,
 }
 
 impl BlockStreamIterator {
@@ -76,34 +84,105 @@ impl BlockStreamIterator {
     /// The iterator reads at most `max_block_count` from the stream.
     pub fn new(
         sstable: TableHolder,
-        block_stream: BlockDataStream,
         task_progress: Arc<TaskProgress>,
+        sstable_store: SstableStoreRef,
+        sstable_info: SstableInfo,
+        max_io_retry_times: usize,
+        stats_ptr: Arc<AtomicU64>,
     ) -> Self {
         Self {
-            block_stream,
+            block_stream: None,
             next_block_index: 0,
             sstable,
             iter: None,
             task_progress,
+            sstable_store,
+            sstable_info,
+            io_retry_times: 0,
+            max_io_retry_times,
+            stats_ptr,
         }
     }
 
-    /// Wrapper function for `self.block_stream.next()` which allows us to measure the time needed.
-    async fn download_next_block(&mut self) -> HummockResult<Option<(Bytes, Vec<u8>, BlockMeta)>> {
-        let (data, _) = match self.block_stream.next_block_impl().await? {
-            None => return Ok(None),
-            Some(ret) => ret,
-        };
-        let meta = self.sstable.meta.block_metas[self.next_block_index].clone();
-        let filter_block = self
-            .sstable
-            .filter_reader
-            .get_block_raw_filter(self.next_block_index);
-        self.next_block_index += 1;
-        Ok(Some((data, filter_block, meta)))
+    async fn create_stream(&mut self) -> HummockResult<()> {
+        // Fast compact only support the single table compaction.(not split sst)
+        // So we don't need to filter the block_metas with table_id and key_range
+        let block_stream = self
+            .sstable_store
+            .get_stream_for_blocks(
+                self.sstable_info.object_id,
+                &self.sstable.meta.block_metas[self.next_block_index..],
+            )
+            .verbose_instrument_await("stream_iter_get_stream")
+            .await?;
+        self.block_stream = Some(block_stream);
+        Ok(())
     }
 
-    fn init_block_iter(&mut self, buf: Bytes, uncompressed_capacity: usize) -> HummockResult<()> {
+    /// Wrapper function for `self.block_stream.next()` which allows us to measure the time needed.
+    pub(crate) async fn download_next_block(
+        &mut self,
+    ) -> HummockResult<Option<(Bytes, Vec<u8>, BlockMeta)>> {
+        let now = Instant::now();
+        let _time_stat = scopeguard::guard(self.stats_ptr.clone(), |stats_ptr: Arc<AtomicU64>| {
+            let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+            stats_ptr.fetch_add(add as u64, atomic::Ordering::Relaxed);
+        });
+        loop {
+            let ret = match &mut self.block_stream {
+                Some(block_stream) => block_stream.next_block_impl().await,
+                None => {
+                    self.create_stream().await?;
+                    continue;
+                }
+            };
+            match ret {
+                Ok(Some((data, _))) => {
+                    let meta = self.sstable.meta.block_metas[self.next_block_index].clone();
+                    let filter_block = self
+                        .sstable
+                        .filter_reader
+                        .get_block_raw_filter(self.next_block_index);
+                    self.next_block_index += 1;
+                    return Ok(Some((data, filter_block, meta)));
+                }
+
+                Ok(None) => break,
+
+                Err(e) => {
+                    if !e.is_object_error() || self.io_retry_times >= self.max_io_retry_times {
+                        return Err(e);
+                    }
+
+                    self.block_stream.take();
+                    self.io_retry_times += 1;
+                    fail_point!("create_stream_err");
+
+                    tracing::warn!(
+                        "fast compact retry create stream for sstable {} times, sstinfo={}",
+                        self.io_retry_times,
+                        format!(
+                            "object_id={}, sst_id={}, meta_offset={}, table_ids={:?}",
+                            self.sstable_info.object_id,
+                            self.sstable_info.sst_id,
+                            self.sstable_info.meta_offset,
+                            self.sstable_info.table_ids
+                        )
+                    );
+                }
+            }
+        }
+
+        self.next_block_index = self.sstable.meta.block_metas.len();
+        self.iter.take();
+        Ok(None)
+    }
+
+    pub(crate) fn init_block_iter(
+        &mut self,
+        buf: Bytes,
+        uncompressed_capacity: usize,
+    ) -> HummockResult<()> {
         let block = Block::decode(buf, uncompressed_capacity)?;
         let mut iter = BlockIterator::new(BlockHolder::from_owned_block(Box::new(block)));
         iter.seek_to_first();
@@ -153,8 +232,14 @@ impl BlockStreamIterator {
         }
     }
 
-    fn is_valid(&self) -> bool {
+    pub(crate) fn is_valid(&self) -> bool {
         self.iter.is_some() || self.next_block_index < self.sstable.meta.block_metas.len()
+    }
+
+    #[cfg(test)]
+    #[cfg(feature = "failpoints")]
+    pub(crate) fn iter_mut(&mut self) -> &mut BlockIterator {
+        self.iter.as_mut().unwrap()
     }
 }
 
@@ -180,6 +265,8 @@ pub struct ConcatSstableIterator {
 
     stats: StoreLocalStatistic,
     task_progress: Arc<TaskProgress>,
+
+    max_io_retry_times: usize,
 }
 
 impl ConcatSstableIterator {
@@ -190,6 +277,7 @@ impl ConcatSstableIterator {
         sst_infos: Vec<SstableInfo>,
         sstable_store: SstableStoreRef,
         task_progress: Arc<TaskProgress>,
+        max_io_retry_times: usize,
     ) -> Self {
         Self {
             sstable_iter: None,
@@ -198,6 +286,7 @@ impl ConcatSstableIterator {
             sstable_store,
             task_progress,
             stats: StoreLocalStatistic::default(),
+            max_io_retry_times,
         }
     }
 
@@ -239,24 +328,16 @@ impl ConcatSstableIterator {
                 .sstable(sstable_info, &mut self.stats)
                 .verbose_instrument_await("stream_iter_sstable")
                 .await?;
-            let stats_ptr = self.stats.remote_io_time.clone();
-            let now = Instant::now();
             self.task_progress.inc_num_pending_read_io();
 
-            // Fast compact only support the single table compaction.(not split sst)
-            // So we don't need to filter the block_metas with table_id and key_range
-            let block_stream = self
-                .sstable_store
-                .get_stream_for_blocks(sstable.id, &sstable.meta.block_metas)
-                .verbose_instrument_await("stream_iter_get_stream")
-                .await?;
-
-            // Determine time needed to open stream.
-            let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
-            stats_ptr.fetch_add(add as u64, atomic::Ordering::Relaxed);
-
-            let sstable_iter =
-                BlockStreamIterator::new(sstable, block_stream, self.task_progress.clone());
+            let sstable_iter = BlockStreamIterator::new(
+                sstable,
+                self.task_progress.clone(),
+                self.sstable_store.clone(),
+                sstable_info.clone(),
+                self.max_io_retry_times,
+                self.stats.remote_io_time.clone(),
+            );
             self.sstable_iter = Some(sstable_iter);
         }
         Ok(())
@@ -335,11 +416,13 @@ impl CompactorRunner {
             task.input_ssts[0].table_infos.clone(),
             context.sstable_store.clone(),
             task_progress.clone(),
+            context.storage_opts.compactor_iter_max_io_retry_times,
         ));
         let right = Box::new(ConcatSstableIterator::new(
             task.input_ssts[1].table_infos.clone(),
             context.sstable_store,
             task_progress.clone(),
+            context.storage_opts.compactor_iter_max_io_retry_times,
         ));
         let state = SkipWatermarkState::from_safe_epoch_watermarks(&task.table_watermarks);
 
