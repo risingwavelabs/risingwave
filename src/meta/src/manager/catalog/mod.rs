@@ -639,11 +639,6 @@ impl CatalogManager {
                         .into_iter()
                         .map(|sink| StreamingJobId::new(sink.id)),
                 )
-                .chain(
-                    subscriptions_to_drop
-                        .into_iter()
-                        .map(|subscription| StreamingJobId::new(subscription.id)),
-                )
                 .collect_vec();
             let source_deleted_ids = sources_to_drop
                 .into_iter()
