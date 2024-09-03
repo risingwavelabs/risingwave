@@ -469,19 +469,15 @@ pub struct MetaDeveloperConfig {
 
     /// Max number of actor allowed per parallelism (default = 100).
     /// CREATE MV/Table will be noticed when the number of actors exceeds this limit.
-    /// This limit is effective for clusters that meets the following conditions:
-    /// - running with version >= 2.0
-    /// - running with paied tier license
-    /// Free tier cluster's limit will be hardcoded to FREE_TIER_ACTOR_CNT_SOFT_LIMIT
+    /// This limit is effective only for paid tier clusters.
+    /// Free tier cluster's limit will be hardcoded to `FREE_TIER_ACTOR_CNT_SOFT_LIMIT`
     #[serde(default = "default::developer::actor_cnt_per_worker_parallelism_soft_limit")]
     pub actor_cnt_per_worker_parallelism_soft_limit: usize,
 
     /// Max number of actor allowed per parallelism (default = 400).
     /// CREATE MV/Table will be rejected when the number of actors exceeds this limit.
-    /// This limit is effective for clusters that meets the following conditions:
-    /// - created with version >= 2.0
-    /// - running with paied tier license
-    /// Free tier cluster's limit will be hardcoded to FREE_TIER_ACTOR_CNT_HARD_LIMIT
+    /// This limit is effective only for paid tier clusters.
+    /// Free tier cluster's limit will be hardcoded to `FREE_TIER_ACTOR_CNT_HARD_LIMIT``
     #[serde(default = "default::developer::actor_cnt_per_worker_parallelism_hard_limit")]
     pub actor_cnt_per_worker_parallelism_hard_limit: usize,
 }

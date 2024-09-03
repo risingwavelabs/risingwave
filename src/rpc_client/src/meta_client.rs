@@ -1438,7 +1438,9 @@ impl MetaClient {
         Ok(resp.version.unwrap())
     }
 
-    pub async fn get_cluster_limits(&self) -> Result<Vec<risingwave_common::util::cluster_limit::ClusterLimit>> {
+    pub async fn get_cluster_limits(
+        &self,
+    ) -> Result<Vec<risingwave_common::util::cluster_limit::ClusterLimit>> {
         let req = GetClusterLimitsRequest {};
         let resp = self.inner.get_cluster_limits(req).await?;
         Ok(resp.active_limits.into_iter().map(|l| l.into()).collect())

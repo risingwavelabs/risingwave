@@ -107,13 +107,13 @@ impl ActorCountPerParallelism {
     pub fn exceed_hard_limit(&self) -> bool {
         self.worker_id_to_actor_count
             .values()
-            .any(|v| v.actor_count > self.hard_limit.saturating_mul(v.parallelism) )
+            .any(|v| v.actor_count > self.hard_limit.saturating_mul(v.parallelism))
     }
 
     pub fn exceed_soft_limit(&self) -> bool {
         self.worker_id_to_actor_count
             .values()
-            .any(|v| v.actor_count > self.soft_limit.saturating_mul(v.parallelism) )
+            .any(|v| v.actor_count > self.soft_limit.saturating_mul(v.parallelism))
     }
 
     pub fn exceed_limit(&self) -> bool {
