@@ -31,7 +31,7 @@ use async_trait::async_trait;
 use iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
 use iceberg::spec::TableMetadata;
 use iceberg::table::Table as TableV2;
-use iceberg::{Catalog as CatalogV2, TableIdent};
+use iceberg::{Catalog as CatalogV2, NamespaceIdent, TableCreation, TableIdent};
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 use icelake::catalog::{
     load_catalog, load_iceberg_base_catalog_config, BaseCatalogConfig, CatalogRef, CATALOG_NAME,
@@ -43,9 +43,10 @@ use icelake::io_v2::{
     DataFileWriterBuilder, EqualityDeltaWriterBuilder, IcebergWriterBuilder, DELETE_OP, INSERT_OP,
 };
 use icelake::transaction::Transaction;
-use icelake::types::{data_file_from_json, data_file_to_json, Any, DataFile};
+use icelake::types::{data_file_from_json, data_file_to_json, Any, DataFile, COLUMN_ID_META_KEY};
 use icelake::{Table, TableIdentifier};
 use itertools::Itertools;
+use parquet::arrow::PARQUET_FIELD_ID_META_KEY;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
@@ -151,6 +152,9 @@ pub struct IcebergConfig {
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
     pub commit_checkpoint_interval: u64,
+
+    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    pub create_table_if_not_exists: bool,
 }
 
 impl IcebergConfig {
@@ -701,6 +705,10 @@ impl Debug for IcebergSink {
 
 impl IcebergSink {
     async fn create_and_validate_table(&self) -> Result<Table> {
+        if self.config.create_table_if_not_exists {
+            self.create_table_if_not_exists().await?;
+        }
+
         let table = self
             .config
             .load_table()
@@ -720,6 +728,79 @@ impl IcebergSink {
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
         Ok(table)
+    }
+
+    async fn create_table_if_not_exists(&self) -> Result<()> {
+        let catalog = self.config.create_catalog_v2().await?;
+        let table_id = self
+            .config
+            .full_table_name_v2()
+            .context("Unable to parse table name")?;
+        if !catalog
+            .table_exists(&table_id)
+            .await
+            .map_err(|e| SinkError::Iceberg(anyhow!(e)))?
+        {
+            let namespace = if let Some(database_name) = &self.config.database_name {
+                NamespaceIdent::new(database_name.clone())
+            } else {
+                bail!("database name must be set if you want to create table")
+            };
+
+            // convert risingwave schema -> arrow schema -> iceberg schema
+            let arrow_fields = self
+                .param
+                .columns
+                .iter()
+                .map(|column| {
+                    let mut arrow_field = IcebergArrowConvert
+                        .to_arrow_field(&column.name, &column.data_type)
+                        .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                        .context(format!(
+                            "failed to convert {}: {} to arrow type",
+                            &column.name, &column.data_type
+                        ))?;
+                    let mut metadata = HashMap::new();
+                    metadata.insert(
+                        PARQUET_FIELD_ID_META_KEY.to_string(),
+                        column.column_id.get_id().to_string(),
+                    );
+                    metadata.insert(
+                        COLUMN_ID_META_KEY.to_string(),
+                        column.column_id.get_id().to_string(),
+                    );
+                    arrow_field.set_metadata(metadata);
+                    Ok(arrow_field)
+                })
+                .collect::<Result<Vec<ArrowField>>>()?;
+            let arrow_schema = arrow_schema_iceberg::Schema::new(arrow_fields);
+            let iceberg_schema = iceberg::arrow::arrow_schema_to_schema(&arrow_schema)
+                .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                .context("failed to convert arrow schema to iceberg schema")?;
+
+            let location = {
+                let mut names = namespace.clone().inner();
+                names.push(self.config.table_name.to_string());
+                if self.config.path.ends_with('/') {
+                    format!("{}{}", self.config.path, names.join("/"))
+                } else {
+                    format!("{}/{}", self.config.path, names.join("/"))
+                }
+            };
+
+            let table_creation = TableCreation::builder()
+                .name(self.config.table_name.clone())
+                .schema(iceberg_schema)
+                .location(location)
+                .build();
+
+            catalog
+                .create_table(&namespace, table_creation)
+                .await
+                .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                .context("failed to create iceberg table")?;
+        }
+        Ok(())
     }
 
     pub fn new(config: IcebergConfig, param: SinkParam) -> Result<Self> {
@@ -1292,6 +1373,8 @@ pub fn try_matches_arrow_schema(
 
         let compatible = match (&converted_arrow_data_type, arrow_field.data_type()) {
             (ArrowDataType::Decimal128(_, _), ArrowDataType::Decimal128(_, _)) => true,
+            (ArrowDataType::Binary, ArrowDataType::LargeBinary) => true,
+            (ArrowDataType::LargeBinary, ArrowDataType::Binary) => true,
             (left, right) => left == right,
         };
         if !compatible {
@@ -1394,6 +1477,7 @@ mod test {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
             commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
+            create_table_if_not_exists: false,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);
