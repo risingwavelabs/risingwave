@@ -281,7 +281,7 @@ pub(super) struct TrackingCommand {
 /// 4. With `actor_map` we can use an actor's `ActorId` to find the ID of the `StreamJob`.
 #[derive(Default, Debug)]
 pub(super) struct CreateMviewProgressTracker {
-    // XXX: which one should contain source backfill?
+    // TODO: add a specialized progress for source
     /// Progress of the create-mview DDL indicated by the `TableId`.
     progress_map: HashMap<TableId, (Progress, TrackingJob)>,
 
