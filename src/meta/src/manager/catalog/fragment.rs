@@ -612,6 +612,7 @@ impl FragmentManager {
         &self,
         table_ids: &HashSet<TableId>,
     ) -> MetaResult<Vec<u32>> {
+        error!(?table_ids, "drop table fragment");
         let mut guard = self.core.write().await;
         let current_revision = guard.table_revision;
 
