@@ -25,7 +25,6 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::{DataType, Decimal, ScalarRefImpl, Serial};
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::Serialize;
@@ -37,13 +36,11 @@ use tracing::warn;
 use with_options::WithOptions;
 
 use super::decouple_checkpoint_log_sink::{
-    default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf, COMMIT_CHECKPOINT_INTERVAL,
-    DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
+    default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
 };
 use super::writer::SinkWriter;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::error::ConnectorResult;
-use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::{
     Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
@@ -496,35 +493,6 @@ impl Sink for ClickHouseSink {
     type LogSinker = DecoupleCheckpointLogSinkerOf<ClickHouseSinkWriter>;
 
     const SINK_NAME: &'static str = CLICKHOUSE_SINK;
-
-    fn is_sink_decouple(desc: &mut SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        let commit_checkpoint_interval = desc.properties.get(COMMIT_CHECKPOINT_INTERVAL);
-
-        match user_specified {
-            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
-            SinkDecouple::Disable => {
-                if let Some(interval) = commit_checkpoint_interval {
-                    let commit_checkpoint_interval = interval.parse::<u64>().map_err(|e| {
-                        SinkError::Config(anyhow!(
-                            "Convert `commit_checkpoint_interval` to u64 error: {:?}",
-                            e
-                        ))
-                    })?;
-                    if commit_checkpoint_interval > 1 {
-                        return Err(SinkError::Config(anyhow!(
-                            "config conflict: Clickhouse config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
-                        )));
-                    }
-                } else {
-                    desc.properties.insert(
-                        COMMIT_CHECKPOINT_INTERVAL.to_string(),
-                        DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE.to_string(),
-                    );
-                }
-                Ok(false)
-            }
-        }
-    }
 
     async fn validate(&self) -> Result<()> {
         // For upsert clickhouse sink, the primary key must be defined.

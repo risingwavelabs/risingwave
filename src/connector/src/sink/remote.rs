@@ -60,7 +60,6 @@ use tracing::warn;
 
 use super::elasticsearch::{is_es_sink, StreamChunkConverter, ES_OPTION_DELIMITER};
 use crate::error::ConnectorResult;
-use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
@@ -116,7 +115,7 @@ def_remote_sink!();
 
 pub trait RemoteSinkTrait: Send + Sync + 'static {
     const SINK_NAME: &'static str;
-    fn default_sink_decouple(_desc: &SinkDesc) -> bool {
+    fn default_sink_decouple() -> bool {
         true
     }
 }
@@ -144,9 +143,9 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
 
     const SINK_NAME: &'static str = R::SINK_NAME;
 
-    fn is_sink_decouple(desc: &mut SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+    fn is_sink_decouple(user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
-            SinkDecouple::Default => Ok(R::default_sink_decouple(desc)),
+            SinkDecouple::Default => Ok(R::default_sink_decouple()),
             SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => Ok(false),
         }

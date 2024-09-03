@@ -31,7 +31,6 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
@@ -41,11 +40,9 @@ use serde_derive::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
 
-use super::catalog::desc::SinkDesc;
 use super::coordinate::CoordinatedSinkWriter;
 use super::decouple_checkpoint_log_sink::{
-    default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf, COMMIT_CHECKPOINT_INTERVAL,
-    DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
+    default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
 };
 use super::writer::SinkWriter;
 use super::{
@@ -284,35 +281,6 @@ impl Sink for DeltaLakeSink {
     type LogSinker = DecoupleCheckpointLogSinkerOf<CoordinatedSinkWriter<DeltaLakeSinkWriter>>;
 
     const SINK_NAME: &'static str = DELTALAKE_SINK;
-
-    fn is_sink_decouple(desc: &mut SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        let commit_checkpoint_interval = desc.properties.get(COMMIT_CHECKPOINT_INTERVAL);
-
-        match user_specified {
-            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
-            SinkDecouple::Disable => {
-                if let Some(interval) = commit_checkpoint_interval {
-                    let commit_checkpoint_interval = interval.parse::<u64>().map_err(|e| {
-                        SinkError::Config(anyhow!(
-                            "Convert `commit_checkpoint_interval` to u64 error: {:?}",
-                            e
-                        ))
-                    })?;
-                    if commit_checkpoint_interval > 1 {
-                        return Err(SinkError::Config(anyhow!(
-                            "config conflict: DeltaLake config `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
-                        )));
-                    }
-                } else {
-                    desc.properties.insert(
-                        COMMIT_CHECKPOINT_INTERVAL.to_string(),
-                        DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE.to_string(),
-                    );
-                }
-                Ok(false)
-            }
-        }
-    }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let inner = DeltaLakeSinkWriter::new(

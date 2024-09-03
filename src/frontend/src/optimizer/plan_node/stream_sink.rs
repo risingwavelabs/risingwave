@@ -241,8 +241,11 @@ impl StreamSink {
                         if connector == TABLE_SINK && sink.target_table.is_none() {
                             unsupported_sink(TABLE_SINK)
                         } else {
-                            SinkType::is_sink_decouple(
+                            SinkType::set_default_commit_checkpoint_interval(
                                 &mut sink,
+                                &input.ctx().session_ctx().config().sink_decouple(),
+                            )?;
+                            SinkType::is_sink_decouple(
                                 &input.ctx().session_ctx().config().sink_decouple(),
                             )
                         }

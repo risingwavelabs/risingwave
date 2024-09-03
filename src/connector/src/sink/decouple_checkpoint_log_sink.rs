@@ -20,12 +20,12 @@ use async_trait::async_trait;
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::writer::SinkWriter;
 use crate::sink::{LogSinker, Result, SinkLogReader, SinkMetrics};
-pub const DEFAULT_COMMIT_CHECKPOINT_INTERVAL: u64 = 10;
+pub const DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE: u64 = 10;
 pub const DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE: u64 = 1;
 pub const COMMIT_CHECKPOINT_INTERVAL: &str = "commit_checkpoint_interval";
 
 pub fn default_commit_checkpoint_interval() -> u64 {
-    DEFAULT_COMMIT_CHECKPOINT_INTERVAL
+    DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
 }
 
 /// The `LogSinker` implementation used for commit-decoupled sinks (such as `Iceberg`, `DeltaLake` and `StarRocks`).
