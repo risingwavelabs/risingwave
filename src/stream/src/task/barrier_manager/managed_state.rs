@@ -699,7 +699,6 @@ impl ManagedBarrierState {
             if let Some(monitor_task_handle) = state.monitor_task_handle {
                 monitor_task_handle.abort();
             }
-            self.current_shared_context.drop_actor(actor_id);
         }
         let prev_graph_state = self
             .graph_states
