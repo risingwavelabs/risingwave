@@ -122,6 +122,63 @@ select to_jsonb(m1), to_jsonb(m2), to_jsonb(m3), to_jsonb(l), to_jsonb(s) from t
 {"a": 1.0, "b": 2.0, "c": 3.0}	null	null	null	null
 {"a": 1.0, "b": 2.0, "c": 3.0}	{"1": true, "2": false, "3": true}	{"a": {"a1": "a2"}, "b": {"b1": "b2"}}	[{"a": 1, "b": 2, "c": 3}, {"d": 4, "e": 5, "f": 6}]	{"m": {"a": {"x": 1}, "b": {"x": 2}, "c": {"x": 3}}}
 
+query ?
+select jsonb_populate_map(
+    null::map(varchar, int),
+    '{"a": 1, "b": 2}'::jsonb
+);
+----
+{a:1,b:2}
+
+
+query ?
+select jsonb_populate_map(
+    MAP {'a': 1, 'b': 2},
+    '{"b": 3, "c": 4}'::jsonb
+);
+----
+{a:1,b:3,c:4}
+
+
+# implicit cast (int -> varchar)
+query ?
+select jsonb_populate_map(
+    MAP {'a': 'a', 'b': 'b'},
+    '{"b": 3, "c": 4}'::jsonb
+);
+----
+{a:a,b:3,c:4}
+
+
+query error
+select jsonb_populate_map(
+    MAP {'a': 1, 'b': 2},
+    '{"b": "3", "c": 4}'::jsonb
+);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: error while evaluating expression `jsonb_populate_map('{a:1,b:2}', '{"b": "3", "c": 4}')`
+  3: Parse error: cannot cast jsonb string to type number
+
+
+query error
+select jsonb_populate_map(
+    null::map(int, int),
+    '{"a": 1, "b": 2}'::jsonb
+);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: error while evaluating expression `jsonb_populate_map(NULL, '{"a": 1, "b": 2}')`
+  3: Parse error: cannot convert jsonb to a map with non-string keys
+
+
+
 statement ok
 drop table t;
 
