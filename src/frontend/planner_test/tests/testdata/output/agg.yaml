@@ -1925,7 +1925,7 @@
         │     └─StreamShare { id: 2 }
         │       └─StreamProject { exprs: [t.v1::Float64 as $expr1, t.v1, t._row_id] }
         │         └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-        └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), count] }
+        └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), count], must_output_per_barrier: true }
           └─StreamExchange { dist: Single }
             └─StreamStatelessSimpleAgg { aggs: [sum(t.v1)] }
               └─StreamShare { id: 2 }
@@ -1956,7 +1956,7 @@
         │     └─StreamShare { id: 2 }
         │       └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t._row_id] }
         │         └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-        └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count(t.v1)), count] }
+        └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count(t.v1)), count], must_output_per_barrier: true }
           └─StreamExchange { dist: Single }
             └─StreamStatelessSimpleAgg { aggs: [sum(t.v1), count(t.v1)] }
               └─StreamShare { id: 2 }
@@ -2041,7 +2041,7 @@
         │       └─StreamShare { id: 2 }
         │         └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
         │           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-        └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count), sum(sum(t.v2)), count] }
+        └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count), sum(sum(t.v2)), count], must_output_per_barrier: true }
           └─StreamExchange { dist: Single }
             └─StreamStatelessSimpleAgg { aggs: [sum(t.v1), count, sum(t.v2)] }
               └─StreamShare { id: 2 }
@@ -2079,7 +2079,7 @@
         │       └─StreamShare { id: 2 }
         │         └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
         │           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-        └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count), sum(sum(t.v2)), count] }
+        └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count), sum(sum(t.v2)), count], must_output_per_barrier: true }
           └─StreamExchange { dist: Single }
             └─StreamStatelessSimpleAgg { aggs: [sum(t.v1), count, sum(t.v2)] }
               └─StreamShare { id: 2 }
@@ -2109,7 +2109,7 @@
         │     └─StreamShare { id: 2 }
         │       └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t._row_id] }
         │         └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-        └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), count] }
+        └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), count], must_output_per_barrier: true }
           └─StreamExchange { dist: Single }
             └─StreamStatelessSimpleAgg { aggs: [sum(t.v1)] }
               └─StreamShare { id: 2 }
@@ -2146,7 +2146,7 @@
         │       └─StreamShare { id: 2 }
         │         └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
         │           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-        └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count), max(max(t.v2)), count] }
+        └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count), max(max(t.v2)), count], must_output_per_barrier: true }
           └─StreamExchange { dist: Single }
             └─StreamHashAgg { group_key: [$expr5], aggs: [sum(t.v1), count, max(t.v2)] }
               └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr3, t.v2, t.v2::Float64 as $expr4, t._row_id, Vnode(t._row_id) as $expr5] }

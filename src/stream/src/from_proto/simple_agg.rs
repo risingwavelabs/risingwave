@@ -54,6 +54,7 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
         let distinct_dedup_tables =
             build_distinct_dedup_table_from_proto(node.get_distinct_dedup_tables(), store, None)
                 .await;
+        let must_output_per_barrier = node.get_must_output_per_barrier();
 
         let exec = SimpleAggExecutor::new(AggExecutorArgs {
             version: node.version(),
@@ -71,7 +72,7 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             distinct_dedup_tables,
             watermark_epoch: params.watermark_epoch,
             extra: SimpleAggExecutorExtraArgs {
-                must_output_per_barrier: false,
+                must_output_per_barrier,
             },
         })?;
 
