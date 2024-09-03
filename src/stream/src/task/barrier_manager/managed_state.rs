@@ -85,12 +85,12 @@ enum ManagedBarrierStateInner {
 
 #[derive(Debug)]
 pub(super) struct BarrierState {
-    curr_epoch: u64,
+    barrier: Barrier,
     inner: ManagedBarrierStateInner,
 }
 
 type AwaitEpochCompletedFuture =
-    impl Future<Output = (u64, StreamResult<BarrierCompleteResult>)> + 'static;
+    impl Future<Output = (Barrier, StreamResult<BarrierCompleteResult>)> + 'static;
 
 fn sync_epoch<S: StateStore>(
     state_store: &S,
@@ -672,9 +672,12 @@ impl ManagedBarrierState {
     ) -> impl Future<Output = (PartialGraphId, u64)> + '_ {
         poll_fn(|cx| {
             for (partial_graph_id, graph_state) in &mut self.graph_states {
-                if let Poll::Ready(epoch) = graph_state.poll_next_completed_epoch(cx) {
+                if let Poll::Ready(barrier) = graph_state.poll_next_completed_barrier(cx) {
+                    if let Some(actors_to_stop) = barrier.all_stop_actors() {
+                        self.current_shared_context.drop_actors(actors_to_stop);
+                    }
                     let partial_graph_id = *partial_graph_id;
-                    return Poll::Ready((partial_graph_id, epoch));
+                    return Poll::Ready((partial_graph_id, barrier.epoch.prev));
                 }
             }
             Poll::Pending
@@ -742,7 +745,7 @@ impl PartialGraphManagedBarrierState {
 
             let create_mview_progress = self
                 .create_mview_progress
-                .remove(&barrier_state.curr_epoch)
+                .remove(&barrier_state.barrier.epoch.curr)
                 .unwrap_or_default()
                 .into_iter()
                 .map(|(actor, state)| CreateMviewProgress {
@@ -750,7 +753,7 @@ impl PartialGraphManagedBarrierState {
                     done: matches!(state, BackfillState::Done(_)),
                     consumed_epoch: match state {
                         BackfillState::ConsumingUpstream(consumed_epoch, _) => consumed_epoch,
-                        BackfillState::Done(_) => barrier_state.curr_epoch,
+                        BackfillState::Done(_) => barrier_state.barrier.epoch.curr,
                     },
                     consumed_rows: match state {
                         BackfillState::ConsumingUpstream(_, consumed_rows) => consumed_rows,
@@ -789,6 +792,8 @@ impl PartialGraphManagedBarrierState {
                 }
             };
 
+            let barrier = barrier_state.barrier.clone();
+
             self.await_epoch_completed_futures.push_back({
                 let future = async move {
                     if let Some(future) = complete_barrier_future {
@@ -800,7 +805,7 @@ impl PartialGraphManagedBarrierState {
                 }
                 .map(move |result| {
                     (
-                        prev_epoch,
+                        barrier,
                         result.map(|sync_result| BarrierCompleteResult {
                             sync_result,
                             create_mview_progress,
@@ -840,7 +845,7 @@ impl PartialGraphManagedBarrierState {
                 )
             }
             Some(&mut BarrierState {
-                curr_epoch,
+                ref barrier,
                 inner:
                     ManagedBarrierStateInner::Issued(IssuedState {
                         ref mut remaining_actors,
@@ -854,7 +859,7 @@ impl PartialGraphManagedBarrierState {
                     "the actor doesn't exist. actor_id: {:?}, curr_epoch: {:?}",
                     actor_id, epoch.curr
                 );
-                assert_eq!(curr_epoch, epoch.curr);
+                assert_eq!(barrier.epoch.curr, epoch.curr);
                 self.may_have_collected_all(epoch.prev);
             }
             Some(BarrierState { inner, .. }) => {
@@ -936,7 +941,7 @@ impl PartialGraphManagedBarrierState {
         self.epoch_barrier_state_map.insert(
             barrier.epoch.prev,
             BarrierState {
-                curr_epoch: barrier.epoch.curr,
+                barrier: barrier.clone(),
                 inner: ManagedBarrierStateInner::Issued(IssuedState {
                     remaining_actors: BTreeSet::from_iter(actor_ids_to_collect),
                     mutation: barrier.mutation.clone(),
@@ -950,17 +955,17 @@ impl PartialGraphManagedBarrierState {
     }
 
     /// Return a future that yields the next completed epoch. The future is cancellation safe.
-    pub(crate) fn poll_next_completed_epoch(&mut self, cx: &mut Context<'_>) -> Poll<u64> {
+    pub(crate) fn poll_next_completed_barrier(&mut self, cx: &mut Context<'_>) -> Poll<Barrier> {
         ready!(self.await_epoch_completed_futures.next().poll_unpin(cx))
-            .map(|(prev_epoch, result)| {
+            .map(|(barrier, result)| {
                 let state = self
                     .epoch_barrier_state_map
-                    .get_mut(&prev_epoch)
+                    .get_mut(&barrier.epoch.prev)
                     .expect("should exist");
                 // sanity check on barrier state
                 assert_matches!(&state.inner, ManagedBarrierStateInner::AllCollected);
                 state.inner = ManagedBarrierStateInner::Completed(result);
-                prev_epoch
+                barrier
             })
             .map(Poll::Ready)
             .unwrap_or(Poll::Pending)
@@ -1006,9 +1011,12 @@ impl PartialGraphManagedBarrierState {
 
     #[cfg(test)]
     async fn pop_next_completed_epoch(&mut self) -> u64 {
-        let epoch = poll_fn(|cx| self.poll_next_completed_epoch(cx)).await;
-        let _ = self.pop_completed_epoch(epoch).unwrap().unwrap();
-        epoch
+        let barrier = poll_fn(|cx| self.poll_next_completed_barrier(cx)).await;
+        let _ = self
+            .pop_completed_epoch(barrier.epoch.prev)
+            .unwrap()
+            .unwrap();
+        barrier.epoch.prev
     }
 }
 
