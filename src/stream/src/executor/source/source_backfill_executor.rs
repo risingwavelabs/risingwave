@@ -422,10 +422,9 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         if barrier.is_pause_on_startup() {
             pause_reader!();
         }
-
         yield Message::Barrier(barrier);
 
-        if !self.backfill_finished(&backfill_stage.states).await? {
+        if !self.should_report_finished(&backfill_stage.states) {
             let source_backfill_row_count = self
                 .metrics
                 .source_backfill_row_count
@@ -560,13 +559,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     );
                                 }
 
-                                // TODO: use a specialized progress for source?
-                                // self.progress.update(
-                                //     barrier.epoch,
-                                //     snapshot_read_epoch,
-                                //     total_snapshot_processed_rows,
-                                // );
-
                                 self.backfill_state_store
                                     .set_states(backfill_stage.states.clone())
                                     .await?;
@@ -575,10 +567,20 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     .commit(barrier.epoch)
                                     .await?;
 
+                                let epoch = barrier.epoch;
                                 yield Message::Barrier(barrier);
 
-                                if self.backfill_finished(&backfill_stage.states).await? {
-                                    break 'backfill_loop;
+                                if self.should_report_finished(&backfill_stage.states) {
+                                    // TODO: use a specialized progress for source
+                                    // Currently, `CreateMviewProgress` is designed for MV backfill, and rw_ddl_progress calculates
+                                    // progress based on the number of consumed rows and an estimated total number of rows from hummock.
+                                    // For now, we just rely on the same code path, and for source backfill, the progress will always be 99.99%.
+                                    tracing::info!("progress finish");
+                                    self.progress.finish(epoch, 114514);
+
+                                    if self.backfill_finished(&backfill_stage.states).await? {
+                                        break 'backfill_loop;
+                                    }
                                 }
                             }
                             Message::Chunk(chunk) => {
@@ -650,8 +652,15 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             }
         }
 
-        let mut first_barrier_after_finish = true;
         let mut splits: HashSet<SplitId> = backfill_stage.states.keys().cloned().collect();
+        self.backfill_state_store
+            .set_states(
+                splits
+                    .iter()
+                    .map(|s| (s.clone(), BackfillState::Finished))
+                    .collect(),
+            )
+            .await?;
 
         // All splits finished backfilling. Now we only forward the source data.
         #[for_await]
@@ -680,7 +689,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 self.apply_split_change_forward_stage(
                                     actor_splits,
                                     &mut splits,
-                                    true,
+                                    false,
                                 )
                                 .await?;
                             }
@@ -688,24 +697,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                         }
                     }
 
-                    if first_barrier_after_finish {
-                        // Update state and report progress after the first barrier.
-                        // TODO: use a specialized progress for source
-                        // Currently, `CreateMviewProgress` is designed for MV backfill, and rw_ddl_progress calculates
-                        // progress based on the number of consumed rows and an estimated total number of rows from hummock.
-                        // For now, we just rely on the same code path, and for source backfill, the progress will always be 99.99%.
-                        tracing::info!("progress finish");
-                        self.progress.finish(barrier.epoch, 114514);
-                        self.backfill_state_store
-                            .set_states(
-                                splits
-                                    .iter()
-                                    .map(|s| (s.clone(), BackfillState::Finished))
-                                    .collect(),
-                            )
-                            .await?;
-                    }
-                    first_barrier_after_finish = false;
                     self.backfill_state_store
                         .state_store
                         .commit(barrier.epoch)
@@ -713,6 +704,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     yield Message::Barrier(barrier);
                 }
                 Message::Chunk(chunk) => {
+                    // FIXME: consider SourceCatchingUp here?
                     yield Message::Chunk(chunk);
                 }
                 Message::Watermark(watermark) => {
@@ -724,8 +716,24 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
 
     /// All splits finished backfilling.
     ///
+    /// Note: we don't need to consider split migration (online scaling) here, so we can just check the splits assigned to this actor.
+    /// - For foreground DDL, scaling is not allowed during backfilling.
+    /// - For background DDL, scaling is skipped when backfilling is not finished, and can be triggered by recreating actors during recovery.
+    ///
+    /// See <https://github.com/risingwavelabs/risingwave/issues/18300> for more details.
+    fn should_report_finished(&self, states: &BackfillStates) -> bool {
+        states.values().all(|state| {
+            matches!(
+                state,
+                BackfillState::Finished | BackfillState::SourceCachingUp(_)
+            )
+        })
+    }
+
+    /// All splits entered `Finished` state.
+    ///
     /// We check all splits for the source, including other actors' splits here, before going to the forward stage.
-    /// Otherwise if we break early, but after rescheduling, an unfinished split is migrated to
+    /// Otherwise if we `break` early, but after rescheduling, an unfinished split is migrated to
     /// this actor, we still need to backfill it.
     async fn backfill_finished(&self, states: &BackfillStates) -> StreamExecutorResult<bool> {
         Ok(states
@@ -795,7 +803,10 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     }
                     Some(backfill_state) => {
                         // Migrated split. Backfill if unfinished.
-                        // TODO: disallow online scaling during backfilling.
+                        debug_assert!(
+                            false,
+                            "split migration during backfill stage should not happen"
+                        );
                         target_state.insert(split_id, backfill_state);
                     }
                 }
