@@ -628,6 +628,15 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         }
 
         let mut splits: HashSet<SplitId> = backfill_stage.states.keys().cloned().collect();
+        // Make sure `Finished` state is persisted.
+        self.backfill_state_store
+            .set_states(
+                splits
+                    .iter()
+                    .map(|s| (s.clone(), BackfillState::Finished))
+                    .collect(),
+            )
+            .await?;
 
         // All splits finished backfilling. Now we only forward the source data.
         #[for_await]
@@ -663,14 +672,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                             _ => {}
                         }
                     }
-                    self.backfill_state_store
-                        .set_states(
-                            splits
-                                .iter()
-                                .map(|s| (s.clone(), BackfillState::Finished))
-                                .collect(),
-                        )
-                        .await?;
                     self.backfill_state_store
                         .state_store
                         .commit(barrier.epoch)
