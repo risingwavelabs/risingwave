@@ -263,6 +263,7 @@ impl MySqlExternalTableReader {
 
         opts_builder = match config.ssl_mode {
             SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
+            // verify-ca and verify-full are same as required for mysql now
             SslMode::Required | SslMode::VerifyCa | SslMode::VerifyFull => {
                 let ssl_without_verify = mysql_async::SslOpts::default()
                     .with_danger_accept_invalid_certs(true)
