@@ -1891,7 +1891,7 @@
       │     └─StreamExchange { dist: HashShard(bid.auction) }
       │       └─StreamTableScan { table: bid, columns: [bid.auction, bid._row_id], stream_scan_type: ArrangementBackfill, stream_key: [bid._row_id], pk: [_row_id], dist: UpstreamHashShard(bid._row_id) }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [(sum0(sum0(count)) / sum0(count(bid.auction))) as $expr1], noop_update_hint: true }
+        └─StreamProject { exprs: [(sum0(sum0(count)) / sum0(count(bid.auction))) as $expr1] }
           └─StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count(bid.auction)), count] }
             └─StreamExchange { dist: Single }
               └─StreamStatelessSimpleAgg { aggs: [sum0(count), count(bid.auction)] }
@@ -1926,7 +1926,7 @@
     └── BatchPlanNode
 
     Fragment 3
-    StreamProject { exprs: [(sum0(sum0(count)) / sum0(count(bid.auction))) as $expr1], noop_update_hint: true }
+    StreamProject { exprs: [(sum0(sum0(count)) / sum0(count(bid.auction))) as $expr1] }
     └── StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count(bid.auction)), count] } { tables: [ SimpleAggState: 9 ] }
         └── StreamExchange Single from 4
 
@@ -2331,7 +2331,7 @@
               └─BatchScan { table: bid, columns: [bid.auction, bid.price, bid.date_time], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [min_final], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [min(min(max(bid.price)))], noop_update_hint: true }
+    └─StreamProject { exprs: [min(min(max(bid.price)))] }
       └─StreamSimpleAgg { aggs: [min(min(max(bid.price))), count] }
         └─StreamExchange { dist: Single }
           └─StreamHashAgg { group_key: [$expr1], aggs: [min(max(bid.price)), count] }
@@ -2348,7 +2348,7 @@
     Fragment 0
     StreamMaterialize { columns: [min_final], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
-    └── StreamProject { exprs: [min(min(max(bid.price)))], noop_update_hint: true }
+    └── StreamProject { exprs: [min(min(max(bid.price)))] }
         └── StreamSimpleAgg { aggs: [min(min(max(bid.price))), count] }
             ├── tables: [ SimpleAggState: 1, SimpleAggCall0: 0 ]
             └── StreamExchange Single from 1
