@@ -531,6 +531,11 @@ mod tests {
         let b2 = Barrier::with_prev_epoch_for_test(test_epoch(1000), *prev_epoch)
             .with_mutation(Mutation::Stop(HashSet::default()));
         barrier_test_env.inject_barrier(&b2, [actor_id]);
+        barrier_test_env
+            .shared_context
+            .local_barrier_manager
+            .flush_all_events()
+            .await;
 
         for (tx_id, tx) in txs.into_iter().enumerate() {
             let epochs = epochs.clone();
