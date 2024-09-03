@@ -988,6 +988,9 @@ PulsarProperties:
     field_type: String
     required: false
     default: Default::default
+  - name: subscription.name.prefix
+    field_type: String
+    required: false
 S3Properties:
   fields:
   - name: s3.region_name

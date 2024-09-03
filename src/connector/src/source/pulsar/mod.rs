@@ -74,6 +74,9 @@ pub struct PulsarProperties {
     #[serde(rename = "iceberg.bucket", default)]
     pub iceberg_bucket: Option<String>,
 
+    #[serde(rename = "subscription.name.prefix")]
+    pub subscription_name_prefix: Option<String>,
+
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
 }
