@@ -629,11 +629,12 @@ impl CatalogManager {
                 .into_iter()
                 .filter(|table| valid_table_name(&table.name))
                 .map(|table| StreamingJobId::new(table.id))
-                .chain(
-                    sources_to_drop
-                        .iter()
-                        .map(|source| StreamingJobId::new(source.id)),
-                )
+                .chain(sources_to_drop.iter().filter_map(|source| {
+                    source
+                        .info
+                        .as_ref()
+                        .and_then(|info| info.is_shared().then(|| StreamingJobId::new(source.id)))
+                }))
                 .chain(
                     sinks_to_drop
                         .into_iter()
