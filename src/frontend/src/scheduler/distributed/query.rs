@@ -472,10 +472,7 @@ pub(crate) mod tests {
     use risingwave_batch::worker_manager::worker_node_manager::{
         WorkerNodeManager, WorkerNodeSelector,
     };
-    use risingwave_common::catalog::{
-        ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, StreamJobStatus,
-        DEFAULT_SUPER_USER_ID,
-    };
+    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, StreamJobStatus, DEFAULT_SUPER_USER_ID, Engine};
     use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
     use risingwave_common::types::DataType;
     use risingwave_pb::common::worker_node::Property;
@@ -597,6 +594,7 @@ pub(crate) mod tests {
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             cdc_table_id: None,
+            engine: Engine::Hummock,
         };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),

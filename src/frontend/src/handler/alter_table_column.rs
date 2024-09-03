@@ -18,7 +18,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::catalog::{ColumnCatalog, Engine};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::{bail, bail_not_implemented};
@@ -185,10 +185,16 @@ pub async fn get_replace_table_plan(
         with_version_column,
         wildcard_idx,
         cdc_table_info,
+        engine,
         ..
     } = definition
     else {
         panic!("unexpected statement type: {:?}", definition);
+    };
+
+    let engine = match engine {
+        risingwave_sqlparser::ast::Engine::Hummock => Engine::Hummock,
+        risingwave_sqlparser::ast::Engine::Iceberg => Engine::Iceberg,
     };
 
     let (mut graph, mut table, source, job_type) = generate_stream_graph_for_table(
@@ -207,6 +213,7 @@ pub async fn get_replace_table_plan(
         with_version_column,
         cdc_table_info,
         new_version_columns,
+        engine,
     )
     .await?;
 
