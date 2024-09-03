@@ -25,7 +25,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -42,7 +42,7 @@ use risingwave_storage::error::StorageResult;
 use risingwave_storage::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use risingwave_storage::store::{StateStoreIterExt, StateStoreReadIter};
-use risingwave_storage::table::{compute_vnode, TableDistribution, SINGLETON_VNODE};
+use risingwave_storage::table::{compute_vnode, SINGLETON_VNODE};
 use rw_futures_util::select_all;
 
 use crate::common::log_store_impl::kv_log_store::{
@@ -201,8 +201,7 @@ impl LogStoreRowSerde {
 
         let vnodes = match vnodes {
             Some(vnodes) => vnodes,
-
-            None => TableDistribution::singleton_vnode_bitmap(),
+            None => Bitmap::singleton().into(),
         };
 
         // epoch and seq_id. The seq_id of barrier is set null, and therefore the second order type
@@ -216,7 +215,7 @@ impl LogStoreRowSerde {
         );
 
         let dist_key_indices = if dist_key_indices.is_empty() {
-            if &vnodes != TableDistribution::singleton_vnode_bitmap_ref() {
+            if !vnodes.is_singleton() {
                 warn!(
                     ?vnodes,
                     "singleton log store gets non-singleton vnode bitmap"

@@ -1250,7 +1250,8 @@ fn derive_partitions(
     }
 
     let table_distribution = TableDistribution::new_from_storage_table_desc(
-        Some(TableDistribution::all_vnodes()),
+        // TODO(var-vnode): use vnode count from table desc
+        Some(Bitmap::ones(VirtualNode::COUNT).into()),
         &table_desc.try_to_protobuf()?,
     );
 
