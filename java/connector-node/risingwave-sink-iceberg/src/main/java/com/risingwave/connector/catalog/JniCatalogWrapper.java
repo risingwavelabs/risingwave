@@ -67,21 +67,21 @@ public class JniCatalogWrapper {
     /**
      * Create table through this prox.
      *
-     * @param namespace Namespace.
+     * @param namespaceStr String.
      * @param createTableRequest Request serialized using json.
      * @return Response serialized using json.
      * @throws Exception
      */
-    public String createTable(String namespace, String createTableRequest) throws Exception {
-        Namespace ns = null;
-        if (namespace == null) {
-            ns = Namespace.empty();
+    public String createTable(String namespaceStr, String createTableRequest) throws Exception {
+        Namespace namespace;
+        if (namespaceStr == null) {
+            namespace = Namespace.empty();
         } else {
-            ns = Namespace.of(namespace);
+            namespace = Namespace.of(namespaceStr);
         }
         CreateTableRequest req =
                 RESTObjectMapper.mapper().readValue(createTableRequest, CreateTableRequest.class);
-        LoadTableResponse resp = CatalogHandlers.createTable(catalog, ns, req);
+        LoadTableResponse resp = CatalogHandlers.createTable(catalog, namespace, req);
         return RESTObjectMapper.mapper().writer().writeValueAsString(resp);
     }
 
