@@ -1,32 +1,5 @@
 # THIS FILE IS AUTO_GENERATED. DO NOT EDIT
 
-AzblobProperties:
-  fields:
-  - name: azblob.container_name
-    field_type: String
-    required: true
-  - name: azblob.credentials.account_name
-    field_type: String
-    required: false
-    default: Default::default
-  - name: azblob.credentials.account_key
-    field_type: String
-    required: false
-    default: Default::default
-  - name: azblob.endpoint_url
-    field_type: String
-    required: true
-  - name: match_pattern
-    field_type: String
-    required: false
-    default: Default::default
-  - name: refresh.interval.sec
-    field_type: u64
-    required: false
-  - name: compression_format
-    field_type: CompressionFormat
-    required: false
-    default: Default::default
 DatagenProperties:
   fields:
   - name: datagen.split.num
@@ -63,10 +36,6 @@ GcsProperties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
-  - name: compression_format
-    field_type: CompressionFormat
-    required: false
-    default: Default::default
 IcebergProperties:
   fields:
   - name: catalog.type
@@ -665,10 +634,6 @@ PosixFsProperties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
-  - name: compression_format
-    field_type: CompressionFormat
-    required: false
-    default: Default::default
 PubsubProperties:
   fields:
   - name: pubsub.subscription
