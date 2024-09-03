@@ -460,6 +460,7 @@ async fn test_failpoints_fast_compactor_iterator_recreate() {
         meta.clone(),
         sstable_store.clone(),
         default_writer_opt_for_test(),
+        vec![table_id as u32],
     )
     .await
     .unwrap();
@@ -486,7 +487,7 @@ async fn test_failpoints_fast_compactor_iterator_recreate() {
             .init_block_iter(buf, meta.uncompressed_size as usize)
             .unwrap();
 
-        let block_iter = sstable_iter.mut_iter();
+        let block_iter = sstable_iter.iter_mut();
 
         while block_iter.is_valid() {
             let key = block_iter.key();

@@ -139,13 +139,10 @@ impl BlockStreamIterator {
             match ret {
                 Ok(Some((data, _))) => {
                     let meta = self.sstable.meta.block_metas[self.next_block_index].clone();
-                    let filter_block = if !cfg!(feature = "failpoints") {
-                        self.sstable
-                            .filter_reader
-                            .get_block_raw_filter(self.next_block_index)
-                    } else {
-                        vec![]
-                    };
+                    let filter_block = self
+                        .sstable
+                        .filter_reader
+                        .get_block_raw_filter(self.next_block_index);
                     self.next_block_index += 1;
                     return Ok(Some((data, filter_block, meta)));
                 }
@@ -239,8 +236,9 @@ impl BlockStreamIterator {
         self.iter.is_some() || self.next_block_index < self.sstable.meta.block_metas.len()
     }
 
+    #[cfg(test)]
     #[cfg(feature = "failpoints")]
-    pub(crate) fn mut_iter(&mut self) -> &mut BlockIterator {
+    pub(crate) fn iter_mut(&mut self) -> &mut BlockIterator {
         self.iter.as_mut().unwrap()
     }
 }
