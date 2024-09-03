@@ -27,16 +27,16 @@ use crate::version::{
     GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo,
     IntraLevelDelta,
 };
-use crate::{CompactionGroupId, HummockSstableId};
+use crate::{CompactionGroupId, HummockSstableId, HummockVersionId};
 
 /// [`IncompleteHummockVersion`] is incomplete because `SSTableInfo` only has the `sst_id` set in the following fields:
 /// - `PbLevels`
 /// - `TableChangeLog`
 #[derive(Debug, Clone, PartialEq)]
 pub struct IncompleteHummockVersion {
-    pub id: u64,
+    pub id: HummockVersionId,
     pub levels: HashMap<CompactionGroupId, Levels>,
-    pub max_committed_epoch: u64,
+    max_committed_epoch: u64,
     safe_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
     pub table_change_log: HashMap<TableId, TableChangeLog>,
@@ -60,6 +60,7 @@ fn stripped_sstable_info(origin: &SstableInfo) -> SstableInfo {
         uncompressed_file_size: Default::default(),
         range_tombstone_count: Default::default(),
         bloom_filter_kind: Default::default(),
+        sst_size: Default::default(),
     }
 }
 
@@ -101,8 +102,6 @@ pub fn refill_version(
     for level in version.levels.values_mut().flat_map(|level| {
         level
             .l0
-            .as_mut()
-            .unwrap()
             .sub_levels
             .iter_mut()
             .rev()
@@ -159,7 +158,7 @@ fn stripped_l0(origin: &OverlappingLevel) -> OverlappingLevel {
 fn stripped_levels(origin: &Levels) -> Levels {
     Levels {
         levels: origin.levels.iter().map(stripped_level).collect(),
-        l0: origin.l0.as_ref().map(stripped_l0),
+        l0: stripped_l0(&origin.l0),
         group_id: origin.group_id,
         parent_group_id: origin.parent_group_id,
         member_table_ids: Default::default(),
@@ -213,7 +212,7 @@ impl From<(&HummockVersion, &HashSet<CompactionGroupId>)> for IncompleteHummockV
                     }
                 })
                 .collect(),
-            max_committed_epoch: version.max_committed_epoch,
+            max_committed_epoch: version.visible_table_committed_epoch(),
             safe_epoch: version.visible_table_safe_epoch(),
             table_watermarks: version.table_watermarks.clone(),
             // TODO: optimization: strip table change log
@@ -238,7 +237,7 @@ impl IncompleteHummockVersion {
     /// Resulted `SStableInfo` is incompelte.
     pub fn to_protobuf(&self) -> PbHummockVersion {
         PbHummockVersion {
-            id: self.id,
+            id: self.id.0,
             levels: self
                 .levels
                 .iter()
@@ -266,8 +265,8 @@ impl IncompleteHummockVersion {
 /// - `ChangeLogDelta`
 #[derive(Debug, PartialEq, Clone)]
 pub struct IncompleteHummockVersionDelta {
-    pub id: u64,
-    pub prev_id: u64,
+    pub id: HummockVersionId,
+    pub prev_id: HummockVersionId,
     pub group_deltas: HashMap<CompactionGroupId, PbGroupDeltas>,
     pub max_committed_epoch: u64,
     pub safe_epoch: u64,
@@ -296,7 +295,7 @@ impl From<(&HummockVersionDelta, &HashSet<CompactionGroupId>)> for IncompleteHum
                     }
                 })
                 .collect(),
-            max_committed_epoch: delta.max_committed_epoch,
+            max_committed_epoch: delta.visible_table_committed_epoch(),
             safe_epoch: delta.visible_table_safe_epoch(),
             trivial_move: delta.trivial_move,
             new_table_watermarks: delta.new_table_watermarks.clone(),
@@ -316,8 +315,8 @@ impl IncompleteHummockVersionDelta {
     /// Resulted `SStableInfo` is incompelte.
     pub fn to_protobuf(&self) -> PbHummockVersionDelta {
         PbHummockVersionDelta {
-            id: self.id,
-            prev_id: self.prev_id,
+            id: self.id.0,
+            prev_id: self.prev_id.0,
             group_deltas: self.group_deltas.clone(),
             max_committed_epoch: self.max_committed_epoch,
             safe_epoch: self.safe_epoch,
@@ -340,7 +339,7 @@ impl IncompleteHummockVersionDelta {
             state_table_info_delta: self
                 .state_table_info_delta
                 .iter()
-                .map(|(table_id, delta)| (table_id.table_id, delta.clone()))
+                .map(|(table_id, delta)| (table_id.table_id, *delta))
                 .collect(),
         }
     }

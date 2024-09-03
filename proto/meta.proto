@@ -273,6 +273,7 @@ enum ThrottleTarget {
   SOURCE = 1;
   MV = 2;
   TABLE_WITH_SOURCE = 3;
+  CDC_TABLE = 4;
 }
 
 message ApplyThrottleRequest {
@@ -311,6 +312,8 @@ message AddWorkerNodeRequest {
     bool is_streaming = 2;
     bool is_serving = 3;
     bool is_unschedulable = 4;
+    // This is used for frontend node to register its rpc address
+    string internal_rpc_host_addr = 5;
   }
   common.WorkerType worker_type = 1;
   common.HostAddress host = 2;
@@ -320,9 +323,6 @@ message AddWorkerNodeRequest {
 }
 
 message AddWorkerNodeResponse {
-  reserved 3;
-  reserved "system_params";
-  common.Status status = 1;
   optional uint32 node_id = 2;
   string cluster_id = 4;
 }
@@ -584,6 +584,7 @@ message GetServerlessStreamingJobsStatusResponse {
   repeated Status streaming_job_statuses = 1;
 }
 
+// This is used by `risectl`
 service ScaleService {
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
@@ -630,6 +631,7 @@ message SystemParams {
   optional bool enable_tracing = 15;
   optional bool use_new_object_prefix_strategy = 16;
   optional string license_key = 17;
+  optional uint64 time_travel_retention_ms = 18;
 }
 
 message GetSystemParamsRequest {}
@@ -729,6 +731,12 @@ message EventLog {
     common.HostAddress host_addr = 3;
     string panic_info = 4;
   }
+  message EventAutoSchemaChangeFail {
+    uint32 table_id = 1;
+    string table_name = 2;
+    string cdc_table_id = 3;
+    string upstream_ddl = 4;
+  }
   // Event logs identifier, which should be populated by event log service.
   optional string unique_id = 1;
   // Processing time, which should be populated by event log service.
@@ -741,6 +749,7 @@ message EventLog {
     EventInjectBarrierFail inject_barrier_fail = 7;
     EventCollectBarrierFail collect_barrier_fail = 8;
     EventLog.EventWorkerNodePanic worker_node_panic = 9;
+    EventLog.EventAutoSchemaChangeFail auto_schema_change_fail = 10;
   }
 }
 
@@ -762,4 +771,21 @@ message AddEventLogResponse {}
 service EventLogService {
   rpc ListEventLog(ListEventLogRequest) returns (ListEventLogResponse);
   rpc AddEventLog(AddEventLogRequest) returns (AddEventLogResponse);
+}
+
+message ActorIds {
+  repeated uint32 ids = 1;
+}
+
+message FragmentIdToActorIdMap {
+  map<uint32, ActorIds> map = 1;
+}
+
+/// Provides all the ids: relation_id, fragment_id, actor_id
+/// in an hierarchical format.
+/// relation_id -> [fragment_id]
+/// fragment_id -> [actor_id]
+message RelationIdInfos {
+  // relation_id -> FragmentIdToActorIdMap
+  map<uint32, FragmentIdToActorIdMap> map = 1;
 }

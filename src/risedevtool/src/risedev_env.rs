@@ -118,6 +118,24 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(env, r#"PGPASSWORD="{password}""#,).unwrap();
                 writeln!(env, r#"PGDATABASE="{database}""#,).unwrap();
             }
+            ServiceConfig::SqlServer(c) => {
+                let host = &c.address;
+                let port = &c.port;
+                let user = &c.user;
+                let password = &c.password;
+                let database = &c.database;
+                // These envs are used by `sqlcmd`.
+                writeln!(env, r#"SQLCMDSERVER="{host}""#,).unwrap();
+                writeln!(env, r#"SQLCMDPORT="{port}""#,).unwrap();
+                writeln!(env, r#"SQLCMDUSER="{user}""#,).unwrap();
+                writeln!(env, r#"SQLCMDPASSWORD="{password}""#,).unwrap();
+                writeln!(env, r#"SQLCMDDBNAME="{database}""#,).unwrap();
+                writeln!(
+                    env,
+                    r#"RISEDEV_SQLSERVER_WITH_OPTIONS_COMMON="connector='sqlserver-cdc',hostname='{host}',port='{port}',username='{user}',password='{password}',database.name='{database}'""#,
+                )
+                .unwrap();
+            }
             _ => {}
         }
     }

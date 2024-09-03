@@ -222,6 +222,7 @@ fn main() -> Result<()> {
             ServiceConfig::Redis(_)
             | ServiceConfig::MySql(_)
             | ServiceConfig::Postgres(_)
+            | ServiceConfig::SqlServer(_)
             | ServiceConfig::SchemaRegistry(_) => return Err(anyhow!("not supported")),
         };
         compose.container_name = service.id().to_string();

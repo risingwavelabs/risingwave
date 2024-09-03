@@ -237,7 +237,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
 
         let ordered = seq_scan_node.ordered;
 
-        let epoch = source.epoch.clone();
+        let epoch = source.epoch;
         let limit = seq_scan_node.limit;
         let as_of = seq_scan_node
             .as_of
@@ -341,8 +341,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         for point_get in point_gets {
             let table = table.clone();
             if let Some(row) =
-                Self::execute_point_get(table, point_get, query_epoch.clone(), histogram.clone())
-                    .await?
+                Self::execute_point_get(table, point_get, query_epoch, histogram.clone()).await?
             {
                 if let Some(chunk) = data_chunk_builder.append_one_row(row) {
                     returned += chunk.cardinality() as u64;
@@ -373,7 +372,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 table.clone(),
                 range,
                 ordered,
-                query_epoch.clone(),
+                query_epoch,
                 chunk_size,
                 limit,
                 histogram.clone(),

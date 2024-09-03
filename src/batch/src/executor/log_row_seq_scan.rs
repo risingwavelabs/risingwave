@@ -25,7 +25,7 @@ use risingwave_common::catalog::{ColumnId, Field, Schema};
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::common::BatchQueryEpoch;
+use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{collect_data_chunk, TableDistribution};
@@ -47,22 +47,22 @@ pub struct LogRowSeqScanExecutor<S: StateStore> {
     metrics: Option<BatchMetricsWithTaskLabels>,
 
     table: StorageTable<S>,
-    old_epoch: BatchQueryEpoch,
-    new_epoch: BatchQueryEpoch,
+    old_epoch: u64,
+    new_epoch: u64,
 }
 
 impl<S: StateStore> LogRowSeqScanExecutor<S> {
     pub fn new(
         table: StorageTable<S>,
-        old_epoch: BatchQueryEpoch,
-        new_epoch: BatchQueryEpoch,
+        old_epoch: u64,
+        new_epoch: u64,
         chunk_size: usize,
         identity: String,
         metrics: Option<BatchMetricsWithTaskLabels>,
     ) -> Self {
         let mut schema = table.schema().clone();
         schema.fields.push(Field::with_name(
-            risingwave_common::types::DataType::Int16,
+            risingwave_common::types::DataType::Varchar,
             "op",
         ));
         Self {
@@ -112,12 +112,26 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
         let chunk_size = source.context.get_config().developer.chunk_size as u32;
         let metrics = source.context().batch_metrics();
 
+        let Some(BatchQueryEpoch {
+            epoch: Some(batch_query_epoch::Epoch::Committed(old_epoch)),
+        }) = &log_store_seq_scan_node.old_epoch
+        else {
+            unreachable!("invalid old epoch: {:?}", log_store_seq_scan_node.old_epoch)
+        };
+
+        let Some(BatchQueryEpoch {
+            epoch: Some(batch_query_epoch::Epoch::Committed(new_epoch)),
+        }) = &log_store_seq_scan_node.new_epoch
+        else {
+            unreachable!("invalid new epoch: {:?}", log_store_seq_scan_node.new_epoch)
+        };
+
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = StorageTable::new_partial(state_store, column_ids, vnodes, table_desc);
             Ok(Box::new(LogRowSeqScanExecutor::new(
                 table,
-                log_store_seq_scan_node.old_epoch.clone().unwrap(),
-                log_store_seq_scan_node.new_epoch.clone().unwrap(),
+                *old_epoch,
+                *new_epoch,
                 chunk_size as usize,
                 source.plan_node().get_identity().clone(),
                 metrics,
@@ -165,8 +179,8 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         //       it can consume too much memory if there're too many ranges.
         let stream = Self::execute_range(
             table.clone(),
-            old_epoch.clone(),
-            new_epoch.clone(),
+            old_epoch,
+            new_epoch,
             chunk_size,
             histogram.clone(),
             Arc::new(schema.clone()),
@@ -181,32 +195,35 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn execute_range(
         table: Arc<StorageTable<S>>,
-        old_epoch: BatchQueryEpoch,
-        new_epoch: BatchQueryEpoch,
+        old_epoch: u64,
+        new_epoch: u64,
         chunk_size: usize,
         histogram: Option<impl Deref<Target = Histogram>>,
         schema: Arc<Schema>,
     ) {
         // Range Scan.
         let iter = table
-            .batch_iter_log_with_pk_bounds(old_epoch.into(), new_epoch.into())
+            .batch_iter_log_with_pk_bounds(old_epoch, new_epoch)
             .await?
             .flat_map(|r| {
-                futures::stream::iter(std::iter::from_coroutine(move || {
-                    match r {
-                        Ok(change_log_row) => {
-                            fn with_op(op: Op, row: impl Row) -> impl Row {
-                                row.chain([Some(ScalarImpl::Int16(op.to_i16()))])
+                futures::stream::iter(std::iter::from_coroutine(
+                    #[coroutine]
+                    move || {
+                        match r {
+                            Ok(change_log_row) => {
+                                fn with_op(op: Op, row: impl Row) -> impl Row {
+                                    row.chain([Some(ScalarImpl::Utf8(op.to_varchar().into()))])
+                                }
+                                for (op, row) in change_log_row.into_op_value_iter() {
+                                    yield Ok(with_op(op, row));
+                                }
                             }
-                            for (op, row) in change_log_row.into_op_value_iter() {
-                                yield Ok(with_op(op, row));
+                            Err(e) => {
+                                yield Err(e);
                             }
-                        }
-                        Err(e) => {
-                            yield Err(e);
-                        }
-                    };
-                }))
+                        };
+                    },
+                ))
             });
 
         pin_mut!(iter);

@@ -472,8 +472,7 @@ impl FrontendObserverNode {
         match info {
             Info::HummockSnapshot(hummock_snapshot) => match resp.operation() {
                 Operation::Update => {
-                    self.hummock_snapshot_manager
-                        .update(hummock_snapshot.clone());
+                    self.hummock_snapshot_manager.update(*hummock_snapshot);
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },

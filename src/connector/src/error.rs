@@ -52,6 +52,7 @@ def_anyhow_newtype! {
     sqlx::Error => transparent, // believed to be self-explanatory
     mysql_async::Error => "MySQL error",
     tokio_postgres::Error => "Postgres error",
+    tiberius::error::Error => "Sql Server error",
     apache_avro::Error => "Avro error",
     rdkafka::error::KafkaError => "Kafka error",
     pulsar::Error => "Pulsar error",

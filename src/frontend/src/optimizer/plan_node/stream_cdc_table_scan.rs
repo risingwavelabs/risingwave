@@ -256,7 +256,7 @@ impl StreamCdcTableScan {
             // The table desc used by backfill executor
             state_table: Some(catalog),
             cdc_table_desc: Some(self.core.cdc_table_desc.to_protobuf()),
-            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+            rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
             disable_backfill: options.disable_backfill,
             options: Some(options),
         });

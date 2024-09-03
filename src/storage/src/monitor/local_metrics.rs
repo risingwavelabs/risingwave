@@ -106,6 +106,13 @@ impl StoreLocalStatistic {
         }
     }
 
+    pub fn discard(self) {
+        #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
+        {
+            self.reported.fetch_or(true, Ordering::Relaxed);
+        }
+    }
+
     pub fn report_compactor(&self, metrics: &CompactorMetrics) {
         let t = self.remote_io_time.load(Ordering::Relaxed) as f64;
         if t > 0.0 {
@@ -249,30 +256,30 @@ impl LocalStoreMetrics {
     pub fn new(metrics: &HummockStateStoreMetrics, table_id_label: &str) -> Self {
         let cache_data_block_total = metrics
             .sst_store_block_request_counts
-            .with_label_values(&[table_id_label, "data_total"])
+            .with_guarded_label_values(&[table_id_label, "data_total"])
             .local();
 
         let cache_data_block_miss = metrics
             .sst_store_block_request_counts
-            .with_label_values(&[table_id_label, "data_miss"])
+            .with_guarded_label_values(&[table_id_label, "data_miss"])
             .local();
 
         let cache_meta_block_total = metrics
             .sst_store_block_request_counts
-            .with_label_values(&[table_id_label, "meta_total"])
+            .with_guarded_label_values(&[table_id_label, "meta_total"])
             .local();
         let cache_data_prefetch_count = metrics
             .sst_store_block_request_counts
-            .with_label_values(&[table_id_label, "prefetch_count"])
+            .with_guarded_label_values(&[table_id_label, "prefetch_count"])
             .local();
         let cache_data_prefetch_block_count = metrics
             .sst_store_block_request_counts
-            .with_label_values(&[table_id_label, "prefetch_data_count"])
+            .with_guarded_label_values(&[table_id_label, "prefetch_data_count"])
             .local();
 
         let cache_meta_block_miss = metrics
             .sst_store_block_request_counts
-            .with_label_values(&[table_id_label, "meta_miss"])
+            .with_guarded_label_values(&[table_id_label, "meta_miss"])
             .local();
 
         let remote_io_time = metrics
@@ -282,22 +289,22 @@ impl LocalStoreMetrics {
 
         let processed_key_count = metrics
             .iter_scan_key_counts
-            .with_label_values(&[table_id_label, "processed"])
+            .with_guarded_label_values(&[table_id_label, "processed"])
             .local();
 
         let skip_multi_version_key_count = metrics
             .iter_scan_key_counts
-            .with_label_values(&[table_id_label, "skip_multi_version"])
+            .with_guarded_label_values(&[table_id_label, "skip_multi_version"])
             .local();
 
         let skip_delete_key_count = metrics
             .iter_scan_key_counts
-            .with_label_values(&[table_id_label, "skip_delete"])
+            .with_guarded_label_values(&[table_id_label, "skip_delete"])
             .local();
 
         let total_key_count = metrics
             .iter_scan_key_counts
-            .with_label_values(&[table_id_label, "total"])
+            .with_guarded_label_values(&[table_id_label, "total"])
             .local();
 
         let get_shared_buffer_hit_counts = metrics
@@ -470,7 +477,7 @@ macro_rules! define_bloom_filter_metrics {
             pub fn new(metrics: &HummockStateStoreMetrics, table_id_label: &str, oper_type: &str) -> Self {
                 // checks SST bloom filters
                 Self {
-                    $($x: metrics.$x.with_label_values(&[table_id_label, oper_type]).local(),)*
+                    $($x: metrics.$x.with_guarded_label_values(&[table_id_label, oper_type]).local(),)*
                 }
             }
 

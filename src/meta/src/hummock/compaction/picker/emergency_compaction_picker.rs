@@ -51,7 +51,7 @@ impl EmergencyCompactionPicker {
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let unused_validator = Arc::new(CompactionTaskValidator::unused());
-        let l0 = levels.l0.as_ref().unwrap();
+        let l0 = &levels.l0;
         let overlapping_count = l0
             .sub_levels
             .iter()
@@ -100,7 +100,7 @@ impl EmergencyCompactionPicker {
                 WholeLevelCompactionPicker::new(self.config.clone(), unused_validator.clone());
 
             if let Some(ret) = intral_level_compaction_picker.pick_whole_level(
-                levels.l0.as_ref().unwrap(),
+                &levels.l0,
                 &level_handlers[0],
                 self.config.split_weight_by_vnode,
                 stats,

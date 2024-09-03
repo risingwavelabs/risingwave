@@ -114,7 +114,7 @@ impl ManualCompactionPicker {
         for l in 1..self.target_level {
             assert!(levels.levels[l - 1].table_infos.is_empty());
         }
-        let l0 = levels.l0.as_ref().unwrap();
+        let l0 = &levels.l0;
         let mut input_levels = vec![];
         let mut max_sub_level_idx = usize::MAX;
         let mut info = self.overlap_strategy.create_overlap_info();
@@ -222,7 +222,7 @@ impl CompactionPicker for ManualCompactionPicker {
     ) -> Option<CompactionInput> {
         if self.option.level == 0 {
             if !self.option.sst_ids.is_empty() {
-                return self.pick_l0_to_sub_level(levels.l0.as_ref().unwrap(), level_handlers);
+                return self.pick_l0_to_sub_level(&levels.l0, level_handlers);
             } else if self.target_level > 0 {
                 return self.pick_l0_to_base_level(levels, level_handlers);
             } else {
@@ -301,8 +301,8 @@ impl CompactionPicker for ManualCompactionPicker {
         }
 
         Some(CompactionInput {
-            select_input_size: select_input_ssts.iter().map(|sst| sst.file_size).sum(),
-            target_input_size: target_input_ssts.iter().map(|sst| sst.file_size).sum(),
+            select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size).sum(),
+            target_input_size: target_input_ssts.iter().map(|sst| sst.sst_size).sum(),
             total_file_count: (select_input_ssts.len() + target_input_ssts.len()) as u64,
             input_levels: vec![
                 InputLevel {
@@ -401,7 +401,7 @@ pub mod tests {
         ];
         let mut levels = Levels {
             levels,
-            l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
+            l0: generate_l0_nonoverlapping_sublevels(vec![]),
             ..Default::default()
         };
         let mut levels_handler = vec![
@@ -586,7 +586,7 @@ pub mod tests {
         }
         let levels = Levels {
             levels,
-            l0: Some(l0),
+            l0,
             ..Default::default()
         };
 
@@ -613,7 +613,7 @@ pub mod tests {
         }];
         let levels = Levels {
             levels,
-            l0: Some(l0),
+            l0,
             ..Default::default()
         };
 
@@ -635,7 +635,7 @@ pub mod tests {
         }];
         let levels = Levels {
             levels,
-            l0: Some(l0),
+            l0,
             ..Default::default()
         };
         let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
@@ -1174,7 +1174,7 @@ pub mod tests {
         assert_eq!(levels.len(), 4);
         let levels = Levels {
             levels,
-            l0: Some(l0),
+            l0,
             ..Default::default()
         };
         let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();
@@ -1294,7 +1294,7 @@ pub mod tests {
         assert_eq!(levels.len(), 4);
         let levels = Levels {
             levels,
-            l0: Some(l0),
+            l0,
             ..Default::default()
         };
         let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();

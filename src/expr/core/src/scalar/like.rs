@@ -32,6 +32,12 @@ fn like_impl<const CASE_INSENSITIVE: bool>(
             let c = pbytes[px];
             match c {
                 b'_' => {
+                    if escape == b'_' {
+                        if px > 0 && pbytes[px - 1] != escape {
+                            px += 1;
+                            continue;
+                        }
+                    }
                     if sx < sbytes.len() {
                         px += 1;
                         sx += 1;
@@ -107,24 +113,15 @@ impl EscapeChar {
                 name: "escape",
                 reason: "only single ascii character is supported now".into(),
             })
-            .and_then(|c| {
-                // TODO: This is a temporary restriction since we don't output same result as PostgreSQL.
-                if c == b'_' {
-                    Err(ExprError::InvalidParam {
-                        name: "escape",
-                        reason: "`_` is not allowed as escape character now".into(),
-                    })
-                } else {
-                    Ok(c)
-                }
-            })
             .map(Self)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{i_like_default, like_default};
+    use risingwave_expr::scalar::like::EscapeChar;
+
+    use super::{i_like_default, like, like_default};
 
     static CASES: &[(&str, &str, bool, bool)] = &[
         (r#"ABCDE"#, r#"%abcde%"#, false, false),
@@ -172,6 +169,28 @@ mod tests {
                 output, *expected,
                 "target={}, pattern={}, case_insensitive={}",
                 target, pattern, case_insensitive
+            );
+        }
+    }
+
+    static ESCAPE_CASES: &[(&str, &str, &str, bool)] = &[
+        (r"bear", r"b_ear", r"_", true),
+        (r"be_r", r"b_e__r", r"_", true),
+        (r"be__r", r"b_e___r", r"_", true),
+        (r"be___r", r"b_e____r", r"_", true),
+        (r"be_r", r"__e__r", r"_", false),
+        // TODO: Wrong behavior
+        (r"___r", r"____r", r"_", false),
+    ];
+
+    #[test]
+    fn test_escape_like() {
+        for (target, pattern, escape, expected) in ESCAPE_CASES {
+            let output = like(target, pattern, &EscapeChar::from_str(escape).unwrap());
+            assert_eq!(
+                output, *expected,
+                "target={}, pattern={}, escape={}",
+                target, pattern, escape
             );
         }
     }

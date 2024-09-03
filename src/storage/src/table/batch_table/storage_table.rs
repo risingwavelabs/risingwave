@@ -387,9 +387,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             ..Default::default()
         };
         if let Some(value) = self.store.get(serialized_pk, epoch, read_options).await? {
-            // Refer to [`StorageTableInnerIterInner::new`] for necessity of `validate_read_epoch`.
-            self.store.validate_read_epoch(wait_epoch)?;
-
             let row = self.row_serde.deserialize(&value)?;
             let result_row_in_value = self.mapping.project(OwnedRow::new(row));
 
@@ -749,9 +746,9 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
 
     pub async fn batch_iter_log_with_pk_bounds(
         &self,
-        satrt_epoch: HummockReadEpoch,
-        end_epoch: HummockReadEpoch,
-    ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send> {
+        start_epoch: u64,
+        end_epoch: u64,
+    ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send + 'static> {
         let pk_prefix = OwnedRow::default();
         let start_key = self.serialize_pk_bound(&pk_prefix, Unbounded, true);
         let end_key = self.serialize_pk_bound(&pk_prefix, Unbounded, false);
@@ -779,7 +776,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                 self.row_serde.clone(),
                 table_key_range,
                 read_options,
-                satrt_epoch,
+                start_epoch,
                 end_epoch,
             )
             .await?
@@ -872,11 +869,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
         let raw_epoch = epoch.get_epoch();
         store.try_wait_epoch(epoch).await?;
         let iter = store.iter(table_key_range, raw_epoch, read_options).await?;
-        // For `HummockStorage`, a cluster recovery will clear storage data and make subsequent
-        // `HummockReadEpoch::Current` read incomplete.
-        // `validate_read_epoch` is a safeguard against that incorrect read. It rejects the read
-        // result if any recovery has happened after `try_wait_epoch`.
-        store.validate_read_epoch(epoch)?;
         let iter = Self {
             iter,
             mapping,
@@ -974,18 +966,14 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
         row_deserializer: Arc<SD>,
         table_key_range: TableKeyRange,
         read_options: ReadLogOptions,
-        satrt_epoch: HummockReadEpoch,
-        end_epoch: HummockReadEpoch,
+        start_epoch: u64,
+        end_epoch: u64,
     ) -> StorageResult<Self> {
-        let raw_satrt_epoch = satrt_epoch.get_epoch();
-        let raw_end_epoch = end_epoch.get_epoch();
-        store.try_wait_epoch(end_epoch).await?;
+        store
+            .try_wait_epoch(HummockReadEpoch::Committed(end_epoch))
+            .await?;
         let iter = store
-            .iter_log(
-                (raw_satrt_epoch, raw_end_epoch),
-                table_key_range,
-                read_options,
-            )
+            .iter_log((start_epoch, end_epoch), table_key_range, read_options)
             .await?;
         let iter = Self {
             iter,

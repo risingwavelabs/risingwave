@@ -1,5 +1,5 @@
 # See `README.md` before bumping the version.
 
 [toolchain]
-channel = "nightly-2024-04-18"
+channel = "nightly-2024-06-06"
 components = ["llvm-tools-preview", "rustc-dev"]

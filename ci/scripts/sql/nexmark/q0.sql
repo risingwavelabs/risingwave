@@ -4,4 +4,4 @@ CREATE SINK nexmark_q0
 AS
 SELECT auction, bidder, price, date_time
 FROM bid
-WITH ( connector = 'blackhole', type = 'append-only');
+WITH ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');

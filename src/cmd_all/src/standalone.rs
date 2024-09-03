@@ -12,10 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::env;
+use std::fmt::Write;
 use std::future::Future;
+use std::path::Path;
 
 use clap::Parser;
 use risingwave_common::config::MetaBackend;
+use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
@@ -245,7 +249,7 @@ pub async fn standalone(
 ) {
     tracing::info!("launching Risingwave in standalone mode");
 
-    let (meta, is_in_memory) = if let Some(opts) = meta_opts {
+    let (meta, is_in_memory) = if let Some(opts) = meta_opts.clone() {
         let is_in_memory = matches!(opts.backend, Some(MetaBackend::Mem));
         tracing::info!("starting meta-node thread with cli args: {:?}", opts);
         let service = Service::spawn("meta", |shutdown| {
@@ -319,11 +323,22 @@ It SHOULD NEVER be used in benchmarks and production environment!!!"
         );
     }
 
-    if let Some(opts) = frontend_opts {
+    // This is a specialization of `generate_risedev_env` in `src/risedevtool/src/risedev_env.rs`.
+    let mut risedev_env = String::new();
+
+    if let Some(opts) = &frontend_opts {
         let host = opts.listen_addr.split(':').next().unwrap_or("localhost");
         let port = opts.listen_addr.split(':').last().unwrap_or("4566");
         let database = "dev";
         let user = "root";
+
+        writeln!(
+            risedev_env,
+            r#"RISEDEV_RW_FRONTEND_LISTEN_ADDRESS="{host}""#
+        )
+        .unwrap();
+        writeln!(risedev_env, r#"RISEDEV_RW_FRONTEND_PORT="{port}""#).unwrap();
+
         eprintln!();
         eprintln!("Connect to the RisingWave instance via psql:");
         eprintln!(
@@ -333,6 +348,20 @@ It SHOULD NEVER be used in benchmarks and production environment!!!"
             ))
             .blue()
         );
+    }
+
+    if let Some(opts) = &meta_opts {
+        let meta_addr = &opts.listen_addr;
+        writeln!(risedev_env, r#"RW_META_ADDR="http://{meta_addr}""#).unwrap();
+    }
+
+    // Create the environment file when launched by RiseDev.
+    if env_var_is_true("RISEDEV") {
+        let env_path = Path::new(
+            &env::var("PREFIX_CONFIG").expect("env var `PREFIX_CONFIG` must be set by RiseDev"),
+        )
+        .join("risedev-env");
+        std::fs::write(env_path, risedev_env).unwrap();
     }
 
     let meta_stopped = meta
@@ -438,6 +467,7 @@ mod test {
                             heap_profiling_dir: None,
                             dangerous_max_idle_secs: None,
                             connector_rpc_endpoint: None,
+                            license_key: None,
                             temp_secret_file_dir: "./meta/secrets/",
                         },
                     ),
@@ -468,6 +498,7 @@ mod test {
                     frontend_opts: Some(
                         FrontendOpts {
                             listen_addr: "0.0.0.0:4566",
+                            tcp_keepalive_idle_secs: 300,
                             advertise_addr: None,
                             meta_addr: List(
                                 [
@@ -475,7 +506,7 @@ mod test {
                                 ],
                             ),
                             prometheus_listener_addr: "127.0.0.1:1234",
-                            health_check_listener_addr: "127.0.0.1:6786",
+                            frontend_rpc_listener_addr: "127.0.0.1:6786",
                             config_path: "src/config/test.toml",
                             metrics_level: None,
                             enable_barrier_read: None,

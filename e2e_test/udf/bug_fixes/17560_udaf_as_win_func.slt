@@ -1,0 +1,19 @@
+# https://github.com/risingwavelabs/risingwave/issues/17560
+
+statement ok
+create aggregate sum00(value int) returns int language python as $$
+def create_state():
+    return 0
+def accumulate(state, value):
+    return state + value
+def retract(state, value):
+    return state - value
+def finish(state):
+    return state
+$$;
+
+query ii
+select t.value, sum00(weight) OVER (PARTITION BY value) from (values (1, 1), (null, 2), (3, 3)) as t(value, weight);
+----
+1 1
+3 3

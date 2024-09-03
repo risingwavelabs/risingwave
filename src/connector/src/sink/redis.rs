@@ -233,12 +233,12 @@ impl Sink for RedisSink {
         ) {
             let key_format = self.format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
                 SinkError::Config(anyhow!(
-                    "Cannot find 'key_format',please set it or use JSON"
+                    "Cannot find 'key_format', please set it or use JSON"
                 ))
             })?;
             let value_format = self.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
                 SinkError::Config(anyhow!(
-                    "Cannot find 'value_format',please set it or use JSON"
+                    "Cannot find 'value_format', please set it or use JSON"
                 ))
             })?;
             TemplateEncoder::check_string_format(key_format, &pk_set)?;

@@ -16,7 +16,6 @@ use std::ops::Bound::{self, *};
 
 use futures::stream;
 use risingwave_common::array::{Array, ArrayImpl, Op};
-use risingwave_common::bail;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, once, OwnedRow as RowData};
@@ -52,10 +51,6 @@ pub struct DynamicFilterExecutor<S: StateStore, const USE_WATERMARK_CACHE: bool>
     metrics: Arc<StreamingMetrics>,
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
-    /// If the right side's change always make the condition more relaxed.
-    /// In other words, make more record in the left side satisfy the condition.
-    /// In that case, there are only records which does not satisfy the condition in the table.
-    condition_always_relax: bool,
     cleaned_by_watermark: bool,
 }
 
@@ -73,7 +68,6 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         state_table_r: StateTable<S>,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
-        condition_always_relax: bool,
         cleaned_by_watermark: bool,
     ) -> Self {
         Self {
@@ -88,7 +82,6 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
             right_table: state_table_r,
             metrics,
             chunk_size,
-            condition_always_relax,
             cleaned_by_watermark,
         }
     }
@@ -97,12 +90,19 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         &mut self,
         chunk: &StreamChunk,
         filter_condition: Option<NonStrictExpression>,
+        below_watermark_condition: Option<NonStrictExpression>,
     ) -> Result<(Vec<Op>, Bitmap), StreamExecutorError> {
         let mut new_ops = Vec::with_capacity(chunk.capacity());
         let mut new_visibility = BitmapBuilder::with_capacity(chunk.capacity());
         let mut last_res = false;
 
         let filter_results = if let Some(cond) = filter_condition {
+            Some(cond.eval_infallible(chunk).await)
+        } else {
+            None
+        };
+
+        let below_watermark = if let Some(cond) = below_watermark_condition {
             Some(cond.eval_infallible(chunk).await)
         } else {
             None
@@ -119,6 +119,16 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                 }
             } else {
                 // A NULL right value implies a false evaluation for all rows
+                false
+            };
+            let below_watermark = if let Some(array) = &below_watermark {
+                if let ArrayImpl::Bool(results) = &**array {
+                    results.value_at(idx).unwrap_or(false)
+                } else {
+                    panic!("below watermark check condition eval must return bool array")
+                }
+            } else {
+                // there was no state cleaning watermark before
                 false
             };
 
@@ -162,9 +172,16 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                 },
             }
 
-            // Do not need to maintain the emitted records in the left table when the condition is always relaxed
-            // Also, if the delete value satisfy the condition, there could not be in the state table.
-            if self.condition_always_relax && satisfied_dyn_filter_cond {
+            // No need to maintain the records in the left table after the records become
+            // below state cleaning watermark.
+            // Here's why:
+            // 1. For >= and >, watermark on rhs means that any future changes that satisfy the
+            //    filter condition should >= state clean watermark, and those below the watermark
+            //    will never satisfy the filter condition.
+            // 2. For < and <=, watermark on rhs means that any future changes that are below
+            //    the watermark will always satisfy the filter condition, so those changes should
+            //    always be directly sent to downstream without any state table maintenance.
+            if below_watermark {
                 continue;
             }
 
@@ -274,11 +291,13 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         assert_eq!(l_data_type, r_data_type);
 
         let build_cond = {
+            let l_data_type = l_data_type.clone();
+            let r_data_type = r_data_type.clone();
             let eval_error_report = self.eval_error_report.clone();
-            move |literal: Datum| {
+            move |cmp: PbExprNodeType, literal: Datum| {
                 literal.map(|scalar| {
                     build_func_non_strict(
-                        self.comparator,
+                        cmp,
                         DataType::Boolean,
                         vec![
                             Box::new(InputRefExpression::new(l_data_type.clone(), self.key_l)),
@@ -332,12 +351,23 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                     let chunk = chunk.compact(); // Is this unnecessary work?
 
                     // The condition is `None` if it is always false by virtue of a NULL right
-                    // input, so we save evaluating it on the datachunk
+                    // input, so we save evaluating it on the datachunk.
                     let filter_condition =
-                        build_cond(committed_rhs_value.clone().flatten()).transpose()?;
+                        build_cond(self.comparator, committed_rhs_value.clone().flatten())
+                            .transpose()?;
 
-                    let (new_ops, new_visibility) =
-                        self.apply_batch(&chunk, filter_condition).await?;
+                    // The condition is `None` if there's no committed state cleaning watermark before.
+                    // Note that we should not use `state_cleaning_watermark` variable here, because
+                    // it represents outstanding watermark to be applied. Here we need the watermark
+                    // that has been applied to the state table, just like why we use `prev_epoch_value`
+                    // instead of `current_epoch_value` for `filter_condition`.
+                    let below_watermark_condition =
+                        build_cond(LessThan, self.left_table.get_committed_watermark().cloned())
+                            .transpose()?;
+
+                    let (new_ops, new_visibility) = self
+                        .apply_batch(&chunk, filter_condition, below_watermark_condition)
+                        .await?;
 
                     let columns = chunk.into_parts().0.into_parts().0;
 
@@ -402,13 +432,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                     if prev != curr {
                         let (range, _latest_is_lower, is_insert) = self.get_range(&curr, prev);
 
-                        if !is_insert && self.condition_always_relax {
-                            bail!("The optimizer inferred that the right side's change always make the condition more relaxed.\
-                                But the right changes make the conditions stricter.");
-                        }
-
                         let range = (Self::to_row_bound(range.0), Self::to_row_bound(range.1));
-
                         // TODO: prefetching for append-only case.
                         let streams = futures::future::try_join_all(
                             self.left_table.vnodes().iter_vnodes().map(|vnode| {
@@ -426,11 +450,6 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         #[for_await]
                         for res in stream::select_all(streams) {
                             let row = res?;
-
-                            if self.condition_always_relax && !self.cleaned_by_watermark {
-                                staging_state_watermark.clone_from(&row[self.key_l])
-                            }
-
                             if let Some(chunk) = stream_chunk_builder.append_row(
                                 // All rows have a single identity at this point
                                 if is_insert { Op::Insert } else { Op::Delete },
@@ -446,7 +465,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                     }
 
                     if let Some(watermark) = staging_state_watermark.take() {
-                        self.left_table.update_watermark(watermark, false);
+                        self.left_table.update_watermark(watermark.clone());
                     };
 
                     if let Some(watermark) = watermark_to_propagate.take() {
@@ -536,17 +555,10 @@ mod tests {
 
     async fn create_executor(
         comparator: PbExprNodeType,
+        store: MemoryStateStore,
+        cleaned_by_watermark: bool,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
-        let mem_state = MemoryStateStore::new();
-        create_executor_inner(comparator, mem_state, false).await
-    }
-
-    async fn create_executor_inner(
-        comparator: PbExprNodeType,
-        mem_state: MemoryStateStore,
-        always_relax: bool,
-    ) -> (MessageSender, MessageSender, BoxedMessageStream) {
-        let (mem_state_l, mem_state_r) = create_in_memory_state_table(mem_state).await;
+        let (mem_state_l, mem_state_r) = create_in_memory_state_table(store).await;
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
@@ -572,8 +584,7 @@ mod tests {
             mem_state_r,
             Arc::new(StreamingMetrics::unused()),
             1024,
-            always_relax,
-            false,
+            cleaned_by_watermark,
         );
         (tx_l, tx_r, executor.boxed().execute())
     }
@@ -608,9 +619,9 @@ mod tests {
             "  I
              + 4",
         );
-        let mem_state = MemoryStateStore::new();
+        let mem_store = MemoryStateStore::new();
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor_inner(PbExprNodeType::GreaterThan, mem_state.clone(), false).await;
+            create_executor(PbExprNodeType::GreaterThan, mem_store.clone(), false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(test_epoch(1), false);
@@ -633,7 +644,7 @@ mod tests {
 
         // Recover executor from state store
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor_inner(PbExprNodeType::GreaterThan, mem_state.clone(), false).await;
+            create_executor(PbExprNodeType::GreaterThan, mem_store.clone(), false).await;
 
         // push the recovery barrier for left and right
         tx_l.push_barrier(test_epoch(2), false);
@@ -680,7 +691,7 @@ mod tests {
 
         // Recover executor from state store
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor_inner(PbExprNodeType::GreaterThan, mem_state.clone(), false).await;
+            create_executor(PbExprNodeType::GreaterThan, mem_store.clone(), false).await;
 
         // push recovery barrier
         tx_l.push_barrier(test_epoch(3), false);
@@ -765,8 +776,9 @@ mod tests {
             "  I
              + 4",
         );
+        let mem_store = MemoryStateStore::new();
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor(PbExprNodeType::GreaterThan).await;
+            create_executor(PbExprNodeType::GreaterThan, mem_store, false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(test_epoch(1), false);
@@ -871,8 +883,9 @@ mod tests {
             "  I
              + 5",
         );
+        let mem_store = MemoryStateStore::new();
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor(PbExprNodeType::GreaterThanOrEqual).await;
+            create_executor(PbExprNodeType::GreaterThanOrEqual, mem_store, false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(test_epoch(1), false);
@@ -977,8 +990,9 @@ mod tests {
             "  I
              + 1",
         );
+        let mem_store = MemoryStateStore::new();
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor(PbExprNodeType::LessThan).await;
+            create_executor(PbExprNodeType::LessThan, mem_store, false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(test_epoch(1), false);
@@ -1083,8 +1097,9 @@ mod tests {
             "  I
              + 0",
         );
+        let mem_store = MemoryStateStore::new();
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor(PbExprNodeType::LessThanOrEqual).await;
+            create_executor(PbExprNodeType::LessThanOrEqual, mem_store, false).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(test_epoch(1), false);
@@ -1168,7 +1183,7 @@ mod tests {
         let row = table
             .get_row(
                 &OwnedRow::new(vec![Some(x.into())]),
-                HummockReadEpoch::Current(u64::MAX),
+                HummockReadEpoch::NoWait(u64::MAX),
             )
             .await
             .unwrap();
@@ -1176,9 +1191,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_dynamic_filter_always_relax() -> StreamExecutorResult<()> {
+    async fn test_dynamic_filter_state_cleaning() -> StreamExecutorResult<()> {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I
+             + 1
              + 2
              + 3
              + 4
@@ -1194,17 +1210,19 @@ mod tests {
             "  I
              + 2",
         );
+        let watermark_r1 = 2;
         let chunk_r2 = StreamChunk::from_pretty(
             "  I
              + 5",
         );
+        let watermark_r2 = 5;
 
-        let mem_state = MemoryStateStore::new();
+        let mem_store = MemoryStateStore::new();
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
-            create_executor_inner(PbExprNodeType::LessThanOrEqual, mem_state.clone(), true).await;
+            create_executor(PbExprNodeType::LessThanOrEqual, mem_store.clone(), true).await;
         let column_descs = ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64);
         let table = StorageTable::for_test(
-            mem_state.clone(),
+            mem_store.clone(),
             TableId::new(0),
             vec![column_descs],
             vec![OrderType::ascending()],
@@ -1217,69 +1235,48 @@ mod tests {
         tx_r.push_barrier(test_epoch(1), false);
         dynamic_filter.next_unwrap_ready_barrier()?;
 
-        // push the 1st right chunk
+        // push the 1st set of messages
+        tx_l.push_chunk(chunk_l1);
         tx_r.push_chunk(chunk_r1);
-
-        // push the init barrier for left and right
+        tx_r.push_int64_watermark(0, watermark_r1);
         tx_l.push_barrier(test_epoch(2), false);
         tx_r.push_barrier(test_epoch(2), false);
 
-        // Get the barrier
-        dynamic_filter.next_unwrap_ready_barrier()?;
-
-        // push the 1st left chunk
-        tx_l.push_chunk(chunk_l1);
-
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.expect_chunk().await;
         assert_eq!(
-            chunk,
+            chunk.compact(),
             StreamChunk::from_pretty(
                 " I
+                + 1
                 + 2"
             )
         );
 
-        // push the init barrier for left and right
-        tx_l.push_barrier(test_epoch(3), false);
-        tx_r.push_barrier(test_epoch(3), false);
+        dynamic_filter.expect_barrier().await;
 
-        // Get the barrier
-        dynamic_filter.next_unwrap_ready_barrier()?;
-
-        assert!(!in_table(&table, 2).await);
+        assert!(!in_table(&table, 1).await); // `1` should be cleaned because it's less than watermark
+        assert!(in_table(&table, 2).await);
         assert!(in_table(&table, 3).await);
         assert!(in_table(&table, 4).await);
 
-        // push the 2nd left chunk
+        // push the 2nd set of messages
         tx_l.push_chunk(chunk_l2);
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        tx_r.push_chunk(chunk_r2);
+        tx_r.push_int64_watermark(0, watermark_r2);
+        tx_l.push_barrier(test_epoch(3), false);
+        tx_r.push_barrier(test_epoch(3), false);
+
+        let chunk = dynamic_filter.expect_chunk().await;
         assert_eq!(
-            chunk,
+            chunk.compact(),
             StreamChunk::from_pretty(
+                // the two rows are directly sent to the output cuz they satisfy the condition of previously committed rhs
                 " I
                 + 1
                 - 2"
             )
         );
-        // push the init barrier for left and right
-        tx_l.push_barrier(test_epoch(4), false);
-        tx_r.push_barrier(test_epoch(4), false);
-        // Get the barrier
-        dynamic_filter.next_unwrap_ready_barrier()?;
-
-        assert!(!in_table(&table, 2).await);
-        assert!(!in_table(&table, 2).await);
-        assert!(!in_table(&table, 3).await);
-        assert!(in_table(&table, 4).await);
-
-        // push the 2nd right chunk
-        tx_r.push_chunk(chunk_r2);
-
-        // push the init barrier for left and right
-        tx_l.push_barrier(test_epoch(5), false);
-        tx_r.push_barrier(test_epoch(5), false);
-
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.expect_chunk().await;
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -1289,17 +1286,13 @@ mod tests {
             )
         );
 
-        // Get the barrier
-        dynamic_filter.next_unwrap_ready_barrier()?;
-        tx_l.push_barrier(test_epoch(6), false);
-        tx_r.push_barrier(test_epoch(6), false);
-        // Get the barrier
-        dynamic_filter.next_unwrap_ready_barrier()?;
-        // This part test need change the `DefaultWatermarkBufferStrategy` to `super::watermark::WatermarkNoBuffer`
-        // clean is the Bound::Exclude
-        // TODO: https://github.com/risingwavelabs/risingwave/issues/14014
-        // assert!(!in_table(&table, 4).await);
-        // assert!(in_table(&table, 5).await);
+        dynamic_filter.expect_barrier().await;
+
+        assert!(!in_table(&table, 2).await);
+        assert!(!in_table(&table, 3).await);
+        assert!(!in_table(&table, 4).await);
+        assert!(in_table(&table, 5).await);
+
         Ok(())
     }
 }

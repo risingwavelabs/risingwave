@@ -333,7 +333,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                 if row.len() == 1 {
                     Ok::<_, StreamExecutorError>(row[0].to_owned())
                 } else {
-                    bail!("The watermark row should only contains 1 datum");
+                    bail!("The watermark row should only contain 1 datum");
                 }
             }
             _ => Ok(None),

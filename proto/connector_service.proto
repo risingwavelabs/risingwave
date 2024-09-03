@@ -147,13 +147,22 @@ message SinkCoordinatorStreamResponse {
 /* Source Service */
 
 message CdcMessage {
+  enum CdcMessageType {
+    UNSPECIFIED = 0;
+    HEARTBEAT = 1;
+    DATA = 2;
+    TRANSACTION_META = 3;
+    SCHEMA_CHANGE = 4;
+  }
+
   // The value of the Debezium message
   string payload = 1;
   string partition = 2;
   string offset = 3;
   string full_table_name = 4;
   int64 source_ts_ms = 5;
-  bool is_transaction_meta = 6;
+  CdcMessageType msg_type = 6;
+
   // The key of the Debezium message, which only used by `mongodb-cdc` connector.
   string key = 7;
 }
@@ -164,6 +173,7 @@ enum SourceType {
   POSTGRES = 2;
   CITUS = 3;
   MONGODB = 4;
+  SQL_SERVER = 5;
 }
 
 message GetEventStreamRequest {

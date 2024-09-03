@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Field, Schema, RW_INTERNAL_TABLE_FUNCTION_NAME};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Function, FunctionArg, ObjectName, TableAlias};
+use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgList, ObjectName, TableAlias};
 
 use super::watermark::is_watermark_func;
 use super::{Binder, Relation, Result, WindowTableFunctionKind};
@@ -83,13 +83,10 @@ impl Binder {
         let mut clause = Some(Clause::From);
         std::mem::swap(&mut self.context.clause, &mut clause);
         let func = self.bind_function(Function {
-            aggregate: false,
+            scalar_as_agg: false,
             name,
-            args,
-            variadic: false,
+            arg_list: FunctionArgList::args_only(args),
             over: None,
-            distinct: false,
-            order_by: vec![],
             filter: None,
             within_group: None,
         });

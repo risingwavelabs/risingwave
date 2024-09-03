@@ -8,7 +8,7 @@ statement ok
 flush;
 
 statement ok
-set streaming_rate_limit=1;
+set backfill_rate_limit=1;
 
 ############## Test drop foreground mv
 onlyif can-use-recover
@@ -61,7 +61,7 @@ drop materialized view m1;
 
 ############## Make sure the mv can still be successfully created later.
 statement ok
-set streaming_rate_limit=default;
+set backfill_rate_limit=default;
 
 statement ok
 set background_ddl=false;

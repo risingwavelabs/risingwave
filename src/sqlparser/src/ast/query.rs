@@ -97,6 +97,7 @@ pub enum SetExpr {
     SetOperation {
         op: SetOperator,
         all: bool,
+        corresponding: Corresponding,
         left: Box<SetExpr>,
         right: Box<SetExpr>,
     },
@@ -114,9 +115,10 @@ impl fmt::Display for SetExpr {
                 right,
                 op,
                 all,
+                corresponding,
             } => {
                 let all_str = if *all { " ALL" } else { "" };
-                write!(f, "{} {}{} {}", left, op, all_str, right)
+                write!(f, "{} {}{}{} {}", left, op, all_str, corresponding, right)
             }
         }
     }
@@ -137,6 +139,50 @@ impl fmt::Display for SetOperator {
             SetOperator::Except => "EXCEPT",
             SetOperator::Intersect => "INTERSECT",
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+/// `CORRESPONDING [ BY <left paren> <corresponding column list> <right paren> ]`
+pub struct Corresponding {
+    pub corresponding: bool,
+    pub column_list: Option<Vec<Ident>>,
+}
+
+impl Corresponding {
+    pub fn with_column_list(column_list: Option<Vec<Ident>>) -> Self {
+        Self {
+            corresponding: true,
+            column_list,
+        }
+    }
+
+    pub fn none() -> Self {
+        Self {
+            corresponding: false,
+            column_list: None,
+        }
+    }
+
+    pub fn is_corresponding(&self) -> bool {
+        self.corresponding
+    }
+
+    pub fn column_list(&self) -> Option<&[Ident]> {
+        self.column_list.as_deref()
+    }
+}
+
+impl fmt::Display for Corresponding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.corresponding {
+            write!(f, " CORRESPONDING")?;
+            if let Some(column_list) = &self.column_list {
+                write!(f, " BY ({})", display_comma_separated(column_list))?;
+            }
+        }
+        Ok(())
     }
 }
 

@@ -430,7 +430,7 @@ pub async fn start_service_as_election_leader(
                     .await
                     .unwrap(),
             );
-            let catalog_controller = Arc::new(CatalogController::new(env.clone()));
+            let catalog_controller = Arc::new(CatalogController::new(env.clone()).await?);
             MetadataManager::new_v2(cluster_controller, catalog_controller)
         }
     };
@@ -569,7 +569,8 @@ pub async fn start_service_as_election_leader(
         meta_metrics.clone(),
         stream_rpc_manager.clone(),
         scale_controller.clone(),
-    );
+    )
+    .await;
 
     {
         let source_manager = source_manager.clone();
@@ -618,6 +619,7 @@ pub async fn start_service_as_election_leader(
         source_manager.clone(),
         barrier_manager.context().clone(),
         sink_manager.clone(),
+        meta_metrics.clone(),
     )
     .await;
 
@@ -771,7 +773,7 @@ pub async fn start_service_as_election_leader(
         risingwave_pb::meta::event_log::Event::MetaNodeStart(event),
     ]);
 
-    let server = tonic::transport::Server::builder()
+    let server_builder = tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
         .layer(TracingExtractLayer::new())
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
@@ -793,17 +795,19 @@ pub async fn start_service_as_election_leader(
         .add_service(ServingServiceServer::new(serving_srv))
         .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
-        .add_service(EventLogServiceServer::new(event_log_srv))
-        .add_service(TraceServiceServer::new(trace_srv))
-        .monitored_serve_with_shutdown(
-            address_info.listen_addr,
-            "grpc-meta-leader-service",
-            TcpConfig {
-                tcp_nodelay: true,
-                keepalive_duration: None,
-            },
-            shutdown.clone().cancelled_owned(),
-        );
+        .add_service(EventLogServiceServer::new(event_log_srv));
+    #[cfg(not(madsim))] // `otlp-embedded` does not use madsim-patched tonic
+    let server_builder = server_builder.add_service(TraceServiceServer::new(trace_srv));
+
+    let server = server_builder.monitored_serve_with_shutdown(
+        address_info.listen_addr,
+        "grpc-meta-leader-service",
+        TcpConfig {
+            tcp_nodelay: true,
+            keepalive_duration: None,
+        },
+        shutdown.clone().cancelled_owned(),
+    );
     started::set();
     let _server_handle = tokio::spawn(server);
 

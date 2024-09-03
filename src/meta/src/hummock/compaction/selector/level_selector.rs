@@ -207,8 +207,6 @@ impl DynamicLevelSelectorCore {
 
         let idle_file_count = levels
             .l0
-            .as_ref()
-            .unwrap()
             .sub_levels
             .iter()
             .map(|level| level.table_infos.len())
@@ -223,8 +221,6 @@ impl DynamicLevelSelectorCore {
             // to calculate the score
             let overlapping_file_count = levels
                 .l0
-                .as_ref()
-                .unwrap()
                 .sub_levels
                 .iter()
                 .filter(|level| level.level_type == LevelType::Overlapping)
@@ -250,8 +246,6 @@ impl DynamicLevelSelectorCore {
             // calculation rule to avoid unbalanced compact task due to large size.
             let total_size = levels
                 .l0
-                .as_ref()
-                .unwrap()
                 .sub_levels
                 .iter()
                 .filter(|level| {
@@ -260,7 +254,7 @@ impl DynamicLevelSelectorCore {
                 })
                 .map(|level| level.total_file_size)
                 .sum::<u64>()
-                - handlers[0].get_pending_output_file_size(ctx.base_level as u32);
+                .saturating_sub(handlers[0].get_pending_output_file_size(ctx.base_level as u32));
             let base_level_size = levels.get_level(ctx.base_level).total_file_size;
             let base_level_sst_count = levels.get_level(ctx.base_level).table_infos.len() as u64;
 
@@ -270,8 +264,6 @@ impl DynamicLevelSelectorCore {
             // level count limit
             let non_overlapping_level_count = levels
                 .l0
-                .as_ref()
-                .unwrap()
                 .sub_levels
                 .iter()
                 .filter(|level| level.level_type == LevelType::Nonoverlapping)
@@ -357,8 +349,6 @@ impl DynamicLevelSelectorCore {
         let mut compact_to_next_level_bytes = 0;
         let l0_size = levels
             .l0
-            .as_ref()
-            .unwrap()
             .sub_levels
             .iter()
             .map(|sub_level| sub_level.total_file_size)
@@ -523,7 +513,7 @@ pub mod tests {
         ];
         let mut levels = Levels {
             levels,
-            l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
+            l0: generate_l0_nonoverlapping_sublevels(vec![]),
             ..Default::default()
         };
         let ctx = selector.calculate_level_base_size(&levels);
@@ -538,7 +528,7 @@ pub mod tests {
         levels.levels[3].total_file_size = levels.levels[3]
             .table_infos
             .iter()
-            .map(|sst| sst.file_size)
+            .map(|sst| sst.sst_size)
             .sum::<u64>();
 
         let ctx = selector.calculate_level_base_size(&levels);
@@ -559,13 +549,13 @@ pub mod tests {
         assert_eq!(ctx.level_max_bytes[3], 600);
         assert_eq!(ctx.level_max_bytes[4], 3000);
 
-        levels.l0.as_mut().unwrap().sub_levels.clear();
-        levels.l0.as_mut().unwrap().total_file_size = 0;
+        levels.l0.sub_levels.clear();
+        levels.l0.total_file_size = 0;
         levels.levels[0].table_infos = generate_tables(26..32, 0..1000, 1, 100);
         levels.levels[0].total_file_size = levels.levels[0]
             .table_infos
             .iter()
-            .map(|sst| sst.file_size)
+            .map(|sst| sst.sst_size)
             .sum::<u64>();
 
         let ctx = selector.calculate_level_base_size(&levels);
@@ -597,12 +587,7 @@ pub mod tests {
         ];
         let mut levels = Levels {
             levels,
-            l0: Some(generate_l0_nonoverlapping_sublevels(generate_tables(
-                15..25,
-                0..600,
-                3,
-                10,
-            ))),
+            l0: generate_l0_nonoverlapping_sublevels(generate_tables(15..25, 0..600, 3, 10)),
             ..Default::default()
         };
 
@@ -637,8 +622,8 @@ pub mod tests {
         let group_config = CompactionGroup::new(1, config.clone());
         let mut selector = DynamicLevelSelector::default();
 
-        levels.l0.as_mut().unwrap().sub_levels.clear();
-        levels.l0.as_mut().unwrap().total_file_size = 0;
+        levels.l0.sub_levels.clear();
+        levels.l0.total_file_size = 0;
         push_tables_level0_nonoverlapping(&mut levels, generate_tables(15..25, 0..600, 3, 20));
         let mut levels_handlers = (0..5).map(LevelHandler::new).collect_vec();
         let compaction = selector
@@ -663,7 +648,7 @@ pub mod tests {
 
         levels_handlers[0].remove_task(1);
         levels_handlers[2].remove_task(1);
-        levels.l0.as_mut().unwrap().sub_levels.clear();
+        levels.l0.sub_levels.clear();
         levels.levels[1].table_infos = generate_tables(20..30, 0..1000, 3, 10);
         let compaction = selector
             .pick_compaction(
@@ -740,12 +725,7 @@ pub mod tests {
         ];
         let levels = Levels {
             levels,
-            l0: Some(generate_l0_nonoverlapping_sublevels(generate_tables(
-                15..25,
-                0..600,
-                3,
-                100,
-            ))),
+            l0: generate_l0_nonoverlapping_sublevels(generate_tables(15..25, 0..600, 3, 100)),
             ..Default::default()
         };
 
@@ -755,7 +735,7 @@ pub mod tests {
         );
         let ctx = dynamic_level_core.calculate_level_base_size(&levels);
         assert_eq!(1, ctx.base_level);
-        assert_eq!(1000, levels.l0.as_ref().unwrap().total_file_size); // l0
+        assert_eq!(1000, levels.l0.total_file_size); // l0
         assert_eq!(0, levels.levels.first().unwrap().total_file_size); // l1
         assert_eq!(25000, levels.levels.get(1).unwrap().total_file_size); // l2
         assert_eq!(15000, levels.levels.get(2).unwrap().total_file_size); // l3

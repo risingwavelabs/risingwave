@@ -14,6 +14,8 @@
 
 use std::fmt::{Display, Formatter};
 
+use risingwave_common::util::epoch::EpochPair;
+
 use super::LocalBarrierManager;
 use crate::task::barrier_manager::LocalBarrierEvent::ReportCreateProgress;
 use crate::task::barrier_manager::LocalBarrierWorker;
@@ -42,27 +44,29 @@ impl Display for BackfillState {
 impl LocalBarrierWorker {
     pub(crate) fn update_create_mview_progress(
         &mut self,
-        current_epoch: u64,
+        epoch: EpochPair,
         actor: ActorId,
         state: BackfillState,
     ) {
-        self.state
-            .create_mview_progress
-            .entry(current_epoch)
-            .or_default()
-            .insert(actor, state);
+        if let Some(actor_state) = self.state.actor_states.get(&actor)
+            && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
+            && let Some(graph_state) = self.state.graph_states.get_mut(partial_graph_id)
+        {
+            graph_state
+                .create_mview_progress
+                .entry(epoch.curr)
+                .or_default()
+                .insert(actor, state);
+        } else {
+            warn!(?epoch, actor, ?state, "ignore create mview progress");
+        }
     }
 }
 
 impl LocalBarrierManager {
-    fn update_create_mview_progress(
-        &self,
-        current_epoch: u64,
-        actor: ActorId,
-        state: BackfillState,
-    ) {
+    fn update_create_mview_progress(&self, epoch: EpochPair, actor: ActorId, state: BackfillState) {
         self.send_event(ReportCreateProgress {
-            current_epoch,
+            epoch,
             actor,
             state,
         })
@@ -126,13 +130,10 @@ impl CreateMviewProgress {
         self.backfill_actor_id
     }
 
-    fn update_inner(&mut self, current_epoch: u64, state: BackfillState) {
+    fn update_inner(&mut self, epoch: EpochPair, state: BackfillState) {
         self.state = Some(state);
-        self.barrier_manager.update_create_mview_progress(
-            current_epoch,
-            self.backfill_actor_id,
-            state,
-        );
+        self.barrier_manager
+            .update_create_mview_progress(epoch, self.backfill_actor_id, state);
     }
 
     /// Update the progress to `ConsumingUpstream(consumed_epoch, consumed_rows)`. The epoch must be
@@ -141,7 +142,7 @@ impl CreateMviewProgress {
     /// `current_consumed_rows` is an accumulated value.
     pub fn update(
         &mut self,
-        current_epoch: u64,
+        epoch: EpochPair,
         consumed_epoch: ConsumedEpoch,
         current_consumed_rows: ConsumedRows,
     ) {
@@ -159,18 +160,18 @@ impl CreateMviewProgress {
             None => {}
         };
         self.update_inner(
-            current_epoch,
+            epoch,
             BackfillState::ConsumingUpstream(consumed_epoch, current_consumed_rows),
         );
     }
 
     /// Finish the progress. If the progress is already finished, then perform no-op.
     /// `current_epoch` should be provided to locate the barrier under concurrent checkpoint.
-    pub fn finish(&mut self, current_epoch: u64, current_consumed_rows: ConsumedRows) {
+    pub fn finish(&mut self, epoch: EpochPair, current_consumed_rows: ConsumedRows) {
         if let Some(BackfillState::Done(_)) = self.state {
             return;
         }
-        self.update_inner(current_epoch, BackfillState::Done(current_consumed_rows));
+        self.update_inner(epoch, BackfillState::Done(current_consumed_rows));
     }
 }
 

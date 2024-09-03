@@ -1218,7 +1218,6 @@ async fn test_multiple_epoch_sync_v2() {
         }
     };
     test_get().await;
-    hummock_storage.seal_epoch(epoch1, false);
     let sync_result2 = hummock_storage.seal_and_sync_epoch(epoch2).await.unwrap();
     let sync_result3 = hummock_storage.seal_and_sync_epoch(epoch3).await.unwrap();
     test_get().await;
@@ -1341,7 +1340,9 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
 
     drop(local_hummock_storage);
 
-    hummock_storage.clear_shared_buffer(epoch1).await;
+    hummock_storage
+        .clear_shared_buffer(hummock_storage.get_pinned_version().id())
+        .await;
 
     assert_eq!(
         hummock_storage

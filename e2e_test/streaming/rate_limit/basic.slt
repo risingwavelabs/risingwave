@@ -5,7 +5,7 @@ statement ok
 CREATE TABLE t1(v1 int, v2 int);
 
 statement ok
-SET STREAMING_RATE_LIMIT TO 2000;
+SET BACKFILL_RATE_LIMIT TO 2000;
 
 statement ok
 CREATE MATERIALIZED VIEW m AS SELECT * FROM t1;
@@ -35,7 +35,7 @@ FLUSH;
 # Test with small rate_limit. In this case, the stream chunk needs to be split
 
 statement ok
-SET STREAMING_RATE_LIMIT TO 1;
+SET BACKFILL_RATE_LIMIT TO 1;
 
 statement ok
 CREATE MATERIALIZED VIEW m AS SELECT * FROM t1;

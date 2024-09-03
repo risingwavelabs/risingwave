@@ -41,7 +41,7 @@ const LEAP_DAYS: &[i32] = &[0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 const NORMAL_DAYS: &[i32] = &[0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 macro_rules! impl_chrono_wrapper {
-    ($variant_name:ident, $chrono:ty) => {
+    ($variant_name:ident, $chrono:ty, $pg_type:ident) => {
         #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
         #[repr(transparent)]
         pub struct $variant_name(pub $chrono);
@@ -67,105 +67,43 @@ macro_rules! impl_chrono_wrapper {
         }
 
         impl ZeroHeapSize for $variant_name {}
+
+        impl ToSql for $variant_name {
+            accepts!($pg_type);
+
+            to_sql_checked!();
+
+            fn to_sql(
+                &self,
+                ty: &Type,
+                out: &mut BytesMut,
+            ) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>>
+            where
+                Self: Sized,
+            {
+                self.0.to_sql(ty, out)
+            }
+        }
+
+        impl<'a> FromSql<'a> for $variant_name {
+            fn from_sql(
+                ty: &Type,
+                raw: &'a [u8],
+            ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+                let instant = <$chrono>::from_sql(ty, raw)?;
+                Ok(Self::from(instant))
+            }
+
+            fn accepts(ty: &Type) -> bool {
+                matches!(*ty, Type::$pg_type)
+            }
+        }
     };
 }
 
-impl_chrono_wrapper!(Date, NaiveDate);
-impl_chrono_wrapper!(Timestamp, NaiveDateTime);
-impl_chrono_wrapper!(Time, NaiveTime);
-
-impl ToSql for Date {
-    accepts!(DATE);
-
-    to_sql_checked!();
-
-    fn to_sql(
-        &self,
-        ty: &Type,
-        out: &mut BytesMut,
-    ) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>>
-    where
-        Self: Sized,
-    {
-        self.0.to_sql(ty, out)
-    }
-}
-
-impl<'a> FromSql<'a> for Date {
-    fn from_sql(
-        ty: &Type,
-        raw: &'a [u8],
-    ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        let instant = NaiveDate::from_sql(ty, raw)?;
-        Ok(Self::from(instant))
-    }
-
-    fn accepts(ty: &Type) -> bool {
-        matches!(*ty, Type::DATE)
-    }
-}
-
-impl ToSql for Time {
-    accepts!(TIME);
-
-    to_sql_checked!();
-
-    fn to_sql(
-        &self,
-        ty: &Type,
-        out: &mut BytesMut,
-    ) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>>
-    where
-        Self: Sized,
-    {
-        self.0.to_sql(ty, out)
-    }
-}
-
-impl<'a> FromSql<'a> for Time {
-    fn from_sql(
-        ty: &Type,
-        raw: &'a [u8],
-    ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        let instant = NaiveTime::from_sql(ty, raw)?;
-        Ok(Self::from(instant))
-    }
-
-    fn accepts(ty: &Type) -> bool {
-        matches!(*ty, Type::TIME)
-    }
-}
-
-impl ToSql for Timestamp {
-    accepts!(TIMESTAMP);
-
-    to_sql_checked!();
-
-    fn to_sql(
-        &self,
-        ty: &Type,
-        out: &mut BytesMut,
-    ) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>>
-    where
-        Self: Sized,
-    {
-        self.0.to_sql(ty, out)
-    }
-}
-
-impl<'a> FromSql<'a> for Timestamp {
-    fn from_sql(
-        ty: &Type,
-        raw: &'a [u8],
-    ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        let instant = NaiveDateTime::from_sql(ty, raw)?;
-        Ok(Self::from(instant))
-    }
-
-    fn accepts(ty: &Type) -> bool {
-        matches!(*ty, Type::TIMESTAMP)
-    }
-}
+impl_chrono_wrapper!(Date, NaiveDate, DATE);
+impl_chrono_wrapper!(Timestamp, NaiveDateTime, TIMESTAMP);
+impl_chrono_wrapper!(Time, NaiveTime, TIME);
 
 /// Parse a date from varchar.
 ///

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -50,7 +49,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::hummock::compaction::selector::{
     default_compaction_selector, CompactionSelector, SpaceReclaimCompactionSelector,
 };
-use crate::hummock::{CommitEpochInfo, HummockManager};
+use crate::hummock::{CommitEpochInfo, HummockManager, NewTableFragmentInfo};
 
 pub struct MockHummockMetaClient {
     hummock_manager: Arc<HummockManager>,
@@ -95,6 +94,10 @@ impl MockHummockMetaClient {
             .await
             .unwrap_or(None)
     }
+
+    pub fn context_id(&self) -> HummockContextId {
+        self.context_id
+    }
 }
 
 fn mock_err(error: super::error::Error) -> RpcError {
@@ -138,7 +141,6 @@ impl HummockMetaClient for MockHummockMetaClient {
                 self.context_id,
                 HummockSnapshot {
                     committed_epoch: pinned_epochs,
-                    current_epoch: pinned_epochs,
                 },
             )
             .await
@@ -181,26 +183,20 @@ impl HummockMetaClient for MockHummockMetaClient {
                 .keys()
                 .map(|table_id| (table_id.table_id, 0)),
         );
+
         self.hummock_manager
-            .commit_epoch(CommitEpochInfo::new(
-                sync_result.uncommitted_ssts,
-                new_table_watermark,
-                sst_to_worker,
-                None,
-                table_change_log,
-                BTreeMap::from_iter([(
-                    epoch,
-                    version.state_table_info.info().keys().cloned().collect(),
-                )]),
-                epoch,
-            ))
+            .commit_epoch(CommitEpochInfo {
+                sstables: sync_result.uncommitted_ssts,
+                new_table_watermarks: new_table_watermark,
+                sst_to_context: sst_to_worker,
+                new_table_fragment_info: NewTableFragmentInfo::None,
+                change_log_delta: table_change_log,
+                committed_epoch: epoch,
+                tables_to_commit: version.state_table_info.info().keys().cloned().collect(),
+                is_visible_table_committed_epoch: true,
+            })
             .await
             .map_err(mock_err)?;
-        Ok(())
-    }
-
-    async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()> {
-        self.hummock_manager.update_current_epoch(epoch);
         Ok(())
     }
 

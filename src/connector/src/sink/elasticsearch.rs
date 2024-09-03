@@ -24,7 +24,7 @@ use risingwave_common::types::{JsonbVal, Scalar, ToText};
 use serde_json::Value;
 
 use super::encoder::{JsonEncoder, RowEncoder};
-use super::remote::{ElasticSearchSink, OpensearchSink};
+use super::remote::{ElasticSearchSink, OpenSearchSink};
 use crate::sink::{Result, Sink};
 pub const ES_OPTION_DELIMITER: &str = "delimiter";
 pub const ES_OPTION_INDEX_COLUMN: &str = "index_column";
@@ -87,7 +87,7 @@ impl EsStreamChunkConverter {
             Box::new(|row: RowRef<'_>| {
                 Ok(row
                     .datum_at(0)
-                    .ok_or_else(|| anyhow!("No value find in row, index is 0"))?
+                    .ok_or_else(|| anyhow!("No value found in row, index is 0"))?
                     .to_text())
             })
         } else if pk_indices.len() == 1 {
@@ -95,7 +95,7 @@ impl EsStreamChunkConverter {
             Box::new(move |row: RowRef<'_>| {
                 Ok(row
                     .datum_at(index)
-                    .ok_or_else(|| anyhow!("No value find in row, index is 0"))?
+                    .ok_or_else(|| anyhow!("No value found in row, index is 0"))?
                     .to_text())
             })
         } else {
@@ -108,7 +108,7 @@ impl EsStreamChunkConverter {
                 for index in &pk_indices {
                     keys.push(
                         row.datum_at(*index)
-                            .ok_or_else(|| anyhow!("No value find in row, index is {}", index))?
+                            .ok_or_else(|| anyhow!("No value found in row, index is {}", index))?
                             .to_text(),
                     );
                 }
@@ -144,7 +144,7 @@ impl EsStreamChunkConverter {
             if let Some(index) = self.index_column {
                 index_builder.append(Some(
                     row.datum_at(index)
-                        .ok_or_else(|| anyhow!("No value find in row, index is {}", index))?
+                        .ok_or_else(|| anyhow!("No value found in row, index is {}", index))?
                         .into_utf8(),
                 ));
             } else {
@@ -172,5 +172,5 @@ impl EsStreamChunkConverter {
 }
 
 pub fn is_es_sink(sink_name: &str) -> bool {
-    sink_name == ElasticSearchSink::SINK_NAME || sink_name == OpensearchSink::SINK_NAME
+    sink_name == ElasticSearchSink::SINK_NAME || sink_name == OpenSearchSink::SINK_NAME
 }

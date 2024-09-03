@@ -25,8 +25,8 @@ use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::bail;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{
-    DataType, Date, DatumCow, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
-    ToOwnedDatum,
+    DataType, Date, DatumCow, Interval, JsonbVal, MapValue, ScalarImpl, Time, Timestamp,
+    Timestamptz, ToOwnedDatum,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 
@@ -317,6 +317,34 @@ impl<'a> AvroParseOptions<'a> {
             }
             (DataType::Varchar, Value::Uuid(uuid)) => {
                 uuid.as_hyphenated().to_string().into_boxed_str().into()
+            }
+            (DataType::Map(map_type), Value::Map(map)) => {
+                let schema = self.extract_inner_schema(None);
+                let mut builder = map_type
+                    .clone()
+                    .into_struct()
+                    .create_array_builder(map.len());
+                // Since the map is HashMap, we can ensure
+                // key is non-null and unique, keys and values have the same length.
+
+                // NOTE: HashMap's iter order is non-deterministic, but MapValue's
+                // order matters. We sort by key here to have deterministic order
+                // in tests. We might consider removing this, or make all MapValue sorted
+                // in the future.
+                for (k, v) in map.iter().sorted_by_key(|(k, _v)| *k) {
+                    let value_datum = Self {
+                        schema,
+                        relax_numeric: self.relax_numeric,
+                    }
+                    .convert_to_datum(v, map_type.value())?
+                    .to_owned_datum();
+                    builder.append(
+                        StructValue::new(vec![Some(k.as_str().into()), value_datum])
+                            .to_owned_datum(),
+                    );
+                }
+                let list = ListValue::new(builder.finish());
+                MapValue::from_entries(list).into()
             }
 
             (_expected, _got) => Err(create_error())?,

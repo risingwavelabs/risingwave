@@ -85,6 +85,14 @@ pub struct LocalFrontend {
 impl SessionManager for LocalFrontend {
     type Session = SessionImpl;
 
+    fn create_dummy_session(
+        &self,
+        _database_id: u32,
+        _user_name: u32,
+    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+        unreachable!()
+    }
+
     fn connect(
         &self,
         _database: &str,
@@ -930,24 +938,15 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn try_unregister(&self) {}
 
     async fn pin_snapshot(&self) -> RpcResult<HummockSnapshot> {
-        Ok(HummockSnapshot {
-            committed_epoch: 0,
-            current_epoch: 0,
-        })
+        Ok(HummockSnapshot { committed_epoch: 0 })
     }
 
     async fn get_snapshot(&self) -> RpcResult<HummockSnapshot> {
-        Ok(HummockSnapshot {
-            committed_epoch: 0,
-            current_epoch: 0,
-        })
+        Ok(HummockSnapshot { committed_epoch: 0 })
     }
 
     async fn flush(&self, _checkpoint: bool) -> RpcResult<HummockSnapshot> {
-        Ok(HummockSnapshot {
-            committed_epoch: 0,
-            current_epoch: 0,
-        })
+        Ok(HummockSnapshot { committed_epoch: 0 })
     }
 
     async fn wait(&self) -> RpcResult<()> {

@@ -372,6 +372,7 @@ impl CacheRefillTask {
 
                 let now = Instant::now();
                 let res = context.sstable_store.sstable(info, &mut stats).await;
+                stats.discard();
                 GLOBAL_CACHE_REFILL_METRICS
                     .meta_refill_success_duration
                     .observe(now.elapsed().as_secs_f64());

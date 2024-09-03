@@ -32,7 +32,7 @@ pub struct BarrierInfo {
 #[derive(Debug, Default)]
 pub(crate) struct Notifier {
     /// Get notified when scheduled barrier has started to be handled.
-    pub started: Option<oneshot::Sender<BarrierInfo>>,
+    pub started: Option<oneshot::Sender<MetaResult<BarrierInfo>>>,
 
     /// Get notified when scheduled barrier is collected or failed.
     pub collected: Option<oneshot::Sender<MetaResult<()>>>,
@@ -42,7 +42,13 @@ impl Notifier {
     /// Notify when we have injected a barrier to compute nodes.
     pub fn notify_started(&mut self, info: BarrierInfo) {
         if let Some(tx) = self.started.take() {
-            tx.send(info).ok();
+            tx.send(Ok(info)).ok();
+        }
+    }
+
+    pub fn notify_start_failed(self, err: MetaError) {
+        if let Some(tx) = self.started {
+            tx.send(Err(err)).ok();
         }
     }
 

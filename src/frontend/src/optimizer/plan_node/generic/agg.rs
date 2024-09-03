@@ -136,7 +136,6 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         self.agg_calls.iter().all(|c| {
             matches!(c.agg_kind, agg_kinds::single_value_state!())
                 || (matches!(c.agg_kind, agg_kinds::single_value_state_iff_in_append_only!() if stream_input_append_only))
-                || (matches!(c.agg_kind, AggKind::Builtin(PbAggKind::ApproxPercentile)))
         })
     }
 
@@ -419,17 +418,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     AggCallState::Value
                 }
                 agg_kinds::single_value_state!() => AggCallState::Value,
-                AggKind::Builtin(
-                    PbAggKind::Min
-                    | PbAggKind::Max
-                    | PbAggKind::FirstValue
-                    | PbAggKind::LastValue
-                    | PbAggKind::StringAgg
-                    | PbAggKind::ArrayAgg
-                    | PbAggKind::JsonbAgg
-                    | PbAggKind::JsonbObjectAgg,
-                )
-                | AggKind::WrapScalar(_) => {
+                agg_kinds::materialized_input_state!() => {
                     // columns with order requirement in state table
                     let sort_keys = {
                         match agg_call.agg_kind {
@@ -445,7 +434,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                                 | PbAggKind::StringAgg
                                 | PbAggKind::ArrayAgg
                                 | PbAggKind::JsonbAgg,
-                            ) => {
+                            )
+                            | AggKind::WrapScalar(_) => {
                                 if agg_call.order_by.is_empty() {
                                     me.ctx().warn_to_user(format!(
                                         "{} without ORDER BY may produce non-deterministic result",
@@ -470,8 +460,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                                     })
                                     .collect()
                             }
-                            AggKind::Builtin(PbAggKind::JsonbObjectAgg)
-                            | AggKind::WrapScalar(_) => agg_call
+                            AggKind::Builtin(PbAggKind::JsonbObjectAgg) => agg_call
                                 .order_by
                                 .iter()
                                 .map(|o| (o.order_type, o.column_index))
@@ -492,6 +481,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
 
                     // other columns that should be contained in state table
                     let include_keys = match agg_call.agg_kind {
+                        // `agg_kinds::materialized_input_state` except for `min`/`max`
                         AggKind::Builtin(
                             PbAggKind::FirstValue
                             | PbAggKind::LastValue
@@ -499,7 +489,10 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                             | PbAggKind::ArrayAgg
                             | PbAggKind::JsonbAgg
                             | PbAggKind::JsonbObjectAgg,
-                        ) => agg_call.inputs.iter().map(|i| i.index).collect(),
+                        )
+                        | AggKind::WrapScalar(_) => {
+                            agg_call.inputs.iter().map(|i| i.index).collect()
+                        }
                         _ => vec![],
                     };
 

@@ -77,7 +77,7 @@ impl HummockVersionStateTableInfo {
     pub fn from_protobuf(state_table_info: &HashMap<u32, PbStateTableInfo>) -> Self {
         let state_table_info = state_table_info
             .iter()
-            .map(|(table_id, info)| (TableId::new(*table_id), info.clone()))
+            .map(|(table_id, info)| (TableId::new(*table_id), *info))
             .collect();
         let compaction_group_member_tables =
             Self::build_compaction_group_member_tables(&state_table_info);
@@ -90,7 +90,7 @@ impl HummockVersionStateTableInfo {
     pub fn to_protobuf(&self) -> HashMap<u32, PbStateTableInfo> {
         self.state_table_info
             .iter()
-            .map(|(table_id, info)| (table_id.table_id, info.clone()))
+            .map(|(table_id, info)| (table_id.table_id, *info))
             .collect()
     }
 
@@ -98,8 +98,9 @@ impl HummockVersionStateTableInfo {
         &mut self,
         delta: &HashMap<TableId, StateTableInfoDelta>,
         removed_table_id: &HashSet<TableId>,
-    ) -> HashMap<TableId, Option<StateTableInfo>> {
+    ) -> (HashMap<TableId, Option<StateTableInfo>>, bool) {
         let mut changed_table = HashMap::new();
+        let mut has_bumped_committed_epoch = false;
         fn remove_table_from_compaction_group(
             compaction_group_member_tables: &mut HashMap<CompactionGroupId, BTreeSet<TableId>>,
             compaction_group_id: CompactionGroupId,
@@ -150,6 +151,9 @@ impl HummockVersionStateTableInfo {
                         prev_info,
                         new_info
                     );
+                    if new_info.committed_epoch > prev_info.committed_epoch {
+                        has_bumped_committed_epoch = true;
+                    }
                     if prev_info.compaction_group_id != new_info.compaction_group_id {
                         // table moved to another compaction group
                         remove_table_from_compaction_group(
@@ -172,6 +176,7 @@ impl HummockVersionStateTableInfo {
                         .entry(new_info.compaction_group_id)
                         .or_default()
                         .insert(*table_id));
+                    has_bumped_committed_epoch = true;
                     entry.insert(new_info);
                     changed_table.insert(*table_id, None);
                 }
@@ -181,7 +186,7 @@ impl HummockVersionStateTableInfo {
             self.compaction_group_member_tables,
             Self::build_compaction_group_member_tables(&self.state_table_info)
         );
-        changed_table
+        (changed_table, has_bumped_committed_epoch)
     }
 
     pub fn info(&self) -> &HashMap<TableId, StateTableInfo> {
@@ -205,9 +210,9 @@ impl HummockVersionStateTableInfo {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HummockVersion {
-    pub id: u64,
+    pub id: HummockVersionId,
     pub levels: HashMap<CompactionGroupId, Levels>,
-    pub max_committed_epoch: u64,
+    max_committed_epoch: u64,
     safe_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
     pub table_change_log: HashMap<TableId, TableChangeLog>,
@@ -258,7 +263,7 @@ impl HummockVersion {
 impl From<&PbHummockVersion> for HummockVersion {
     fn from(pb_version: &PbHummockVersion) -> Self {
         Self {
-            id: pb_version.id,
+            id: HummockVersionId(pb_version.id),
             levels: pb_version
                 .levels
                 .iter()
@@ -296,7 +301,7 @@ impl From<&PbHummockVersion> for HummockVersion {
 impl From<&HummockVersion> for PbHummockVersion {
     fn from(version: &HummockVersion) -> Self {
         Self {
-            id: version.id,
+            id: version.id.0,
             levels: version
                 .levels
                 .iter()
@@ -322,7 +327,7 @@ impl From<&HummockVersion> for PbHummockVersion {
 impl From<HummockVersion> for PbHummockVersion {
     fn from(version: HummockVersion) -> Self {
         Self {
-            id: version.id,
+            id: version.id.0,
             levels: version
                 .levels
                 .into_iter()
@@ -347,7 +352,7 @@ impl From<HummockVersion> for PbHummockVersion {
 
 impl HummockVersion {
     pub fn next_version_id(&self) -> HummockVersionId {
-        self.id + 1
+        self.id.next()
     }
 
     pub fn need_fill_backward_compatible_state_table_info_delta(&self) -> bool {
@@ -396,6 +401,19 @@ impl HummockVersion {
         self.safe_epoch
     }
 
+    pub(crate) fn set_max_committed_epoch(&mut self, max_committed_epoch: u64) {
+        self.max_committed_epoch = max_committed_epoch;
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub fn max_committed_epoch(&self) -> u64 {
+        self.max_committed_epoch
+    }
+
+    pub fn visible_table_committed_epoch(&self) -> u64 {
+        self.max_committed_epoch
+    }
+
     pub fn create_init_version(default_compaction_config: Arc<CompactionConfig>) -> HummockVersion {
         let mut init_version = HummockVersion {
             id: FIRST_VERSION_ID,
@@ -436,10 +454,10 @@ impl HummockVersion {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct HummockVersionDelta {
-    pub id: u64,
-    pub prev_id: u64,
+    pub id: HummockVersionId,
+    pub prev_id: HummockVersionId,
     pub group_deltas: HashMap<CompactionGroupId, GroupDeltas>,
-    pub max_committed_epoch: u64,
+    max_committed_epoch: u64,
     safe_epoch: u64,
     pub trivial_move: bool,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
@@ -570,13 +588,21 @@ impl HummockVersionDelta {
     pub fn set_safe_epoch(&mut self, safe_epoch: u64) {
         self.safe_epoch = safe_epoch;
     }
+
+    pub fn visible_table_committed_epoch(&self) -> u64 {
+        self.max_committed_epoch
+    }
+
+    pub fn set_max_committed_epoch(&mut self, max_committed_epoch: u64) {
+        self.max_committed_epoch = max_committed_epoch;
+    }
 }
 
 impl From<&PbHummockVersionDelta> for HummockVersionDelta {
     fn from(pb_version_delta: &PbHummockVersionDelta) -> Self {
         Self {
-            id: pb_version_delta.id,
-            prev_id: pb_version_delta.prev_id,
+            id: HummockVersionId(pb_version_delta.id),
+            prev_id: HummockVersionId(pb_version_delta.prev_id),
             group_deltas: pb_version_delta
                 .group_deltas
                 .iter()
@@ -616,7 +642,7 @@ impl From<&PbHummockVersionDelta> for HummockVersionDelta {
             state_table_info_delta: pb_version_delta
                 .state_table_info_delta
                 .iter()
-                .map(|(table_id, delta)| (TableId::new(*table_id), delta.clone()))
+                .map(|(table_id, delta)| (TableId::new(*table_id), *delta))
                 .collect(),
         }
     }
@@ -625,8 +651,8 @@ impl From<&PbHummockVersionDelta> for HummockVersionDelta {
 impl From<&HummockVersionDelta> for PbHummockVersionDelta {
     fn from(version_delta: &HummockVersionDelta) -> Self {
         Self {
-            id: version_delta.id,
-            prev_id: version_delta.prev_id,
+            id: version_delta.id.0,
+            prev_id: version_delta.prev_id.0,
             group_deltas: version_delta
                 .group_deltas
                 .iter()
@@ -653,7 +679,7 @@ impl From<&HummockVersionDelta> for PbHummockVersionDelta {
             state_table_info_delta: version_delta
                 .state_table_info_delta
                 .iter()
-                .map(|(table_id, delta)| (table_id.table_id, delta.clone()))
+                .map(|(table_id, delta)| (table_id.table_id, *delta))
                 .collect(),
         }
     }
@@ -662,8 +688,8 @@ impl From<&HummockVersionDelta> for PbHummockVersionDelta {
 impl From<HummockVersionDelta> for PbHummockVersionDelta {
     fn from(version_delta: HummockVersionDelta) -> Self {
         Self {
-            id: version_delta.id,
-            prev_id: version_delta.prev_id,
+            id: version_delta.id.0,
+            prev_id: version_delta.prev_id.0,
             group_deltas: version_delta
                 .group_deltas
                 .into_iter()
@@ -690,7 +716,7 @@ impl From<HummockVersionDelta> for PbHummockVersionDelta {
             state_table_info_delta: version_delta
                 .state_table_info_delta
                 .into_iter()
-                .map(|(table_id, delta)| (table_id.table_id, delta.clone()))
+                .map(|(table_id, delta)| (table_id.table_id, delta))
                 .collect(),
         }
     }
@@ -699,8 +725,8 @@ impl From<HummockVersionDelta> for PbHummockVersionDelta {
 impl From<PbHummockVersionDelta> for HummockVersionDelta {
     fn from(pb_version_delta: PbHummockVersionDelta) -> Self {
         Self {
-            id: pb_version_delta.id,
-            prev_id: pb_version_delta.prev_id,
+            id: HummockVersionId(pb_version_delta.id),
+            prev_id: HummockVersionId(pb_version_delta.prev_id),
             group_deltas: pb_version_delta
                 .group_deltas
                 .into_iter()
@@ -735,7 +761,7 @@ impl From<PbHummockVersionDelta> for HummockVersionDelta {
             state_table_info_delta: pb_version_delta
                 .state_table_info_delta
                 .iter()
-                .map(|(table_id, delta)| (TableId::new(*table_id), delta.clone()))
+                .map(|(table_id, delta)| (TableId::new(*table_id), *delta))
                 .collect(),
         }
     }
@@ -912,7 +938,7 @@ impl From<&GroupDelta> for PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupConstruct(pb_group_construct.clone())),
             },
             GroupDelta::GroupDestroy(pb_group_destroy) => PbGroupDelta {
-                delta_type: Some(PbDeltaType::GroupDestroy(pb_group_destroy.clone())),
+                delta_type: Some(PbDeltaType::GroupDestroy(*pb_group_destroy)),
             },
             GroupDelta::GroupMetaChange(pb_group_meta_change) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupMetaChange(pb_group_meta_change.clone())),
@@ -934,7 +960,7 @@ impl From<&PbGroupDelta> for GroupDelta {
                 GroupDelta::GroupConstruct(pb_group_construct.clone())
             }
             Some(PbDeltaType::GroupDestroy(pb_group_destroy)) => {
-                GroupDelta::GroupDestroy(pb_group_destroy.clone())
+                GroupDelta::GroupDestroy(*pb_group_destroy)
             }
             Some(PbDeltaType::GroupMetaChange(pb_group_meta_change)) => {
                 GroupDelta::GroupMetaChange(pb_group_meta_change.clone())

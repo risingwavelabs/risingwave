@@ -354,10 +354,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
         let pk_prefix = OwnedRow::new(scan_range.eq_conds);
 
         if self.lookup_prefix_len == self.table.pk_indices().len() {
-            let row = self
-                .table
-                .get_row(&pk_prefix, self.epoch.clone().into())
-                .await?;
+            let row = self.table.get_row(&pk_prefix, self.epoch.into()).await?;
 
             if let Some(row) = row {
                 self.row_list.push(row);
@@ -366,7 +363,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
             let iter = self
                 .table
                 .batch_iter_with_pk_bounds(
-                    self.epoch.clone().into(),
+                    self.epoch.into(),
                     &pk_prefix,
                     ..,
                     false,

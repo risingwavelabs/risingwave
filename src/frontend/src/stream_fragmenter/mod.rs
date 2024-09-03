@@ -15,6 +15,7 @@
 mod graph;
 use graph::*;
 use risingwave_common::util::recursive::{self, Recurse as _};
+use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 mod rewrite;
 
@@ -26,7 +27,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag, NoOpNode,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanType,
 };
 
 use self::rewrite::build_delta_join_without_arrange;
@@ -266,8 +267,8 @@ fn build_fragment(
 
                 if let Some(source) = node.source_inner.as_ref()
                     && let Some(source_info) = source.info.as_ref()
-                    && source_info.is_shared()
-                    && !source_info.is_distributed
+                    && ((source_info.is_shared() && !source_info.is_distributed)
+                        || source.with_properties.is_new_fs_connector())
                 {
                     current_fragment.requires_singleton = true;
                 }
@@ -289,6 +290,10 @@ fn build_fragment(
 
             NodeBody::StreamScan(node) => {
                 current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
+                if node.stream_scan_type() == StreamScanType::SnapshotBackfill {
+                    current_fragment.fragment_type_mask |=
+                        FragmentTypeFlag::SnapshotBackfillStreamScan as u32;
+                }
                 // memorize table id for later use
                 // The table id could be a upstream CDC source
                 state

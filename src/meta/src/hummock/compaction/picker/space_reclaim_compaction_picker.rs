@@ -63,9 +63,9 @@ impl SpaceReclaimCompactionPicker {
     ) -> Option<CompactionInput> {
         assert!(!levels.levels.is_empty());
         let mut select_input_ssts = vec![];
-        if let Some(l0) = levels.l0.as_ref()
-            && state.last_level == 0
-        {
+
+        if state.last_level == 0 {
+            let l0 = &levels.l0;
             // only pick trivial reclaim sstables because this kind of task could be optimized and do not need send to compactor.
             for level in &l0.sub_levels {
                 for sst in &level.table_infos {
@@ -84,7 +84,7 @@ impl SpaceReclaimCompactionPicker {
                 }
                 if !select_input_ssts.is_empty() {
                     return Some(CompactionInput {
-                        select_input_size: select_input_ssts.iter().map(|sst| sst.file_size).sum(),
+                        select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size).sum(),
                         total_file_count: select_input_ssts.len() as u64,
                         input_levels: vec![
                             InputLevel {
@@ -140,7 +140,7 @@ impl SpaceReclaimCompactionPicker {
             // turn to next_round
             if !select_input_ssts.is_empty() {
                 return Some(CompactionInput {
-                    select_input_size: select_input_ssts.iter().map(|sst| sst.file_size).sum(),
+                    select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size).sum(),
                     total_file_count: select_input_ssts.len() as u64,
                     input_levels: vec![
                         InputLevel {
@@ -240,7 +240,7 @@ mod test {
         assert_eq!(levels.len(), 4);
         let levels = Levels {
             levels,
-            l0: Some(l0),
+            l0,
             ..Default::default()
         };
         let mut member_table_ids = BTreeSet::new();
@@ -311,7 +311,7 @@ mod test {
             let select_file_size: u64 = task.input.input_levels[0]
                 .table_infos
                 .iter()
-                .map(|sst| sst.file_size)
+                .map(|sst| sst.sst_size)
                 .sum();
             assert!(select_file_size > max_space_reclaim_bytes);
         }

@@ -44,6 +44,9 @@ pub enum AccessError {
 
     #[error(transparent)]
     NotImplemented(#[from] NotImplemented),
+    // NOTE: We intentionally don't embed `anyhow::Error` in `AccessError` since it happens
+    // in record-level and it might be too heavy to capture the backtrace
+    // when creating a new `anyhow::Error`.
 }
 
 pub type AccessResult<T = Datum> = std::result::Result<T, AccessError>;

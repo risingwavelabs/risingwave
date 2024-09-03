@@ -13,10 +13,6 @@ create table m_simple (v1 int primary key, v2 int);
 statement ok
 create sink s_simple_1 into m_simple as select v1, v2 from t_simple;
 
-# we can't alter a table with incoming sinks
-statement error Feature is not yet implemented: alter table with incoming sinks
-alter table m_simple add column v3 int;
-
 statement ok
 drop sink s_simple_1;
 

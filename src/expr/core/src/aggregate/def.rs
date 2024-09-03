@@ -239,6 +239,7 @@ impl Display for AggKind {
     }
 }
 
+/// `FromStr` for builtin aggregate functions.
 impl FromStr for AggKind {
     type Err = ();
 
@@ -425,7 +426,8 @@ pub mod agg_kinds {
                     | PbAggKind::BoolAnd
                     | PbAggKind::BoolOr
                     | PbAggKind::ApproxCountDistinct
-                    | PbAggKind::InternalLastSeenValue,
+                    | PbAggKind::InternalLastSeenValue
+                    | PbAggKind::ApproxPercentile,
             ) | AggKind::UserDefined(_)
         };
     }
@@ -440,6 +442,24 @@ pub mod agg_kinds {
         };
     }
     pub use single_value_state_iff_in_append_only;
+
+    /// [`AggKind`](super::AggKind)s that are implemented with a materialized input state.
+    #[macro_export]
+    macro_rules! materialized_input_state {
+        () => {
+            AggKind::Builtin(
+                PbAggKind::Min
+                    | PbAggKind::Max
+                    | PbAggKind::FirstValue
+                    | PbAggKind::LastValue
+                    | PbAggKind::StringAgg
+                    | PbAggKind::ArrayAgg
+                    | PbAggKind::JsonbAgg
+                    | PbAggKind::JsonbObjectAgg,
+            ) | AggKind::WrapScalar(_)
+        };
+    }
+    pub use materialized_input_state;
 
     /// Ordered-set aggregate functions.
     #[macro_export]

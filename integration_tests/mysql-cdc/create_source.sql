@@ -1,10 +1,11 @@
+create secret mysql_pwd with (backend = 'meta') as '123456';
 
 create source mysql_mydb with (
     connector = 'mysql-cdc',
     hostname = 'mysql',
     port = '3306',
     username = 'root',
-    password = '123456',
+    password = secret mysql_pwd,
     database.name = 'mydb',
     server.id = '2'
 );

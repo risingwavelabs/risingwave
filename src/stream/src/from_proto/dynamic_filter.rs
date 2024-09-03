@@ -50,8 +50,6 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             );
         }
 
-        let condition_always_relax = node.get_condition_always_relax();
-
         let state_table_r =
             StateTable::from_table_catalog(node.get_right_table()?, store.clone(), None).await;
 
@@ -75,7 +73,6 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
                 state_table_r,
                 params.executor_stats,
                 params.env.config().developer.chunk_size,
-                condition_always_relax,
                 cleaned_by_watermark,
             )
             .boxed()
@@ -95,7 +92,6 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
                 state_table_r,
                 params.executor_stats,
                 params.env.config().developer.chunk_size,
-                condition_always_relax,
                 cleaned_by_watermark,
             )
             .boxed()

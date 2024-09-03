@@ -111,7 +111,7 @@ impl MergeExecutor {
             Some(
                 self.metrics
                     .merge_barrier_align_duration
-                    .with_label_values(&[
+                    .with_guarded_label_values(&[
                         &self.actor_context.id.to_string(),
                         &self.actor_context.fragment_id.to_string(),
                     ]),
@@ -524,13 +524,13 @@ mod tests {
             .map(|(_, epoch)| {
                 let barrier = Barrier::with_prev_epoch_for_test(*epoch, *prev_epoch);
                 *prev_epoch = *epoch;
-                barrier_test_env.inject_barrier(&barrier, [], [actor_id]);
+                barrier_test_env.inject_barrier(&barrier, [actor_id]);
                 (*epoch, barrier)
             })
             .collect();
         let b2 = Barrier::with_prev_epoch_for_test(test_epoch(1000), *prev_epoch)
             .with_mutation(Mutation::Stop(HashSet::default()));
-        barrier_test_env.inject_barrier(&b2, [], [actor_id]);
+        barrier_test_env.inject_barrier(&b2, [actor_id]);
 
         for (tx_id, tx) in txs.into_iter().enumerate() {
             let epochs = epochs.clone();
@@ -703,7 +703,7 @@ mod tests {
                 actor_new_dispatchers: Default::default(),
             },
         ));
-        barrier_test_env.inject_barrier(&b1, [], [actor_id]);
+        barrier_test_env.inject_barrier(&b1, [actor_id]);
         send!(
             [untouched, old],
             Message::Barrier(b1.clone().into_dispatcher())
@@ -820,11 +820,7 @@ mod tests {
             )
         };
 
-        test_env.inject_barrier(
-            &exchange_client_test_barrier(),
-            [],
-            [remote_input.actor_id()],
-        );
+        test_env.inject_barrier(&exchange_client_test_barrier(), [remote_input.actor_id()]);
 
         pin_mut!(remote_input);
 

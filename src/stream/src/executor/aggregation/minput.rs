@@ -31,7 +31,7 @@ use risingwave_storage::StateStore;
 
 use super::agg_state_cache::{AggStateCache, GenericAggStateCache};
 use super::GroupKey;
-use crate::common::cache::{OrderedStateCache, TopNStateCache};
+use crate::common::state_cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
 use crate::executor::{PkIndices, StreamExecutorResult};
@@ -136,7 +136,8 @@ impl MaterializedInputState {
                 | PbAggKind::ArrayAgg
                 | PbAggKind::JsonbAgg
                 | PbAggKind::JsonbObjectAgg,
-            ) => Box::new(GenericAggStateCache::new(
+            )
+            | AggKind::WrapScalar(_) => Box::new(GenericAggStateCache::new(
                 OrderedStateCache::new(),
                 agg_call.args.arg_types(),
             )),

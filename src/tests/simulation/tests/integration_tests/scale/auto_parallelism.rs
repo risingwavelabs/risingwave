@@ -25,7 +25,7 @@ use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
 /// Please ensure that this value is the same as the one in the `risingwave-auto-scale.toml` file.
-const MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE: u64 = 15;
+pub const MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE: u64 = 15;
 
 #[tokio::test]
 async fn test_passive_online_and_offline() -> Result<()> {

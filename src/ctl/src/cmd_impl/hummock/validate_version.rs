@@ -63,7 +63,7 @@ async fn get_archive(
 
 pub async fn print_user_key_in_archive(
     context: &CtlContext,
-    archive_ids: Vec<HummockVersionId>,
+    archive_ids: impl IntoIterator<Item = HummockVersionId>,
     data_dir: String,
     user_key: String,
     use_new_object_prefix_strategy: bool,
@@ -100,15 +100,7 @@ async fn print_user_key_in_version(
 ) -> anyhow::Result<()> {
     println!("print key {:?} in version {}", target_key, version.id);
     for cg in version.levels.values() {
-        for level in cg
-            .l0
-            .as_ref()
-            .unwrap()
-            .sub_levels
-            .iter()
-            .rev()
-            .chain(cg.levels.iter())
-        {
+        for level in cg.l0.sub_levels.iter().rev().chain(cg.levels.iter()) {
             for sstable_info in &level.table_infos {
                 let key_range = &sstable_info.key_range;
                 let left_user_key = FullKey::decode(&key_range.left);
@@ -177,7 +169,7 @@ async fn print_user_key_in_sst(
 
 pub async fn print_version_delta_in_archive(
     context: &CtlContext,
-    archive_ids: Vec<HummockVersionId>,
+    archive_ids: impl IntoIterator<Item = HummockVersionId>,
     data_dir: String,
     sst_id: HummockSstableObjectId,
     use_new_object_prefix_strategy: bool,

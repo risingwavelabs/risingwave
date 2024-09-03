@@ -19,7 +19,7 @@ use opendal::services::Oss;
 use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
-use super::{EngineType, OpendalObjectStore};
+use super::{MediaType, OpendalObjectStore};
 use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::ObjectResult;
 
@@ -55,7 +55,7 @@ impl OpendalObjectStore {
             .finish();
         Ok(Self {
             op,
-            engine_type: EngineType::Oss,
+            media_type: MediaType::Oss,
             config,
             metrics,
         })

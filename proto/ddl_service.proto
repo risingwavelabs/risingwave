@@ -5,6 +5,7 @@ package ddl_service;
 import "catalog.proto";
 import "common.proto";
 import "meta.proto";
+import "plan_common.proto";
 import "stream_plan.proto";
 
 option java_package = "com.risingwave.proto";
@@ -444,6 +445,30 @@ message CommentOnResponse {
   uint64 version = 2;
 }
 
+message TableSchemaChange {
+  enum TableChangeType {
+    UNSPECIFIED = 0;
+    ALTER = 1;
+    CREATE = 2;
+    DROP = 3;
+  }
+
+  TableChangeType change_type = 1;
+  string cdc_table_id = 2;
+  repeated plan_common.ColumnCatalog columns = 3;
+  string upstream_ddl = 4;
+}
+
+message SchemaChangeEnvelope {
+  repeated TableSchemaChange table_changes = 1;
+}
+
+message AutoSchemaChangeRequest {
+  SchemaChangeEnvelope schema_change = 1;
+}
+
+message AutoSchemaChangeResponse {}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -482,4 +507,5 @@ service DdlService {
   rpc GetTables(GetTablesRequest) returns (GetTablesResponse);
   rpc Wait(WaitRequest) returns (WaitResponse);
   rpc CommentOn(CommentOnRequest) returns (CommentOnResponse);
+  rpc AutoSchemaChange(AutoSchemaChangeRequest) returns (AutoSchemaChangeResponse);
 }

@@ -157,6 +157,14 @@ public class SourceValidateHandler {
                 var validator = new MongoDbValidator(props);
                 validator.validateDbConfig();
                 break;
+            case SQL_SERVER:
+                ensureRequiredProps(props, isCdcSourceJob);
+                ensurePropNotBlank(props, DbzConnectorConfig.SQL_SERVER_SCHEMA_NAME);
+                try (var sqlServerValidator =
+                        new SqlServerValidator(props, tableSchema, isCdcSourceJob)) {
+                    sqlServerValidator.validateAll();
+                }
+                break;
             default:
                 LOG.warn("Unknown source type");
                 throw ValidatorUtils.invalidArgument("Unknown source type");

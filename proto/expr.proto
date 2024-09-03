@@ -283,6 +283,19 @@ message ExprNode {
     JSONB_TO_RECORD = 630;
     JSONB_SET = 631;
 
+    // Map functions
+    MAP_FROM_ENTRIES = 700;
+    MAP_ACCESS = 701;
+    MAP_KEYS = 702;
+    MAP_VALUES = 703;
+    MAP_ENTRIES = 704;
+    MAP_FROM_KEY_VALUES = 705;
+    MAP_LENGTH = 706;
+    MAP_CONTAINS = 707;
+    MAP_CAT = 708;
+    MAP_INSERT = 709;
+    MAP_DELETE = 710;
+
     // Non-pure functions below (> 1000)
     // ------------------------
     // Internal functions

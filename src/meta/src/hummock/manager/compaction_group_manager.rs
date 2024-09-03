@@ -30,8 +30,8 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    compact_task, CompactionConfig, CompactionGroupInfo, CompatibilityVersion, PbGroupConstruct,
-    PbGroupDestroy, PbStateTableInfoDelta,
+    CompactionConfig, CompactionGroupInfo, CompatibilityVersion, PbGroupConstruct, PbGroupDestroy,
+    PbStateTableInfoDelta,
 };
 use tokio::sync::OnceCell;
 
@@ -46,7 +46,10 @@ use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
 use crate::manager::{MetaSrvEnv, MetaStoreImpl};
-use crate::model::{BTreeMapTransaction, MetadataModel, MetadataModelError};
+use crate::model::{
+    BTreeMapTransaction, BTreeMapTransactionInner, DerefMutForward, MetadataModel,
+    MetadataModelError,
+};
 
 type CompactionGroupTransaction<'a> = BTreeMapTransaction<'a, CompactionGroupId, CompactionGroup>;
 
@@ -218,7 +221,9 @@ impl HummockManager {
             &self.metrics,
         );
         let mut new_version_delta = version.new_delta();
-        let epoch = new_version_delta.latest_version().max_committed_epoch;
+        let epoch = new_version_delta
+            .latest_version()
+            .visible_table_committed_epoch();
 
         for (table_id, raw_group_id) in pairs {
             let mut group_id = *raw_group_id;
@@ -600,16 +605,6 @@ impl HummockManager {
         drop(compaction_guard);
         self.report_compact_tasks(canceled_tasks).await?;
 
-        // Don't trigger compactions if we enable deterministic compaction
-        if !self.env.opts.compaction_deterministic_test {
-            // commit_epoch may contains SSTs from any compaction group
-            self.try_send_compaction_request(parent_group_id, compact_task::TaskType::SpaceReclaim);
-            self.try_send_compaction_request(
-                target_compaction_group_id,
-                compact_task::TaskType::SpaceReclaim,
-            );
-        }
-
         self.metrics
             .move_state_table_count
             .with_label_values(&[&parent_group_id.to_string()])
@@ -693,6 +688,26 @@ impl CompactionGroupManager {
         CompactionGroupTransaction::new(&mut self.compaction_groups)
     }
 
+    pub fn start_owned_compaction_groups_txn<P: DerefMut<Target = Self>>(
+        inner: P,
+    ) -> BTreeMapTransactionInner<
+        CompactionGroupId,
+        CompactionGroup,
+        DerefMutForward<
+            Self,
+            BTreeMap<CompactionGroupId, CompactionGroup>,
+            P,
+            impl Fn(&Self) -> &BTreeMap<CompactionGroupId, CompactionGroup>,
+            impl Fn(&mut Self) -> &mut BTreeMap<CompactionGroupId, CompactionGroup>,
+        >,
+    > {
+        BTreeMapTransactionInner::new(DerefMutForward::new(
+            inner,
+            |mgr| &mgr.compaction_groups,
+            |mgr| &mut mgr.compaction_groups,
+        ))
+    }
+
     /// Tries to get compaction group config for `compaction_group_id`.
     pub(super) fn try_get_compaction_group_config(
         &self,
@@ -761,6 +776,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             }
             MutableConfig::MaxL0CompactLevelCount(c) => {
                 target.max_l0_compact_level_count = Some(*c);
+            }
+            MutableConfig::SstAllowedTrivialMoveMinSize(c) => {
+                target.sst_allowed_trivial_move_min_size = Some(*c);
             }
         }
     }

@@ -89,8 +89,7 @@ impl WithOptions {
             .inner
             .into_iter()
             .filter(|(key, _)| {
-                key != OverwriteOptions::STREAMING_RATE_LIMIT_KEY
-                    && key != options::RETENTION_SECONDS
+                key != OverwriteOptions::SOURCE_RATE_LIMIT_KEY && key != options::RETENTION_SECONDS
             })
             .collect();
 

@@ -197,12 +197,20 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     ) -> HummockResult<bool> {
         let table_id = smallest_key.user_key.table_id.table_id;
         if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
+            if !self.block_builder.is_empty() {
+                // Try to finish the previous `Block`` when the `table_id` is switched, making sure that the data in the `Block` doesn't span two `table_ids`.
+                self.build_block().await?;
+            }
+
             self.table_ids.insert(table_id);
             self.finalize_last_table_stats();
             self.last_table_id = Some(table_id);
         }
+
         if !self.block_builder.is_empty() {
             let min_block_size = std::cmp::min(MIN_BLOCK_SIZE, self.options.block_capacity / 4);
+
+            // If the previous block is too small, we should merge it into the previous block.
             if self.block_builder.approximate_len() < min_block_size {
                 let block = Block::decode(buf, meta.uncompressed_size as usize)?;
                 let mut iter = BlockIterator::new(BlockHolder::from_owned_block(Box::new(block)));
@@ -219,6 +227,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 }
                 return Ok(false);
             }
+
             self.build_block().await?;
         }
         self.last_full_key = largest_key;
@@ -235,6 +244,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.filter_builder.add_raw_data(filter_data);
         let block_meta = self.block_metas.last_mut().unwrap();
         self.writer.write_block_bytes(buf, block_meta).await?;
+
         Ok(true)
     }
 
@@ -515,6 +525,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             min_epoch: cmp::min(min_epoch, tombstone_min_epoch),
             max_epoch: cmp::max(max_epoch, tombstone_max_epoch),
             range_tombstone_count: meta.monotonic_tombstone_events.len() as u64,
+            sst_size: meta.estimated_size as u64,
         };
         tracing::trace!(
             "meta_size {} bloom_filter_size {}  add_key_counts {} stale_key_count {} min_epoch {} max_epoch {} epoch_count {}",
@@ -528,6 +539,21 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         );
         let bloom_filter_size = meta.bloom_filter.len();
         let sstable_file_size = sst_info.file_size as usize;
+
+        if !meta.block_metas.is_empty() {
+            // fill total_compressed_size
+            let mut last_table_id = meta.block_metas[0].table_id().table_id();
+            let mut last_table_stats = self.table_stats.get_mut(&last_table_id).unwrap();
+            for block_meta in &meta.block_metas {
+                let block_table_id = block_meta.table_id();
+                if last_table_id != block_table_id.table_id() {
+                    last_table_id = block_table_id.table_id();
+                    last_table_stats = self.table_stats.get_mut(&last_table_id).unwrap();
+                }
+
+                last_table_stats.total_compressed_size += block_meta.len as u64;
+            }
+        }
 
         let writer_output = self.writer.finish(meta).await?;
         Ok(SstableBuilderOutput::<W::Output> {

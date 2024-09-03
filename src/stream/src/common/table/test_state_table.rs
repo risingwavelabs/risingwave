@@ -1399,7 +1399,7 @@ async fn test_state_table_watermark_cache_ignore_null() {
     assert_eq!(cache.len(), 0);
 
     let watermark = Timestamptz::from_secs(2500).unwrap().to_scalar_value();
-    state_table.update_watermark(watermark, true);
+    state_table.update_watermark(watermark);
 
     epoch.inc_for_test();
     test_env
@@ -1486,7 +1486,7 @@ async fn test_state_table_watermark_cache_write_chunk() {
     assert_eq!(cache.len(), 0);
 
     let watermark = Timestamptz::from_secs(0).unwrap().to_scalar_value();
-    state_table.update_watermark(watermark, true);
+    state_table.update_watermark(watermark);
 
     epoch.inc_for_test();
     test_env
@@ -1598,7 +1598,7 @@ async fn test_state_table_watermark_cache_write_chunk() {
 
     // Should not cleanup anything.
     let watermark = Timestamptz::from_secs(2500).unwrap().to_scalar_value();
-    state_table.update_watermark(watermark, true);
+    state_table.update_watermark(watermark);
 
     epoch.inc_for_test();
     test_env
@@ -1701,7 +1701,7 @@ async fn test_state_table_watermark_cache_refill() {
     assert_eq!(cache.len(), 0);
 
     let watermark = Timestamptz::from_secs(2500).unwrap().to_scalar_value();
-    state_table.update_watermark(watermark, true);
+    state_table.update_watermark(watermark);
 
     epoch.inc_for_test();
     test_env

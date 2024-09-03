@@ -835,7 +835,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
             }
             if *stream_epoch < epoch {
                 return Err(anyhow!(
-                    "current epoch {} has exceed epoch {} of stream not started",
+                    "current epoch {} has exceeded the epoch {} of the stream that has not started",
                     epoch,
                     stream_epoch
                 ));

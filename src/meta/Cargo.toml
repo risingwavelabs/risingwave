@@ -36,7 +36,7 @@ flate2 = "1"
 function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
-hyper = "0.14" # required by tonic
+http = "1"
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 maplit = "1.0.2"
@@ -55,6 +55,7 @@ risingwave_common = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
+risingwave_license = { workspace = true }
 risingwave_meta_dashboard = { workspace = true }
 risingwave_meta_model_migration = { workspace = true }
 risingwave_meta_model_v2 = { workspace = true }
@@ -80,7 +81,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
   "signal",
 ] }
 tokio-retry = "0.3"
-tokio-stream = { version = "0.1", features = ["net"] }
+tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"

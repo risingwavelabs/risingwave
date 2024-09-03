@@ -124,7 +124,10 @@ async fn do_scan(table: TableCatalog, hummock: MonitoredStateStore<HummockStorag
     print_table_catalog(&table);
 
     println!("Rows:");
-    let read_epoch = hummock.inner().get_pinned_version().max_committed_epoch();
+    let read_epoch = hummock
+        .inner()
+        .get_pinned_version()
+        .visible_table_committed_epoch();
     let storage_table = make_storage_table(hummock, &table)?;
     let stream = storage_table
         .batch_iter(

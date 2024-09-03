@@ -120,6 +120,20 @@ pub struct KafkaProperties {
     )]
     pub time_offset: Option<String>,
 
+    /// Specify a custom consumer group id prefix for the source.
+    /// Defaults to `rw-consumer`.
+    ///
+    /// Notes:
+    /// - Each job (materialized view) will have a separated consumer group and
+    ///   contains a generated suffix in the group id.
+    ///   The consumer group will be `{group_id_prefix}-{fragment_id}`.
+    /// - The consumer group is solely for monintoring progress in some external
+    ///   Kafka tools, and for authorization. RisingWave does not rely on committed
+    ///   offsets, and does not join the consumer group. It just reports offsets
+    ///   to the group.
+    #[serde(rename = "group.id.prefix")]
+    pub group_id_prefix: Option<String>,
+
     /// This parameter is used to tell `KafkaSplitReader` to produce `UpsertMessage`s, which
     /// combine both key and value fields of the Kafka message.
     /// TODO: Currently, `Option<bool>` can not be parsed here.

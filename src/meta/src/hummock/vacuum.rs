@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
@@ -77,16 +78,21 @@ impl VacuumManager {
                 break;
             }
         }
-        if self.env.opts.enable_hummock_time_travel {
-            let current_epoch_time = Epoch::now().physical_time();
-            let epoch_watermark = Epoch::from_physical_time(
-                current_epoch_time.saturating_sub(self.env.opts.hummock_time_travel_retention_ms),
-            )
-            .0;
-            self.hummock_manager
-                .truncate_time_travel_metadata(epoch_watermark)
-                .await?;
-        }
+
+        let current_epoch_time = Epoch::now().physical_time();
+        let epoch_watermark = Epoch::from_physical_time(
+            current_epoch_time.saturating_sub(
+                self.env
+                    .system_params_reader()
+                    .await
+                    .time_travel_retention_ms(),
+            ),
+        )
+        .0;
+        self.hummock_manager
+            .truncate_time_travel_metadata(epoch_watermark)
+            .await?;
+
         Ok(total_deleted)
     }
 

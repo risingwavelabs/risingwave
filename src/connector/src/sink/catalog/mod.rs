@@ -147,6 +147,7 @@ pub enum SinkEncode {
     Protobuf,
     Avro,
     Template,
+    Parquet,
     Text,
 }
 
@@ -202,6 +203,7 @@ impl SinkFormatDesc {
             SinkEncode::Protobuf => E::Protobuf,
             SinkEncode::Avro => E::Avro,
             SinkEncode::Template => E::Template,
+            SinkEncode::Parquet => E::Parquet,
             SinkEncode::Text => E::Text,
         };
 
@@ -250,13 +252,8 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             E::Protobuf => SinkEncode::Protobuf,
             E::Template => SinkEncode::Template,
             E::Avro => SinkEncode::Avro,
-            e @ (E::Unspecified
-            | E::Native
-            | E::Csv
-            | E::Bytes
-            | E::None
-            | E::Text
-            | E::Parquet) => {
+            E::Parquet => SinkEncode::Parquet,
+            e @ (E::Unspecified | E::Native | E::Csv | E::Bytes | E::None | E::Text) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink encode unsupported: {}",
                     e.as_str_name()
@@ -364,6 +361,9 @@ pub struct SinkCatalog {
 
     /// The secret reference for the sink, mapping from property name to secret id.
     pub secret_refs: BTreeMap<String, PbSecretRef>,
+
+    /// Only for the sink whose target is a table. Columns of the target table when the sink is created. At this point all the default columns of the target table are all handled by the project operator in the sink plan.
+    pub original_target_columns: Vec<ColumnCatalog>,
 }
 
 impl SinkCatalog {
@@ -406,6 +406,11 @@ impl SinkCatalog {
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             create_type: self.create_type.to_proto() as i32,
             secret_refs: self.secret_refs.clone(),
+            original_target_columns: self
+                .original_target_columns
+                .iter()
+                .map(|c| c.to_protobuf())
+                .collect_vec(),
         }
     }
 
@@ -441,6 +446,11 @@ impl SinkCatalog {
 
     pub fn downstream_pk_indices(&self) -> Vec<usize> {
         self.downstream_pk.clone()
+    }
+
+    pub fn unique_identity(&self) -> String {
+        // We need to align with meta here, so we've utilized the proto method.
+        self.to_proto().unique_identity()
     }
 }
 
@@ -500,6 +510,11 @@ impl From<PbSink> for SinkCatalog {
             created_at_cluster_version: pb.created_at_cluster_version,
             create_type: CreateType::from_proto(create_type),
             secret_refs: pb.secret_refs,
+            original_target_columns: pb
+                .original_target_columns
+                .into_iter()
+                .map(ColumnCatalog::from)
+                .collect_vec(),
         }
     }
 }

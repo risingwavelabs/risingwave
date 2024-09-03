@@ -28,7 +28,7 @@ use risingwave_pb::connector_service::{SourceType, ValidateSourceRequest, Valida
 use crate::error::ConnectorResult;
 use crate::source::cdc::{
     table_schema_exclude_additional_columns, CdcProperties, CdcSourceTypeTrait, Citus,
-    DebeziumCdcSplit, Mongodb, Mysql, Postgres,
+    DebeziumCdcSplit, Mongodb, Mysql, Postgres, SqlServer,
 };
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
@@ -178,6 +178,18 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Mongodb> {
 
     fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
         // CDC source only supports single split
+        vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
+            self.source_id,
+            None,
+            None,
+        )]
+    }
+}
+
+impl ListCdcSplits for DebeziumSplitEnumerator<SqlServer> {
+    type CdcSourceType = SqlServer;
+
+    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
         vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
             self.source_id,
             None,

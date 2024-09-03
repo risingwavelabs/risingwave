@@ -73,11 +73,9 @@ macro_rules! def_remote_sink {
     () => {
         def_remote_sink! {
             { ElasticSearch, ElasticSearchSink, "elasticsearch" }
-            { Opensearch, OpensearchSink, "opensearch"}
+            { Opensearch, OpenSearchSink, "opensearch"}
             { Cassandra, CassandraSink, "cassandra" }
-            { Jdbc, JdbcSink, "jdbc", |desc| {
-                desc.sink_type.is_append_only()
-            } }
+            { Jdbc, JdbcSink, "jdbc" }
             { DeltaLake, DeltaLakeSink, "deltalake" }
             { HttpJava, HttpJavaSink, "http" }
         }
@@ -119,7 +117,7 @@ def_remote_sink!();
 pub trait RemoteSinkTrait: Send + Sync + 'static {
     const SINK_NAME: &'static str;
     fn default_sink_decouple(_desc: &SinkDesc) -> bool {
-        false
+        true
     }
 }
 
@@ -165,11 +163,16 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
 }
 
 async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorResult<()> {
+    if sink_name == OpenSearchSink::SINK_NAME {
+        risingwave_common::license::Feature::OpenSearchSink
+            .check_available()
+            .map_err(|e| anyhow::anyhow!(e))?;
+    }
     if is_es_sink(sink_name)
         && param.downstream_pk.len() > 1
         && !param.properties.contains_key(ES_OPTION_DELIMITER)
     {
-        bail!("Es sink only support single pk or pk with delimiter option");
+        bail!("Es sink only supports single pk or pk with delimiter option");
     }
     // FIXME: support struct and array in stream sink
     param.columns.iter().map(|col| {
@@ -194,7 +197,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                     Ok(())
                 } else{
                     Err(SinkError::Remote(anyhow!(
-                        "Remote sink only support list<int16, int32, int64, float, double, varchar>, got {:?}: {:?}",
+                        "Remote sink only supports list<int16, int32, int64, float, double, varchar>, got {:?}: {:?}",
                         col.name,
                         col.data_type,
                     )))
@@ -205,13 +208,13 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                     Ok(())
                 }else{
                     Err(SinkError::Remote(anyhow!(
-                        "Only Es sink support struct, got {:?}: {:?}",
+                        "Only Es sink supports struct, got {:?}: {:?}",
                         col.name,
                         col.data_type,
                     )))
                 }
             },
-            DataType::Serial | DataType::Int256 => Err(SinkError::Remote(anyhow!(
+            DataType::Serial | DataType::Int256 | DataType::Map(_) => Err(SinkError::Remote(anyhow!(
                             "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Timestamptz, Bytea, List and Varchar, (Es sink support Struct) got {:?}: {:?}",
                             col.name,
                             col.data_type,
@@ -347,7 +350,7 @@ impl LogSinker for RemoteLogSinker {
                 })?;
                 if sent_offset != persisted_offset {
                     bail!(
-                        "new response offset {:?} not match the buffer offset {:?}",
+                        "new response offset {:?} does not match the buffer offset {:?}",
                         persisted_offset,
                         sent_offset
                     );
@@ -535,7 +538,7 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
             self.param.clone(),
             writer_param.vnode_bitmap.ok_or_else(|| {
                 SinkError::Remote(anyhow!(
-                    "sink needs coordination should not have singleton input"
+                    "sink needs coordination and should not have singleton input"
                 ))
             })?,
             CoordinatedRemoteSinkWriter::new(self.param.clone(), writer_param.sink_metrics.clone())

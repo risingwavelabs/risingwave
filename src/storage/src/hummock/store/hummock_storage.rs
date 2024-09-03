@@ -15,14 +15,12 @@
 use std::collections::HashSet;
 use std::future::Future;
 use std::ops::{Bound, Deref};
-use std::sync::atomic::{AtomicU64, Ordering as MemOrdering};
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use futures::FutureExt;
 use itertools::Itertools;
-use more_asserts::assert_gt;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common_service::{NotificationClient, ObserverManager};
@@ -32,7 +30,7 @@ use risingwave_hummock_sdk::key::{
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{HummockReadEpoch, HummockVersionId};
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -61,7 +59,7 @@ use crate::hummock::{
     MemoryLimiter, SstableObjectIdManager, SstableObjectIdManagerRef, SstableStoreRef,
 };
 use crate::mem_table::ImmutableMemtable;
-use crate::monitor::{CompactorMetrics, HummockStateStoreMetrics, StoreLocalStatistic};
+use crate::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use crate::opts::StorageOpts;
 use crate::store::*;
 
@@ -99,8 +97,6 @@ pub struct HummockStorage {
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
 
-    seal_epoch: Arc<AtomicU64>,
-
     pinned_version: Arc<ArcSwap<PinnedVersion>>,
 
     hummock_version_reader: HummockVersionReader,
@@ -110,9 +106,6 @@ pub struct HummockStorage {
     read_version_mapping: ReadOnlyReadVersionMapping,
 
     backup_reader: BackupReaderRef,
-
-    /// `current_epoch` < `min_current_epoch` cannot be read.
-    min_current_epoch: Arc<AtomicU64>,
 
     write_limiter: WriteLimiterRef,
 
@@ -132,8 +125,17 @@ pub fn get_committed_read_version_tuple(
     epoch: HummockEpoch,
 ) -> (TableKeyRange, ReadVersionTuple) {
     if let Some(table_watermarks) = version.version().table_watermarks.get(&table_id) {
-        TableWatermarksIndex::new_committed(table_watermarks.clone(), version.max_committed_epoch())
-            .rewrite_range_with_table_watermark(epoch, &mut key_range)
+        TableWatermarksIndex::new_committed(
+            table_watermarks.clone(),
+            version
+                .version()
+                .state_table_info
+                .info()
+                .get(&table_id)
+                .expect("should exist when having table watermark")
+                .committed_epoch,
+        )
+        .rewrite_range_with_table_watermark(epoch, &mut key_range)
     }
     (key_range, (vec![], vec![], version))
 }
@@ -202,8 +204,6 @@ impl HummockStorage {
             await_tree_reg.clone(),
         );
 
-        let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
-        let min_current_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
         let hummock_event_handler = HummockEventHandler::new(
             version_update_rx,
             pinned_version,
@@ -221,7 +221,6 @@ impl HummockStorage {
             sstable_object_id_manager,
             buffer_tracker: hummock_event_handler.buffer_tracker().clone(),
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
-            seal_epoch,
             hummock_event_sender: event_tx.clone(),
             _version_update_sender: version_update_tx,
             pinned_version: hummock_event_handler.pinned_version(),
@@ -235,7 +234,6 @@ impl HummockStorage {
             }),
             read_version_mapping: hummock_event_handler.read_version_mapping(),
             backup_reader,
-            min_current_epoch,
             write_limiter,
             compact_await_tree_reg: await_tree_reg,
             hummock_meta_client,
@@ -388,9 +386,17 @@ impl HummockStorage {
     ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
         let pinned_version = self.pinned_version.load();
         validate_safe_epoch(pinned_version.version(), table_id, epoch)?;
+        let table_committed_epoch = pinned_version
+            .version()
+            .state_table_info
+            .info()
+            .get(&table_id)
+            .map(|info| info.committed_epoch);
 
         // check epoch if lower mce
-        let ret = if epoch <= pinned_version.max_committed_epoch() {
+        let ret = if let Some(table_committed_epoch) = table_committed_epoch
+            && epoch <= table_committed_epoch
+        {
             // read committed_version directly without build snapshot
             get_committed_read_version_tuple((**pinned_version).clone(), table_id, key_range, epoch)
         } else {
@@ -427,20 +433,20 @@ impl HummockStorage {
             if read_version_vec.is_empty() {
                 if matched_replicated_read_version_cnt > 0 {
                     tracing::warn!(
-                        "Read(table_id={} vnode={} epoch={}) is not allowed on replicated read version ({} found). Fall back to committed version (epoch={})",
+                        "Read(table_id={} vnode={} epoch={}) is not allowed on replicated read version ({} found). Fall back to committed version (epoch={:?})",
                         table_id,
                         vnode.to_index(),
                         epoch,
                         matched_replicated_read_version_cnt,
-                        pinned_version.max_committed_epoch()
+                        table_committed_epoch,
                     );
                 } else {
                     tracing::debug!(
-                        "No read version found for read(table_id={} vnode={} epoch={}). Fall back to committed version (epoch={})",
+                        "No read version found for read(table_id={} vnode={} epoch={}). Fall back to committed version (epoch={:?})",
                         table_id,
                         vnode.to_index(),
                         epoch,
-                        pinned_version.max_committed_epoch()
+                        table_committed_epoch
                     );
                 }
                 get_committed_read_version_tuple(
@@ -458,7 +464,7 @@ impl HummockStorage {
                             v.vnodes().iter_ones().collect_vec()
                         })
                         .collect_vec();
-                    panic!("There are {} read version associated with vnode {}. read_version_vnodes={:?}", read_version_vnodes.len(), vnode.to_index(), read_version_vnodes);
+                    return Err(HummockError::other(format!("There are {} read version associated with vnode {}. read_version_vnodes={:?}", read_version_vnodes.len(), vnode.to_index(), read_version_vnodes)).into());
                 }
                 read_filter_for_version(
                     epoch,
@@ -496,6 +502,14 @@ impl HummockStorage {
             version_update_notifier_tx,
             self.context.storage_opts.mem_table_spill_threshold,
         )
+    }
+
+    pub async fn clear_shared_buffer(&self, version_id: HummockVersionId) {
+        let (tx, rx) = oneshot::channel();
+        self.hummock_event_sender
+            .send(HummockEvent::Clear(tx, version_id))
+            .expect("should send success");
+        rx.await.expect("should wait success");
     }
 
     /// Declare the start of an epoch. This information is provided for spill so that the spill task won't
@@ -605,7 +619,6 @@ impl StateStore for HummockStorage {
     /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
     /// we will only check whether it is le `sealed_epoch` and won't wait.
     async fn try_wait_epoch(&self, wait_epoch: HummockReadEpoch) -> StorageResult<()> {
-        self.validate_read_epoch(wait_epoch)?;
         let wait_epoch = match wait_epoch {
             HummockReadEpoch::Committed(epoch) => {
                 assert!(!is_max_epoch(epoch), "epoch should not be MAX EPOCH");
@@ -630,67 +643,8 @@ impl StateStore for HummockStorage {
         })
     }
 
-    fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-        // Update `seal_epoch` synchronously,
-        // as `HummockEvent::SealEpoch` is handled asynchronously.
-        let prev_epoch = self.seal_epoch.swap(epoch, MemOrdering::SeqCst);
-        assert_gt!(epoch, prev_epoch);
-
-        if is_checkpoint {
-            let _ = self.min_current_epoch.compare_exchange(
-                HummockEpoch::MAX,
-                epoch,
-                MemOrdering::SeqCst,
-                MemOrdering::SeqCst,
-            );
-        }
-        StoreLocalStatistic::flush_all();
-    }
-
-    async fn clear_shared_buffer(&self, prev_epoch: u64) {
-        let (tx, rx) = oneshot::channel();
-        self.hummock_event_sender
-            .send(HummockEvent::Clear(tx, prev_epoch))
-            .expect("should send success");
-        rx.await.expect("should wait success");
-
-        let epoch = self.pinned_version.load().max_committed_epoch();
-        self.min_current_epoch
-            .store(HummockEpoch::MAX, MemOrdering::SeqCst);
-        self.seal_epoch.store(epoch, MemOrdering::SeqCst);
-    }
-
     fn new_local(&self, option: NewLocalOptions) -> impl Future<Output = Self::Local> + Send + '_ {
         self.new_local_inner(option)
-    }
-
-    fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
-        if let HummockReadEpoch::Current(read_current_epoch) = epoch {
-            assert!(
-                !is_max_epoch(read_current_epoch),
-                "epoch should not be MAX EPOCH"
-            );
-            let sealed_epoch = self.seal_epoch.load(MemOrdering::SeqCst);
-            if read_current_epoch > sealed_epoch {
-                tracing::warn!(
-                    "invalid barrier read {} > max seal epoch {}",
-                    read_current_epoch,
-                    sealed_epoch
-                );
-                return Err(HummockError::read_current_epoch().into());
-            }
-
-            let min_current_epoch = self.min_current_epoch.load(MemOrdering::SeqCst);
-            if read_current_epoch < min_current_epoch {
-                tracing::warn!(
-                    "invalid barrier read {} < min current epoch {}",
-                    read_current_epoch,
-                    min_current_epoch
-                );
-                return Err(HummockError::read_current_epoch().into());
-            }
-        }
-        Ok(())
     }
 }
 
@@ -700,7 +654,6 @@ impl HummockStorage {
         &self,
         epoch: u64,
     ) -> StorageResult<risingwave_hummock_sdk::SyncResult> {
-        self.seal_epoch(epoch, true);
         let table_ids = self
             .pinned_version
             .load()
@@ -780,7 +733,7 @@ impl HummockStorage {
         &self.hummock_version_reader
     }
 
-    pub async fn wait_version_update(&self, old_id: u64) -> u64 {
+    pub async fn wait_version_update(&self, old_id: HummockVersionId) -> HummockVersionId {
         use tokio::task::yield_now;
         loop {
             let cur_id = self.pinned_version.load().id();

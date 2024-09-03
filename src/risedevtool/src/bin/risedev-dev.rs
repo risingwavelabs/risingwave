@@ -28,7 +28,7 @@ use risedev::{
     ConfigureTmuxTask, DummyService, EnsureStopService, ExecuteContext, FrontendService,
     GrafanaService, KafkaService, MetaNodeService, MinioService, MySqlService, PostgresService,
     PrometheusService, PubsubService, RedisService, SchemaRegistryService, ServiceConfig,
-    SqliteConfig, Task, TempoService, RISEDEV_NAME,
+    SqlServerService, SqliteConfig, Task, TempoService, RISEDEV_NAME,
 };
 use tempfile::tempdir;
 use thiserror_ext::AsReport;
@@ -353,6 +353,24 @@ fn task_main(
                 ctx.pb
                     .set_message(format!("postgres {}:{}", c.address, c.port));
             }
+            ServiceConfig::SqlServer(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                // only `c.password` will be used in `SqlServerService` as the password for user `sa`.
+                SqlServerService::new(c.clone()).execute(&mut ctx)?;
+                if c.user_managed {
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                } else {
+                    let mut task = risedev::LogReadyCheckTask::new(
+                        "SQL Server is now ready for client connections.",
+                    )?;
+                    task.execute(&mut ctx)?;
+                }
+                ctx.pb
+                    .set_message(format!("sqlserver {}:{}", c.address, c.port));
+            }
         }
 
         let service_id = service.id().to_string();
@@ -422,6 +440,8 @@ fn main() -> Result<()> {
     }
     manager.finish_all();
 
+    use risedev::util::stylized_risedev_subcmd as r;
+
     match task_result {
         Ok((stat, log_buffer)) => {
             println!("---- summary of startup time ----");
@@ -440,20 +460,11 @@ fn main() -> Result<()> {
 
             print!("{}", log_buffer);
 
-            println!(
-                "* You may find logs using {} command",
-                style("./risedev l").blue().bold()
-            );
+            println!("* You may find logs using {} command", r("l"));
 
-            println!(
-                "* Run {} to kill cluster.",
-                style("./risedev k").blue().bold()
-            );
+            println!("* Run {} to kill cluster.", r("k"));
 
-            println!(
-                "* Run {} to run `risedev` anywhere!",
-                style("./risedev install").blue().bold()
-            );
+            println!("* Run {} to run `risedev` anywhere!", r("install"));
 
             Ok(())
         }
@@ -466,20 +477,17 @@ fn main() -> Result<()> {
             println!();
             println!(
                 "* Use `{}` to enable new components, if they are missing.",
-                style("./risedev configure").blue().bold(),
+                r("configure")
             );
             println!(
                 "* Use `{}` to view logs, or visit `{}`",
-                style("./risedev l").blue().bold(),
+                r("l"),
                 env::var("PREFIX_LOG")?
             );
-            println!(
-                "* Run `{}` to clean up cluster.",
-                style("./risedev k").blue().bold()
-            );
+            println!("* Run `{}` to clean up cluster.", r("k"));
             println!(
                 "* Run `{}` to clean data, which might potentially fix the issue.",
-                style("./risedev clean-data").blue().bold()
+                r("clean-data")
             );
             println!("---");
             println!();

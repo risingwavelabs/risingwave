@@ -36,7 +36,6 @@ pub struct StreamDynamicFilter {
     pub base: PlanBase<Stream>,
     core: generic::DynamicFilter<PlanRef>,
     cleaned_by_watermark: bool,
-    condition_always_relax: bool,
 }
 
 impl StreamDynamicFilter {
@@ -67,7 +66,6 @@ impl StreamDynamicFilter {
             base,
             core,
             cleaned_by_watermark,
-            condition_always_relax,
         }
     }
 
@@ -100,7 +98,13 @@ impl StreamDynamicFilter {
                     // downstream. See `derive_watermark_columns`.
                     true
                 }
-                _ => false,
+                ExprType::LessThan | ExprType::LessThanOrEqual => {
+                    // For <= and <, watermark on rhs means all rows older than the watermark should already be emitted,
+                    // and future lhs inputs should be directly passed to downstream without any state table operation.
+                    // So, the state table can be cleaned up.
+                    true
+                }
+                _ => unreachable!(),
             }
         } else {
             false
@@ -122,12 +126,6 @@ impl Distill for StreamDynamicFilter {
             vec.push((
                 "cleaned_by_watermark",
                 Pretty::display(&self.cleaned_by_watermark),
-            ));
-        }
-        if self.condition_always_relax {
-            vec.push((
-                "condition_always_relax",
-                Pretty::display(&self.condition_always_relax),
             ));
         }
         childless_record(
@@ -172,12 +170,13 @@ impl StreamNode for StreamDynamicFilter {
         let right = self.right();
         let right_table = infer_right_internal_table_catalog(right.plan_base())
             .with_id(state.gen_table_id_wrapped());
+        #[allow(deprecated)]
         NodeBody::DynamicFilter(DynamicFilterNode {
             left_key: left_index as u32,
             condition,
             left_table: Some(left_table.to_internal_table_prost()),
             right_table: Some(right_table.to_internal_table_prost()),
-            condition_always_relax: self.condition_always_relax,
+            condition_always_relax: false, // deprecated
         })
     }
 }

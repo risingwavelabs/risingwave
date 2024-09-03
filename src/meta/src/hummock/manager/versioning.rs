@@ -60,6 +60,8 @@ pub struct Versioning {
     pub time_travel_snapshot_interval_counter: u64,
     /// Used to avoid the attempts to rewrite the same SST to meta store
     pub last_time_travel_snapshot_sst_ids: HashSet<HummockSstableId>,
+    /// Whether time travel is enabled during last commit epoch.
+    pub time_travel_toggle_check: bool,
 
     // Persistent states below
     pub hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
@@ -74,7 +76,7 @@ impl ContextInfo {
         for id in self
             .pinned_versions
             .values()
-            .map(|v| v.min_pinned_id)
+            .map(|v| HummockVersionId::new(v.min_pinned_id))
             .chain(self.version_safe_points.iter().cloned())
         {
             min_pinned_version_id = cmp::min(id, min_pinned_version_id);
@@ -147,16 +149,13 @@ impl HummockManager {
     /// Should not be called inside [`HummockManager`], because it requests locks internally.
     ///
     /// Note: this method can hurt performance because it will clone a large object.
+    #[cfg(any(test, feature = "test"))]
     pub async fn get_current_version(&self) -> HummockVersion {
-        self.versioning.read().await.current_version.clone()
+        self.on_current_version(|version| version.clone()).await
     }
 
-    pub async fn get_current_max_committed_epoch(&self) -> HummockEpoch {
-        self.versioning
-            .read()
-            .await
-            .current_version
-            .max_committed_epoch
+    pub async fn on_current_version<T>(&self, mut f: impl FnMut(&HummockVersion) -> T) -> T {
+        f(&self.versioning.read().await.current_version)
     }
 
     /// Gets the mapping from table id to compaction group id
@@ -170,7 +169,7 @@ impl HummockManager {
     #[cfg_attr(coverage, coverage(off))]
     pub async fn list_version_deltas(
         &self,
-        start_id: u64,
+        start_id: HummockVersionId,
         num_limit: u32,
         committed_epoch_limit: HummockEpoch,
     ) -> Result<Vec<HummockVersionDelta>> {
@@ -179,7 +178,7 @@ impl HummockManager {
             .hummock_version_deltas
             .range(start_id..)
             .map(|(_id, delta)| delta)
-            .filter(|delta| delta.max_committed_epoch <= committed_epoch_limit)
+            .filter(|delta| delta.visible_table_committed_epoch() <= committed_epoch_limit)
             .take(num_limit as _)
             .cloned()
             .collect();
@@ -282,22 +281,6 @@ impl HummockManager {
         HummockSnapshot::clone(&snapshot)
     }
 
-    /// We don't commit an epoch without checkpoint. We will only update the `max_current_epoch`.
-    pub fn update_current_epoch(&self, max_current_epoch: HummockEpoch) -> HummockSnapshot {
-        // We only update `max_current_epoch`!
-        let prev_snapshot = self.latest_snapshot.rcu(|snapshot| HummockSnapshot {
-            committed_epoch: snapshot.committed_epoch,
-            current_epoch: max_current_epoch,
-        });
-        assert!(prev_snapshot.current_epoch < max_current_epoch);
-
-        tracing::trace!("new current epoch {}", max_current_epoch);
-        HummockSnapshot {
-            committed_epoch: prev_snapshot.committed_epoch,
-            current_epoch: max_current_epoch,
-        }
-    }
-
     pub async fn list_change_log_epochs(
         &self,
         table_id: u32,
@@ -311,7 +294,7 @@ impl HummockManager {
             .get(&TableId::new(table_id))
         {
             let table_change_log = table_change_log.clone();
-            table_change_log.get_epochs(min_epoch, max_count as usize)
+            table_change_log.get_non_empty_epochs(min_epoch, max_count as usize)
         } else {
             vec![]
         }
@@ -361,7 +344,7 @@ pub(super) fn calc_new_write_limits(
 /// Note that the result is approximate value. See `estimate_table_stats`.
 fn rebuild_table_stats(version: &HummockVersion) -> HummockVersionStats {
     let mut stats = HummockVersionStats {
-        hummock_version_id: version.id,
+        hummock_version_id: version.id.to_u64(),
         table_stats: Default::default(),
     };
     for level in version.get_combined_levels() {
@@ -404,7 +387,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_hummock_sdk::key_range::KeyRange;
-    use risingwave_hummock_sdk::level::{Level, Levels, OverlappingLevel};
+    use risingwave_hummock_sdk::level::{Level, Levels};
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
@@ -429,11 +412,13 @@ mod tests {
                 min_pinned_id: 10,
             },
         );
-        assert_eq!(context_info.min_pinned_version_id(), 10);
-        context_info.version_safe_points.push(5);
-        assert_eq!(context_info.min_pinned_version_id(), 5);
+        assert_eq!(context_info.min_pinned_version_id().to_u64(), 10);
+        context_info
+            .version_safe_points
+            .push(HummockVersionId::new(5));
+        assert_eq!(context_info.min_pinned_version_id().to_u64(), 5);
         context_info.version_safe_points.clear();
-        assert_eq!(context_info.min_pinned_version_id(), 10);
+        assert_eq!(context_info.min_pinned_version_id().to_u64(), 10);
         context_info.pinned_versions.clear();
         assert_eq!(context_info.min_pinned_version_id(), HummockVersionId::MAX);
     }
@@ -441,12 +426,7 @@ mod tests {
     #[test]
     fn test_calc_new_write_limits() {
         let add_level_to_l0 = |levels: &mut Levels| {
-            levels
-                .l0
-                .as_mut()
-                .unwrap()
-                .sub_levels
-                .push(Level::default());
+            levels.l0.sub_levels.push(Level::default());
         };
         let set_sub_level_number_threshold_for_group_1 =
             |target_groups: &mut HashMap<CompactionGroupId, CompactionGroup>,
@@ -479,13 +459,7 @@ mod tests {
         .collect();
         let mut version: HummockVersion = Default::default();
         for group_id in 1..=3 {
-            version.levels.insert(
-                group_id,
-                Levels {
-                    l0: Some(OverlappingLevel::default()),
-                    ..Default::default()
-                },
-            );
+            version.levels.insert(group_id, Levels::default());
         }
         let new_write_limits =
             calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
@@ -562,7 +536,7 @@ mod tests {
         }
 
         let mut version = HummockVersion::default();
-        version.id = 123;
+        version.id = HummockVersionId::new(123);
 
         for cg in 1..3 {
             version.levels.insert(
@@ -572,7 +546,6 @@ mod tests {
                         table_infos: vec![sst.clone()],
                         ..Default::default()
                     }],
-                    l0: Some(Default::default()),
                     ..Default::default()
                 },
             );
@@ -581,7 +554,7 @@ mod tests {
             hummock_version_id,
             table_stats,
         } = rebuild_table_stats(&version);
-        assert_eq!(hummock_version_id, version.id);
+        assert_eq!(hummock_version_id, version.id.to_u64());
         assert_eq!(table_stats.len(), 3);
         for (tid, stats) in table_stats {
             assert_eq!(

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::iter::empty;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -74,7 +74,6 @@ impl Drop for PinnedVersionGuard {
 #[derive(Clone)]
 pub struct PinnedVersion {
     version: Arc<HummockVersion>,
-    compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
     guard: Arc<PinnedVersionGuard>,
 }
 
@@ -84,20 +83,13 @@ impl PinnedVersion {
         pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
     ) -> Self {
         let version_id = version.id;
-        let compaction_group_index = version.state_table_info.build_table_compaction_group_id();
-
         PinnedVersion {
             version: Arc::new(version),
-            compaction_group_index: Arc::new(compaction_group_index),
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 pinned_version_manager_tx,
             )),
         }
-    }
-
-    pub(crate) fn compaction_group_index(&self) -> Arc<HashMap<TableId, CompactionGroupId>> {
-        self.compaction_group_index.clone()
     }
 
     pub fn new_pin_version(&self, version: HummockVersion) -> Self {
@@ -108,11 +100,9 @@ impl PinnedVersion {
             self.version.id
         );
         let version_id = version.id;
-        let compaction_group_index = version.state_table_info.build_table_compaction_group_id();
 
         PinnedVersion {
             version: Arc::new(version),
-            compaction_group_index: Arc::new(compaction_group_index),
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 self.guard.pinned_version_manager_tx.clone(),
@@ -140,8 +130,6 @@ impl PinnedVersion {
                 let levels = self.levels_by_compaction_groups_id(compaction_group_id);
                 levels
                     .l0
-                    .as_ref()
-                    .unwrap()
                     .sub_levels
                     .iter()
                     .rev()
@@ -151,8 +139,13 @@ impl PinnedVersion {
         }
     }
 
+    #[cfg(any(test, feature = "test"))]
     pub fn max_committed_epoch(&self) -> u64 {
-        self.version.max_committed_epoch
+        self.version.max_committed_epoch()
+    }
+
+    pub fn visible_table_committed_epoch(&self) -> u64 {
+        self.version.visible_table_committed_epoch()
     }
 
     /// ret value can't be used as `HummockVersion`. it must be modified with delta
@@ -178,7 +171,7 @@ pub(crate) async fn start_pinned_version_worker(
     min_execute_interval_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut need_unpin = false;
 
-    let mut version_ids_in_use: BTreeMap<u64, (usize, Instant)> = BTreeMap::new();
+    let mut version_ids_in_use: BTreeMap<HummockVersionId, (usize, Instant)> = BTreeMap::new();
     let max_version_pinning_duration_sec = Duration::from_secs(max_version_pinning_duration_sec);
     // For each run in the loop, accumulate versions to unpin and call unpin RPC once.
     loop {

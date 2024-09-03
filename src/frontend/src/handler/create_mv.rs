@@ -38,6 +38,7 @@ use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
+use crate::utils::ordinal;
 
 pub(super) fn parse_column_names(columns: &[Ident]) -> Option<Vec<String>> {
     if columns.is_empty() {
@@ -276,20 +277,6 @@ It only indicates the physical clustering of the data, which may improve the per
     Ok(PgResponse::empty_result(
         StatementType::CREATE_MATERIALIZED_VIEW,
     ))
-}
-
-fn ordinal(i: usize) -> String {
-    let s = i.to_string();
-    let suffix = if s.ends_with('1') && !s.ends_with("11") {
-        "st"
-    } else if s.ends_with('2') && !s.ends_with("12") {
-        "nd"
-    } else if s.ends_with('3') && !s.ends_with("13") {
-        "rd"
-    } else {
-        "th"
-    };
-    s + suffix
 }
 
 #[cfg(test)]

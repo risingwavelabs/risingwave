@@ -176,7 +176,7 @@ impl TtlReclaimCompactionPicker {
         });
 
         Some(CompactionInput {
-            select_input_size: select_input_ssts.iter().map(|sst| sst.file_size).sum(),
+            select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size).sum(),
             total_file_count: select_input_ssts.len() as _,
             input_levels: vec![
                 InputLevel {
@@ -355,7 +355,7 @@ mod test {
         assert_eq!(levels.len(), 4);
         let levels = Levels {
             levels,
-            l0: Some(l0),
+            l0,
             ..Default::default()
         };
         let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();

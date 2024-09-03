@@ -21,7 +21,6 @@ use futures::prelude::TryFuture;
 use futures::FutureExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -34,7 +33,6 @@ use super::encoder::{
 use super::utils::chunk_to_json;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::connector_common::NatsCommon;
-use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
@@ -79,7 +77,7 @@ impl NatsConfig {
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY {
             Err(SinkError::Config(anyhow!(
-                "Nats sink only support append-only mode"
+                "NATS sink only supports append-only mode"
             )))
         } else {
             Ok(config)
@@ -107,17 +105,10 @@ impl Sink for NatsSink {
 
     const SINK_NAME: &'static str = NATS_SINK;
 
-    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        match user_specified {
-            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
-            SinkDecouple::Disable => Ok(false),
-        }
-    }
-
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
             return Err(SinkError::Nats(anyhow!(
-                "Nats sink only support append-only mode"
+                "NATS sink only supports append-only mode"
             )));
         }
         let _client = (self.config.common.build_client().await)

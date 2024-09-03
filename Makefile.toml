@@ -40,7 +40,6 @@ env_scripts = [
   is_external_udf_enabled = get_env ENABLE_EXTERNAL_UDF
   is_wasm_udf_enabled = get_env ENABLE_WASM_UDF
   is_js_udf_enabled = get_env ENABLE_JS_UDF
-  is_deno_udf_enabled = get_env ENABLE_DENO_UDF
   is_python_udf_enabled = get_env ENABLE_PYTHON_UDF
 
   if ${is_sanitizer_enabled}
@@ -77,11 +76,6 @@ env_scripts = [
   if ${is_js_udf_enabled}
     flags = get_env RISINGWAVE_FEATURE_FLAGS
     set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features js-udf"
-  end
-
-  if ${is_deno_udf_enabled}
-    flags = get_env RISINGWAVE_FEATURE_FLAGS
-    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features deno-udf"
   end
 
   if ${is_python_udf_enabled}
@@ -282,7 +276,7 @@ do
   fi
 done
 
-if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 3000 )) ; then
+if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 4000 )) ; then
     echo "$(tput setaf 1)ERROR: log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
     exit 1
 fi
@@ -375,7 +369,7 @@ ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "$
 
 [tasks.post-build-risingwave]
 category = "RiseDev - Build"
-description = "Copy RisngWave binaries to bin"
+description = "Copy RisingWave binaries to bin"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
 dependencies = [
     "link-all-in-one-binaries",
@@ -766,7 +760,7 @@ set -e
 for tool in cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-make cargo-udeps
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
-  cargo binstall -y --no-symlinks $tool
+  cargo binstall -y --locked --no-symlinks $tool
   echo
 done
 
@@ -1250,7 +1244,7 @@ cat <<EOF > "${INSTALL_PATH}"
 #!/usr/bin/env bash
 set -e
 cd "$DIR"
-./risedev "\\$@"
+RISEDEV_CMD="\\$(basename \\"$0")" ./risedev "\\$@"
 EOF
 chmod +x "${INSTALL_PATH}"
 

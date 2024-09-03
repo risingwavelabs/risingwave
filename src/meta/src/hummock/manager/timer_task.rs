@@ -376,8 +376,6 @@ impl HummockManager {
                         *id,
                         group
                             .l0
-                            .as_ref()
-                            .unwrap()
                             .sub_levels
                             .iter()
                             .map(|level| level.total_file_size)

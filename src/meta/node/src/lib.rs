@@ -25,6 +25,7 @@ use educe::Educe;
 pub use error::{MetaError, MetaResult};
 use redact::Secret;
 use risingwave_common::config::OverrideConfig;
+use risingwave_common::license::LicenseKey;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
@@ -187,8 +188,13 @@ pub struct MetaNodeOpts {
     #[clap(long, hide = true, env = "RW_CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
 
+    /// The license key to activate enterprise features.
+    #[clap(long, hide = true, env = "RW_LICENSE_KEY")]
+    #[override_opts(path = system.license_key)]
+    pub license_key: Option<LicenseKey>,
+
     /// 128-bit AES key for secret store in HEX format.
-    #[educe(Debug(ignore))]
+    #[educe(Debug(ignore))] // TODO: use newtype to redact debug impl
     #[clap(long, hide = true, env = "RW_SECRET_STORE_PRIVATE_KEY_HEX")]
     pub secret_store_private_key_hex: Option<String>,
 
@@ -290,7 +296,6 @@ pub fn start(
                 ),
             },
         };
-
         validate_config(&config);
 
         let total_memory_bytes = resource_util::memory::system_memory_available_bytes();
@@ -374,8 +379,6 @@ pub fn start(
                     .meta
                     .hummock_version_checkpoint_interval_sec,
                 enable_hummock_data_archive: config.meta.enable_hummock_data_archive,
-                enable_hummock_time_travel: config.meta.enable_hummock_time_travel,
-                hummock_time_travel_retention_ms: config.meta.hummock_time_travel_retention_ms,
                 hummock_time_travel_snapshot_interval: config
                     .meta
                     .hummock_time_travel_snapshot_interval,

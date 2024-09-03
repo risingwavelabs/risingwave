@@ -41,6 +41,7 @@ use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::selector::{default_compaction_selector, LocalSelectorStatistic};
 use crate::hummock::compaction::{CompactionDeveloperConfig, CompactionSelectorContext};
 use crate::hummock::level_handler::LevelHandler;
+pub use crate::hummock::manager::CommitEpochInfo;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
 use crate::manager::{
@@ -165,6 +166,7 @@ pub fn generate_test_sstables_with_table_id(
 ) -> Vec<SstableInfo> {
     let mut sst_info = vec![];
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
+        let object_size = 2;
         sst_info.push(SstableInfo {
             object_id: sst_id,
             sst_id,
@@ -183,10 +185,11 @@ pub fn generate_test_sstables_with_table_id(
                 )),
                 right_exclusive: false,
             },
-            file_size: 2,
+            file_size: object_size,
             table_ids: vec![table_id],
-            uncompressed_file_size: 2,
+            uncompressed_file_size: object_size,
             max_epoch: epoch,
+            sst_size: object_size,
             ..Default::default()
         });
     }
@@ -196,6 +199,7 @@ pub fn generate_test_sstables_with_table_id(
 pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) -> Vec<SstableInfo> {
     let mut sst_info = vec![];
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
+        let object_size = 2;
         sst_info.push(SstableInfo {
             object_id: sst_id,
             sst_id,
@@ -204,10 +208,11 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) ->
                 right: Bytes::from(iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch)),
                 right_exclusive: false,
             },
-            file_size: 2,
+            file_size: object_size,
             table_ids: vec![sst_id as u32, sst_id as u32 * 10000],
-            uncompressed_file_size: 2,
+            uncompressed_file_size: object_size,
             max_epoch: epoch,
+            sst_size: object_size,
             ..Default::default()
         });
     }
@@ -296,7 +301,7 @@ pub fn get_sorted_committed_object_ids(
     levels
         .levels
         .iter()
-        .chain(levels.l0.as_ref().unwrap().sub_levels.iter())
+        .chain(levels.l0.sub_levels.iter())
         .flat_map(|levels| levels.table_infos.iter().map(|info| info.object_id))
         .sorted()
         .collect_vec()
@@ -351,6 +356,7 @@ pub async fn setup_compute_env_with_metric(
                 is_streaming: true,
                 is_serving: true,
                 is_unschedulable: false,
+                internal_rpc_host_addr: "".to_string(),
             },
             Default::default(),
         )

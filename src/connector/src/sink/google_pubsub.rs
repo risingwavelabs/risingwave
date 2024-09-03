@@ -29,13 +29,11 @@ use google_cloud_pubsub::client::{Client, ClientConfig};
 use google_cloud_pubsub::publisher::{Awaiter, Publisher};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tonic::Status;
 use with_options::WithOptions;
 
-use super::catalog::desc::SinkDesc;
 use super::catalog::SinkFormatDesc;
 use super::formatter::SinkFormatterImpl;
 use super::log_store::DeliveryFutureManagerAddFuture;
@@ -113,13 +111,6 @@ impl Sink for GooglePubSubSink {
     type LogSinker = AsyncTruncateLogSinkerOf<GooglePubSubSinkWriter>;
 
     const SINK_NAME: &'static str = PUBSUB_SINK;
-
-    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        match user_specified {
-            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
-            SinkDecouple::Disable => Ok(false),
-        }
-    }
 
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {

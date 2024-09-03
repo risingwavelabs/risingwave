@@ -417,7 +417,7 @@ where
                 snapshot_read_epoch = barrier.epoch.prev;
 
                 self.progress.update(
-                    barrier.epoch.curr,
+                    barrier.epoch,
                     snapshot_read_epoch,
                     total_snapshot_processed_rows,
                 );
@@ -540,7 +540,7 @@ where
                     // and backfill which just finished, we need to update mview tracker,
                     // it does not persist this information.
                     self.progress
-                        .finish(barrier.epoch.curr, total_snapshot_processed_rows);
+                        .finish(barrier.epoch, total_snapshot_processed_rows);
                     tracing::trace!(
                         epoch = ?barrier.epoch,
                         "Updated CreateMaterializedTracker"
@@ -652,13 +652,16 @@ where
         } else {
             // Checked the rate limit is not zero.
             #[for_await]
-            for r in Self::snapshot_read(upstream_table, epoch, current_pos) {
+            for r in
+                Self::snapshot_read(upstream_table, HummockReadEpoch::NoWait(epoch), current_pos)
+            {
                 if let Some(rate_limit) = &rate_limiter {
                     rate_limit.until_ready().await;
                 }
-                yield r?;
+                yield Some(r?);
             }
         }
+        yield None;
     }
 
     /// Snapshot read the upstream mv.
@@ -667,16 +670,15 @@ where
     /// remaining data in `builder` must be flushed manually.
     /// Otherwise when we scan a new snapshot, it is possible the rows in the `builder` would be
     /// present, Then when we flush we contain duplicate rows.
-    #[try_stream(ok = Option<OwnedRow>, error = StreamExecutorError)]
-    async fn snapshot_read(
+    #[try_stream(ok = OwnedRow, error = StreamExecutorError)]
+    pub async fn snapshot_read(
         upstream_table: &StorageTable<S>,
-        epoch: u64,
+        epoch: HummockReadEpoch,
         current_pos: Option<OwnedRow>,
     ) {
         let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
         let range_bounds = match range_bounds {
             None => {
-                yield None;
                 return Ok(());
             }
             Some(range_bounds) => range_bounds,
@@ -686,7 +688,7 @@ where
         // together with the upstream mv.
         let iter = upstream_table
             .batch_iter_with_pk_bounds(
-                HummockReadEpoch::NoWait(epoch),
+                epoch,
                 row::empty(),
                 range_bounds,
                 true,
@@ -698,9 +700,8 @@ where
 
         #[for_await]
         for row in row_iter {
-            yield Some(row?);
+            yield row?;
         }
-        yield None;
     }
 
     async fn persist_state(
