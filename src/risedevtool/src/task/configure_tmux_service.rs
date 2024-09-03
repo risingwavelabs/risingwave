@@ -19,6 +19,7 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 use console::style;
 
+use crate::util::stylized_risedev_subcmd;
 use crate::{ExecuteContext, Task};
 
 pub struct ConfigureTmuxTask;
@@ -60,7 +61,7 @@ impl Task for ConfigureTmuxTask {
         if ctx.run_command(cmd).is_ok() {
             bail!(
                 "A previous cluster is already running. Please kill it first with {}.",
-                style("./risedev k").blue().bold()
+                stylized_risedev_subcmd("k"),
             );
         }
 

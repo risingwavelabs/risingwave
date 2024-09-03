@@ -19,6 +19,7 @@ use std::process::Command;
 
 use anyhow::{anyhow, Result};
 
+use crate::util::stylized_risedev_subcmd;
 use crate::{ExecuteContext, RedisConfig, Task};
 
 pub struct RedisService {
@@ -49,7 +50,11 @@ impl Task for RedisService {
         ctx.pb.set_message("starting");
         let path = self.redis_path()?;
         if !path.exists() {
-            return Err(anyhow!("Redis binary not found in {:?}\nDid you enable redis feature in `./risedev configure`?", path));
+            return Err(anyhow!(
+                "Redis binary not found in {:?}\nDid you enable redis feature in `{}`?",
+                path,
+                stylized_risedev_subcmd("configure")
+            ));
         }
 
         let mut cmd = self.redis()?;
