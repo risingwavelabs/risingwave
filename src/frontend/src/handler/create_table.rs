@@ -27,6 +27,7 @@ use risingwave_common::catalog::{
     INITIAL_TABLE_VERSION_ID,
 };
 use risingwave_common::license::Feature;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_connector::source::cdc::build_cdc_table_id;
@@ -750,10 +751,10 @@ fn gen_table_plan_inner(
 /// in create table workflow, the `table_id` is a placeholder will be filled in the Meta
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn gen_create_table_plan_for_cdc_table(
-    handler_args: HandlerArgs,
-    explain_options: ExplainOptions,
+    context: OptimizerContextRef,
     source: Arc<SourceCatalog>,
     external_table_name: String,
+    column_defs: Vec<ColumnDef>,
     mut columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
     connect_properties: WithOptionsSecResolved,
@@ -761,12 +762,12 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
     include_column_options: IncludeOption,
-    resolved_table_name: String,
+    table_name: ObjectName,
+    resolved_table_name: String, // table name without schema prefix
     database_id: DatabaseId,
     schema_id: SchemaId,
     table_id: TableId,
 ) -> Result<(PlanRef, PbTable)> {
-    let context: OptimizerContextRef = OptimizerContext::new(handler_args, explain_options).into();
     let session = context.session_ctx().clone();
 
     // append additional columns to the end
@@ -781,8 +782,17 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
 
-    let (columns, pk_column_ids, _row_id_index) =
+    let (mut columns, pk_column_ids, _row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
+
+    // NOTES: In auto schema change, default value is not provided in column definition.
+    bind_sql_column_constraints(
+        context.session_ctx(),
+        table_name.real_value(),
+        &mut columns,
+        column_defs,
+        &pk_column_ids,
+    )?;
 
     let definition = context.normalized_sql().to_owned();
 
@@ -986,7 +996,7 @@ pub(super) async fn handle_create_table_plan(
                 let session = &handler_args.session;
                 let db_name = session.database();
                 let (schema_name, resolved_table_name) =
-                    Binder::resolve_schema_qualified_name(db_name, table_name)?;
+                    Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
                 let (database_id, schema_id) =
                     session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
@@ -1020,11 +1030,13 @@ pub(super) async fn handle_create_table_plan(
                 )
                 .await?;
 
+                let context: OptimizerContextRef =
+                    OptimizerContext::new(handler_args, explain_options).into();
                 let (plan, table) = gen_create_table_plan_for_cdc_table(
-                    handler_args,
-                    explain_options,
+                    context,
                     source,
                     cdc_table.external_table_name.clone(),
+                    column_defs,
                     columns,
                     pk_names,
                     connect_properties,
@@ -1032,6 +1044,7 @@ pub(super) async fn handle_create_table_plan(
                     on_conflict,
                     with_version_column,
                     include_column_options,
+                    table_name,
                     resolved_table_name,
                     database_id,
                     schema_id,
@@ -1120,13 +1133,20 @@ fn sanity_check_for_cdc_table(
     Ok(())
 }
 
+struct CdcSchemaChangeArgs {
+    /// original table catalog
+    original_catalog: Arc<TableCatalog>,
+    /// new version table columns, only provided in auto schema change
+    new_version_columns: Option<Vec<ColumnCatalog>>,
+}
+
+/// Derive schema for cdc table when create a new Table or alter an existing Table
 async fn derive_schema_for_cdc_table(
     column_defs: &Vec<ColumnDef>,
     constraints: &Vec<TableConstraint>,
     connect_properties: WithOptionsSecResolved,
     need_auto_schema_map: bool,
-    // original table catalog available in auto schema change process
-    original_catalog: Option<Arc<TableCatalog>>,
+    schema_change_args: Option<CdcSchemaChangeArgs>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
     if need_auto_schema_map {
@@ -1158,14 +1178,32 @@ async fn derive_schema_for_cdc_table(
             table.pk_names().clone(),
         ))
     } else {
-        let columns = bind_sql_columns(column_defs)?;
-        // For table created by `create table t (*)` the constraint is empty, we need to
-        // retrieve primary key names from original table catalog if available
-        let pk_names = if let Some(original_catalog) = original_catalog {
-            original_catalog
+        let mut columns = bind_sql_columns(column_defs)?;
+        let pk_names = if let Some(args) = schema_change_args {
+            // If new_version_columns is provided, we are in the process of auto schema change.
+            // update the default value column since the default value column is not set in the
+            // column sql definition.
+            if let Some(new_version_columns) = args.new_version_columns {
+                for (col, new_version_col) in columns
+                    .iter_mut()
+                    .zip_eq_fast(new_version_columns.into_iter())
+                {
+                    assert_eq!(col.name(), new_version_col.name());
+                    col.column_desc.generated_or_default_column =
+                        new_version_col.column_desc.generated_or_default_column;
+                }
+            }
+
+            // For table created by `create table t (*)` the constraint is empty, we need to
+            // retrieve primary key names from original table catalog if available
+            args.original_catalog
                 .pk
                 .iter()
-                .map(|x| original_catalog.columns[x.column_index].name().to_string())
+                .map(|x| {
+                    args.original_catalog.columns[x.column_index]
+                        .name()
+                        .to_string()
+                })
                 .collect()
         } else {
             bind_sql_pk_names(column_defs, constraints)?
@@ -1289,6 +1327,7 @@ pub async fn generate_stream_graph_for_table(
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
     cdc_table_info: Option<CdcTableInfo>,
+    new_version_columns: Option<Vec<ColumnCatalog>>,
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
@@ -1342,22 +1381,28 @@ pub async fn generate_stream_graph_for_table(
                 &constraints,
                 connect_properties.clone(),
                 false,
-                Some(original_catalog.clone()),
+                Some(CdcSchemaChangeArgs {
+                    original_catalog: original_catalog.clone(),
+                    new_version_columns,
+                }),
             )
             .await?;
 
+            let context: OptimizerContextRef =
+                OptimizerContext::new(handler_args, ExplainOptions::default()).into();
             let (plan, table) = gen_create_table_plan_for_cdc_table(
-                handler_args,
-                ExplainOptions::default(),
+                context,
                 source,
                 cdc_table.external_table_name.clone(),
+                column_defs,
                 columns,
                 pk_names,
                 connect_properties,
                 col_id_gen,
                 on_conflict,
                 with_version_column,
-                vec![], // empty include options
+                IncludeOption::default(),
+                table_name,
                 resolved_table_name,
                 database_id,
                 schema_id,
