@@ -231,6 +231,11 @@ async fn test_merger_sum_aggr() {
     let mut epoch = test_epoch(1);
     let b1 = Barrier::new_test_barrier(epoch);
     barrier_test_env.inject_barrier(&b1, actors.clone());
+    barrier_test_env
+        .shared_context
+        .local_barrier_manager
+        .flush_all_events()
+        .await;
     let handles = actor_futures
         .into_iter()
         .map(|actor_future| tokio::spawn(actor_future))
