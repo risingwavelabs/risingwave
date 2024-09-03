@@ -31,7 +31,7 @@ use risingwave_pb::stream_service::BuildActorInfo;
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tracing::{debug, error, info, warn, Instrument};
+use tracing::{debug, info, warn, Instrument};
 
 use super::{CheckpointControl, TracedEpoch};
 use crate::barrier::info::{InflightGraphInfo, InflightSubscriptionInfo};
@@ -197,7 +197,6 @@ impl GlobalBarrierManagerContext {
         let (dropped_actors, cancelled) = scheduled_barriers.pre_apply_drop_cancel_scheduled();
         let applied = !dropped_actors.is_empty() || !cancelled.is_empty();
         if !cancelled.is_empty() {
-            error!(?cancelled, "pre apply cancel drop");
             match &self.metadata_manager {
                 MetadataManager::V1(mgr) => {
                     mgr.fragment_manager
@@ -1125,8 +1124,7 @@ impl GlobalBarrierManagerContext {
         {
             for (node_id, actors) in &info.actor_map {
                 if !actors.is_empty() && !all_node_actors.contains_key(node_id) {
-                    // TODO: remove it
-                    panic!("invalid: {} {:?}", node_id, actors);
+                    return Err(anyhow!("streaming job dropped during update").into());
                 }
             }
         }
