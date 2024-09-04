@@ -15,8 +15,9 @@
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 
+use risingwave_pb::meta::actor_count_per_parallelism::PbWorkerActorCount;
 use risingwave_pb::meta::cluster_limit::PbLimit;
-use risingwave_pb::meta::{PbActorCountPerParallelism, PbClusterLimit, PbWorkerActorCount};
+use risingwave_pb::meta::{PbActorCountPerParallelism, PbClusterLimit};
 
 pub const FREE_TIER_ACTOR_CNT_SOFT_LIMIT: usize = 25;
 pub const FREE_TIER_ACTOR_CNT_HARD_LIMIT: usize = 100;
