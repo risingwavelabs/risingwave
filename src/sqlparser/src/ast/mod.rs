@@ -1302,6 +1302,8 @@ pub enum Statement {
         cdc_table_info: Option<CdcTableInfo>,
         /// `INCLUDE a AS b INCLUDE c`
         include_column_options: IncludeOption,
+
+        engine: Engine,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -1835,6 +1837,7 @@ impl fmt::Display for Statement {
                 query,
                 cdc_table_info,
                 include_column_options,
+                engine,
             } => {
                 // We want to allow the following options
                 // Empty column list, allowed by PostgreSQL:
@@ -1883,6 +1886,13 @@ impl fmt::Display for Statement {
                 if let Some(info) = cdc_table_info {
                     write!(f, " FROM {}", info.source_name)?;
                     write!(f, " TABLE '{}'", info.external_table_name)?;
+                }
+                // TODO(nimtable): change the default engine to iceberg
+                match engine {
+                    Engine::Hummock => {},
+                    Engine::Iceberg => {
+                        write!(f, " ENGINE = {}", engine)?;
+                    },
                 }
                 Ok(())
             }
@@ -2779,6 +2789,22 @@ impl fmt::Display for OnConflict {
             OnConflict::UpdateFull => "DO UPDATE FULL",
             OnConflict::Nothing => "DO NOTHING",
             OnConflict::UpdateIfNotNull => "DO UPDATE IF NOT NULL",
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Engine {
+    Hummock,
+    Iceberg,
+}
+
+impl fmt::Display for crate::ast::Engine {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            crate::ast::Engine::Hummock => "HUMMOCK",
+            crate::ast::Engine::Iceberg => "ICEBERG",
         })
     }
 }

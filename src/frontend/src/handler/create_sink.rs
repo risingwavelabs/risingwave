@@ -673,10 +673,16 @@ pub(crate) async fn reparse_table_for_sink(
         append_only,
         on_conflict,
         with_version_column,
+        engine,
         ..
     } = definition
     else {
         panic!("unexpected statement type: {:?}", definition);
+    };
+
+    let engine = match engine {
+        risingwave_sqlparser::ast::Engine::Hummock => risingwave_common::catalog::Engine::Hummock,
+        risingwave_sqlparser::ast::Engine::Iceberg => risingwave_common::catalog::Engine::Iceberg,
     };
 
     let (graph, table, source, _) = generate_stream_graph_for_table(
@@ -695,6 +701,7 @@ pub(crate) async fn reparse_table_for_sink(
         with_version_column,
         None,
         None,
+        engine,
     )
     .await?;
 

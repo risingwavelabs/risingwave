@@ -81,6 +81,7 @@ async fn do_handle_explain(
                     on_conflict,
                     with_version_column,
                     include_column_options,
+                    risingwave_common::catalog::Engine::Hummock,
                 )
                 .await?;
                 let context = plan.ctx();
