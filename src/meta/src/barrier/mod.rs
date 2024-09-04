@@ -965,6 +965,19 @@ impl GlobalBarrierManager {
             info,
         } = &command
         {
+            if self.state.paused_reason().is_some() {
+                warn!("cannot create streaming job with snapshot backfill when paused");
+                for notifier in notifiers {
+                    notifier.notify_start_failed(
+                        anyhow!("cannot create streaming job with snapshot backfill when paused",)
+                            .into(),
+                    );
+                }
+                return Ok(());
+            }
+            let mutation = command
+                .to_mutation(None)
+                .expect("should have some mutation in `CreateStreamingJob` command");
             self.checkpoint_control
                 .creating_streaming_job_controls
                 .insert(
@@ -975,6 +988,7 @@ impl GlobalBarrierManager {
                         prev_epoch.value().0,
                         &self.checkpoint_control.hummock_version_stats,
                         &self.context.metrics,
+                        mutation,
                     ),
                 );
         }
