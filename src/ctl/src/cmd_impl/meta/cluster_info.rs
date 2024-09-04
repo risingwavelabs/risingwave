@@ -40,7 +40,7 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
         revision: _,
     } = get_cluster_info(context).await?;
 
-    let mut actor_splits_map: BTreeMap<u32, String> = BTreeMap::new();
+    let mut actor_splits_map: BTreeMap<u32, (usize, String)> = BTreeMap::new();
 
     // build actor_splits_map
     for table_fragment in &table_fragments {
@@ -69,7 +69,7 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
                         .map(|split| split.id())
                         .collect_vec()
                         .join(",");
-                    actor_splits_map.insert(actor.actor_id, splits);
+                    actor_splits_map.insert(actor.actor_id, (splits.len(), splits));
                 }
             }
         }
@@ -112,7 +112,7 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
                 }
             );
             for actor in &fragment.actors {
-                if let Some(splits) = actor_splits_map.get(&actor.actor_id) {
+                if let Some((split_count, splits)) = actor_splits_map.get(&actor.actor_id) {
                     println!(
                         "\t\tActor{} ({} splits): [{}]{}",
                         if ignore_id {
@@ -120,7 +120,7 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
                         } else {
                             format!(" #{:<3}", actor.actor_id,)
                         },
-                        splits.len(),
+                        split_count,
                         splits,
                         if !actor.upstream_actor_id.is_empty() {
                             assert!(
@@ -136,7 +136,7 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
                                 } else {
                                     format!(" #{}", actor.upstream_actor_id[0])
                                 },
-                                upstream_splits
+                                upstream_splits.1
                             )
                         } else {
                             "".to_string()
