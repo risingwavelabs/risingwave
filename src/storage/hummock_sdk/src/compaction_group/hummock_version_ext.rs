@@ -2223,7 +2223,7 @@ mod tests {
             },
         );
 
-        let right_levels = build_initial_compaction_group_levels(
+        let mut right_levels = build_initial_compaction_group_levels(
             2,
             &CompactionConfig {
                 max_level: 6,
