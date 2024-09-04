@@ -154,7 +154,9 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         Worker::insert(worker::ActiveModel::from(&worker.worker_node))
             .exec(&meta_store_sql.conn)
             .await?;
-        if worker.worker_type() == WorkerType::ComputeNode {
+        if worker.worker_type() == WorkerType::ComputeNode
+            || worker.worker_type() == WorkerType::Frontend
+        {
             let pb_property = worker.worker_node.property.as_ref().unwrap();
             let property = worker_property::ActiveModel {
                 worker_id: Set(worker.worker_id() as _),
@@ -162,6 +164,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 is_serving: Set(pb_property.is_serving),
                 is_unschedulable: Set(pb_property.is_unschedulable),
                 parallelism: Set(worker.worker_node.parallelism() as _),
+                internal_rpc_host_addr: Set(Some(pb_property.internal_rpc_host_addr.clone())),
             };
             WorkerProperty::insert(property)
                 .exec(&meta_store_sql.conn)

@@ -14,7 +14,7 @@
 
 use thiserror::Error;
 
-use super::{License, LicenseKeyError, LicenseManager, Tier};
+use super::{report_telemetry, License, LicenseKeyError, LicenseManager, Tier};
 
 /// Define all features that are available based on the tier of the license.
 ///
@@ -55,6 +55,9 @@ macro_rules! for_all_features {
             { CdcTableSchemaMap,    Paid,       "Automatically map upstream schema to CDC Table."},
             { SqlServerSink,        Paid,       "Sink data from RisingWave to SQL Server." },
             { SqlServerCdcSource,   Paid,       "CDC source connector for Sql Server." },
+            { CdcAutoSchemaChange,  Paid,       "Auto replicate upstream DDL to CDC Table." },
+            { IcebergSinkWithGlue,  Paid,       "Delivering data to Iceberg with Glue catalog." },
+            { FileSink,             Paid,       "Delivering data to object storage."},
         }
     };
 }
@@ -78,6 +81,14 @@ macro_rules! def_feature {
                 match self {
                     $(
                         Self::$name => Tier::$min_tier,
+                    )*
+                }
+            }
+
+            fn get_feature_name(&self) -> &'static str {
+                match &self {
+                    $(
+                        Self::$name => stringify!($name),
                     )*
                 }
             }
@@ -110,7 +121,7 @@ pub enum FeatureNotAvailable {
 impl Feature {
     /// Check whether the feature is available based on the current license.
     pub fn check_available(self) -> Result<(), FeatureNotAvailable> {
-        match LicenseManager::get().license() {
+        let check_res = match LicenseManager::get().license() {
             Ok(license) => {
                 if license.tier >= self.min_tier() {
                     Ok(())
@@ -133,6 +144,10 @@ impl Feature {
                     })
                 }
             }
-        }
+        };
+
+        report_telemetry(&self, self.get_feature_name(), check_res.is_ok());
+
+        check_res
     }
 }

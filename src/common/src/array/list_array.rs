@@ -372,11 +372,11 @@ impl ListValue {
 
     /// Creates a new `ListValue` from an iterator of `Datum`.
     pub fn from_datum_iter<T: ToDatumRef>(
-        datatype: &DataType,
+        elem_datatype: &DataType,
         iter: impl IntoIterator<Item = T>,
     ) -> Self {
         let iter = iter.into_iter();
-        let mut builder = datatype.create_array_builder(iter.size_hint().0);
+        let mut builder = elem_datatype.create_array_builder(iter.size_hint().0);
         for datum in iter {
             builder.append(datum);
         }

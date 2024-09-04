@@ -30,12 +30,12 @@ use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::{Barrier, BarrierMutation};
+use risingwave_pb::stream_service::build_actor_info::SubscriptionIds;
 use risingwave_pb::stream_service::streaming_control_stream_request::RemovePartialGraphRequest;
 use risingwave_pb::stream_service::{
     streaming_control_stream_request, streaming_control_stream_response, BarrierCompleteResponse,
-    BroadcastActorInfoTableRequest, BuildActorInfo, BuildActorsRequest, DropActorsRequest,
-    InjectBarrierRequest, StreamingControlStreamRequest, StreamingControlStreamResponse,
-    UpdateActorsRequest,
+    BuildActorInfo, DropActorsRequest, InjectBarrierRequest, StreamingControlStreamRequest,
+    StreamingControlStreamResponse,
 };
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::StreamClient;
@@ -263,6 +263,39 @@ impl ControlStreamManager {
             pre_applied_graph_info,
             applied_graph_info,
             actor_ids_to_pre_sync_mutation,
+            command_ctx.actors_to_create().map(|actors_to_create| {
+                actors_to_create
+                    .into_iter()
+                    .map(|(worker_id, actors)| {
+                        (
+                            worker_id,
+                            actors
+                                .into_iter()
+                                .map(|actor| BuildActorInfo {
+                                    actor: Some(actor),
+                                    // TODO: consider subscriber of backfilling mv
+                                    related_subscriptions: command_ctx
+                                        .subscription_info
+                                        .mv_depended_subscriptions
+                                        .iter()
+                                        .map(|(table_id, subscriptions)| {
+                                            (
+                                                table_id.table_id,
+                                                SubscriptionIds {
+                                                    subscription_ids: subscriptions
+                                                        .keys()
+                                                        .cloned()
+                                                        .collect(),
+                                                },
+                                            )
+                                        })
+                                        .collect(),
+                                })
+                                .collect_vec(),
+                        )
+                    })
+                    .collect()
+            }),
         )
     }
 
@@ -275,6 +308,7 @@ impl ControlStreamManager {
         pre_applied_graph_info: &InflightGraphInfo,
         applied_graph_info: Option<&InflightGraphInfo>,
         actor_ids_to_pre_sync_mutation: HashMap<WorkerId, Vec<ActorId>>,
+        mut new_actors: Option<HashMap<WorkerId, Vec<BuildActorInfo>>>,
     ) -> MetaResult<HashSet<WorkerId>> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
             "inject_barrier_err"
@@ -287,30 +321,48 @@ impl ControlStreamManager {
             })
             .unwrap_or(u32::MAX);
 
-        for worker_id in pre_applied_graph_info.worker_ids().chain(
-            applied_graph_info
-                .into_iter()
-                .flat_map(|info| info.worker_ids()),
-        ) {
+        for worker_id in pre_applied_graph_info
+            .worker_ids()
+            .chain(
+                applied_graph_info
+                    .into_iter()
+                    .flat_map(|info| info.worker_ids()),
+            )
+            .chain(
+                new_actors
+                    .iter()
+                    .flat_map(|new_actors| new_actors.keys().cloned()),
+            )
+        {
             if !self.nodes.contains_key(&worker_id) {
                 return Err(anyhow!("unconnected worker node {}", worker_id).into());
             }
         }
 
         let mut node_need_collect = HashSet::new();
+        let new_actors_location_to_broadcast = new_actors
+            .iter()
+            .flatten()
+            .flat_map(|(worker_id, actor_infos)| {
+                actor_infos.iter().map(|actor_info| ActorInfo {
+                    actor_id: actor_info.actor.as_ref().unwrap().actor_id,
+                    host: self
+                        .nodes
+                        .get(worker_id)
+                        .expect("have checked exist previously")
+                        .worker
+                        .host
+                        .clone(),
+                })
+            })
+            .collect_vec();
 
         self.nodes
             .iter_mut()
             .map(|(node_id, node)| {
-                let actor_ids_to_send: Vec<_> =
-                    pre_applied_graph_info.actor_ids_to_send(*node_id).collect();
                 let actor_ids_to_collect: Vec<_> = pre_applied_graph_info
                     .actor_ids_to_collect(*node_id)
                     .collect();
-                if actor_ids_to_collect.is_empty() {
-                    // No need to send or collect barrier for this node.
-                    assert!(actor_ids_to_send.is_empty());
-                }
                 let table_ids_to_sync = if let Some(graph_info) = applied_graph_info {
                     graph_info
                         .existing_table_ids()
@@ -340,7 +392,6 @@ impl ControlStreamManager {
                                     InjectBarrierRequest {
                                         request_id: StreamRpcManager::new_request_id(),
                                         barrier: Some(barrier),
-                                        actor_ids_to_send,
                                         actor_ids_to_collect,
                                         table_ids_to_sync,
                                         partial_graph_id,
@@ -351,6 +402,14 @@ impl ControlStreamManager {
                                                 .flatten()
                                                 .cloned()
                                                 .collect(),
+                                        broadcast_info: new_actors_location_to_broadcast.clone(),
+                                        actors_to_build: new_actors
+                                            .as_mut()
+                                            .map(|new_actors| new_actors.remove(node_id))
+                                            .into_iter()
+                                            .flatten()
+                                            .flatten()
+                                            .collect(),
                                     },
                                 ),
                             ),
@@ -477,73 +536,6 @@ impl StreamRpcManager {
 
     fn new_request_id() -> String {
         Uuid::new_v4().to_string()
-    }
-
-    pub async fn build_actors(
-        &self,
-        node_map: &HashMap<WorkerId, WorkerNode>,
-        node_actors: impl Iterator<Item = (WorkerId, Vec<ActorId>)>,
-    ) -> MetaResult<()> {
-        self.make_request(
-            node_actors.map(|(worker_id, actors)| (node_map.get(&worker_id).unwrap(), actors)),
-            |client, actors| async move {
-                let request_id = Self::new_request_id();
-                tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
-                client
-                    .build_actors(BuildActorsRequest {
-                        request_id,
-                        actor_id: actors,
-                    })
-                    .await
-            },
-        )
-        .await?;
-        Ok(())
-    }
-
-    /// Broadcast and update actor info in CN.
-    /// `node_actors_to_create` must be a subset of `broadcast_worker_ids`.
-    pub async fn broadcast_update_actor_info(
-        &self,
-        worker_nodes: &HashMap<WorkerId, WorkerNode>,
-        broadcast_worker_ids: impl Iterator<Item = WorkerId>,
-        actor_infos_to_broadcast: impl Iterator<Item = ActorInfo>,
-        node_actors_to_create: impl Iterator<Item = (WorkerId, Vec<BuildActorInfo>)>,
-    ) -> MetaResult<()> {
-        let actor_infos = actor_infos_to_broadcast.collect_vec();
-        let mut node_actors_to_create = node_actors_to_create.collect::<HashMap<_, _>>();
-        self.make_request(
-            broadcast_worker_ids
-                .map(|worker_id| {
-                    let node = worker_nodes.get(&worker_id).unwrap();
-                    let actors = node_actors_to_create.remove(&worker_id);
-                    (node, actors)
-                }),
-            |client, actors| {
-                let info = actor_infos.clone();
-                async move {
-                    client
-                        .broadcast_actor_info_table(BroadcastActorInfoTableRequest { info })
-                        .await?;
-                    if let Some(actors) = actors {
-                        let request_id = Self::new_request_id();
-                        let actor_ids = actors.iter().map(|actor| actor.actor.as_ref().unwrap().actor_id).collect_vec();
-                        tracing::debug!(request_id = request_id.as_str(), actors = ?actor_ids, "update actors");
-                        client
-                            .update_actors(UpdateActorsRequest { request_id, actors })
-                            .await?;
-                    }
-                    Ok(())
-                }
-            },
-        )
-        .await?;
-        assert!(
-            node_actors_to_create.is_empty(),
-            "remaining uncreated actors: {:?}",
-            node_actors_to_create
-        );
-        Ok(())
     }
 
     pub async fn drop_actors(

@@ -637,6 +637,7 @@ impl PlanRoot {
         version: Option<TableVersion>,
         with_external_source: bool,
         retention_seconds: Option<NonZeroU32>,
+        cdc_table_id: Option<String>,
     ) -> Result<StreamMaterialize> {
         assert_eq!(self.phase, PlanPhase::Logical);
         assert_eq!(self.plan.convention(), Convention::Logical);
@@ -867,6 +868,7 @@ impl PlanRoot {
             row_id_index,
             version,
             retention_seconds,
+            cdc_table_id,
         )
     }
 

@@ -47,7 +47,9 @@ use super::trace::TracedEpoch;
 use crate::barrier::{GlobalBarrierManagerContext, InflightSubscriptionInfo};
 use crate::manager::{DdlType, InflightFragmentInfo, MetadataManager, StreamingJob, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
-use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
+use crate::stream::{
+    build_actor_connector_splits, validate_assignment, SplitAssignment, ThrottleConfig,
+};
 use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -76,6 +78,7 @@ pub struct Reschedule {
 
     /// Reassigned splits for source actors.
     /// It becomes the `actor_splits` in [`UpdateMutation`].
+    /// `Source` and `SourceBackfill` are handled together here.
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
     /// Whether this fragment is injectable. The injectable means whether the fragment contains
@@ -520,9 +523,14 @@ impl CommandContext {
                 }
 
                 Command::SourceSplitAssignment(change) => {
+                    let mut checked_assignment = change.clone();
+                    checked_assignment
+                        .iter_mut()
+                        .for_each(|(_, assignment)| validate_assignment(assignment));
+
                     let mut diff = HashMap::new();
 
-                    for actor_splits in change.values() {
+                    for actor_splits in checked_assignment.values() {
                         diff.extend(actor_splits.clone());
                     }
 
@@ -570,7 +578,12 @@ impl CommandContext {
                         })
                         .collect();
                     let added_actors = table_fragments.actor_ids();
-                    let actor_splits = split_assignment
+
+                    let mut checked_split_assignment = split_assignment.clone();
+                    checked_split_assignment
+                        .iter_mut()
+                        .for_each(|(_, assignment)| validate_assignment(assignment));
+                    let actor_splits = checked_split_assignment
                         .values()
                         .flat_map(build_actor_connector_splits)
                         .collect();
@@ -776,7 +789,10 @@ impl CommandContext {
                     let mut actor_splits = HashMap::new();
 
                     for reschedule in reschedules.values() {
-                        for (actor_id, splits) in &reschedule.actor_splits {
+                        let mut checked_assignment = reschedule.actor_splits.clone();
+                        validate_assignment(&mut checked_assignment);
+
+                        for (actor_id, splits) in &checked_assignment {
                             actor_splits.insert(
                                 *actor_id as ActorId,
                                 ConnectorSplits {
@@ -827,6 +843,42 @@ impl CommandContext {
             };
 
         mutation
+    }
+
+    pub fn actors_to_create(&self) -> Option<HashMap<WorkerId, Vec<StreamActor>>> {
+        match &self.command {
+            Command::CreateStreamingJob { info, job_type } => {
+                let mut map = match job_type {
+                    CreateStreamingJobType::Normal => HashMap::new(),
+                    CreateStreamingJobType::SinkIntoTable(replace_table) => {
+                        replace_table.new_table_fragments.actors_to_create()
+                    }
+                    CreateStreamingJobType::SnapshotBackfill(_) => {
+                        // for snapshot backfill, the actors to create is measured separately
+                        return None;
+                    }
+                };
+                for (worker_id, new_actors) in info.table_fragments.actors_to_create() {
+                    map.entry(worker_id).or_default().extend(new_actors)
+                }
+                Some(map)
+            }
+            Command::RescheduleFragment { reschedules, .. } => {
+                let mut map: HashMap<WorkerId, Vec<_>> = HashMap::new();
+                for (actor, status) in reschedules
+                    .values()
+                    .flat_map(|reschedule| reschedule.newly_created_actors.iter())
+                {
+                    let worker_id = status.location.as_ref().unwrap().worker_node_id;
+                    map.entry(worker_id).or_default().push(actor.clone());
+                }
+                Some(map)
+            }
+            Command::ReplaceTable(replace_table) => {
+                Some(replace_table.new_table_fragments.actors_to_create())
+            }
+            _ => None,
+        }
     }
 
     fn generate_update_mutation_for_replace_table(

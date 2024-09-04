@@ -243,6 +243,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::SortOverWindow => SortOverWindowExecutor,
             NodeBody::MaxOneRow => MaxOneRowExecutor,
             NodeBody::FileScan => FileScanExecutorBuilder,
+            NodeBody::IcebergScan => IcebergScanExecutorBuilder,
             // Follow NodeBody only used for test
             NodeBody::BlockExecutor => BlockExecutorBuilder,
             NodeBody::BusyLoopExecutor => BusyLoopExecutorBuilder,

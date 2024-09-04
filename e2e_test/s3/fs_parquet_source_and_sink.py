@@ -69,7 +69,8 @@ def do_test(config, file_num, item_num_per_file, prefix):
         s3.bucket_name = '{config['S3_BUCKET']}',
         s3.credentials.access = '{config['S3_ACCESS_KEY']}',
         s3.credentials.secret = '{config['S3_SECRET_KEY']}',
-        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
+        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}',
+        refresh.interval.sec = 1,
     ) FORMAT PLAIN ENCODE PARQUET;''')
 
     total_rows = file_num * item_num_per_file
@@ -95,11 +96,109 @@ def do_test(config, file_num, item_num_per_file, prefix):
     _assert_eq('count(*)', result[0], total_rows)
     _assert_eq('sum(id)', result[1], (total_rows - 1) * total_rows / 2)
 
-    print('Test pass')
+    print('File source test pass!')
 
-    cur.execute(f'drop table {_table()}')
     cur.close()
     conn.close()
+
+def do_sink(config, file_num, item_num_per_file, prefix):
+    conn = psycopg2.connect(
+        host="localhost",
+        port="4566",
+        user="root",
+        database="dev"
+    )
+
+    # Open a cursor to execute SQL statements
+    cur = conn.cursor()
+
+    def _table():
+        return 's3_test_parquet'
+
+    # Execute a SELECT statement
+    cur.execute(f'''CREATE sink test_file_sink as select
+        id,
+        name,
+        sex,
+        mark,
+        test_int,
+        test_real,
+        test_double_precision,
+        test_varchar,
+        test_bytea,
+        test_date,
+        test_time,
+        test_timestamp,
+        test_timestamptz
+        from {_table()} WITH (
+        connector = 's3',
+        match_pattern = '*.parquet',
+        s3.region_name = '{config['S3_REGION']}',
+        s3.bucket_name = '{config['S3_BUCKET']}',
+        s3.credentials.access = '{config['S3_ACCESS_KEY']}',
+        s3.credentials.secret = '{config['S3_SECRET_KEY']}',
+        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}',
+        s3.path = '',
+        s3.file_type = 'parquet',
+        type = 'append-only',
+        force_append_only='true'
+    ) FORMAT PLAIN ENCODE PARQUET(force_append_only='true');''')
+
+    print('Sink into s3...')
+    # Execute a SELECT statement
+    cur.execute(f'''CREATE TABLE test_sink_table(
+        id bigint primary key,
+        name TEXT,
+        sex bigint,
+        mark bigint,
+        test_int int,
+        test_real real,
+        test_double_precision double precision,
+        test_varchar varchar,
+        test_bytea bytea,
+        test_date date,
+        test_time time,
+        test_timestamp timestamp,
+        test_timestamptz timestamptz,
+    ) WITH (
+        connector = 's3',
+        match_pattern = '*.parquet',
+        s3.region_name = '{config['S3_REGION']}',
+        s3.bucket_name = '{config['S3_BUCKET']}',
+        s3.credentials.access = '{config['S3_ACCESS_KEY']}',
+        s3.credentials.secret = '{config['S3_SECRET_KEY']}',
+        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
+    ) FORMAT PLAIN ENCODE PARQUET;''')
+
+    total_rows = file_num * item_num_per_file
+    MAX_RETRIES = 40
+    for retry_no in range(MAX_RETRIES):
+        cur.execute(f'select count(*) from test_sink_table')
+        result = cur.fetchone()
+        if result[0] == total_rows:
+            break
+        print(f"[retry {retry_no}] Now got {result[0]} rows in table, {total_rows} expected, wait 10s")
+        sleep(10)
+
+    stmt = f'select count(*), sum(id) from test_sink_table'
+    print(f'Execute reading sink files: {stmt}')
+    cur.execute(stmt)
+    result = cur.fetchone()
+
+    print('Got:', result)
+
+    def _assert_eq(field, got, expect):
+        assert got == expect, f'{field} assertion failed: got {got}, expect {expect}.'
+
+    _assert_eq('count(*)', result[0], total_rows)
+    _assert_eq('sum(id)', result[1], (total_rows - 1) * total_rows / 2)
+
+    print('File sink test pass!')
+    cur.execute(f'drop sink test_file_sink')
+    cur.execute(f'drop table test_sink_table')
+    cur.close()
+    conn.close()
+
 
 
 if __name__ == "__main__":
@@ -135,3 +234,10 @@ if __name__ == "__main__":
     # clean up s3 files
     for idx, _ in enumerate(data):
        client.remove_object(config["S3_BUCKET"], _s3(idx))
+
+    do_sink(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id)
+
+     # clean up s3 files
+    for idx, _ in enumerate(data):
+       client.remove_object(config["S3_BUCKET"], _s3(idx))
+

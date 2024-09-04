@@ -19,6 +19,7 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
+use crate::util::stylized_risedev_subcmd;
 use crate::PubsubConfig;
 
 pub struct PubsubService {
@@ -49,7 +50,11 @@ impl Task for PubsubService {
 
         let path = self.gcloud_path()?;
         if !path.exists() {
-            return Err(anyhow!("gcloud binary not found in {:?}\nDid you enable pubsub-emulator feature in `./risedev configure`?", path));
+            return Err(anyhow!(
+                "gcloud binary not found in {:?}\nDid you enable pubsub-emulator feature in `{}`?",
+                path,
+                stylized_risedev_subcmd("configure")
+            ));
         }
 
         let mut cmd = self.gcloud()?;

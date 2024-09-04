@@ -18,6 +18,7 @@ message SstableInfo {
   uint64 object_id = 1;
   uint64 sst_id = 2;
   KeyRange key_range = 3;
+  // represents the physical object size, which is usually used in the builder.
   uint64 file_size = 4;
   repeated uint32 table_ids = 5;
   uint64 meta_offset = 6;
@@ -28,6 +29,10 @@ message SstableInfo {
   uint64 uncompressed_file_size = 11;
   uint64 range_tombstone_count = 12;
   BloomFilterType bloom_filter_kind = 13;
+
+  // In order to calculate more finely in the compaction strategy, we need to re-calculate the sst_size after split sst
+  // `sst_size` represents the size of the sst instead of the object size(usually used in the meta).
+  uint64 sst_size = 14;
 }
 
 enum LevelType {
@@ -234,7 +239,8 @@ message HummockSnapshot {
   // Epoch with checkpoint, we will read durable data with it.
   uint64 committed_epoch = 1;
   // Epoch without checkpoint, we will read real-time data with it. But it may be rolled back.
-  uint64 current_epoch = 2;
+  reserved 2;
+  reserved "current_epoch";
 }
 
 message VersionUpdatePayload {
@@ -716,6 +722,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 tombstone_reclaim_ratio = 16;
       CompressionAlgorithm compression_algorithm = 17;
       uint32 max_l0_compact_level_count = 18;
+      uint64 sst_allowed_trivial_move_min_size = 19;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -907,12 +914,19 @@ message CompactionConfig {
 
   // The limitation of the level count of l0 compaction
   optional uint32 max_l0_compact_level_count = 21;
+
+  // The limitation of base level trivial move sst size
+  optional uint64 sst_allowed_trivial_move_min_size = 22;
 }
 
 message TableStats {
   int64 total_key_size = 1;
   int64 total_value_size = 2;
   int64 total_key_count = 3;
+
+  // `total_compressed_size`` represents the size that the table takes up in the output sst
+  //  and this field is only filled and used by CN flushes, not compactor compaction
+  uint64 total_compressed_size = 4;
 }
 
 message HummockVersionStats {

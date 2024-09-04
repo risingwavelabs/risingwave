@@ -20,7 +20,6 @@ use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::{StreamScanNode, StreamScanType};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use tokio::sync::mpsc;
 
 use super::*;
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
@@ -154,10 +153,10 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     .collect_vec();
 
                 let vnodes = params.vnode_bitmap.map(Arc::new);
-                let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
-                params
-                    .create_actor_context
-                    .register_sender(params.actor_context.id, barrier_tx);
+                let barrier_rx = params
+                    .shared_context
+                    .local_barrier_manager
+                    .subscribe_barrier(params.actor_context.id);
 
                 let upstream_table =
                     StorageTable::new_partial(state_store.clone(), column_ids, vnodes, table_desc);

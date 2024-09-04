@@ -63,6 +63,26 @@ select * from m1;
 
 query I
 select
+ approx_percentile(0.01, 0.01) within group (order by p_col) as p01,
+ round(sum(p_col)::numeric, 2) as s,
+ approx_percentile(0.5, 0.01) within group (order by p_col) as p50,
+ count(*)::double + approx_percentile(0.99, 0.01) within group (order by p_col) as p99
+from t;
+----
+-963.1209598593477 0.55 0.00009999833511933609 3965.1209598593477
+
+query I
+select
+ approx_percentile(0.01, 0.01) within group (order by p_col) as p01,
+ round(sum(p_col)::numeric, 2) as s,
+ approx_percentile(0.5, 0.01) within group (order by p_col) as p50,
+ count(*)::double + approx_percentile(0.99, 0.01) within group (order by p_col) as p99
+from t group by grp_col;
+----
+-963.1209598593477 0.55 0.00009999833511933609 3965.1209598593477
+
+query I
+select
   percentile_cont(0.01) within group (order by p_col) as p01,
   round(sum(p_col) * 100),
   percentile_cont(0.5) within group (order by p_col) as p50,
@@ -71,6 +91,25 @@ select
 from t;
 ----
 -969.99 55 0.0001 3002 969.9899999999998
+
+statement ok
+delete from t;
+
+statement ok
+insert into t select 0.0001, 1 from generate_series(1, 501);
+
+statement ok
+flush;
+
+query I
+select
+ round(p01::numeric, 6),
+ round(s::numeric, 6),
+ round(p50::numeric, 6),
+ round(p99::numeric, 6) as p99_plus_sum
+ from m1;
+----
+0.000100 0.050100 0.000100 501.000100
 
 statement ok
 drop materialized view m1;

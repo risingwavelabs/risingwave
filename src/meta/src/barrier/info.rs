@@ -259,24 +259,6 @@ impl InflightGraphInfo {
         })
     }
 
-    /// Returns actor list to send in the target worker node.
-    pub fn actor_ids_to_send(&self, node_id: WorkerId) -> impl Iterator<Item = ActorId> + '_ {
-        self.fragment_infos
-            .values()
-            .filter(|info| info.is_injectable)
-            .flat_map(move |info| {
-                info.actors
-                    .iter()
-                    .filter_map(move |(actor_id, actor_node_id)| {
-                        if *actor_node_id == node_id {
-                            Some(*actor_id)
-                        } else {
-                            None
-                        }
-                    })
-            })
-    }
-
     pub fn existing_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
         self.fragment_infos
             .values()

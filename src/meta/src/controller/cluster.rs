@@ -26,6 +26,7 @@ use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_license::LicenseManager;
 use risingwave_meta_model_v2::prelude::{Worker, WorkerProperty};
 use risingwave_meta_model_v2::worker::{WorkerStatus, WorkerType};
 use risingwave_meta_model_v2::{worker, worker_property, TransactionId, WorkerId};
@@ -38,8 +39,8 @@ use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulabili
 use sea_orm::prelude::Expr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect,
-    TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
+    QueryFilter, QuerySelect, TransactionTrait,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -84,6 +85,7 @@ impl From<WorkerInfo> for PbWorkerNode {
                 is_streaming: p.is_streaming,
                 is_serving: p.is_serving,
                 is_unschedulable: p.is_unschedulable,
+                internal_rpc_host_addr: p.internal_rpc_host_addr.clone().unwrap_or_default(),
             }),
             transactional_id: info.0.transaction_id.map(|id| id as _),
             resource: info.2.resource,
@@ -581,6 +583,43 @@ impl ClusterControllerInner {
         }
     }
 
+    /// Check if the total CPU cores in the cluster exceed the license limit, after counting the
+    /// newly joined compute node.
+    pub async fn check_cpu_core_limit_on_newly_joined_compute_node(
+        &self,
+        txn: &DatabaseTransaction,
+        host_address: &HostAddress,
+        resource: &PbResource,
+    ) -> MetaResult<()> {
+        let this = resource.total_cpu_cores;
+
+        let other_worker_ids: Vec<WorkerId> = Worker::find()
+            .filter(
+                (worker::Column::Host
+                    .eq(host_address.host.clone())
+                    .and(worker::Column::Port.eq(host_address.port)))
+                .not()
+                .and(worker::Column::WorkerType.eq(WorkerType::ComputeNode)),
+            )
+            .select_only()
+            .column(worker::Column::WorkerId)
+            .into_tuple()
+            .all(txn)
+            .await?;
+
+        let others = other_worker_ids
+            .into_iter()
+            .flat_map(|id| self.worker_extra_info.get(&id))
+            .flat_map(|info| info.resource.as_ref().map(|r| r.total_cpu_cores))
+            .sum::<u64>();
+
+        LicenseManager::get()
+            .check_cpu_core_limit(this + others)
+            .map_err(anyhow::Error::from)?;
+
+        Ok(())
+    }
+
     pub async fn add_worker(
         &mut self,
         r#type: PbWorkerType,
@@ -590,6 +629,11 @@ impl ClusterControllerInner {
         ttl: Duration,
     ) -> MetaResult<WorkerId> {
         let txn = self.db.begin().await?;
+
+        if let PbWorkerType::ComputeNode = r#type {
+            self.check_cpu_core_limit_on_newly_joined_compute_node(&txn, &host_address, &resource)
+                .await?;
+        }
 
         let worker = Worker::find()
             .filter(
@@ -652,6 +696,23 @@ impl ClusterControllerInner {
                 self.update_worker_ttl(worker.worker_id, ttl)?;
                 self.update_resource_and_started_at(worker.worker_id, resource)?;
                 Ok(worker.worker_id)
+            } else if worker.worker_type == WorkerType::Frontend && property.is_none() {
+                let worker_property = worker_property::ActiveModel {
+                    worker_id: Set(worker.worker_id),
+                    parallelism: Set(add_property
+                        .worker_node_parallelism
+                        .try_into()
+                        .expect("invalid parallelism")),
+                    is_streaming: Set(add_property.is_streaming),
+                    is_serving: Set(add_property.is_serving),
+                    is_unschedulable: Set(add_property.is_unschedulable),
+                    internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
+                };
+                WorkerProperty::insert(worker_property).exec(&txn).await?;
+                txn.commit().await?;
+                self.update_worker_ttl(worker.worker_id, ttl)?;
+                self.update_resource_and_started_at(worker.worker_id, resource)?;
+                Ok(worker.worker_id)
             } else {
                 self.update_worker_ttl(worker.worker_id, ttl)?;
                 self.update_resource_and_started_at(worker.worker_id, resource)?;
@@ -670,7 +731,7 @@ impl ClusterControllerInner {
         };
         let insert_res = Worker::insert(worker).exec(&txn).await?;
         let worker_id = insert_res.last_insert_id as WorkerId;
-        if r#type == PbWorkerType::ComputeNode {
+        if r#type == PbWorkerType::ComputeNode || r#type == PbWorkerType::Frontend {
             let property = worker_property::ActiveModel {
                 worker_id: Set(worker_id),
                 parallelism: Set(add_property
@@ -680,6 +741,7 @@ impl ClusterControllerInner {
                 is_streaming: Set(add_property.is_streaming),
                 is_serving: Set(add_property.is_serving),
                 is_unschedulable: Set(add_property.is_unschedulable),
+                internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
             };
             WorkerProperty::insert(property).exec(&txn).await?;
         }
@@ -926,6 +988,7 @@ mod tests {
             is_streaming: true,
             is_serving: true,
             is_unschedulable: false,
+            internal_rpc_host_addr: "".to_string(),
         };
         let hosts = mock_worker_hosts_for_test(worker_count);
         let mut worker_ids = vec![];
@@ -935,7 +998,7 @@ mod tests {
                     .add_worker(
                         PbWorkerType::ComputeNode,
                         host.clone(),
-                        property,
+                        property.clone(),
                         PbResource::default(),
                     )
                     .await?,
@@ -967,7 +1030,7 @@ mod tests {
         );
 
         // re-register existing worker node with larger parallelism and change its serving mode.
-        let mut new_property = property;
+        let mut new_property = property.clone();
         new_property.worker_node_parallelism = (parallelism_num * 2) as _;
         new_property.is_serving = false;
         cluster_ctl
@@ -1016,12 +1079,13 @@ mod tests {
             is_streaming: true,
             is_serving: true,
             is_unschedulable: false,
+            internal_rpc_host_addr: "".to_string(),
         };
         let worker_id = cluster_ctl
             .add_worker(
                 PbWorkerType::ComputeNode,
                 host.clone(),
-                property,
+                property.clone(),
                 PbResource::default(),
             )
             .await?;

@@ -1027,6 +1027,10 @@ pub struct StreamingDeveloperConfig {
     /// If not specified, the value of `server.connection_pool_size` will be used.
     #[serde(default = "default::developer::stream_exchange_connection_pool_size")]
     pub exchange_connection_pool_size: Option<u16>,
+
+    /// A flag to allow disabling the auto schema change handling
+    #[serde(default = "default::developer::stream_enable_auto_schema_change")]
+    pub enable_auto_schema_change: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1161,7 +1165,7 @@ pub struct S3ObjectStoreDeveloperConfig {
     )]
     pub retryable_service_error_codes: Vec<String>,
 
-    // TODO: the following field will be deprecated after opendal is stablized
+    // TODO: deprecate this config when we are completely deprecate aws sdk.
     #[serde(default = "default::object_store_config::s3::developer::use_opendal")]
     pub use_opendal: bool,
 }
@@ -1903,6 +1907,10 @@ pub mod default {
         pub fn enable_actor_tokio_metrics() -> bool {
             false
         }
+
+        pub fn stream_enable_auto_schema_change() -> bool {
+            true
+        }
     }
 
     pub use crate::system_param::default as system;
@@ -1945,17 +1953,19 @@ pub mod default {
     }
 
     pub mod compaction_config {
-        const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
-        const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
-        const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * 1024 * 1024; // 512MB
+        const MB: u64 = 1024 * 1024;
+        const GB: u64 = 1024 * 1024 * 1024;
+        const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * GB; // 2GB
+        const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * MB; // 128MB
+        const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * MB; // 512MB
 
         // decrease this configure when the generation of checkpoint barrier is not frequent.
         const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 12;
-        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024;
+        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * MB;
         // 32MB
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
         const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
-        const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
+        const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * MB; // 512MB;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 300;
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 100;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
@@ -1964,6 +1974,7 @@ pub mod default {
         const DEFAULT_EMERGENCY_PICKER: bool = true;
         const DEFAULT_MAX_LEVEL: u32 = 6;
         const DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT: u32 = 42;
+        const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE: u64 = 4 * MB;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -2033,6 +2044,10 @@ pub mod default {
 
         pub fn max_l0_compact_level_count() -> u32 {
             DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT
+        }
+
+        pub fn sst_allowed_trivial_move_min_size() -> u64 {
+            DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE
         }
     }
 
@@ -2159,10 +2174,6 @@ pub mod default {
             }
 
             pub mod developer {
-                use crate::util::env_var::env_var_is_true_or;
-
-                const RW_USE_OPENDAL_FOR_S3: &str = "RW_USE_OPENDAL_FOR_S3";
-
                 pub fn retry_unknown_service_error() -> bool {
                     false
                 }
@@ -2172,11 +2183,7 @@ pub mod default {
                 }
 
                 pub fn use_opendal() -> bool {
-                    // TODO: deprecate this config when we are completely switch from aws sdk to opendal.
-                    // The reason why we use !env_var_is_false_or(RW_USE_OPENDAL_FOR_S3, false) here is
-                    // 1. Maintain compatibility so that there is no behavior change in cluster with RW_USE_OPENDAL_FOR_S3 set.
-                    // 2. Change the default behavior to use opendal for s3 if RW_USE_OPENDAL_FOR_S3 is not set.
-                    env_var_is_true_or(RW_USE_OPENDAL_FOR_S3, false)
+                    true
                 }
             }
         }

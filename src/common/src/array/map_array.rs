@@ -24,6 +24,7 @@ use serde::Serializer;
 use super::{
     Array, ArrayBuilder, ArrayImpl, ArrayResult, DatumRef, DefaultOrdered, ListArray,
     ListArrayBuilder, ListRef, ListValue, MapType, ScalarRef, ScalarRefImpl, StructArray,
+    StructRef,
 };
 use crate::bitmap::Bitmap;
 use crate::types::{DataType, Scalar, ToText};
@@ -162,7 +163,7 @@ impl Array for MapArray {
 
     fn data_type(&self) -> DataType {
         let list_value_type = self.inner.values().data_type();
-        DataType::Map(MapType::from_list_entries(list_value_type))
+        DataType::Map(MapType::from_entries(list_value_type))
     }
 }
 
@@ -193,7 +194,10 @@ pub use scalar::{MapRef, MapValue};
 /// We only check the invariants in the constructors.
 /// After they are constructed, we assume the invariants holds.
 mod scalar {
+    use std::collections::HashSet;
+
     use super::*;
+    use crate::array::{Datum, ScalarImpl, StructValue};
 
     /// Refer to [`MapArray`] for the invariants of a map value.
     #[derive(Clone, Eq, EstimateSize)]
@@ -221,20 +225,33 @@ mod scalar {
 
         /// # Panics
         /// Panics if [map invariants](`super::MapArray`) are violated.
-        pub fn from_list_entries(list: ListValue) -> Self {
-            // validates list type is valid
-            _ = MapType::from_list_entries(list.data_type());
-            // TODO: validate the values is valid
-            MapValue(list)
+        pub fn from_entries(entries: ListValue) -> Self {
+            Self::try_from_entries(entries).unwrap()
         }
 
-        /// # Panics
-        /// Panics if [map invariants](`super::MapArray`) are violated.
+        /// Returns error if [map invariants](`super::MapArray`) are violated.
+        pub fn try_from_entries(entries: ListValue) -> Result<Self, String> {
+            // validates list type is valid
+            let _ = MapType::try_from_entries(entries.data_type())?;
+            let mut keys = HashSet::with_capacity(entries.len());
+            let struct_array = entries.into_array();
+            for key in struct_array.as_struct().field_at(0).iter() {
+                let Some(key) = key else {
+                    return Err("map keys must not be NULL".to_string());
+                };
+                if !keys.insert(key) {
+                    return Err("map keys must be unique".to_string());
+                }
+            }
+            Ok(MapValue(ListValue::new(struct_array)))
+        }
+
+        /// Returns error if [map invariants](`super::MapArray`) are violated.
         pub fn try_from_kv(key: ListValue, value: ListValue) -> Result<Self, String> {
             if key.len() != value.len() {
                 return Err("map keys and values have different length".to_string());
             }
-            let unique_keys = key.iter().unique().collect_vec();
+            let unique_keys: HashSet<_> = key.iter().unique().collect();
             if unique_keys.len() != key.len() {
                 return Err("map keys must be unique".to_string());
             }
@@ -251,6 +268,46 @@ mod scalar {
                 Bitmap::ones(len),
             );
             Ok(MapValue(ListValue::new(struct_array.into())))
+        }
+
+        /// # Panics
+        /// Panics if `m1` and `m2` have different types.
+        pub fn concat(m1: MapRef<'_>, m2: MapRef<'_>) -> Self {
+            debug_assert_eq!(m1.inner().data_type(), m2.inner().data_type());
+            let m2_keys = m2.keys();
+            let l = ListValue::from_datum_iter(
+                &m1.inner().data_type(),
+                m1.iter_struct()
+                    .filter(|s| !m2_keys.contains(&s.field_at(0).expect("map key is not null")))
+                    .chain(m2.iter_struct())
+                    .map(|s| Some(ScalarRefImpl::Struct(s))),
+            );
+            Self::from_entries(l)
+        }
+
+        pub fn insert(m: MapRef<'_>, key: ScalarImpl, value: Datum) -> Self {
+            let l = ListValue::from_datum_iter(
+                &m.inner().data_type(),
+                m.iter_struct()
+                    .filter(|s| {
+                        key.as_scalar_ref_impl() != s.field_at(0).expect("map key is not null")
+                    })
+                    .chain(std::iter::once(
+                        StructValue::new(vec![Some(key.clone()), value]).as_scalar_ref(),
+                    ))
+                    .map(|s| Some(ScalarRefImpl::Struct(s))),
+            );
+            Self::from_entries(l)
+        }
+
+        pub fn delete(m: MapRef<'_>, key: ScalarRefImpl<'_>) -> Self {
+            let l = ListValue::from_datum_iter(
+                &m.inner().data_type(),
+                m.iter_struct()
+                    .filter(|s| key != s.field_at(0).expect("map key is not null"))
+                    .map(|s| Some(ScalarRefImpl::Struct(s))),
+            );
+            Self::from_entries(l)
         }
     }
 
@@ -271,6 +328,14 @@ mod scalar {
 
         pub fn into_kv(self) -> (ListRef<'a>, ListRef<'a>) {
             self.0.as_map_kv()
+        }
+
+        pub fn keys(&self) -> HashSet<ScalarRefImpl<'_>> {
+            self.iter().map(|(k, _v)| k).collect()
+        }
+
+        pub fn to_owned(self) -> MapValue {
+            MapValue(self.0.to_owned())
         }
     }
 
@@ -379,6 +444,15 @@ impl<'a> MapRef<'a> {
         })
     }
 
+    pub fn iter_struct(
+        self,
+    ) -> impl DoubleEndedIterator + ExactSizeIterator<Item = StructRef<'a>> + 'a {
+        self.inner().iter().map(|list_elem| {
+            let list_elem = list_elem.expect("the list element in map should not be null");
+            list_elem.into_struct()
+        })
+    }
+
     pub fn iter_sorted(
         self,
     ) -> impl DoubleEndedIterator + ExactSizeIterator<Item = (ScalarRefImpl<'a>, DatumRef<'a>)> + 'a
@@ -411,7 +485,7 @@ impl MapValue {
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
         let list = ListValue::memcmp_deserialize(&datatype.clone().into_struct(), deserializer)?;
-        Ok(Self::from_list_entries(list))
+        Ok(Self::from_entries(list))
     }
 }
 

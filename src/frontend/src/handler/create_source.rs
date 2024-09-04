@@ -44,9 +44,9 @@ use risingwave_connector::schema::schema_registry::{
 use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::cdc::{
-    CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
-    CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR,
-    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
+    CDC_AUTO_SCHEMA_CHANGE_KEY, CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY,
+    CDC_TRANSACTIONAL_KEY, CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR,
+    MONGODB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
@@ -54,7 +54,7 @@ use risingwave_connector::source::nexmark::source::{get_event_data_types_with_na
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 pub use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_connector::source::{
-    ConnectorProperties, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
+    ConnectorProperties, AZBLOB_CONNECTOR, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
     KINESIS_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR,
     POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
 };
@@ -73,7 +73,7 @@ use thiserror_ext::AsReport;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::{DatabaseId, SchemaId};
+use crate::catalog::{CatalogError, DatabaseId, SchemaId};
 use crate::error::ErrorCode::{self, Deprecated, InvalidInputSyntax, NotSupported, ProtocolError};
 use crate::error::{Result, RwError};
 use crate::expr::Expr;
@@ -362,7 +362,7 @@ pub(crate) async fn bind_columns_from_source(
         (Format::Native, Encode::Native)
         | (Format::Plain, Encode::Bytes)
         | (Format::DebeziumMongo, Encode::Json) => None,
-        (Format::Plain, Encode::Protobuf) => {
+        (Format::Plain, Encode::Protobuf) | (Format::Upsert, Encode::Protobuf) => {
             let (row_schema_location, use_schema_registry) =
                 get_schema_location(&mut format_encode_options_to_consume)?;
             let protobuf_schema = ProtobufSchema {
@@ -697,6 +697,7 @@ pub(crate) fn bind_all_columns(
                 "Schema definition is required, either from SQL or schema registry.".to_string(),
             )));
         }
+        let non_generated_sql_defined_columns = non_generated_sql_columns(col_defs_from_sql);
         match (&source_schema.format, &source_schema.row_encode) {
             (Format::DebeziumMongo, Encode::Json) => {
                 let mut columns = vec![
@@ -709,8 +710,6 @@ pub(crate) fn bind_all_columns(
                         is_hidden: false,
                     },
                 ];
-                let non_generated_sql_defined_columns =
-                    non_generated_sql_columns(col_defs_from_sql);
                 if non_generated_sql_defined_columns.len() != 2
                     || non_generated_sql_defined_columns[0].name.real_value() != columns[0].name()
                     || non_generated_sql_defined_columns[1].name.real_value() != columns[1].name()
@@ -758,12 +757,25 @@ pub(crate) fn bind_all_columns(
                 Ok(columns)
             }
             (Format::Plain, Encode::Bytes) => {
-                if cols_from_sql.len() != 1 || cols_from_sql[0].data_type() != &DataType::Bytea {
-                    return Err(RwError::from(ProtocolError(
-                        "ENCODE BYTES only accepts one BYTEA type column".to_string(),
-                    )));
+                let err = Err(RwError::from(ProtocolError(
+                    "ENCODE BYTES only accepts one BYTEA type column".to_string(),
+                )));
+                if non_generated_sql_defined_columns.len() == 1 {
+                    // ok to unwrap `data_type`` since it was checked at `bind_sql_columns`
+                    let col_data_type = bind_data_type(
+                        non_generated_sql_defined_columns[0]
+                            .data_type
+                            .as_ref()
+                            .unwrap(),
+                    )?;
+                    if col_data_type == DataType::Bytea {
+                        Ok(cols_from_sql)
+                    } else {
+                        err
+                    }
+                } else {
+                    err
                 }
-                Ok(cols_from_sql)
             }
             (_, _) => Ok(cols_from_sql),
         }
@@ -1064,7 +1076,10 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Csv, Encode::Json, Encode::Parquet],
                 ),
                 GCS_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Csv, Encode::Json],
+                    Format::Plain => vec![Encode::Csv, Encode::Json, Encode::Parquet],
+                ),
+                AZBLOB_CONNECTOR => hashmap!(
+                    Format::Plain => vec![Encode::Csv, Encode::Json, Encode::Parquet],
                 ),
                 POSIX_FS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv],
@@ -1313,12 +1328,9 @@ pub async fn extract_iceberg_columns(
     let props = ConnectorProperties::extract(with_properties.clone(), true)?;
     if let ConnectorProperties::Iceberg(properties) = props {
         let iceberg_config: IcebergConfig = properties.to_iceberg_config();
-        let table = iceberg_config.load_table().await?;
-        let iceberg_schema: arrow_schema_iceberg::Schema = table
-            .current_table_metadata()
-            .current_schema()?
-            .clone()
-            .try_into()?;
+        let table = iceberg_config.load_table_v2().await?;
+        let iceberg_schema: arrow_schema_iceberg::Schema =
+            iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 
         let columns = iceberg_schema
             .fields()
@@ -1368,13 +1380,9 @@ pub async fn check_iceberg_source(
             .collect(),
     };
 
-    let table = iceberg_config.load_table().await?;
+    let table = iceberg_config.load_table_v2().await?;
 
-    let iceberg_schema: arrow_schema_iceberg::Schema = table
-        .current_table_metadata()
-        .current_schema()?
-        .clone()
-        .try_into()?;
+    let iceberg_schema = iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 
     for f1 in schema.fields() {
         if !iceberg_schema.fields.iter().any(|f2| f2.name() == &f1.name) {
@@ -1414,6 +1422,16 @@ pub fn bind_connector_props(
         ))));
     }
     if is_create_source && create_cdc_source_job {
+        if let Some(value) = with_properties.get(CDC_AUTO_SCHEMA_CHANGE_KEY)
+            && value
+                .parse::<bool>()
+                .map_err(|_| anyhow!("invalid value of '{}' option", CDC_AUTO_SCHEMA_CHANGE_KEY))?
+        {
+            Feature::CdcAutoSchemaChange
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
+
         // set connector to backfill mode
         with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
         // enable cdc sharing mode, which will capture all tables in the given `database.name`
@@ -1622,7 +1640,8 @@ pub async fn handle_create_source(
 
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
     let is_shared = create_cdc_source_job
-        || (with_properties.is_kafka_connector() && session.config().rw_enable_shared_source());
+        || (with_properties.is_shareable_non_cdc_connector()
+            && session.config().rw_enable_shared_source());
 
     let (columns_from_resolve_source, mut source_info) = if create_cdc_source_job {
         bind_columns_from_source_for_cdc(&session, &source_schema)?
@@ -1653,6 +1672,15 @@ pub async fn handle_create_source(
         overwrite_options.source_rate_limit,
     )
     .await?;
+
+    // If it is a temporary source, put it into SessionImpl.
+    if stmt.temporary {
+        if session.get_temporary_source(&source_catalog.name).is_some() {
+            return Err(CatalogError::Duplicated("source", source_catalog.name.clone()).into());
+        }
+        session.create_temporary_source(source_catalog);
+        return Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE));
+    }
 
     let source = source_catalog.to_prost(schema_id, database_id);
 

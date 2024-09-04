@@ -192,6 +192,7 @@ async fn test_merger_sum_aggr() {
         2, // row_count_index
         vec![],
         2,
+        false,
     )
     .await;
 
@@ -228,7 +229,7 @@ async fn test_merger_sum_aggr() {
 
     let mut epoch = test_epoch(1);
     let b1 = Barrier::new_test_barrier(epoch);
-    barrier_test_env.inject_barrier(&b1, [], actors.clone());
+    barrier_test_env.inject_barrier(&b1, actors.clone());
     input
         .send(Message::Barrier(b1.into_dispatcher()))
         .await
@@ -244,7 +245,7 @@ async fn test_merger_sum_aggr() {
             input.send(Message::Chunk(chunk)).await.unwrap();
         }
         let b = Barrier::new_test_barrier(epoch);
-        barrier_test_env.inject_barrier(&b, [], actors.clone());
+        barrier_test_env.inject_barrier(&b, actors.clone());
         input
             .send(Message::Barrier(b.into_dispatcher()))
             .await
@@ -253,7 +254,7 @@ async fn test_merger_sum_aggr() {
     }
     let b = Barrier::new_test_barrier(epoch)
         .with_mutation(Mutation::Stop(actors.clone().into_iter().collect()));
-    barrier_test_env.inject_barrier(&b, [], actors);
+    barrier_test_env.inject_barrier(&b, actors);
     input
         .send(Message::Barrier(b.into_dispatcher()))
         .await

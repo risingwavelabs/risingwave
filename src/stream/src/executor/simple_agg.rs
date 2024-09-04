@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use risingwave_common::array::stream_record::Record;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
@@ -83,6 +84,10 @@ struct ExecutorInner<S: StateStore> {
 
     /// Extreme state cache size
     extreme_cache_size: usize,
+
+    /// Required by the downstream `RowMergeExecutor`,
+    /// currently only used by the `approx_percentile`'s two phase plan
+    must_output_per_barrier: bool,
 }
 
 impl<S: StateStore> ExecutorInner<S> {
@@ -129,6 +134,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 distinct_dedup_tables: args.distinct_dedup_tables,
                 watermark_epoch: args.watermark_epoch,
                 extreme_cache_size: args.extreme_cache_size,
+                must_output_per_barrier: args.extra.must_output_per_barrier,
             },
         })
     }
@@ -201,7 +207,16 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             .agg_group
             .build_change(&this.storages, &this.agg_funcs)
             .await?
-            .map(|change| change.to_stream_chunk(&this.info.schema.data_types()));
+            .and_then(|change| {
+                if !this.must_output_per_barrier {
+                    if let Record::Update { old_row, new_row } = &change {
+                        if old_row == new_row {
+                            return None;
+                        }
+                    };
+                }
+                Some(change.to_stream_chunk(&this.info.schema.data_types()))
+            });
 
         // Commit all state tables.
         futures::future::try_join_all(this.all_state_tables_mut().map(|table| table.commit(epoch)))
@@ -343,6 +358,7 @@ mod tests {
             0,
             vec![2],
             1,
+            false,
         )
         .await;
         let mut simple_agg = simple_agg.execute();
@@ -431,6 +447,7 @@ mod tests {
             0,
             vec![2],
             1,
+            true,
         )
         .await;
         let mut simple_agg = simple_agg.execute();
@@ -476,6 +493,82 @@ mod tests {
                 U+ 0   .   .  ."
             )
         );
+        assert_matches!(
+            simple_agg.next().await.unwrap().unwrap(),
+            Message::Barrier { .. }
+        );
+    }
+
+    // NOTE(kwannoel): `approx_percentile` + `keyed_merge` depend on this property for correctness.
+    #[tokio::test]
+    async fn test_simple_aggregation_omit_noop_update() {
+        let store = MemoryStateStore::new();
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+                // primary key column`
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, vec![2]);
+        // initial barrier
+        tx.push_barrier(test_epoch(1), false);
+        // next barrier
+        tx.push_barrier(test_epoch(2), false);
+        tx.push_chunk(StreamChunk::from_pretty(
+            "   I   I    I
+                + 100 200 1001
+                - 100 200 1001",
+        ));
+        tx.push_barrier(test_epoch(3), false);
+        tx.push_barrier(test_epoch(4), false);
+
+        let agg_calls = vec![
+            AggCall::from_pretty("(count:int8)"),
+            AggCall::from_pretty("(sum:int8 $0:int8)"),
+            AggCall::from_pretty("(sum:int8 $1:int8)"),
+            AggCall::from_pretty("(min:int8 $0:int8)"),
+        ];
+
+        let simple_agg = new_boxed_simple_agg_executor(
+            ActorContext::for_test(123),
+            store,
+            source,
+            false,
+            agg_calls,
+            0,
+            vec![2],
+            1,
+            false,
+        )
+        .await;
+        let mut simple_agg = simple_agg.execute();
+
+        // Consume the init barrier
+        simple_agg.next().await.unwrap().unwrap();
+        // Consume stream chunk
+        let msg = simple_agg.next().await.unwrap().unwrap();
+        assert_eq!(
+            *msg.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I   I   I  I
+                + 0   .   .  . "
+            )
+        );
+        assert_matches!(
+            simple_agg.next().await.unwrap().unwrap(),
+            Message::Barrier { .. }
+        );
+
+        // No stream chunk
+        assert_matches!(
+            simple_agg.next().await.unwrap().unwrap(),
+            Message::Barrier { .. }
+        );
+
+        // No stream chunk
         assert_matches!(
             simple_agg.next().await.unwrap().unwrap(),
             Message::Barrier { .. }

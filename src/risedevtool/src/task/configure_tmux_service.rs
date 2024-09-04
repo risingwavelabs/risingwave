@@ -16,12 +16,15 @@ use std::env;
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use console::style;
 
+use crate::util::{risedev_cmd, stylized_risedev_subcmd};
 use crate::{ExecuteContext, Task};
 
-pub struct ConfigureTmuxTask;
+pub struct ConfigureTmuxTask {
+    env: Vec<String>,
+}
 
 pub const RISEDEV_NAME: &str = "risedev";
 
@@ -32,8 +35,8 @@ pub fn new_tmux_command() -> Command {
 }
 
 impl ConfigureTmuxTask {
-    pub fn new() -> Result<Self> {
-        Ok(Self)
+    pub fn new(env: Vec<String>) -> Result<Self> {
+        Ok(Self { env })
     }
 }
 
@@ -58,10 +61,17 @@ impl Task for ConfigureTmuxTask {
         let mut cmd = new_tmux_command();
         cmd.arg("list-sessions");
         if ctx.run_command(cmd).is_ok() {
-            bail!(
-                "A previous cluster is already running. Please kill it first with {}.",
-                style("./risedev k").blue().bold()
-            );
+            ctx.pb.set_message("killing previous session...");
+
+            let mut cmd = Command::new(risedev_cmd());
+            cmd.arg("k");
+            ctx.run_command(cmd).with_context(|| {
+                format!(
+                    "A previous cluster is already running while `risedev-dev` failed to kill it. \
+                     Please kill it manually with {}.",
+                    stylized_risedev_subcmd("k")
+                )
+            })?;
         }
 
         ctx.pb.set_message("creating new session...");
@@ -70,8 +80,11 @@ impl Task for ConfigureTmuxTask {
         cmd.arg("new-session") // this will automatically create the `risedev` tmux server
             .arg("-d")
             .arg("-s")
-            .arg(RISEDEV_NAME)
-            .arg("-c")
+            .arg(RISEDEV_NAME);
+        for e in &self.env {
+            cmd.arg("-e").arg(e);
+        }
+        cmd.arg("-c")
             .arg(Path::new(&prefix_path))
             .arg(Path::new(&prefix_bin).join("welcome.sh"));
 

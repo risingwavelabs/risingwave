@@ -55,7 +55,7 @@ async fn handle_declare_subscription_cursor(
     handle_args: HandlerArgs,
     sub_name: ObjectName,
     cursor_name: ObjectName,
-    rw_timestamp: Option<Since>,
+    rw_timestamp: Since,
 ) -> Result<RwPgResponse> {
     let session = handle_args.session.clone();
     let db_name = session.database();
@@ -67,19 +67,19 @@ async fn handle_declare_subscription_cursor(
         session.get_subscription_by_name(schema_name, &cursor_from_subscription_name)?;
     // Start the first query of cursor, which includes querying the table and querying the subscription's logstore
     let start_rw_timestamp = match rw_timestamp {
-        Some(risingwave_sqlparser::ast::Since::TimestampMsNum(start_rw_timestamp)) => {
+        risingwave_sqlparser::ast::Since::TimestampMsNum(start_rw_timestamp) => {
             check_cursor_unix_millis(start_rw_timestamp, subscription.retention_seconds)?;
             Some(convert_unix_millis_to_logstore_u64(start_rw_timestamp))
         }
-        Some(risingwave_sqlparser::ast::Since::ProcessTime) => Some(Epoch::now().0),
-        Some(risingwave_sqlparser::ast::Since::Begin) => {
+        risingwave_sqlparser::ast::Since::ProcessTime => Some(Epoch::now().0),
+        risingwave_sqlparser::ast::Since::Begin => {
             let min_unix_millis =
                 Epoch::now().as_unix_millis() - subscription.retention_seconds * 1000;
             let subscription_build_millis = subscription.created_at_epoch.unwrap().as_unix_millis();
             let min_unix_millis = std::cmp::max(min_unix_millis, subscription_build_millis);
             Some(convert_unix_millis_to_logstore_u64(min_unix_millis))
         }
-        None => None,
+        risingwave_sqlparser::ast::Since::Full => None,
     };
     // Create cursor based on the response
     if let Err(e) = session

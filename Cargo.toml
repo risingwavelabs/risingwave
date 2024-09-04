@@ -10,6 +10,7 @@ members = [
     "src/common/fields-derive",
     "src/common/heap_profiling",
     "src/common/metrics",
+    "src/common/telemetry_event",
     "src/compute",
     "src/connector",
     "src/connector/codec",
@@ -141,10 +142,9 @@ arrow-array-iceberg = { package = "arrow-array", version = "52" }
 arrow-schema-iceberg = { package = "arrow-schema", version = "52" }
 arrow-buffer-iceberg = { package = "arrow-buffer", version = "52" }
 arrow-cast-iceberg = { package = "arrow-cast", version = "52" }
-# TODO
-# After apache/iceberg-rust#411 is merged, we move to the upstream version.
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "24bd5869f2779a8b9786b5a6e1f9723844f5a82c" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "24bd5869f2779a8b9786b5a6e1f9723844f5a82c" }
+iceberg = "0.3.0"
+iceberg-catalog-rest = "0.3.0"
+iceberg-catalog-glue = "0.3.0"
 opendal = "0.47"
 arrow-array = "50"
 arrow-arith = "50"
@@ -195,7 +195,7 @@ sea-orm = { version = "0.12.14", features = [
     "sqlx-sqlite",
     "runtime-tokio-native-tls",
 ] }
-sqlx = "0.7"
+sqlx = { version = "0.7.3", default-features = false, features = ["bigdecimal", "chrono", "json", "mysql", "postgres", "runtime-tokio-native-tls", "rust_decimal", "sqlite", "time", "uuid"] }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055", features = ["net", "fs"] }
 tokio-util = "0.7"
 tracing-opentelemetry = "0.24"
@@ -243,6 +243,7 @@ risingwave_udf = { path = "./src/expr/udf" }
 risingwave_variables = { path = "./src/utils/variables" }
 risingwave_java_binding = { path = "./src/java_binding" }
 risingwave_jni_core = { path = "src/jni_core" }
+risingwave_telemetry_event = { path = "./src/common/telemetry_event" }
 rw_futures_util = { path = "src/utils/futures_util" }
 rw_resource_util = { path = "src/utils/resource_util" }
 rw_iter_util = { path = "src/utils/iter_util" }
@@ -300,6 +301,12 @@ incremental = true
 split-debuginfo = "packed"
 lto = "off"
 
+# Patch profile for production clusters.
+# It will trade-off lto for faster build time.
+[profile.patch-production]
+inherits = "production"
+lto = "off"
+
 [profile.production]
 inherits = "release"
 incremental = false
@@ -342,6 +349,10 @@ getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae
 # tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
+# NOTE(kwannoel): patch sqlx to use a version compatible with madsim.
+# If we can merge in: https://github.com/madsim-rs/sqlx/pull/2,
+# we can change it to patch madsim version instead.
+sqlx = { git = "https://github.com/kwannoel/sqlx.git", rev = "5a32ad8ce842176c202df30910e1416655eda071" }
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }

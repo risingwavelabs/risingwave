@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::iter::repeat_with;
 use std::ops::{Deref, DerefMut};
+use std::time::Duration;
 
 use futures::TryStreamExt;
 use itertools::Itertools;
@@ -51,6 +52,13 @@ struct DispatcherWithMetrics {
     actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter<3>,
 }
 
+impl DispatcherWithMetrics {
+    pub fn record_output_buffer_blocking_duration(&self, duration: Duration) {
+        let ns = duration.as_nanos() as u64;
+        self.actor_output_buffer_blocking_duration_ns.inc_by(ns);
+    }
+}
+
 impl Debug for DispatcherWithMetrics {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.dispatcher.fmt(f)
@@ -71,14 +79,14 @@ impl DerefMut for DispatcherWithMetrics {
     }
 }
 
-struct DispatcherMetrics {
+struct DispatchExecutorMetrics {
     actor_id_str: String,
     fragment_id_str: String,
     metrics: Arc<StreamingMetrics>,
     actor_out_record_cnt: LabelGuardedIntCounter<2>,
 }
 
-impl DispatcherMetrics {
+impl DispatchExecutorMetrics {
     fn monitor_dispatcher(&self, dispatcher: DispatcherImpl) -> DispatcherWithMetrics {
         DispatcherWithMetrics {
             actor_output_buffer_blocking_duration_ns: self
@@ -98,7 +106,7 @@ struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherWithMetrics>,
     actor_id: u32,
     context: Arc<SharedContext>,
-    metrics: DispatcherMetrics,
+    metrics: DispatchExecutorMetrics,
 }
 
 impl DispatchExecutorInner {
@@ -112,9 +120,7 @@ impl DispatchExecutorInner {
                     .try_for_each_concurrent(limit, |dispatcher| async {
                         let start_time = Instant::now();
                         dispatcher.dispatch_watermark(watermark.clone()).await?;
-                        dispatcher
-                            .actor_output_buffer_blocking_duration_ns
-                            .inc_by(start_time.elapsed().as_nanos() as u64);
+                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
                         StreamResult::Ok(())
                     })
                     .await?;
@@ -125,9 +131,7 @@ impl DispatchExecutorInner {
                     .try_for_each_concurrent(limit, |dispatcher| async {
                         let start_time = Instant::now();
                         dispatcher.dispatch_data(chunk.clone()).await?;
-                        dispatcher
-                            .actor_output_buffer_blocking_duration_ns
-                            .inc_by(start_time.elapsed().as_nanos() as u64);
+                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
                         StreamResult::Ok(())
                     })
                     .await?;
@@ -147,9 +151,7 @@ impl DispatchExecutorInner {
                         dispatcher
                             .dispatch_barrier(barrier.clone().into_dispatcher())
                             .await?;
-                        dispatcher
-                            .actor_output_buffer_blocking_duration_ns
-                            .inc_by(start_time.elapsed().as_nanos() as u64);
+                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
                         StreamResult::Ok(())
                     })
                     .await?;
@@ -361,7 +363,7 @@ impl DispatchExecutor {
         let actor_out_record_cnt = metrics
             .actor_out_record_cnt
             .with_guarded_label_values(&[&actor_id_str, &fragment_id_str]);
-        let metrics = DispatcherMetrics {
+        let metrics = DispatchExecutorMetrics {
             actor_id_str,
             fragment_id_str,
             metrics,
@@ -1271,7 +1273,7 @@ mod tests {
                 actor_new_dispatchers: Default::default(),
             },
         ));
-        barrier_test_env.inject_barrier(&b1, [], [actor_id]);
+        barrier_test_env.inject_barrier(&b1, [actor_id]);
         tx.send(Message::Barrier(b1.clone().into_dispatcher()))
             .await
             .unwrap();
@@ -1291,7 +1293,7 @@ mod tests {
 
         // 6. Send another barrier.
         let b2 = Barrier::new_test_barrier(test_epoch(2));
-        barrier_test_env.inject_barrier(&b2, [], [actor_id]);
+        barrier_test_env.inject_barrier(&b2, [actor_id]);
         tx.send(Message::Barrier(b2.into_dispatcher()))
             .await
             .unwrap();
@@ -1330,7 +1332,7 @@ mod tests {
                 actor_new_dispatchers: Default::default(),
             },
         ));
-        barrier_test_env.inject_barrier(&b3, [], [actor_id]);
+        barrier_test_env.inject_barrier(&b3, [actor_id]);
         tx.send(Message::Barrier(b3.into_dispatcher()))
             .await
             .unwrap();
@@ -1344,7 +1346,7 @@ mod tests {
 
         // 11. Send another barrier.
         let b4 = Barrier::new_test_barrier(test_epoch(4));
-        barrier_test_env.inject_barrier(&b4, [], [actor_id]);
+        barrier_test_env.inject_barrier(&b4, [actor_id]);
         tx.send(Message::Barrier(b4.into_dispatcher()))
             .await
             .unwrap();

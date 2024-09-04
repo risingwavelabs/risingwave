@@ -62,7 +62,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
     ) -> Self {
         let mut schema = table.schema().clone();
         schema.fields.push(Field::with_name(
-            risingwave_common::types::DataType::Int16,
+            risingwave_common::types::DataType::Varchar,
             "op",
         ));
         Self {
@@ -212,7 +212,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
                         match r {
                             Ok(change_log_row) => {
                                 fn with_op(op: Op, row: impl Row) -> impl Row {
-                                    row.chain([Some(ScalarImpl::Int16(op.to_i16()))])
+                                    row.chain([Some(ScalarImpl::Utf8(op.to_varchar().into()))])
                                 }
                                 for (op, row) in change_log_row.into_op_value_iter() {
                                     yield Ok(with_op(op, row));

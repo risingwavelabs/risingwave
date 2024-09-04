@@ -375,6 +375,8 @@ impl SinkFormatterImpl {
                 | (F::Upsert, E::Protobuf, _)
                 | (F::Debezium, E::Json, Some(_))
                 | (F::Debezium, E::Avro | E::Protobuf | E::Template | E::Text, _)
+                | (_, E::Parquet, _)
+                | (_, _, Some(E::Parquet))
                 | (F::AppendOnly | F::Upsert, _, Some(E::Template) | Some(E::Json) | Some(E::Avro) | Some(E::Protobuf)) // reject other encode as key encode
                 => {
                     return Err(SinkError::Config(anyhow!(
