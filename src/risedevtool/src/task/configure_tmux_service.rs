@@ -22,7 +22,9 @@ use console::style;
 use crate::util::{risedev_cmd, stylized_risedev_subcmd};
 use crate::{ExecuteContext, Task};
 
-pub struct ConfigureTmuxTask;
+pub struct ConfigureTmuxTask {
+    envs: Vec<String>,
+}
 
 pub const RISEDEV_NAME: &str = "risedev";
 
@@ -33,8 +35,8 @@ pub fn new_tmux_command() -> Command {
 }
 
 impl ConfigureTmuxTask {
-    pub fn new() -> Result<Self> {
-        Ok(Self)
+    pub fn new(env: Vec<String>) -> Result<Self> {
+        Ok(Self { envs: env })
     }
 }
 
@@ -78,8 +80,11 @@ impl Task for ConfigureTmuxTask {
         cmd.arg("new-session") // this will automatically create the `risedev` tmux server
             .arg("-d")
             .arg("-s")
-            .arg(RISEDEV_NAME)
-            .arg("-c")
+            .arg(RISEDEV_NAME);
+        for env in &self.envs {
+            cmd.arg("-e").arg(env);
+        }
+        cmd.arg("-c")
             .arg(Path::new(&prefix_path))
             .arg(Path::new(&prefix_bin).join("welcome.sh"));
 

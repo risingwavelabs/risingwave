@@ -50,6 +50,24 @@ impl ConfigExpander {
 
     /// Transforms `risedev.yml` and `risedev-profiles.user.yml` to a fully expanded yaml file.
     ///
+    /// Format:
+    ///
+    /// ```yaml
+    /// my-profile:
+    ///   config-path: src/config/ci-recovery.toml
+    ///   envs:
+    ///     - "RUST_LOG=info,risingwave_storage::hummock=off"
+    ///     - "RW_ENABLE_PRETTY_LOG=true"
+    ///   steps:
+    ///     - use: minio
+    ///     - use: sqlite
+    ///     - use: meta-node
+    ///       meta-backend: sqlite
+    ///     - use: compute-node
+    ///       parallelism: 1
+    ///     - use: frontend
+    /// ```
+    ///
     /// # Arguments
     ///
     /// * `root` is the root directory of these YAML files.
@@ -58,8 +76,11 @@ impl ConfigExpander {
     ///
     /// # Returns
     ///
-    /// A pair of `config_path` and expanded steps (items in `{profile}.steps` section in YAML)
-    pub fn expand(root: impl AsRef<Path>, profile: &str) -> Result<(Option<String>, Yaml)> {
+    /// `(config_path, envs, steps)`
+    pub fn expand(
+        root: impl AsRef<Path>,
+        profile: &str,
+    ) -> Result<(Option<String>, Vec<String>, Yaml)> {
         Self::expand_with_extra_info(root, profile, HashMap::new())
     }
 
@@ -72,7 +93,7 @@ impl ConfigExpander {
         root: impl AsRef<Path>,
         profile: &str,
         extra_info: HashMap<String, String>,
-    ) -> Result<(Option<String>, Yaml)> {
+    ) -> Result<(Option<String>, Vec<String>, Yaml)> {
         let global_path = root.as_ref().join(RISEDEV_CONFIG_FILE);
         let global_yaml = Self::load_yaml(global_path)?;
         let global_config = global_yaml
@@ -120,6 +141,11 @@ impl ConfigExpander {
             .get(&Yaml::String("config-path".to_string()))
             .and_then(|s| s.as_str())
             .map(|s| s.to_string());
+        let envs = profile_section
+            .get(&Yaml::String("envs".to_string()))
+            .and_then(|s| s.as_vec())
+            .map(|s| s.iter().map(|s| s.as_str().unwrap().to_string()).collect())
+            .unwrap_or_default();
 
         let steps = profile_section
             .get(&Yaml::String("steps".to_string()))
@@ -131,7 +157,7 @@ impl ConfigExpander {
         let steps = IdExpander::new(&steps)?.visit(steps)?;
         let steps = ProvideExpander::new(&steps)?.visit(steps)?;
 
-        Ok((config_path, steps))
+        Ok((config_path, envs, steps))
     }
 
     /// Parses the expanded yaml into [`ServiceConfig`]s.
