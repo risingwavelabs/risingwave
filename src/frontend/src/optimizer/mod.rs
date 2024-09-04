@@ -50,7 +50,7 @@ use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId,
+    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Engine, Field, Schema, TableId,
 };
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -638,6 +638,7 @@ impl PlanRoot {
         with_external_source: bool,
         retention_seconds: Option<NonZeroU32>,
         cdc_table_id: Option<String>,
+        engine: Engine,
     ) -> Result<StreamMaterialize> {
         assert_eq!(self.phase, PlanPhase::Logical);
         assert_eq!(self.plan.convention(), Convention::Logical);
@@ -869,6 +870,7 @@ impl PlanRoot {
             version,
             retention_seconds,
             cdc_table_id,
+            engine,
         )
     }
 
