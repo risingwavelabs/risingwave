@@ -46,16 +46,14 @@ mod tests {
             .iter()
             .map(|actor_id| CustomActorInfo {
                 actor_id: *actor_id,
-                vnode_bitmap: actor_bitmaps
-                    .get(actor_id)
-                    .map(|bitmap| bitmap.to_protobuf()),
+                vnode_bitmap: actor_bitmaps.get(actor_id).cloned(),
                 ..Default::default()
             })
             .collect()
     }
 
     fn check_affinity_for_scale_in(bitmap: &Bitmap, actor: &CustomActorInfo) {
-        let prev_bitmap = Bitmap::from(actor.vnode_bitmap.as_ref().unwrap());
+        let prev_bitmap = actor.vnode_bitmap.as_ref().unwrap();
 
         for idx in 0..VirtualNode::COUNT_FOR_TEST {
             if prev_bitmap.is_set(idx) {
@@ -125,7 +123,7 @@ mod tests {
             .map(|actor| {
                 (
                     actor.actor_id as ActorId,
-                    Bitmap::from(actor.vnode_bitmap.as_ref().unwrap()),
+                    actor.vnode_bitmap.unwrap().clone(),
                 )
             })
             .collect();
@@ -226,7 +224,7 @@ mod tests {
                     }
 
                     let target_bitmap = result.get(&actor.actor_id).unwrap();
-                    let prev_bitmap = Bitmap::from(actor.vnode_bitmap.as_ref().unwrap());
+                    let prev_bitmap = actor.vnode_bitmap.as_ref().unwrap();
                     assert!(prev_bitmap.eq(target_bitmap));
                 }
             }
