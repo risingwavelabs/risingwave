@@ -694,7 +694,7 @@ impl HummockManager {
             table_write_throughput,
             checkpoint_secs,
             window_size,
-            self.env.opts.table_write_throughput_threshold,
+            self.env.opts.min_table_split_write_throughput,
             group,
         ) {
             tracing::info!("Not Merge high throughput group {}", group.group_id);
@@ -801,7 +801,7 @@ pub fn is_table_high_write_throughput(
         if history.len() >= window_size {
             // Determine if 1/2 of the values in the interval exceed the threshold.
             let mut high_write_throughput_count = 0;
-            for throughput in history.iter().take(history.len() - window_size) {
+            for throughput in history.iter().skip(history.len() - window_size) {
                 if *throughput / checkpoint_secs > threshold {
                     high_write_throughput_count += 1;
                 }
@@ -824,13 +824,13 @@ pub fn is_table_low_write_throughput(
     if let Some(history) = table_write_throughput.get(&table_id) {
         // Determine if 2/3 of the values in the interval below the threshold.
         let mut low_write_throughput_count = 0;
-        for throughput in history.iter().take(history.len() - window_size) {
+        for throughput in history.iter().skip(history.len() - window_size) {
             if *throughput / checkpoint_secs < threshold {
                 low_write_throughput_count += 1;
             }
         }
 
-        return low_write_throughput_count * 3 > window_size;
+        return low_write_throughput_count * 3 / 2 > window_size;
     }
 
     false
