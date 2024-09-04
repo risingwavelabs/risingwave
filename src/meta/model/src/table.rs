@@ -14,7 +14,7 @@
 
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::VnodeCountCompat;
-use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType};
+use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbEngine, PbTableType};
 use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable};
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
@@ -102,6 +102,34 @@ impl From<PbHandleConflictBehavior> for HandleConflictBehavior {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
+pub enum Engine {
+    #[sea_orm(string_value = "HUMMOCK")]
+    Hummock,
+    #[sea_orm(string_value = "ICEBERG")]
+    Iceberg,
+}
+
+impl From<Engine> for PbEngine {
+    fn from(engine: Engine) -> Self {
+        match engine {
+            Engine::Hummock => Self::Hummock,
+            Engine::Iceberg => Self::Iceberg,
+        }
+    }
+}
+
+impl From<PbEngine> for Engine {
+    fn from(engine: PbEngine) -> Self {
+        match engine {
+            PbEngine::Hummock => Self::Hummock,
+            PbEngine::Iceberg => Self::Iceberg,
+            PbEngine::Unspecified => unreachable!("Unspecified engine"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "table")]
 pub struct Model {
@@ -135,6 +163,7 @@ pub struct Model {
     pub incoming_sinks: I32Array,
     pub cdc_table_id: Option<String>,
     pub vnode_count: i32,
+    pub engine: Engine,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -218,6 +247,7 @@ impl From<PbTable> for ActiveModel {
             .value_opt()
             .map(|v| v as _)
             .map_or(NotSet, Set);
+        let engine = pb_table.engine();
 
         let fragment_id = if pb_table.fragment_id == OBJECT_ID_PLACEHOLDER {
             NotSet
@@ -267,6 +297,7 @@ impl From<PbTable> for ActiveModel {
             incoming_sinks: Set(pb_table.incoming_sinks.into()),
             cdc_table_id: Set(pb_table.cdc_table_id),
             vnode_count,
+            engine: Set(engine.into()),
         }
     }
 }

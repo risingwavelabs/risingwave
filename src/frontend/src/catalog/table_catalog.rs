@@ -18,7 +18,7 @@ use std::collections::{HashMap, HashSet};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, CreateType, Field, Schema, StreamJobStatus, TableDesc,
+    ColumnCatalog, ConflictBehavior, CreateType, Engine, Field, Schema, StreamJobStatus, TableDesc,
     TableId, TableVersionId,
 };
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
@@ -182,7 +182,11 @@ pub struct TableCatalog {
     /// [`StreamMaterialize::derive_table_catalog`]: crate::optimizer::plan_node::StreamMaterialize::derive_table_catalog
     /// [`TableCatalogBuilder::build`]: crate::optimizer::plan_node::utils::TableCatalogBuilder::build
     pub vnode_count: VnodeCount,
+    pub engine: Engine,
 }
+
+pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
+pub const ICEBERG_SINK_PREFIX: &str = "__iceberg_sink_";
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TableType {
@@ -465,6 +469,7 @@ impl TableCatalog {
             retention_seconds: self.retention_seconds,
             cdc_table_id: self.cdc_table_id.clone(),
             maybe_vnode_count: self.vnode_count.to_protobuf(),
+            engine: self.engine.to_protobuf().into(),
         }
     }
 
@@ -565,6 +570,7 @@ impl From<PbTable> for TableCatalog {
     fn from(tb: PbTable) -> Self {
         let id = tb.id;
         let tb_conflict_behavior = tb.handle_pk_conflict_behavior();
+        let tb_engine = tb.engine();
         let table_type = tb.get_table_type().unwrap();
         let stream_job_status = tb
             .get_stream_job_status()
@@ -608,6 +614,7 @@ impl From<PbTable> for TableCatalog {
         for idx in &tb.watermark_indices {
             watermark_columns.insert(*idx as _);
         }
+        let engine = Engine::from_protobuf(&tb_engine);
 
         Self {
             id: id.into(),
@@ -657,6 +664,7 @@ impl From<PbTable> for TableCatalog {
                 .collect_vec(),
             cdc_table_id: tb.cdc_table_id,
             vnode_count,
+            engine,
         }
     }
 }
@@ -680,6 +688,7 @@ mod tests {
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_pb::catalog::table::PbEngine;
     use risingwave_pb::plan_common::{
         AdditionalColumn, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
     };
@@ -748,6 +757,7 @@ mod tests {
             version_column_index: None,
             cdc_table_id: None,
             maybe_vnode_count: VnodeCount::set(233).to_protobuf(),
+            engine: PbEngine::Hummock.into(),
         }
         .into();
 
@@ -814,6 +824,7 @@ mod tests {
                 version_column_index: None,
                 cdc_table_id: None,
                 vnode_count: VnodeCount::set(233),
+                engine: Engine::Hummock,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

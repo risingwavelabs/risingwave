@@ -19,7 +19,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, CreateType, StreamJobStatus, TableId, OBJECT_ID_PLACEHOLDER,
+    ColumnCatalog, ConflictBehavior, CreateType, Engine, StreamJobStatus, TableId,
+    OBJECT_ID_PLACEHOLDER,
 };
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -110,6 +111,7 @@ impl StreamMaterialize {
             cardinality,
             retention_seconds,
             create_type,
+            Engine::Hummock,
         )?;
 
         Ok(Self::new(input, table))
@@ -135,6 +137,7 @@ impl StreamMaterialize {
         version: Option<TableVersion>,
         retention_seconds: Option<NonZeroU32>,
         cdc_table_id: Option<String>,
+        engine: Engine,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
@@ -153,6 +156,7 @@ impl StreamMaterialize {
             Cardinality::unknown(), // unknown cardinality for tables
             retention_seconds,
             CreateType::Foreground,
+            engine,
         )?;
 
         table.cdc_table_id = cdc_table_id;
@@ -227,6 +231,7 @@ impl StreamMaterialize {
         cardinality: Cardinality,
         retention_seconds: Option<NonZeroU32>,
         create_type: CreateType,
+        engine: Engine,
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
@@ -285,6 +290,13 @@ impl StreamMaterialize {
             retention_seconds: retention_seconds.map(|i| i.into()),
             cdc_table_id: None,
             vnode_count: VnodeCount::Placeholder, // will be filled in by the meta service later
+            engine: match table_type {
+                TableType::Table => engine,
+                TableType::MaterializedView | TableType::Index | TableType::Internal => {
+                    assert_eq!(engine, Engine::Hummock);
+                    engine
+                }
+            },
         })
     }
 

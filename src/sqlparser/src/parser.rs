@@ -2584,6 +2584,21 @@ impl Parser<'_> {
             None
         };
 
+        let engine = if self.parse_keyword(Keyword::ENGINE) {
+            self.expect_token(&Token::Eq)?;
+            let engine_name = self.parse_object_name()?;
+            if "iceberg".eq_ignore_ascii_case(&engine_name.real_value()) {
+                Engine::Iceberg
+            } else if "hummock".eq_ignore_ascii_case(&engine_name.real_value()) {
+                Engine::Hummock
+            } else {
+                parser_err!("Unsupported engine: {}", engine_name);
+            }
+        } else {
+            // TODO(nimtable): default to hummock, later we can change it to iceberg
+            Engine::Hummock
+        };
+
         Ok(Statement::CreateTable {
             name: table_name,
             temporary,
@@ -2601,6 +2616,7 @@ impl Parser<'_> {
             query,
             cdc_table_info,
             include_column_options: include_options,
+            engine,
         })
     }
 

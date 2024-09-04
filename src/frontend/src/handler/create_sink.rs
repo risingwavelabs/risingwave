@@ -560,10 +560,16 @@ pub(crate) async fn reparse_table_for_sink(
         on_conflict,
         with_version_column,
         include_column_options,
+        engine,
         ..
     } = definition
     else {
         panic!("unexpected statement type: {:?}", definition);
+    };
+
+    let engine = match engine {
+        risingwave_sqlparser::ast::Engine::Hummock => risingwave_common::catalog::Engine::Hummock,
+        risingwave_sqlparser::ast::Engine::Iceberg => risingwave_common::catalog::Engine::Iceberg,
     };
 
     let (graph, table, source, _) = generate_stream_graph_for_replace_table(
@@ -583,6 +589,7 @@ pub(crate) async fn reparse_table_for_sink(
         None,
         None,
         include_column_options,
+        engine,
     )
     .await?;
 

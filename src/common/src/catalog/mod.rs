@@ -27,6 +27,7 @@ use futures::stream::BoxStream;
 pub use internal_table::*;
 use parse_display::Display;
 pub use physical_table::*;
+use risingwave_pb::catalog::table::PbEngine;
 use risingwave_pb::catalog::{
     CreateType as PbCreateType, HandleConflictBehavior as PbHandleConflictBehavior,
     StreamJobStatus as PbStreamJobStatus,
@@ -535,6 +536,37 @@ impl ConflictBehavior {
             ConflictBehavior::Overwrite => "Overwrite".to_string(),
             ConflictBehavior::IgnoreConflict => "IgnoreConflict".to_string(),
             ConflictBehavior::DoUpdateIfNotNull => "DoUpdateIfNotNull".to_string(),
+        }
+    }
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Engine {
+    /// TODO(nimtable): use iceberg engine as default.
+    #[default]
+    Hummock,
+    Iceberg,
+}
+
+impl Engine {
+    pub fn from_protobuf(engine: &PbEngine) -> Self {
+        match engine {
+            PbEngine::Hummock | PbEngine::Unspecified => Engine::Hummock,
+            PbEngine::Iceberg => Engine::Iceberg,
+        }
+    }
+
+    pub fn to_protobuf(self) -> PbEngine {
+        match self {
+            Engine::Hummock => PbEngine::Hummock,
+            Engine::Iceberg => PbEngine::Iceberg,
+        }
+    }
+
+    pub fn debug_to_string(self) -> String {
+        match self {
+            Engine::Hummock => "Hummock".to_string(),
+            Engine::Iceberg => "Iceberg".to_string(),
         }
     }
 }
