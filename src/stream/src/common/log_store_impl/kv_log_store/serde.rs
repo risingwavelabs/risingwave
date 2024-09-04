@@ -945,7 +945,7 @@ mod tests {
     use risingwave_storage::store::{
         FromStreamStateStoreIter, StateStoreIterItem, StateStoreReadIter,
     };
-    use risingwave_storage::table::DEFAULT_VNODE;
+    use risingwave_storage::table::SINGLETON_VNODE;
     use tokio::sync::oneshot;
     use tokio::sync::oneshot::Sender;
 
@@ -1023,7 +1023,7 @@ mod tests {
             seq_id += 1;
         }
 
-        let (key, encoded_barrier) = serde.serialize_barrier(epoch, DEFAULT_VNODE, false);
+        let (key, encoded_barrier) = serde.serialize_barrier(epoch, SINGLETON_VNODE, false);
         let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(&encoded_barrier).unwrap() {
             (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
@@ -1061,7 +1061,8 @@ mod tests {
             seq_id += 1;
         }
 
-        let (key, encoded_checkpoint_barrier) = serde.serialize_barrier(epoch, DEFAULT_VNODE, true);
+        let (key, encoded_checkpoint_barrier) =
+            serde.serialize_barrier(epoch, SINGLETON_VNODE, true);
         let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(&encoded_checkpoint_barrier).unwrap() {
             (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
@@ -1199,7 +1200,7 @@ mod tests {
     ) {
         let (ops, rows) = gen_test_data(base);
         let first_barrier = {
-            let (key, value) = serde.serialize_barrier(EPOCH0, DEFAULT_VNODE, true);
+            let (key, value) = serde.serialize_barrier(EPOCH0, SINGLETON_VNODE, true);
             Ok((FullKey::new(TEST_TABLE_ID, key, EPOCH0), value))
         };
         let stream = stream::once(async move { first_barrier });
@@ -1209,7 +1210,7 @@ mod tests {
         let stream = stream.chain(stream::once({
             let serde = serde.clone();
             async move {
-                let (key, value) = serde.serialize_barrier(EPOCH1, DEFAULT_VNODE, false);
+                let (key, value) = serde.serialize_barrier(EPOCH1, SINGLETON_VNODE, false);
                 Ok((FullKey::new(TEST_TABLE_ID, key, EPOCH1), value))
             }
         }));
@@ -1217,7 +1218,7 @@ mod tests {
             gen_row_stream(serde.clone(), ops.clone(), rows.clone(), EPOCH2, seq_id);
         let stream = stream.chain(row_stream).chain(stream::once({
             async move {
-                let (key, value) = serde.serialize_barrier(EPOCH2, DEFAULT_VNODE, true);
+                let (key, value) = serde.serialize_barrier(EPOCH2, SINGLETON_VNODE, true);
                 Ok((FullKey::new(TEST_TABLE_ID, key, EPOCH2), value))
             }
         }));

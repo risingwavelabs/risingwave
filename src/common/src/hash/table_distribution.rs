@@ -24,9 +24,8 @@ use crate::hash::VirtualNode;
 use crate::row::Row;
 use crate::util::iter_util::ZipEqFast;
 
-/// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
-pub const DEFAULT_VNODE: VirtualNode = VirtualNode::ZERO;
-pub use DEFAULT_VNODE as SINGLETON_VNODE;
+/// For tables without distribution (singleton), the `SINGLETON_VNODE` is encoded.
+pub const SINGLETON_VNODE: VirtualNode = VirtualNode::ZERO;
 
 use super::VnodeBitmapExt;
 
