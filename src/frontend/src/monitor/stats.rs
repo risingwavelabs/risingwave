@@ -168,27 +168,10 @@ impl CursorMetricsCollector {
         let subscription_cursor_last_fetch_duration =
             register_histogram_vec_with_registry!(opts, &["subscription_name"], registry).unwrap();
 
-        let subsription_cursor_nums = Arc::new(subsription_cursor_nums);
-        let invalid_subsription_cursor_nums = Arc::new(invalid_subsription_cursor_nums);
-        let subscription_cursor_last_fetch_duration =
-            Arc::new(subscription_cursor_last_fetch_duration);
-
-        let subsription_cursor_nums_clone = subsription_cursor_nums.clone();
-        let invalid_subsription_cursor_nums_clone = invalid_subsription_cursor_nums.clone();
-        let subscription_cursor_last_fetch_duration_clone =
-            subscription_cursor_last_fetch_duration.clone();
-        let session_map_clone = session_map.clone();
-
         let join_handle = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                let session_vec = {
-                    session_map_clone
-                        .read()
-                        .values()
-                        .cloned()
-                        .collect::<Vec<_>>()
-                };
+                let session_vec = { session_map.read().values().cloned().collect::<Vec<_>>() };
                 let mut subsription_cursor_nums_value = 0;
                 let mut invalid_subsription_cursor_nums_value = 0;
                 for session in &session_vec {
@@ -203,17 +186,13 @@ impl CursorMetricsCollector {
                     for (subscription_name, duration) in
                         &periodic_cursor_metrics.subscription_cursor_last_fetch_duration
                     {
-                        println!(
-                            "subscription_name: {}, duration: {}",
-                            subscription_name, duration
-                        );
-                        subscription_cursor_last_fetch_duration_clone
+                        subscription_cursor_last_fetch_duration
                             .with_label_values(&[subscription_name])
                             .observe(*duration);
                     }
                 }
-                subsription_cursor_nums_clone.set(subsription_cursor_nums_value);
-                invalid_subsription_cursor_nums_clone.set(invalid_subsription_cursor_nums_value);
+                subsription_cursor_nums.set(subsription_cursor_nums_value);
+                invalid_subsription_cursor_nums.set(invalid_subsription_cursor_nums_value);
             }
         });
         Self {
