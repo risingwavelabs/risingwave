@@ -364,7 +364,6 @@ impl Binder {
         matches!(self.bind_for, BindFor::Stream)
     }
 
-    #[expect(dead_code)]
     fn is_for_batch(&self) -> bool {
         matches!(self.bind_for, BindFor::Batch)
     }
