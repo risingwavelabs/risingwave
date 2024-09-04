@@ -33,7 +33,7 @@ struct RwHummockVersionDelta {
     group_deltas: JsonbVal,
 }
 
-#[system_catalog(table, "rw_catalog.rw_hummock_version_deltas")]
+#[system_catalog(table, "nim_catalog.nim_hummock_version_deltas")]
 async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockVersionDelta>> {
     let deltas = reader.meta_client.list_version_deltas().await?;
     let rows = deltas

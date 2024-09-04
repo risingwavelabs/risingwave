@@ -53,7 +53,7 @@ async fn assert_event_count(mut session: Session, expected_count: u64) {
     let event_type = "CREATE_STREAM_JOB_FAIL";
     let count = session
         .run(format!(
-            "select count(*) from rw_event_logs where event_type='{}'",
+            "select count(*) from nim_event_logs where event_type='{}'",
             event_type
         ))
         .await
@@ -70,7 +70,7 @@ async fn assert_latest_event(
     let event_type = "CREATE_STREAM_JOB_FAIL";
     let info = session
         .run(format!(
-            "select info from rw_event_logs where event_type='{}' order by timestamp desc limit 1",
+            "select info from nim_event_logs where event_type='{}' order by timestamp desc limit 1",
             event_type
         ))
         .await
@@ -247,7 +247,7 @@ async fn failpoint_limited_test_collect_barrier_failure() -> Result<()> {
     let event_type = "COLLECT_BARRIER_FAIL";
     let info = session
         .run(format!(
-            "select info from rw_event_logs where event_type='{}' order by timestamp desc limit 1",
+            "select info from nim_event_logs where event_type='{}' order by timestamp desc limit 1",
             event_type
         ))
         .await

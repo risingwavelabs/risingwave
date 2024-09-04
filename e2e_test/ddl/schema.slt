@@ -85,7 +85,7 @@ information_schema
 myschema
 pg_catalog
 public
-rw_catalog
+nim_catalog
 user_for_authorization
 
 statement error Permission denied

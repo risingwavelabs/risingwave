@@ -8,11 +8,11 @@
 - sql: |
     select * from pg_catalog.pg_namespace
   logical_plan: |-
-    LogicalProject { exprs: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
+    LogicalProject { exprs: [nim_schemas.id, nim_schemas.name, nim_schemas.owner, nim_schemas.acl] }
     └─LogicalShare { id: 2 }
-      └─LogicalProject { exprs: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
-        └─LogicalSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
-  batch_plan: 'BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl], distribution: Single }'
+      └─LogicalProject { exprs: [nim_schemas.id, nim_schemas.name, nim_schemas.owner, nim_schemas.acl] }
+        └─LogicalSysScan { table: nim_schemas, columns: [nim_schemas.id, nim_schemas.name, nim_schemas.owner, nim_schemas.acl] }
+  batch_plan: 'BatchScan { table: nim_schemas, columns: [nim_schemas.id, nim_schemas.name, nim_schemas.owner, nim_schemas.acl], distribution: Single }'
 - sql: |
     select * from pg_catalog.pg_cast
   logical_plan: |-

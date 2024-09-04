@@ -29,7 +29,7 @@ struct RwMetaSnapshot {
     rw_version: Option<String>,
 }
 
-#[system_catalog(table, "rw_catalog.rw_meta_snapshot")]
+#[system_catalog(table, "nim_catalog.nim_meta_snapshot")]
 async fn read_meta_snapshot(reader: &SysCatalogReaderImpl) -> Result<Vec<RwMetaSnapshot>> {
     let meta_snapshots = reader
         .meta_client

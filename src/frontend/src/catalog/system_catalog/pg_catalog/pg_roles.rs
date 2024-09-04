@@ -33,7 +33,7 @@ use risingwave_frontend_macro::system_catalog;
         NULL::timestamptz AS rolvaliduntil,
         true AS rolbypassrls,
         '********' AS rolpassword
-    FROM rw_catalog.rw_users"
+    FROM nim_catalog.nim_users"
 )]
 #[derive(Fields)]
 struct PgRule {

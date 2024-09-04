@@ -26,7 +26,7 @@ struct RwTableFragment {
     parallelism: String,
 }
 
-#[system_catalog(table, "rw_catalog.rw_table_fragments")]
+#[system_catalog(table, "nim_catalog.nim_table_fragments")]
 async fn read_rw_table_fragments_info(
     reader: &SysCatalogReaderImpl,
 ) -> Result<Vec<RwTableFragment>> {

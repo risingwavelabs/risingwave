@@ -16,15 +16,15 @@ use std::convert::Infallible;
 use std::str::FromStr;
 
 use super::SESSION_CONFIG_LIST_SEP;
-use crate::catalog::{DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME};
+use crate::catalog::{DEFAULT_SCHEMA_NAME, NIM_CATALOG_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
 
 pub const USER_NAME_WILD_CARD: &str = "\"$user\"";
 
 /// see <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
 ///
 /// 1. when we `select` or `drop` object and don't give a specified schema, it will search the
-///    object from the valid items in schema `rw_catalog`, `pg_catalog` and `search_path`. If schema
-///    `rw_catalog` and `pg_catalog` are not in `search_path`, we will search them firstly. If they're
+///    object from the valid items in schema `nim_catalog`, `pg_catalog` and `search_path`. If schema
+///    `nim_catalog` and `pg_catalog` are not in `search_path`, we will search them firstly. If they're
 ///    in `search_path`, we will follow the order in `search_path`.
 ///
 /// 2. when we `create` a `source` or `mv` and don't give a specified schema, it will use the first
@@ -34,7 +34,7 @@ pub const USER_NAME_WILD_CARD: &str = "\"$user\"";
 #[derive(Clone, Debug, PartialEq)]
 pub struct SearchPath {
     origin_str: String,
-    /// The path will implicitly includes `rw_catalog` and `pg_catalog` if user does specify them.
+    /// The path will implicitly includes `nim_catalog` and `pg_catalog` if user does specify them.
     path: Vec<String>,
     real_path: Vec<String>,
 }
@@ -73,9 +73,9 @@ impl FromStr for SearchPath {
         let string = real_path.join(SESSION_CONFIG_LIST_SEP);
 
         let mut path = real_path.clone();
-        let rw_catalog = RW_CATALOG_SCHEMA_NAME.to_string();
-        if !real_path.contains(&rw_catalog) {
-            path.insert(0, rw_catalog);
+        let nim_catalog = NIM_CATALOG_SCHEMA_NAME.to_string();
+        if !real_path.contains(&nim_catalog) {
+            path.insert(0, nim_catalog);
         }
 
         let pg_catalog = PG_CATALOG_SCHEMA_NAME.to_string();

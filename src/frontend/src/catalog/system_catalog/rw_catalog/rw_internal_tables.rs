@@ -34,7 +34,7 @@ struct RwInternalTable {
     created_at_cluster_version: Option<String>,
 }
 
-#[system_catalog(table, "rw_catalog.rw_internal_tables")]
+#[system_catalog(table, "nim_catalog.nim_internal_tables")]
 fn read_rw_internal_tables(reader: &SysCatalogReaderImpl) -> Result<Vec<RwInternalTable>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;

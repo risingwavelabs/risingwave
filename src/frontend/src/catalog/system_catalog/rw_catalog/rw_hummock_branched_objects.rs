@@ -26,7 +26,7 @@ struct RwHummockBranchedObject {
     sst_id: Vec<i64>,
 }
 
-#[system_catalog(table, "rw_catalog.rw_hummock_branched_objects")]
+#[system_catalog(table, "nim_catalog.nim_hummock_branched_objects")]
 async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockBranchedObject>> {
     let branched_objects = reader.meta_client.list_branched_objects().await?;
     let rows = branched_objects

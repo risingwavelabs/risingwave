@@ -25,7 +25,7 @@ use risingwave_frontend_macro::system_catalog;
         create_db AS usecreatedb,
         is_super AS usesuper,
         '********' AS passwd
-    FROM rw_catalog.rw_users"
+    FROM nim_catalog.nim_users"
 )]
 #[derive(Fields)]
 struct PgUser {

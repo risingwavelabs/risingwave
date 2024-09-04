@@ -18,7 +18,7 @@ execute_sql_and_expect \
 backup
 
 execute_sql_and_expect \
-"SELECT meta_snapshot_id FROM rw_catalog.rw_meta_snapshot;" \
+"SELECT meta_snapshot_id FROM nim_catalog.nim_meta_snapshot;" \
 "1 row"
 
 execute_sql_and_expect \
@@ -28,14 +28,14 @@ execute_sql_and_expect \
 sleep 5
 
 execute_sql_and_expect \
-"SELECT meta_snapshot_id FROM rw_catalog.rw_meta_snapshot;" \
+"SELECT meta_snapshot_id FROM nim_catalog.nim_meta_snapshot;" \
 "0 row"
 
 backup
 backup
 backup
 execute_sql_and_expect \
-"SELECT meta_snapshot_id FROM rw_catalog.rw_meta_snapshot;" \
+"SELECT meta_snapshot_id FROM nim_catalog.nim_meta_snapshot;" \
 "3 row"
 
 execute_sql_and_expect \
@@ -44,7 +44,7 @@ execute_sql_and_expect \
 sleep 5
 
 execute_sql_and_expect \
-"SELECT meta_snapshot_id FROM rw_catalog.rw_meta_snapshot;" \
+"SELECT meta_snapshot_id FROM nim_catalog.nim_meta_snapshot;" \
 "1 row"
 
 execute_sql_and_expect \
@@ -53,13 +53,13 @@ execute_sql_and_expect \
 sleep 5
 
 execute_sql_and_expect \
-"SELECT meta_snapshot_id FROM rw_catalog.rw_meta_snapshot;" \
+"SELECT meta_snapshot_id FROM nim_catalog.nim_meta_snapshot;" \
 "0 row"
 
 backup
 backup
 execute_sql_and_expect \
-"SELECT meta_snapshot_id FROM rw_catalog.rw_meta_snapshot;" \
+"SELECT meta_snapshot_id FROM nim_catalog.nim_meta_snapshot;" \
 "2 row"
 
 execute_sql_and_expect \
@@ -68,12 +68,12 @@ execute_sql_and_expect \
 sleep 5
 
 execute_sql_and_expect \
-"SELECT meta_snapshot_id FROM rw_catalog.rw_meta_snapshot;" \
+"SELECT meta_snapshot_id FROM nim_catalog.nim_meta_snapshot;" \
 "1 row"
 
 backup
 execute_sql_and_expect \
-"SELECT meta_snapshot_id FROM rw_catalog.rw_meta_snapshot;" \
+"SELECT meta_snapshot_id FROM nim_catalog.nim_meta_snapshot;" \
 "2 row"
 
 echo "test succeeded"

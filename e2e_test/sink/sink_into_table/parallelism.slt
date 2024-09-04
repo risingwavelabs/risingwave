@@ -20,7 +20,7 @@ statement ok
 create sink s_simple_1 into m_simple as select v1, v2 from t_simple;
 
 query I
-select distinct parallelism from rw_fragment_parallelism where name in ('t_simple', 'm_simple', 's_simple_1');
+select distinct parallelism from nim_fragment_parallelism where name in ('t_simple', 'm_simple', 's_simple_1');
 ----
 2
 
@@ -64,7 +64,7 @@ statement ok
 create sink s_multi into m_simple as select v1, count(*)::int from t_simple group by v1;
 
 query I
-select parallelism from rw_fragment_parallelism where array_position(flags, 'SINK') is not null and name = 's_multi';
+select parallelism from nim_fragment_parallelism where array_position(flags, 'SINK') is not null and name = 's_multi';
 ----
 3
 
@@ -87,4 +87,3 @@ drop table t_simple;
 
 statement ok
 drop table m_simple;
-

@@ -25,7 +25,7 @@ struct RwHummockPinnedSnapshot {
     min_pinned_snapshot_id: i64,
 }
 
-#[system_catalog(table, "rw_catalog.rw_hummock_pinned_snapshots")]
+#[system_catalog(table, "nim_catalog.nim_hummock_pinned_snapshots")]
 async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockPinnedSnapshot>> {
     let pinned_snapshots = reader
         .meta_client

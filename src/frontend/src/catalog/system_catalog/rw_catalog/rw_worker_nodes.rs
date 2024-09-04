@@ -40,7 +40,7 @@ struct RwWorkerNode {
     started_at: Option<Timestamptz>,
 }
 
-#[system_catalog(table, "rw_catalog.rw_worker_nodes")]
+#[system_catalog(table, "nim_catalog.nim_worker_nodes")]
 async fn read_rw_worker_nodes_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwWorkerNode>> {
     let workers = reader.meta_client.list_all_nodes().await?;
 

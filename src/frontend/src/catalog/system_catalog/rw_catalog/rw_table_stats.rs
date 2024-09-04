@@ -27,7 +27,7 @@ struct RwTableStats {
     total_value_size: i64,
 }
 
-#[system_catalog(table, "rw_catalog.rw_table_stats")]
+#[system_catalog(table, "nim_catalog.nim_table_stats")]
 fn read_table_stats(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTableStats>> {
     let catalog = reader.catalog_reader.read_guard();
     let table_stats = catalog.table_stats();

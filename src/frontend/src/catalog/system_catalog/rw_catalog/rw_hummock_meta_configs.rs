@@ -26,7 +26,7 @@ struct RwHummockMetaConfig {
     config_value: String,
 }
 
-#[system_catalog(table, "rw_catalog.rw_hummock_meta_configs")]
+#[system_catalog(table, "nim_catalog.nim_hummock_meta_configs")]
 async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockMetaConfig>> {
     let configs = reader
         .meta_client

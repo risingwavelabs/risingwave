@@ -38,7 +38,7 @@ struct RwIcebergSnapshots {
     summary: JsonbVal,
 }
 
-#[system_catalog(table, "rw_catalog.rw_iceberg_snapshots")]
+#[system_catalog(table, "nim_catalog.nim_iceberg_snapshots")]
 async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergSnapshots>> {
     let iceberg_sources = {
         let catalog_reader = reader.catalog_reader.read_guard();

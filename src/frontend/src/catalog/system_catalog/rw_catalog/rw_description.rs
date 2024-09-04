@@ -14,7 +14,7 @@
 
 use std::iter;
 
-use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
+use risingwave_common::catalog::NIM_CATALOG_SCHEMA_NAME;
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -33,7 +33,7 @@ struct RwDescription {
     description: Option<String>,
 }
 
-#[system_catalog(table, "rw_catalog.rw_description")]
+#[system_catalog(table, "nim_catalog.nim_description")]
 fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDescription>> {
     let build_row =
         |table_id, catalog_id, index: Option<i32>, description: Option<Box<str>>| RwDescription {
@@ -44,8 +44,8 @@ fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDescription>> {
         };
 
     let catalog_reader = reader.catalog_reader.read_guard();
-    let rw_catalog =
-        catalog_reader.get_schema_by_name(&reader.auth_context.database, RW_CATALOG_SCHEMA_NAME)?;
+    let rw_catalog = catalog_reader
+        .get_schema_by_name(&reader.auth_context.database, NIM_CATALOG_SCHEMA_NAME)?;
     let schemas = catalog_reader
         .iter_schemas(&reader.auth_context.database)?
         .filter(|schema| schema.id() != rw_catalog.id());

@@ -29,7 +29,7 @@ struct RwActorInfo {
     dispatcher: JsonbVal,
 }
 
-#[system_catalog(table, "rw_catalog.rw_actor_infos")]
+#[system_catalog(table, "nim_catalog.nim_actor_infos")]
 async fn read_rw_actors(reader: &SysCatalogReaderImpl) -> Result<Vec<RwActorInfo>> {
     let table_ids = reader
         .meta_client

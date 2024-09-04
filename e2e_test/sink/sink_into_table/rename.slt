@@ -11,13 +11,13 @@ statement ok
 create sink s into target as select * from source with (type = 'append-only');
 
 statement ok
-SELECT name, definition from rw_sinks;
+SELECT name, definition from nim_sinks;
 
 statement ok
 ALTER SINK s RENAME TO s1;
 
 query TT
-SELECT name, definition from rw_sinks;
+SELECT name, definition from nim_sinks;
 ----
 s1 CREATE SINK s1 INTO target AS SELECT * FROM source WITH (type = 'append-only')
 
@@ -28,13 +28,13 @@ statement ok
 ALTER TABLE target RENAME TO tar;
 
 query TT rowsort
-SELECT name, definition from rw_tables;
+SELECT name, definition from nim_tables;
 ----
 src	CREATE TABLE src (v INT) APPEND ONLY
 tar	CREATE TABLE tar (v INT)
 
 query TT
-SELECT name, definition from rw_sinks;
+SELECT name, definition from nim_sinks;
 ----
 s1 CREATE SINK s1 INTO tar AS SELECT * FROM src AS source WITH (type = 'append-only')
 

@@ -223,11 +223,11 @@
     AND pg_catalog.pg_table_is_visible(c.oid)
     ORDER BY 1,2;
   logical_plan: |-
-    LogicalProject { exprs: [rw_schemas.name, rw_tables.name, Case(($expr1 = 'r':Varchar), 'table':Varchar, ($expr1 = 'v':Varchar), 'view':Varchar, ($expr1 = 'm':Varchar), 'materialized view':Varchar, ($expr1 = 'i':Varchar), 'index':Varchar, ($expr1 = 'S':Varchar), 'sequence':Varchar, ($expr1 = 's':Varchar), 'special':Varchar, ($expr1 = 't':Varchar), 'TOAST table':Varchar, ($expr1 = 'f':Varchar), 'foreign table':Varchar, ($expr1 = 'p':Varchar), 'partitioned table':Varchar, ($expr1 = 'I':Varchar), 'partitioned index':Varchar) as $expr3, PgGetUserbyid(rw_tables.owner) as $expr4] }
-    └─LogicalFilter { predicate: In($expr1, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND (rw_schemas.name <> 'pg_catalog':Varchar) AND Not(RegexpEq(rw_schemas.name, '^pg_toast':Varchar)) AND (rw_schemas.name <> 'information_schema':Varchar) }
-      └─LogicalJoin { type: LeftOuter, on: (rw_schemas.id = rw_tables.schema_id), output: all }
+    LogicalProject { exprs: [nim_schemas.name, nim_tables.name, Case(($expr1 = 'r':Varchar), 'table':Varchar, ($expr1 = 'v':Varchar), 'view':Varchar, ($expr1 = 'm':Varchar), 'materialized view':Varchar, ($expr1 = 'i':Varchar), 'index':Varchar, ($expr1 = 'S':Varchar), 'sequence':Varchar, ($expr1 = 's':Varchar), 'special':Varchar, ($expr1 = 't':Varchar), 'TOAST table':Varchar, ($expr1 = 'f':Varchar), 'foreign table':Varchar, ($expr1 = 'p':Varchar), 'partitioned table':Varchar, ($expr1 = 'I':Varchar), 'partitioned index':Varchar) as $expr3, PgGetUserbyid(nim_tables.owner) as $expr4] }
+    └─LogicalFilter { predicate: In($expr1, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND (nim_schemas.name <> 'pg_catalog':Varchar) AND Not(RegexpEq(nim_schemas.name, '^pg_toast':Varchar)) AND (nim_schemas.name <> 'information_schema':Varchar) }
+      └─LogicalJoin { type: LeftOuter, on: (nim_schemas.id = nim_tables.schema_id), output: all }
         ├─LogicalShare { id: 18 }
-        │ └─LogicalProject { exprs: [rw_tables.id, rw_tables.name, rw_tables.schema_id, rw_tables.owner, 'p':Varchar, Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) as $expr1, 0:Int32, 0:Int32, Array as $expr2, false:Boolean, null:Varchar] }
+        │ └─LogicalProject { exprs: [nim_tables.id, nim_tables.name, nim_tables.schema_id, nim_tables.owner, 'p':Varchar, Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) as $expr1, 0:Int32, 0:Int32, Array as $expr2, false:Boolean, null:Varchar] }
         │   └─LogicalShare { id: 16 }
         │     └─LogicalUnion { all: true }
         │       ├─LogicalUnion { all: true }
@@ -236,55 +236,55 @@
         │       │ │ │ ├─LogicalUnion { all: true }
         │       │ │ │ │ ├─LogicalUnion { all: true }
         │       │ │ │ │ │ ├─LogicalUnion { all: true }
-        │       │ │ │ │ │ │ ├─LogicalProject { exprs: [rw_tables.id, rw_tables.name, 'table':Varchar, rw_tables.schema_id, rw_tables.owner, rw_tables.definition, rw_tables.acl] }
-        │       │ │ │ │ │ │ │ └─LogicalSysScan { table: rw_tables, columns: [rw_tables.id, rw_tables.name, rw_tables.schema_id, rw_tables.owner, rw_tables.definition, rw_tables.append_only, rw_tables.acl, rw_tables.initialized_at, rw_tables.created_at, rw_tables.initialized_at_cluster_version, rw_tables.created_at_cluster_version] }
-        │       │ │ │ │ │ │ └─LogicalProject { exprs: [rw_system_tables.id, rw_system_tables.name, 'system table':Varchar, rw_system_tables.schema_id, rw_system_tables.owner, rw_system_tables.definition, rw_system_tables.acl] }
-        │       │ │ │ │ │ │   └─LogicalSysScan { table: rw_system_tables, columns: [rw_system_tables.id, rw_system_tables.name, rw_system_tables.schema_id, rw_system_tables.owner, rw_system_tables.definition, rw_system_tables.acl] }
-        │       │ │ │ │ │ └─LogicalProject { exprs: [rw_sources.id, rw_sources.name, 'source':Varchar, rw_sources.schema_id, rw_sources.owner, rw_sources.definition, rw_sources.acl] }
-        │       │ │ │ │ │   └─LogicalSysScan { table: rw_sources, columns: [rw_sources.id, rw_sources.name, rw_sources.schema_id, rw_sources.owner, rw_sources.connector, rw_sources.columns, rw_sources.format, rw_sources.row_encode, rw_sources.append_only, rw_sources.associated_table_id, rw_sources.connection_id, rw_sources.definition, rw_sources.acl, rw_sources.initialized_at, rw_sources.created_at, rw_sources.initialized_at_cluster_version, rw_sources.created_at_cluster_version] }
-        │       │ │ │ │ └─LogicalProject { exprs: [rw_indexes.id, rw_indexes.name, 'index':Varchar, rw_indexes.schema_id, rw_indexes.owner, rw_indexes.definition, rw_indexes.acl] }
-        │       │ │ │ │   └─LogicalSysScan { table: rw_indexes, columns: [rw_indexes.id, rw_indexes.name, rw_indexes.primary_table_id, rw_indexes.key_columns, rw_indexes.include_columns, rw_indexes.schema_id, rw_indexes.owner, rw_indexes.definition, rw_indexes.acl, rw_indexes.initialized_at, rw_indexes.created_at, rw_indexes.initialized_at_cluster_version, rw_indexes.created_at_cluster_version] }
-        │       │ │ │ └─LogicalProject { exprs: [rw_sinks.id, rw_sinks.name, 'sink':Varchar, rw_sinks.schema_id, rw_sinks.owner, rw_sinks.definition, rw_sinks.acl] }
-        │       │ │ │   └─LogicalSysScan { table: rw_sinks, columns: [rw_sinks.id, rw_sinks.name, rw_sinks.schema_id, rw_sinks.owner, rw_sinks.connector, rw_sinks.sink_type, rw_sinks.connection_id, rw_sinks.definition, rw_sinks.acl, rw_sinks.initialized_at, rw_sinks.created_at, rw_sinks.initialized_at_cluster_version, rw_sinks.created_at_cluster_version] }
-        │       │ │ └─LogicalProject { exprs: [rw_subscriptions.id, rw_subscriptions.name, 'subscription':Varchar, rw_subscriptions.schema_id, rw_subscriptions.owner, rw_subscriptions.definition, rw_subscriptions.acl] }
-        │       │ │   └─LogicalSysScan { table: rw_subscriptions, columns: [rw_subscriptions.id, rw_subscriptions.name, rw_subscriptions.schema_id, rw_subscriptions.owner, rw_subscriptions.definition, rw_subscriptions.acl, rw_subscriptions.initialized_at, rw_subscriptions.created_at, rw_subscriptions.initialized_at_cluster_version, rw_subscriptions.created_at_cluster_version] }
-        │       │ └─LogicalProject { exprs: [rw_materialized_views.id, rw_materialized_views.name, 'materialized view':Varchar, rw_materialized_views.schema_id, rw_materialized_views.owner, rw_materialized_views.definition, rw_materialized_views.acl] }
-        │       │   └─LogicalSysScan { table: rw_materialized_views, columns: [rw_materialized_views.id, rw_materialized_views.name, rw_materialized_views.schema_id, rw_materialized_views.owner, rw_materialized_views.definition, rw_materialized_views.append_only, rw_materialized_views.acl, rw_materialized_views.initialized_at, rw_materialized_views.created_at, rw_materialized_views.initialized_at_cluster_version, rw_materialized_views.created_at_cluster_version] }
-        │       └─LogicalProject { exprs: [rw_views.id, rw_views.name, 'view':Varchar, rw_views.schema_id, rw_views.owner, rw_views.definition, rw_views.acl] }
-        │         └─LogicalSysScan { table: rw_views, columns: [rw_views.id, rw_views.name, rw_views.schema_id, rw_views.owner, rw_views.definition, rw_views.acl] }
+        │       │ │ │ │ │ │ ├─LogicalProject { exprs: [nim_tables.id, nim_tables.name, 'table':Varchar, nim_tables.schema_id, nim_tables.owner, nim_tables.definition, nim_tables.acl] }
+        │       │ │ │ │ │ │ │ └─LogicalSysScan { table: nim_tables, columns: [nim_tables.id, nim_tables.name, nim_tables.schema_id, nim_tables.owner, nim_tables.definition, nim_tables.append_only, nim_tables.acl, nim_tables.initialized_at, nim_tables.created_at, nim_tables.initialized_at_cluster_version, nim_tables.created_at_cluster_version] }
+        │       │ │ │ │ │ │ └─LogicalProject { exprs: [nim_system_tables.id, nim_system_tables.name, 'system table':Varchar, nim_system_tables.schema_id, nim_system_tables.owner, nim_system_tables.definition, nim_system_tables.acl] }
+        │       │ │ │ │ │ │   └─LogicalSysScan { table: nim_system_tables, columns: [nim_system_tables.id, nim_system_tables.name, nim_system_tables.schema_id, nim_system_tables.owner, nim_system_tables.definition, nim_system_tables.acl] }
+        │       │ │ │ │ │ └─LogicalProject { exprs: [nim_sources.id, nim_sources.name, 'source':Varchar, nim_sources.schema_id, nim_sources.owner, nim_sources.definition, nim_sources.acl] }
+        │       │ │ │ │ │   └─LogicalSysScan { table: nim_sources, columns: [nim_sources.id, nim_sources.name, nim_sources.schema_id, nim_sources.owner, nim_sources.connector, nim_sources.columns, nim_sources.format, nim_sources.row_encode, nim_sources.append_only, nim_sources.associated_table_id, nim_sources.connection_id, nim_sources.definition, nim_sources.acl, nim_sources.initialized_at, nim_sources.created_at, nim_sources.initialized_at_cluster_version, nim_sources.created_at_cluster_version] }
+        │       │ │ │ │ └─LogicalProject { exprs: [nim_indexes.id, nim_indexes.name, 'index':Varchar, nim_indexes.schema_id, nim_indexes.owner, nim_indexes.definition, nim_indexes.acl] }
+        │       │ │ │ │   └─LogicalSysScan { table: nim_indexes, columns: [nim_indexes.id, nim_indexes.name, nim_indexes.primary_table_id, nim_indexes.key_columns, nim_indexes.include_columns, nim_indexes.schema_id, nim_indexes.owner, nim_indexes.definition, nim_indexes.acl, nim_indexes.initialized_at, nim_indexes.created_at, nim_indexes.initialized_at_cluster_version, nim_indexes.created_at_cluster_version] }
+        │       │ │ │ └─LogicalProject { exprs: [nim_sinks.id, nim_sinks.name, 'sink':Varchar, nim_sinks.schema_id, nim_sinks.owner, nim_sinks.definition, nim_sinks.acl] }
+        │       │ │ │   └─LogicalSysScan { table: nim_sinks, columns: [nim_sinks.id, nim_sinks.name, nim_sinks.schema_id, nim_sinks.owner, nim_sinks.connector, nim_sinks.sink_type, nim_sinks.connection_id, nim_sinks.definition, nim_sinks.acl, nim_sinks.initialized_at, nim_sinks.created_at, nim_sinks.initialized_at_cluster_version, nim_sinks.created_at_cluster_version] }
+        │       │ │ └─LogicalProject { exprs: [nim_subscriptions.id, nim_subscriptions.name, 'subscription':Varchar, nim_subscriptions.schema_id, nim_subscriptions.owner, nim_subscriptions.definition, nim_subscriptions.acl] }
+        │       │ │   └─LogicalSysScan { table: nim_subscriptions, columns: [nim_subscriptions.id, nim_subscriptions.name, nim_subscriptions.schema_id, nim_subscriptions.owner, nim_subscriptions.definition, nim_subscriptions.acl, nim_subscriptions.initialized_at, nim_subscriptions.created_at, nim_subscriptions.initialized_at_cluster_version, nim_subscriptions.created_at_cluster_version] }
+        │       │ └─LogicalProject { exprs: [nim_materialized_views.id, nim_materialized_views.name, 'materialized view':Varchar, nim_materialized_views.schema_id, nim_materialized_views.owner, nim_materialized_views.definition, nim_materialized_views.acl] }
+        │       │   └─LogicalSysScan { table: nim_materialized_views, columns: [nim_materialized_views.id, nim_materialized_views.name, nim_materialized_views.schema_id, nim_materialized_views.owner, nim_materialized_views.definition, nim_materialized_views.append_only, nim_materialized_views.acl, nim_materialized_views.initialized_at, nim_materialized_views.created_at, nim_materialized_views.initialized_at_cluster_version, nim_materialized_views.created_at_cluster_version] }
+        │       └─LogicalProject { exprs: [nim_views.id, nim_views.name, 'view':Varchar, nim_views.schema_id, nim_views.owner, nim_views.definition, nim_views.acl] }
+        │         └─LogicalSysScan { table: nim_views, columns: [nim_views.id, nim_views.name, nim_views.schema_id, nim_views.owner, nim_views.definition, nim_views.acl] }
         └─LogicalShare { id: 20 }
-          └─LogicalProject { exprs: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
-            └─LogicalSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
+          └─LogicalProject { exprs: [nim_schemas.id, nim_schemas.name, nim_schemas.owner, nim_schemas.acl] }
+            └─LogicalSysScan { table: nim_schemas, columns: [nim_schemas.id, nim_schemas.name, nim_schemas.owner, nim_schemas.acl] }
   batch_plan: |-
-    BatchExchange { order: [rw_schemas.name ASC, rw_tables.name ASC], dist: Single }
-    └─BatchProject { exprs: [rw_schemas.name, rw_tables.name, Case(($expr1 = 'r':Varchar), 'table':Varchar, ($expr1 = 'v':Varchar), 'view':Varchar, ($expr1 = 'm':Varchar), 'materialized view':Varchar, ($expr1 = 'i':Varchar), 'index':Varchar, ($expr1 = 'S':Varchar), 'sequence':Varchar, ($expr1 = 's':Varchar), 'special':Varchar, ($expr1 = 't':Varchar), 'TOAST table':Varchar, ($expr1 = 'f':Varchar), 'foreign table':Varchar, ($expr1 = 'p':Varchar), 'partitioned table':Varchar, ($expr1 = 'I':Varchar), 'partitioned index':Varchar) as $expr2, PgGetUserbyid(rw_tables.owner) as $expr3] }
-      └─BatchProject { exprs: [rw_tables.name, rw_tables.owner, Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) as $expr1, rw_schemas.name] }
-        └─BatchSort { order: [rw_schemas.name ASC, rw_tables.name ASC] }
-          └─BatchHashJoin { type: Inner, predicate: rw_tables.schema_id = rw_schemas.id, output: all }
-            ├─BatchExchange { order: [], dist: HashShard(rw_tables.schema_id) }
+    BatchExchange { order: [nim_schemas.name ASC, nim_tables.name ASC], dist: Single }
+    └─BatchProject { exprs: [nim_schemas.name, nim_tables.name, Case(($expr1 = 'r':Varchar), 'table':Varchar, ($expr1 = 'v':Varchar), 'view':Varchar, ($expr1 = 'm':Varchar), 'materialized view':Varchar, ($expr1 = 'i':Varchar), 'index':Varchar, ($expr1 = 'S':Varchar), 'sequence':Varchar, ($expr1 = 's':Varchar), 'special':Varchar, ($expr1 = 't':Varchar), 'TOAST table':Varchar, ($expr1 = 'f':Varchar), 'foreign table':Varchar, ($expr1 = 'p':Varchar), 'partitioned table':Varchar, ($expr1 = 'I':Varchar), 'partitioned index':Varchar) as $expr2, PgGetUserbyid(nim_tables.owner) as $expr3] }
+      └─BatchProject { exprs: [nim_tables.name, nim_tables.owner, Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) as $expr1, nim_schemas.name] }
+        └─BatchSort { order: [nim_schemas.name ASC, nim_tables.name ASC] }
+          └─BatchHashJoin { type: Inner, predicate: nim_tables.schema_id = nim_schemas.id, output: all }
+            ├─BatchExchange { order: [], dist: HashShard(nim_tables.schema_id) }
             │ └─BatchUnion { all: true }
-            │   ├─BatchProject { exprs: [rw_tables.name, 'table':Varchar, rw_tables.schema_id, rw_tables.owner] }
-            │   │ └─BatchScan { table: rw_tables, columns: [rw_tables.name, rw_tables.schema_id, rw_tables.owner], distribution: Single }
-            │   ├─BatchProject { exprs: [rw_system_tables.name, 'system table':Varchar, rw_system_tables.schema_id, rw_system_tables.owner] }
-            │   │ └─BatchScan { table: rw_system_tables, columns: [rw_system_tables.name, rw_system_tables.schema_id, rw_system_tables.owner], distribution: Single }
-            │   ├─BatchProject { exprs: [rw_sources.name, 'source':Varchar, rw_sources.schema_id, rw_sources.owner] }
+            │   ├─BatchProject { exprs: [nim_tables.name, 'table':Varchar, nim_tables.schema_id, nim_tables.owner] }
+            │   │ └─BatchScan { table: nim_tables, columns: [nim_tables.name, nim_tables.schema_id, nim_tables.owner], distribution: Single }
+            │   ├─BatchProject { exprs: [nim_system_tables.name, 'system table':Varchar, nim_system_tables.schema_id, nim_system_tables.owner] }
+            │   │ └─BatchScan { table: nim_system_tables, columns: [nim_system_tables.name, nim_system_tables.schema_id, nim_system_tables.owner], distribution: Single }
+            │   ├─BatchProject { exprs: [nim_sources.name, 'source':Varchar, nim_sources.schema_id, nim_sources.owner] }
             │   │ └─BatchFilter { predicate: null:Boolean }
-            │   │   └─BatchScan { table: rw_sources, columns: [rw_sources.name, rw_sources.schema_id, rw_sources.owner], distribution: Single }
-            │   ├─BatchProject { exprs: [rw_indexes.name, 'index':Varchar, rw_indexes.schema_id, rw_indexes.owner] }
+            │   │   └─BatchScan { table: nim_sources, columns: [nim_sources.name, nim_sources.schema_id, nim_sources.owner], distribution: Single }
+            │   ├─BatchProject { exprs: [nim_indexes.name, 'index':Varchar, nim_indexes.schema_id, nim_indexes.owner] }
             │   │ └─BatchValues { rows: [] }
-            │   ├─BatchProject { exprs: [rw_sinks.name, 'sink':Varchar, rw_sinks.schema_id, rw_sinks.owner] }
+            │   ├─BatchProject { exprs: [nim_sinks.name, 'sink':Varchar, nim_sinks.schema_id, nim_sinks.owner] }
             │   │ └─BatchFilter { predicate: null:Boolean }
-            │   │   └─BatchScan { table: rw_sinks, columns: [rw_sinks.name, rw_sinks.schema_id, rw_sinks.owner], distribution: Single }
-            │   ├─BatchProject { exprs: [rw_subscriptions.name, 'subscription':Varchar, rw_subscriptions.schema_id, rw_subscriptions.owner] }
+            │   │   └─BatchScan { table: nim_sinks, columns: [nim_sinks.name, nim_sinks.schema_id, nim_sinks.owner], distribution: Single }
+            │   ├─BatchProject { exprs: [nim_subscriptions.name, 'subscription':Varchar, nim_subscriptions.schema_id, nim_subscriptions.owner] }
             │   │ └─BatchFilter { predicate: null:Boolean }
-            │   │   └─BatchScan { table: rw_subscriptions, columns: [rw_subscriptions.name, rw_subscriptions.schema_id, rw_subscriptions.owner], distribution: Single }
-            │   ├─BatchProject { exprs: [rw_materialized_views.name, 'materialized view':Varchar, rw_materialized_views.schema_id, rw_materialized_views.owner] }
-            │   │ └─BatchScan { table: rw_materialized_views, columns: [rw_materialized_views.name, rw_materialized_views.schema_id, rw_materialized_views.owner], distribution: Single }
-            │   └─BatchProject { exprs: [rw_views.name, 'view':Varchar, rw_views.schema_id, rw_views.owner] }
-            │     └─BatchScan { table: rw_views, columns: [rw_views.name, rw_views.schema_id, rw_views.owner], distribution: Single }
-            └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
-              └─BatchFilter { predicate: (rw_schemas.name <> 'pg_catalog':Varchar) AND Not(RegexpEq(rw_schemas.name, '^pg_toast':Varchar)) AND (rw_schemas.name <> 'information_schema':Varchar) }
-                └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+            │   │   └─BatchScan { table: nim_subscriptions, columns: [nim_subscriptions.name, nim_subscriptions.schema_id, nim_subscriptions.owner], distribution: Single }
+            │   ├─BatchProject { exprs: [nim_materialized_views.name, 'materialized view':Varchar, nim_materialized_views.schema_id, nim_materialized_views.owner] }
+            │   │ └─BatchScan { table: nim_materialized_views, columns: [nim_materialized_views.name, nim_materialized_views.schema_id, nim_materialized_views.owner], distribution: Single }
+            │   └─BatchProject { exprs: [nim_views.name, 'view':Varchar, nim_views.schema_id, nim_views.owner] }
+            │     └─BatchScan { table: nim_views, columns: [nim_views.name, nim_views.schema_id, nim_views.owner], distribution: Single }
+            └─BatchExchange { order: [], dist: HashShard(nim_schemas.id) }
+              └─BatchFilter { predicate: (nim_schemas.name <> 'pg_catalog':Varchar) AND Not(RegexpEq(nim_schemas.name, '^pg_toast':Varchar)) AND (nim_schemas.name <> 'information_schema':Varchar) }
+                └─BatchScan { table: nim_schemas, columns: [nim_schemas.id, nim_schemas.name], distribution: Single }
 - sql: |
     create table auction (date_time date);
     select * from hop( auction, auction.date_time, INTERVAL '1', INTERVAL '3600' ) AS hop_1

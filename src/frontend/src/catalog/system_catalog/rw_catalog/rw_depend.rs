@@ -28,7 +28,7 @@ struct RwDepend {
     refobjid: i32,
 }
 
-#[system_catalog(table, "rw_catalog.rw_depend")]
+#[system_catalog(table, "nim_catalog.nim_depend")]
 async fn read_rw_depend(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDepend>> {
     let dependencies = reader.meta_client.list_object_dependencies().await?;
     Ok(dependencies

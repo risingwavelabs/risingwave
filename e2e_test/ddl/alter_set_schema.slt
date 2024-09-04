@@ -55,7 +55,7 @@ ALTER SOURCE test_source SET SCHEMA test_schema;
 
 query TT rowsort
 SELECT name AS sourcename, nspname AS schemaname
-FROM rw_sources
+from nim_sources
 JOIN pg_namespace ON pg_namespace.oid = rw_sources.schema_id
 WHERE nspname = 'test_schema';
 ----
@@ -72,7 +72,7 @@ ALTER SINK test_sink SET SCHEMA test_schema;
 
 query TT
 SELECT name AS sinkname, nspname AS schemaname
-FROM rw_sinks
+from nim_sinks
 JOIN pg_namespace ON pg_namespace.oid = rw_sinks.schema_id
 WHERE nspname = 'test_schema';
 ----
@@ -88,7 +88,7 @@ ALTER SUBSCRIPTION test_subscription SET SCHEMA test_schema;
 
 query TT
 SELECT name AS subscriptionname, nspname AS schemaname
-FROM rw_subscriptions
+from nim_subscriptions
 JOIN pg_namespace ON pg_namespace.oid = rw_subscriptions.schema_id
 WHERE nspname = 'test_schema';
 ----
@@ -102,7 +102,7 @@ ALTER CONNECTION test_conn SET SCHEMA test_schema;
 
 query TT
 SELECT name AS connname, nspname AS schemaname
-FROM rw_connections
+from nim_connections
 JOIN pg_namespace ON pg_namespace.oid = rw_connections.schema_id
 WHERE nspname = 'test_schema';
 ----

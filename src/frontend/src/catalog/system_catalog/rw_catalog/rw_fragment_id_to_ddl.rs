@@ -18,12 +18,12 @@ use risingwave_frontend_macro::system_catalog;
 /// Provides a mapping from `actor_id` to its ddl info.
 #[system_catalog(
 view,
-"rw_catalog.rw_fragment_id_to_ddl",
+"nim_catalog.nim_fragment_id_to_ddl",
 "with
-   job_id_to_mv as (select fragment_id, d.id as job_id, schema_id, 'mv' as ddl_type, name from rw_materialized_views d join rw_fragments f on d.id = f.table_id),
-   job_id_to_sink as (select fragment_id, d.id as job_id, schema_id, 'sink' as ddl_type, name from rw_sinks d join rw_fragments f on d.id = f.table_id),
-   job_id_to_source as (select fragment_id, d.id as job_id, schema_id, 'source' as ddl_type, name from rw_sources d join rw_fragments f on d.id = f.table_id),
-   job_id_to_table as (select fragment_id, d.id as job_id, schema_id, 'table' as ddl_type, name from rw_tables d join rw_fragments f on d.id = f.table_id)
+   job_id_to_mv as (select fragment_id, d.id as job_id, schema_id, 'mv' as ddl_type, name from nim_materialized_views d join nim_fragments f on d.id = f.table_id),
+   job_id_to_sink as (select fragment_id, d.id as job_id, schema_id, 'sink' as ddl_type, name from nim_sinks d join nim_fragments f on d.id = f.table_id),
+   job_id_to_source as (select fragment_id, d.id as job_id, schema_id, 'source' as ddl_type, name from nim_sources d join nim_fragments f on d.id = f.table_id),
+   job_id_to_table as (select fragment_id, d.id as job_id, schema_id, 'table' as ddl_type, name from nim_tables d join nim_fragments f on d.id = f.table_id)
    select * from job_id_to_mv
      union all select * from job_id_to_sink
        union all select * from job_id_to_source

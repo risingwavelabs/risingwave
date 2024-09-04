@@ -35,7 +35,7 @@ struct RwTable {
     created_at_cluster_version: Option<String>,
 }
 
-#[system_catalog(table, "rw_catalog.rw_tables")]
+#[system_catalog(table, "nim_catalog.nim_tables")]
 fn read_rw_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTable>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;

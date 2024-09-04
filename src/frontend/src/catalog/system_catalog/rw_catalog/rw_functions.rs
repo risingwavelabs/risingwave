@@ -35,7 +35,7 @@ struct RwFunction {
     always_retry_on_network_error: bool,
 }
 
-#[system_catalog(table, "rw_catalog.rw_functions")]
+#[system_catalog(table, "nim_catalog.nim_functions")]
 fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFunction>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;

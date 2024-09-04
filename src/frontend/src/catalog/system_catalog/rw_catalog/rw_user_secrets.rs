@@ -28,7 +28,7 @@ struct RwUserSecret {
     password: Option<String>,
 }
 
-#[system_catalog(table, "rw_catalog.rw_user_secrets")]
+#[system_catalog(table, "nim_catalog.nim_user_secrets")]
 fn read_rw_user_secrets_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwUserSecret>> {
     let user_info_reader = reader.user_info_reader.read_guard();
     // Since this catalog contains passwords, it must not be publicly readable.

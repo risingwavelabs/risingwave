@@ -68,9 +68,9 @@ use risingwave_frontend_macro::system_catalog;
         END AS is_generated,
         c.generation_expression,
         NULL AS interval_type
-    FROM rw_catalog.rw_columns c
-    LEFT JOIN rw_catalog.rw_relations r ON c.relation_id = r.id
-    JOIN rw_catalog.rw_schemas s ON s.id = r.schema_id
+    FROM nim_catalog.nim_columns c
+    LEFT JOIN nim_catalog.nim_relations r ON c.relation_id = r.id
+    JOIN nim_catalog.nim_schemas s ON s.id = r.schema_id
     WHERE c.is_hidden = false"
 )]
 #[derive(Fields)]

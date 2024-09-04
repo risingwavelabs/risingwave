@@ -30,7 +30,7 @@ struct RwHummockCompactTaskProgress {
     num_pending_write_io: i64,
 }
 
-#[system_catalog(table, "rw_catalog.rw_hummock_compact_task_progress")]
+#[system_catalog(table, "nim_catalog.nim_hummock_compact_task_progress")]
 async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockCompactTaskProgress>> {
     let compact_task_progress = reader.meta_client.list_compact_task_progress().await?;
 

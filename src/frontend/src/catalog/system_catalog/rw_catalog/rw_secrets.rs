@@ -27,7 +27,7 @@ struct RwSecret {
     acl: String,
 }
 
-#[system_catalog(table, "rw_catalog.rw_secrets")]
+#[system_catalog(table, "nim_catalog.nim_secrets")]
 fn read_rw_view_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSecret>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;

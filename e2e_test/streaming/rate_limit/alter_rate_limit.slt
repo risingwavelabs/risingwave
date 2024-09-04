@@ -23,7 +23,7 @@ sleep 1s
 
 onlyif can-use-recover
 query I
-select btrim(progress, '%')::double from rw_ddl_progress limit 1;
+select btrim(progress, '%')::double from nim_ddl_progress limit 1;
 ----
 0
 

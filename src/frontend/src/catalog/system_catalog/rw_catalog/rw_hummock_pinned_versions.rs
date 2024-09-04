@@ -25,7 +25,7 @@ struct RwHummockPinnedVersion {
     min_pinned_version_id: i64,
 }
 
-#[system_catalog(table, "rw_catalog.rw_hummock_pinned_versions")]
+#[system_catalog(table, "nim_catalog.nim_hummock_pinned_versions")]
 async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockPinnedVersion>> {
     let pinned_versions = reader
         .meta_client

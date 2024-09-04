@@ -32,7 +32,7 @@ use risingwave_frontend_macro::system_catalog;
     ARRAY[]::varchar[] AS reloptions,
     FALSE AS relispartition,
     null AS relpartbound
-    FROM rw_catalog.rw_relations
+    FROM nim_catalog.nim_relations
 ")]
 #[derive(Fields)]
 struct PgClass {

@@ -13,7 +13,7 @@ show schemas;
 information_schema
 pg_catalog
 public
-rw_catalog
+nim_catalog
 schema1
 
 query T
@@ -22,7 +22,7 @@ SELECT setting FROM pg_catalog.pg_settings where name = 'max_concurrent_creating
 4
 
 query T rowsort
-select name, relation_type from rw_relations where relation_type != 'system table' AND relation_type != 'view';
+select name, relation_type from nim_relations where relation_type != 'system table' AND relation_type != 'view';
 ----
 ddl_subscription_table subscription
 idx1 index
@@ -41,7 +41,7 @@ show views;
 v1
 
 query T
-select name, type_, provider from rw_connections;
+select name, type_, provider from nim_connections;
 ----
 conn0 MOCK PRIVATELINK
 
@@ -109,5 +109,5 @@ statement ok
 drop database db1;
 
 query T
-select name, relation_type from rw_relations where relation_type != 'system table' AND relation_type != 'view';
+select name, relation_type from nim_relations where relation_type != 'system table' AND relation_type != 'view';
 ----

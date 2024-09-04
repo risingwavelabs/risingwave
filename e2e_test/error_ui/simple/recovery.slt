@@ -19,7 +19,7 @@ sleep 15s
 query T
 with error as (
     select info->'collectBarrierFail'->'error' #>> '{}' as error
-    from rw_catalog.rw_event_logs
+    from nim_catalog.nim_event_logs
     where event_type = 'COLLECT_BARRIER_FAIL'
     order by timestamp desc
     limit 1

@@ -30,7 +30,7 @@ struct RwView {
     acl: String,
 }
 
-#[system_catalog(table, "rw_catalog.rw_views")]
+#[system_catalog(table, "nim_catalog.nim_views")]
 fn read_rw_view_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwView>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;

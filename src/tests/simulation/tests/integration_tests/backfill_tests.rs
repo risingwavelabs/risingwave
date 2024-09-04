@@ -131,7 +131,7 @@ async fn test_arrangement_backfill_replication() -> Result<()> {
     session.run("SET STREAMING_PARALLELISM=1;").await?;
     session.run("CREATE TABLE t (v1 int primary key)").await?;
     let parallelism_per_fragment = session
-        .run("select parallelism from rw_tables join rw_fragments on id=table_id and name='t';")
+        .run("select parallelism from nim_tables join nim_fragments on id=table_id and name='t';")
         .await?;
     for parallelism in parallelism_per_fragment.split('\n') {
         assert_eq!(parallelism.parse::<usize>().unwrap(), 1);
@@ -176,7 +176,7 @@ async fn test_arrangement_backfill_replication() -> Result<()> {
 
     // Verify its parallelism
     let parallelism_per_fragment = session.run(
-        "select parallelism from rw_materialized_views join rw_fragments on id=table_id and name='m1';"
+        "select parallelism from nim_materialized_views join nim_fragments on id=table_id and name='m1';"
     ).await?;
     for parallelism in parallelism_per_fragment.split('\n') {
         assert_eq!(parallelism.parse::<usize>().unwrap(), 3);
@@ -260,7 +260,7 @@ async fn test_arrangement_backfill_progress() -> Result<()> {
     // since 10s = 10 records processed.
     sleep(Duration::from_secs(10)).await;
     let progress = session
-        .run("SELECT progress FROM rw_catalog.rw_ddl_progress")
+        .run("SELECT progress FROM nim_catalog.nim_ddl_progress")
         .await?;
     let progress = progress.replace('%', "");
     let progress = progress.parse::<f64>().unwrap();
@@ -274,7 +274,7 @@ async fn test_arrangement_backfill_progress() -> Result<()> {
     kill_cn_and_wait_recover(&cluster).await;
     let prev_progress = progress;
     let progress = session
-        .run("SELECT progress FROM rw_catalog.rw_ddl_progress")
+        .run("SELECT progress FROM nim_catalog.nim_ddl_progress")
         .await?;
     let progress = progress.replace('%', "");
     let progress = progress.parse::<f64>().unwrap();

@@ -41,7 +41,7 @@ use risingwave_frontend_macro::system_catalog;
             -1 AS atttypmod,
             NULL::text[] AS attoptions,
             0 AS attcollation
-        FROM rw_catalog.rw_columns c
+        FROM nim_catalog.nim_columns c
         WHERE c.is_hidden = false"
 )]
 #[derive(Fields)]

@@ -56,7 +56,7 @@ pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "public";
 pub const PG_CATALOG_SCHEMA_NAME: &str = "pg_catalog";
 pub const INFORMATION_SCHEMA_SCHEMA_NAME: &str = "information_schema";
-pub const RW_CATALOG_SCHEMA_NAME: &str = "rw_catalog";
+pub const NIM_CATALOG_SCHEMA_NAME: &str = "nim_catalog";
 pub const RESERVED_PG_SCHEMA_PREFIX: &str = "pg_";
 pub const DEFAULT_SUPER_USER: &str = "root";
 pub const DEFAULT_SUPER_USER_ID: u32 = 1;
@@ -74,7 +74,7 @@ pub const OBJECT_ID_PLACEHOLDER: u32 = u32::MAX - 1;
 pub const SYSTEM_SCHEMAS: [&str; 3] = [
     PG_CATALOG_SCHEMA_NAME,
     INFORMATION_SCHEMA_SCHEMA_NAME,
-    RW_CATALOG_SCHEMA_NAME,
+    NIM_CATALOG_SCHEMA_NAME,
 ];
 
 pub const RW_RESERVED_COLUMN_NAME_PREFIX: &str = "_rw_";

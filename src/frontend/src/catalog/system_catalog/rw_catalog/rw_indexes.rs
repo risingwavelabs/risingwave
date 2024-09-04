@@ -36,7 +36,7 @@ struct RwIndex {
     created_at_cluster_version: Option<String>,
 }
 
-#[system_catalog(table, "rw_catalog.rw_indexes")]
+#[system_catalog(table, "nim_catalog.nim_indexes")]
 fn read_rw_indexes(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIndex>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;

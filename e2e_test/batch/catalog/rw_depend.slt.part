@@ -23,12 +23,12 @@ statement ok
 create sink sink2 into t2 as select a from t1;
 
 # equivalent to:
-# select objid::regclass, refobjid::regclass from rw_depend;
+# select objid::regclass, refobjid::regclass from nim_depend;
 query TT rowsort
 select r1.name, r2.name relname
-from rw_depend d
-join rw_relations r1 on d.objid = r1.id
-join rw_relations r2 on d.refobjid = r2.id;
+from nim_depend d
+join nim_relations r1 on d.objid = r1.id
+join nim_relations r2 on d.refobjid = r2.id;
 ----
 idx1  t1
 mv1   s1

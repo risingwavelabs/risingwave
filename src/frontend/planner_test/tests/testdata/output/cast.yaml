@@ -70,7 +70,7 @@
 - name: current_schemas (CURRENT_SCHEMAS with literal 'y' of unknown type)
   sql: |
     select current_schemas('y');
-  batch_plan: 'BatchValues { rows: [[ARRAY[pg_catalog, rw_catalog, public]:List(Varchar)]] }'
+  batch_plan: 'BatchValues { rows: [[ARRAY[pg_catalog, nim_catalog, public]:List(Varchar)]] }'
 - name: FILTER (FILTER with literal 'y' of unknown type)
   sql: |
     create table t(v1 int);

@@ -7,7 +7,7 @@
 # profile=(ci-release|ci-dev) ./ci/scripts/run-backfill-tests.sh
 # ```
 # Example progress:
-# dev=> select * from rw_catalog.rw_ddl_progress;
+# dev=> select * from nim_catalog.nim_ddl_progress;
 # ddl_id |                 ddl_statement                  | progress |        initialized_at
 #--------+------------------------------------------------+----------+-------------------------------
 #   1002 | CREATE MATERIALIZED VIEW m1 AS SELECT * FROM t | 56.12%   | 2023-09-27 06:37:06.636+00:00
@@ -49,7 +49,7 @@ flush() {
 }
 
 cancel_stream_jobs() {
-  ID=$(run_sql "select ddl_id from rw_catalog.rw_ddl_progress;" | tail -3 | head -1 | grep -E -o "[0-9]*")
+  ID=$(run_sql "select ddl_id from nim_catalog.nim_ddl_progress;" | tail -3 | head -1 | grep -E -o "[0-9]*")
   echo "CANCELLING STREAM_JOB: $ID"
   run_sql "CANCEL JOBS $ID;" </dev/null
 }

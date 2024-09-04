@@ -40,7 +40,7 @@ struct RwColumn {
     udt_type: String,
 }
 
-#[system_catalog(table, "rw_catalog.rw_columns")]
+#[system_catalog(table, "nim_catalog.nim_columns")]
 fn read_rw_columns(reader: &SysCatalogReaderImpl) -> Result<Vec<RwColumn>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;

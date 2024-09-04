@@ -5,16 +5,16 @@ statement ok
 set streaming_parallelism to default;
 
 statement ok
-create view table_parallelism as select t.name, tf.parallelism from rw_tables t, rw_table_fragments tf where t.id = tf.table_id;
+create view table_parallelism as select t.name, tf.parallelism from nim_tables t, rw_table_fragments tf where t.id = tf.table_id;
 
 statement ok
-create view mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;
+create view mview_parallelism as select m.name, tf.parallelism from nim_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;
 
 statement ok
-create view sink_parallelism as select s.name, tf.parallelism from rw_sinks s, rw_table_fragments tf where s.id = tf.table_id;
+create view sink_parallelism as select s.name, tf.parallelism from nim_sinks s, rw_table_fragments tf where s.id = tf.table_id;
 
 statement ok
-create view fragment_parallelism as select t.name as table_name, f.fragment_id, f.parallelism from rw_fragments f, rw_tables t where f.table_id = t.id;
+create view fragment_parallelism as select t.name as table_name, f.fragment_id, f.parallelism from nim_fragments f, rw_tables t where f.table_id = t.id;
 
 statement ok
 create table t (v int);

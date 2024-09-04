@@ -31,7 +31,7 @@ psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root
 async function select_internal_table(job_name, table_type) {
   // Note: if we have `t1`, and `t1_balabala`, the latter one will also be matched 😄.
   const internal_tables = await psql(
-    `select name from rw_internal_tables where name like '__internal_${job_name}_%_${table_type}_%'`
+    `select name from nim_internal_tables where name like '__internal_${job_name}_%_${table_type}_%'`
   );
   if (internal_tables.length == 0) {
     throw new Error(

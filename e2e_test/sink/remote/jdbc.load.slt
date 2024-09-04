@@ -100,7 +100,7 @@ CREATE SINK s_mysql_1 FROM mv_remote_1 WITH (
 );
 
 statement ok
-CREATE SINK s2_postgres FROM rw_typed_data WITH (
+CREATE SINK s2_postgres from nim_typed_data WITH (
     connector='jdbc',
     jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
     table.name='t_types',
@@ -110,7 +110,7 @@ CREATE SINK s2_postgres FROM rw_typed_data WITH (
 );
 
 statement ok
-CREATE SINK s2_mysql FROM rw_typed_data WITH (
+CREATE SINK s2_mysql from nim_typed_data WITH (
     connector='jdbc',
     jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw&connectionTimeZone=UTC',
     table.name='t_types',

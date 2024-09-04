@@ -44,7 +44,7 @@ use risingwave_frontend_macro::system_catalog;
         true AS datallowconn,
         -1 AS datconnlimit,
         1663 AS dattablespace,
-        acl AS datacl FROM rw_catalog.rw_databases"
+        acl AS datacl FROM nim_catalog.nim_databases"
 )]
 #[derive(Fields)]
 struct PgDatabase {

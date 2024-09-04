@@ -46,8 +46,8 @@ use crate::error::Result;
 //         NULL AS typdefault,
 //         NULL AS typcategory,
 //         NULL::integer AS typreceive
-//     FROM rw_catalog.rw_types t
-//     JOIN rw_catalog.rw_schemas s
+//     FROM nim_catalog.nim_types t
+//     JOIN nim_catalog.nim_schemas s
 //     ON s.name = 'pg_catalog'"
 // )]
 #[derive(Fields)]

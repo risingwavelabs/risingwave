@@ -30,7 +30,7 @@ struct RwConnection {
     acl: String,
 }
 
-#[system_catalog(table, "rw_catalog.rw_connections")]
+#[system_catalog(table, "nim_catalog.nim_connections")]
 fn read_rw_connections(reader: &SysCatalogReaderImpl) -> Result<Vec<RwConnection>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;

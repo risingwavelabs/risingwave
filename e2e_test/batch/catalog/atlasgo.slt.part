@@ -36,7 +36,7 @@ ORDER BY
     nspname;
 ----
 public (empty)
-rw_catalog (empty)
+nim_catalog (empty)
 
 query TTTTTTT
 SELECT
@@ -55,7 +55,7 @@ FROM
 WHERE
 	t1.table_type = 'BASE TABLE'
 	AND NOT COALESCE(t3.relispartition, false)
-	AND t1.table_schema IN ('public', 'rw_catalog')
+	AND t1.table_schema IN ('public', 'nim_catalog')
 	AND t5.objid IS NULL
 ORDER BY
 	t1.table_schema, t1.table_name;
@@ -73,7 +73,7 @@ FROM
 	JOIN pg_type t ON e.enumtypid = t.oid
 	JOIN pg_namespace n ON t.typnamespace = n.oid
 WHERE
-    n.nspname IN ('public', 'rw_catalog')
+    n.nspname IN ('public', 'nim_catalog')
 ORDER BY
     n.nspname, e.enumtypid, e.enumsortorder
 ----

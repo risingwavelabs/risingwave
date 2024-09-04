@@ -96,7 +96,7 @@ async fn assert_compaction_group_sst_count(
     session: &mut Session,
 ) {
     let count = session
-        .run(format!("SELECT COUNT(*) FROM rw_hummock_sstables WHERE compaction_group_id={compaction_group_id} and level_id={level_id};"))
+        .run(format!("SELECT COUNT(*) from nim_hummock_sstables WHERE compaction_group_id={compaction_group_id} and level_id={level_id};"))
         .await
         .unwrap();
     assert_eq!(count.parse::<usize>().unwrap(), expected);
@@ -116,7 +116,7 @@ async fn test_vnode_watermark_reclaim_impl(
         .unwrap();
 
     let table_id = session
-        .run("SELECT id FROM rw_internal_tables WHERE name LIKE '%dynamicfilterleft%';")
+        .run("SELECT id from nim_internal_tables WHERE name LIKE '%dynamicfilterleft%';")
         .await
         .unwrap()
         .parse::<u64>()
@@ -126,7 +126,7 @@ async fn test_vnode_watermark_reclaim_impl(
     cluster.split_compaction_group(2, table_id).await.unwrap();
     tokio::time::sleep(Duration::from_secs(5)).await;
     let compaction_group_id = session
-        .run("SELECT max(id) FROM rw_hummock_compaction_group_configs;")
+        .run("SELECT max(id) from nim_hummock_compaction_group_configs;")
         .await
         .unwrap()
         .parse::<u64>()

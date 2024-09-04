@@ -45,7 +45,7 @@ fn extract_fragment_type_flag(mask: u32) -> Vec<FragmentTypeFlag> {
     result
 }
 
-#[system_catalog(table, "rw_catalog.rw_fragments")]
+#[system_catalog(table, "nim_catalog.nim_fragments")]
 async fn read_rw_fragment(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFragment>> {
     let distributions = reader.meta_client.list_fragment_distribution().await?;
 

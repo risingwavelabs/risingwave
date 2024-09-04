@@ -21,7 +21,7 @@ use risingwave_frontend_macro::system_catalog;
 #[system_catalog(
     view,
     "pg_catalog.pg_namespace",
-    "SELECT id AS oid, name AS nspname, owner AS nspowner, acl AS nspacl FROM rw_catalog.rw_schemas"
+    "SELECT id AS oid, name AS nspname, owner AS nspowner, acl AS nspacl FROM nim_catalog.nim_schemas"
 )]
 #[derive(Fields)]
 struct PgNamespace {

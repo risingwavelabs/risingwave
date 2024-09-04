@@ -39,7 +39,7 @@ struct RwRelationInfo {
     created_at_cluster_version: Option<String>,
 }
 
-#[system_catalog(table, "rw_catalog.rw_relation_info")]
+#[system_catalog(table, "nim_catalog.nim_relation_info")]
 async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelationInfo>> {
     let mut table_ids = Vec::new();
     {

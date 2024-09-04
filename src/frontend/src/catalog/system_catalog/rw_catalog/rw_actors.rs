@@ -27,7 +27,7 @@ struct RwActor {
     state: String,
 }
 
-#[system_catalog(table, "rw_catalog.rw_actors")]
+#[system_catalog(table, "nim_catalog.nim_actors")]
 async fn read_rw_actors(reader: &SysCatalogReaderImpl) -> Result<Vec<RwActor>> {
     let states = reader.meta_client.list_actor_states().await?;
 

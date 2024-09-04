@@ -58,7 +58,7 @@ struct RwHummockSstable {
     sst_size: i64,
 }
 
-#[system_catalog(table, "rw_catalog.rw_hummock_current_version")]
+#[system_catalog(table, "nim_catalog.nim_hummock_current_version")]
 async fn read_hummock_current_version(
     reader: &SysCatalogReaderImpl,
 ) -> Result<Vec<RwHummockVersion>> {
@@ -68,7 +68,7 @@ async fn read_hummock_current_version(
     ))
 }
 
-#[system_catalog(table, "rw_catalog.rw_hummock_checkpoint_version")]
+#[system_catalog(table, "nim_catalog.nim_hummock_checkpoint_version")]
 async fn read_hummock_checkpoint_version(
     reader: &SysCatalogReaderImpl,
 ) -> Result<Vec<RwHummockVersion>> {
@@ -78,7 +78,7 @@ async fn read_hummock_checkpoint_version(
     ))
 }
 
-#[system_catalog(table, "rw_catalog.rw_hummock_sstables")]
+#[system_catalog(table, "nim_catalog.nim_hummock_sstables")]
 async fn read_hummock_sstables(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockSstable>> {
     let version = reader.meta_client.get_hummock_current_version().await?;
     Ok(version_to_sstable_rows(version))
@@ -154,7 +154,7 @@ struct RwHummockTableWatermark {
     direction: String,
 }
 
-#[system_catalog(table, "rw_catalog.rw_hummock_table_watermark")]
+#[system_catalog(table, "nim_catalog.nim_hummock_table_watermark")]
 async fn read_hummock_table_watermarks(
     reader: &SysCatalogReaderImpl,
 ) -> Result<Vec<RwHummockTableWatermark>> {
@@ -211,7 +211,7 @@ struct RwHummockSnapshot {
     committed_epoch: i64,
 }
 
-#[system_catalog(table, "rw_catalog.rw_hummock_snapshot")]
+#[system_catalog(table, "nim_catalog.nim_hummock_snapshot")]
 async fn read_hummock_snapshot_groups(
     reader: &SysCatalogReaderImpl,
 ) -> Result<Vec<RwHummockSnapshot>> {
@@ -235,7 +235,7 @@ struct RwHummockTableChangeLog {
     change_log: JsonbVal,
 }
 
-#[system_catalog(table, "rw_catalog.rw_hummock_table_change_log")]
+#[system_catalog(table, "nim_catalog.nim_hummock_table_change_log")]
 async fn read_hummock_table_change_log(
     reader: &SysCatalogReaderImpl,
 ) -> Result<

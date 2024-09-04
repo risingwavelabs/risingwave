@@ -30,7 +30,7 @@ pub struct RwType {
     pub typarray: i32,
 }
 
-#[system_catalog(table, "rw_catalog.rw_types")]
+#[system_catalog(table, "nim_catalog.nim_types")]
 pub fn read_rw_types(_: &SysCatalogReaderImpl) -> Result<Vec<RwType>> {
     let mut rows = vec![];
     for (id, name, input_oid, typelem, typarray) in RW_TYPE_DATA {

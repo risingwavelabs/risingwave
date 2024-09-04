@@ -60,7 +60,7 @@ struct RwIcebergFiles {
     pub sort_order_id: Option<i32>,
 }
 
-#[system_catalog(table, "rw_catalog.rw_iceberg_files")]
+#[system_catalog(table, "nim_catalog.nim_iceberg_files")]
 async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergFiles>> {
     let iceberg_sources = {
         let catalog_reader = reader.catalog_reader.read_guard();

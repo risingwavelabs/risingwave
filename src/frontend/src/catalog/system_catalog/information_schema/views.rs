@@ -28,8 +28,8 @@ use risingwave_frontend_macro::system_catalog;
             s.name AS table_schema,
             v.name AS table_name,
             v.definition AS view_definition
-        FROM rw_catalog.rw_views v
-        JOIN rw_catalog.rw_schemas s ON v.schema_id = s.id
+        FROM nim_catalog.nim_views v
+        JOIN nim_catalog.nim_schemas s ON v.schema_id = s.id
         ORDER BY table_schema, table_name"
 )]
 #[derive(Fields)]

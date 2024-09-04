@@ -38,7 +38,7 @@ const WAIT: &str = "WAIT;";
 async fn cancel_stream_jobs(session: &mut Session) -> Result<Vec<u32>> {
     tracing::info!("finding streaming jobs to cancel");
     let ids = session
-        .run("select ddl_id from rw_catalog.rw_ddl_progress;")
+        .run("select ddl_id from nim_catalog.nim_ddl_progress;")
         .await?;
     tracing::info!("selected streaming jobs to cancel {:?}", ids);
     tracing::info!("cancelling streaming jobs");
@@ -290,7 +290,7 @@ async fn test_high_barrier_latency_cancel(config: Configuration) -> Result<()> {
 
         // Check if mv stream job is created in the background
         match session
-            .run("select * from rw_catalog.rw_ddl_progress;")
+            .run("select * from nim_catalog.nim_ddl_progress;")
             .await
         {
             Ok(s) if s.is_empty() => {
@@ -313,7 +313,7 @@ async fn test_high_barrier_latency_cancel(config: Configuration) -> Result<()> {
     loop {
         // Wait until at least 10% of records are ingested.
         let progress = session
-            .run("select progress from rw_catalog.rw_ddl_progress;")
+            .run("select progress from nim_catalog.nim_ddl_progress;")
             .await
             .unwrap();
         tracing::info!(progress, "get progress before cancel stream job");

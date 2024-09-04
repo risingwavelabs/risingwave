@@ -29,8 +29,8 @@ use risingwave_frontend_macro::system_catalog;
             s.password AS passwd,
             NULL::timestamptz AS valuntil,
             NULL::text[] AS useconfig
-        FROM rw_catalog.rw_users u
-        JOIN rw_catalog.rw_user_secrets s
+        FROM nim_catalog.nim_users u
+        JOIN nim_catalog.nim_user_secrets s
             ON u.id = s.id"
 )]
 #[derive(Fields)]

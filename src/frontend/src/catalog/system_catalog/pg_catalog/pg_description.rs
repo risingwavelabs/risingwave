@@ -28,7 +28,7 @@ use risingwave_frontend_macro::system_catalog;
             ELSE objsubid
         END AS objsubid,
         description
-    FROM rw_catalog.rw_description
+    FROM nim_catalog.nim_description
     WHERE description IS NOT NULL;"
 )]
 #[derive(Fields)]

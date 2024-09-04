@@ -37,7 +37,7 @@ struct RwHummockCompactTaskAssignment {
     table_ids: JsonbVal,
 }
 
-#[system_catalog(table, "rw_catalog.rw_hummock_compact_task_assignment")]
+#[system_catalog(table, "nim_catalog.nim_hummock_compact_task_assignment")]
 async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockCompactTaskAssignment>> {
     // The naming of compact_task_assignment is due to versioning; now compact_task_assignment only records the state of the compact task
     let compact_task_assignments = reader.meta_client.list_compact_task_assignment().await?;

@@ -24,8 +24,8 @@ use risingwave_frontend_macro::system_catalog;
             v.name AS viewname,
             pg_catalog.pg_get_userbyid(v.owner) AS viewowner,
             v.definition AS definition
-        FROM rw_catalog.rw_views v
-        JOIN rw_catalog.rw_schemas s
+        FROM nim_catalog.nim_views v
+        JOIN nim_catalog.nim_schemas s
         ON v.schema_id = s.id"
 )]
 #[derive(Fields)]

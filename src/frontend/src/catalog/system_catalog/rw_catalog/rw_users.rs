@@ -29,7 +29,7 @@ struct RwUser {
     can_login: bool,
 }
 
-#[system_catalog(table, "rw_catalog.rw_users")]
+#[system_catalog(table, "nim_catalog.nim_users")]
 fn read_rw_user_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwUser>> {
     let reader = reader.user_info_reader.read_guard();
     let users = reader.get_all_users();

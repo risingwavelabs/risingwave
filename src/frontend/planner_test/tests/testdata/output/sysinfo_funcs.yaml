@@ -10,7 +10,7 @@
   batch_plan: 'BatchValues { rows: [[''root'':Varchar]] }'
 - sql: |
     select current_schemas(true);
-  batch_plan: 'BatchValues { rows: [[ARRAY[pg_catalog, rw_catalog, public]:List(Varchar)]] }'
+  batch_plan: 'BatchValues { rows: [[ARRAY[pg_catalog, nim_catalog, public]:List(Varchar)]] }'
 - sql: |
     select current_schemas(false);
   batch_plan: 'BatchValues { rows: [[ARRAY[public]:List(Varchar)]] }'

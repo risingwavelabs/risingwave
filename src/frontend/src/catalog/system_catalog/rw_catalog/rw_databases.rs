@@ -29,7 +29,7 @@ struct RwDatabases {
     acl: String,
 }
 
-#[system_catalog(table, "rw_catalog.rw_databases")]
+#[system_catalog(table, "nim_catalog.nim_databases")]
 fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDatabases>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let user_reader = reader.user_info_reader.read_guard();

@@ -26,7 +26,7 @@ use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator
 use pgwire::types::Row;
 use risingwave_common::catalog::{
     FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
-    DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
+    DEFAULT_SUPER_USER_ID, NIM_CATALOG_SCHEMA_NAME, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -247,7 +247,7 @@ impl CatalogWriter for MockCatalogWriter {
             .await?;
         self.create_schema(database_id, PG_CATALOG_SCHEMA_NAME, owner)
             .await?;
-        self.create_schema(database_id, RW_CATALOG_SCHEMA_NAME, owner)
+        self.create_schema(database_id, NIM_CATALOG_SCHEMA_NAME, owner)
             .await?;
         Ok(())
     }
@@ -687,7 +687,7 @@ impl MockCatalogWriter {
         });
         catalog.write().create_schema(&PbSchema {
             id: 3,
-            name: RW_CATALOG_SCHEMA_NAME.to_string(),
+            name: NIM_CATALOG_SCHEMA_NAME.to_string(),
             database_id: 0,
             owner: DEFAULT_SUPER_USER_ID,
         });

@@ -18,15 +18,15 @@ use risingwave_frontend_macro::system_catalog;
 /// `rw_relations` is a view that shows all relations in the database.
 #[system_catalog(
     view,
-    "rw_catalog.rw_relations",
-    "SELECT id, name, 'table' AS relation_type, schema_id, owner, definition, acl FROM rw_catalog.rw_tables
-    UNION ALL SELECT id, name, 'system table' AS relation_type, schema_id, owner, definition, acl FROM rw_catalog.rw_system_tables
-    UNION ALL SELECT id, name, 'source' AS relation_type, schema_id, owner, definition, acl FROM rw_catalog.rw_sources
-    UNION ALL SELECT id, name, 'index' AS relation_type, schema_id, owner, definition, acl FROM rw_catalog.rw_indexes
-    UNION ALL SELECT id, name, 'sink' AS relation_type, schema_id, owner, definition, acl FROM rw_catalog.rw_sinks
-    UNION ALL SELECT id, name, 'subscription' AS relation_type, schema_id, owner, definition, acl FROM rw_catalog.rw_subscriptions
-    UNION ALL SELECT id, name, 'materialized view' AS relation_type, schema_id, owner, definition, acl FROM rw_catalog.rw_materialized_views
-    UNION ALL SELECT id, name, 'view' AS relation_type, schema_id, owner, definition, acl FROM rw_catalog.rw_views
+    "nim_catalog.nim_relations",
+    "SELECT id, name, 'table' AS relation_type, schema_id, owner, definition, acl FROM nim_catalog.nim_tables
+    UNION ALL SELECT id, name, 'system table' AS relation_type, schema_id, owner, definition, acl FROM nim_catalog.nim_system_tables
+    UNION ALL SELECT id, name, 'source' AS relation_type, schema_id, owner, definition, acl FROM nim_catalog.nim_sources
+    UNION ALL SELECT id, name, 'index' AS relation_type, schema_id, owner, definition, acl FROM nim_catalog.nim_indexes
+    UNION ALL SELECT id, name, 'sink' AS relation_type, schema_id, owner, definition, acl FROM nim_catalog.nim_sinks
+    UNION ALL SELECT id, name, 'subscription' AS relation_type, schema_id, owner, definition, acl FROM nim_catalog.nim_subscriptions
+    UNION ALL SELECT id, name, 'materialized view' AS relation_type, schema_id, owner, definition, acl FROM nim_catalog.nim_materialized_views
+    UNION ALL SELECT id, name, 'view' AS relation_type, schema_id, owner, definition, acl FROM nim_catalog.nim_views
     "
 )]
 #[derive(Fields)]

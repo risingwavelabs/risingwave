@@ -22,7 +22,7 @@ create source s0 (v1 int, v2 varchar) with (
 ) FORMAT PLAIN ENCODE JSON;
 
 query I
-select count(*) from rw_internal_tables where name like '%s0%';
+select count(*) from nim_internal_tables where name like '%s0%';
 ----
 1
 

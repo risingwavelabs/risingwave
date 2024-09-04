@@ -62,7 +62,7 @@ mysql --protocol=tcp -u root mytest -e "INSERT INTO products VALUES (default,'Mi
 
 # check the fragment distribution
 query TT
-select distribution_type,flags from rw_fragments order by fragment_id;
+select distribution_type,flags from nim_fragments order by fragment_id;
 ----
 SINGLE {SOURCE}
 HASH {MVIEW}

@@ -29,8 +29,8 @@ use risingwave_frontend_macro::system_catalog;
        false AS hasindexes,
        true AS ispopulated,
        mv.definition as definition
-     FROM rw_materialized_views mv
-     JOIN rw_schemas s ON mv.schema_id = s.id"
+     from nim_materialized_views mv
+     JOIN nim_schemas s ON mv.schema_id = s.id"
 )]
 #[derive(Fields)]
 struct PgMatview {

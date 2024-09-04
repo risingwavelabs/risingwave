@@ -17,15 +17,15 @@ use risingwave_frontend_macro::system_catalog;
 
 #[system_catalog(
     view,
-    "rw_catalog.rw_streaming_parallelism",
+    "nim_catalog.nim_streaming_parallelism",
     "WITH all_streaming_jobs AS (
-        SELECT id, name, 'table' as relation_type FROM rw_tables
+        SELECT id, name, 'table' as relation_type from nim_tables
         UNION ALL
-        SELECT id, name, 'materialized view' as relation_type FROM rw_materialized_views
+        SELECT id, name, 'materialized view' as relation_type from nim_materialized_views
         UNION ALL
-        SELECT id, name, 'sink' as relation_type FROM rw_sinks
+        SELECT id, name, 'sink' as relation_type from nim_sinks
         UNION ALL
-        SELECT id, name, 'index' as relation_type FROM rw_indexes
+        SELECT id, name, 'index' as relation_type from nim_indexes
     )
     SELECT
         job.id,
@@ -33,7 +33,7 @@ use risingwave_frontend_macro::system_catalog;
         job.relation_type,
         tf.parallelism
     FROM all_streaming_jobs job
-    INNER JOIN rw_table_fragments tf ON job.id = tf.table_id
+    INNER JOIN nim_table_fragments tf ON job.id = tf.table_id
     ORDER BY job.id"
 )]
 #[derive(Fields)]

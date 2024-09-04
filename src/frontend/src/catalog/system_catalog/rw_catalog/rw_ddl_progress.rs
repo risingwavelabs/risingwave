@@ -29,7 +29,7 @@ struct RwDdlProgress {
     initialized_at: Option<Timestamptz>,
 }
 
-#[system_catalog(table, "rw_catalog.rw_ddl_progress")]
+#[system_catalog(table, "nim_catalog.nim_ddl_progress")]
 async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDdlProgress>> {
     let ddl_progresses = reader.meta_client.list_ddl_progress().await?;
 

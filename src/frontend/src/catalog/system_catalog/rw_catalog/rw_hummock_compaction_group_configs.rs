@@ -30,7 +30,7 @@ struct RwHummockCompactionGroupConfig {
     active_write_limit: Option<JsonbVal>,
 }
 
-#[system_catalog(table, "rw_catalog.rw_hummock_compaction_group_configs")]
+#[system_catalog(table, "nim_catalog.nim_hummock_compaction_group_configs")]
 async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockCompactionGroupConfig>> {
     let info = reader
         .meta_client

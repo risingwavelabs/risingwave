@@ -1024,21 +1024,21 @@
     WHERE r.rolname !~ '^pg_'
     ORDER BY 1;
   batch_plan: |-
-    BatchExchange { order: [rw_users.name ASC], dist: Single }
-    └─BatchProject { exprs: [rw_users.name, rw_users.is_super, true:Boolean, rw_users.create_user, rw_users.create_db, rw_users.can_login, -1:Int32, null:Timestamptz, $expr1, true:Boolean, true:Boolean] }
-      └─BatchSort { order: [rw_users.name ASC] }
-        └─BatchHashJoin { type: LeftOuter, predicate: rw_users.id = null:Int32, output: all }
-          ├─BatchExchange { order: [], dist: HashShard(rw_users.id) }
-          │ └─BatchFilter { predicate: Not(RegexpEq(rw_users.name, '^pg_':Varchar)) }
-          │   └─BatchScan { table: rw_users, columns: [rw_users.id, rw_users.name, rw_users.is_super, rw_users.create_db, rw_users.create_user, rw_users.can_login], distribution: Single }
-          └─BatchProject { exprs: [Coalesce(array_agg(rw_users.name), ARRAY[]:List(Varchar)) as $expr1, null:Int32] }
-            └─BatchHashAgg { group_key: [null:Int32], aggs: [array_agg(rw_users.name)] }
+    BatchExchange { order: [nim_users.name ASC], dist: Single }
+    └─BatchProject { exprs: [nim_users.name, nim_users.is_super, true:Boolean, nim_users.create_user, nim_users.create_db, nim_users.can_login, -1:Int32, null:Timestamptz, $expr1, true:Boolean, true:Boolean] }
+      └─BatchSort { order: [nim_users.name ASC] }
+        └─BatchHashJoin { type: LeftOuter, predicate: nim_users.id = null:Int32, output: all }
+          ├─BatchExchange { order: [], dist: HashShard(nim_users.id) }
+          │ └─BatchFilter { predicate: Not(RegexpEq(nim_users.name, '^pg_':Varchar)) }
+          │   └─BatchScan { table: nim_users, columns: [nim_users.id, nim_users.name, nim_users.is_super, nim_users.create_db, nim_users.create_user, nim_users.can_login], distribution: Single }
+          └─BatchProject { exprs: [Coalesce(array_agg(nim_users.name), ARRAY[]:List(Varchar)) as $expr1, null:Int32] }
+            └─BatchHashAgg { group_key: [null:Int32], aggs: [array_agg(nim_users.name)] }
               └─BatchExchange { order: [], dist: HashShard(null:Int32) }
-                └─BatchHashJoin { type: Inner, predicate: null:Int32 = rw_users.id, output: [rw_users.name, null:Int32] }
+                └─BatchHashJoin { type: Inner, predicate: null:Int32 = nim_users.id, output: [nim_users.name, null:Int32] }
                   ├─BatchExchange { order: [], dist: HashShard(null:Int32) }
                   │ └─BatchValues { rows: [] }
-                  └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
-                    └─BatchScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
+                  └─BatchExchange { order: [], dist: HashShard(nim_users.id) }
+                    └─BatchScan { table: nim_users, columns: [nim_users.id, nim_users.name], distribution: Single }
 - name: correlated array subquery (issue 14423)
   sql: |
     CREATE TABLE array_types ( x BIGINT[] );

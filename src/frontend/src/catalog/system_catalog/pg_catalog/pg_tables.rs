@@ -28,14 +28,14 @@ use risingwave_frontend_macro::system_catalog;
         (SELECT name AS tablename,
                 schema_id,
                 owner
-                FROM rw_catalog.rw_tables
+                FROM nim_catalog.nim_tables
             UNION
             SELECT name AS tablename,
                 schema_id,
                 owner
-                FROM rw_catalog.rw_system_tables) AS t
-        JOIN rw_catalog.rw_schemas s ON t.schema_id = s.id
-        AND s.name <> 'rw_catalog'"
+                FROM nim_catalog.nim_system_tables) AS t
+        JOIN nim_catalog.nim_schemas s ON t.schema_id = s.id
+        AND s.name <> 'nim_catalog'"
 )]
 #[derive(Fields)]
 struct PgTable {

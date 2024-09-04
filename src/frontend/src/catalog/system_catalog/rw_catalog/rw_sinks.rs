@@ -38,7 +38,7 @@ struct RwSink {
     created_at_cluster_version: Option<String>,
 }
 
-#[system_catalog(table, "rw_catalog.rw_sinks")]
+#[system_catalog(table, "nim_catalog.nim_sinks")]
 fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
@@ -79,13 +79,13 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
 
 #[system_catalog(
     view,
-    "rw_catalog.rw_sink_decouple",
+    "nim_catalog.nim_sink_decouple",
     "WITH decoupled_sink_internal_table_ids AS (
         SELECT
             distinct (node->'sink'->'table'->'id')::int as internal_table_id
-        FROM rw_catalog.rw_actor_infos actor
+        FROM nim_catalog.nim_actor_infos actor
             JOIN
-                rw_catalog.rw_fragments fragment
+                nim_catalog.nim_fragments fragment
             ON actor.fragment_id = fragment.fragment_id
         WHERE
             'SINK' = any(flags)
@@ -97,22 +97,22 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
             internal_table_id, count(*)::int as watermark_vnode_count
         FROM decoupled_sink_internal_table_ids
             LEFT JOIN
-                rw_catalog.rw_hummock_table_watermark
-            ON decoupled_sink_internal_table_ids.internal_table_id = rw_catalog.rw_hummock_table_watermark.table_id
+                nim_catalog.nim_hummock_table_watermark
+            ON decoupled_sink_internal_table_ids.internal_table_id = nim_catalog.nim_hummock_table_watermark.table_id
         GROUP BY internal_table_id
     )
     SELECT
-        rw_catalog.rw_sinks.id as sink_id,
+        nim_catalog.nim_sinks.id as sink_id,
         (watermark_vnode_count is not null) as is_decouple,
         watermark_vnode_count
-    FROM rw_catalog.rw_sinks
+    FROM nim_catalog.nim_sinks
         LEFT JOIN
-            (rw_catalog.rw_fragments
+            (nim_catalog.nim_fragments
                 JOIN
                     internal_table_vnode_count
                 ON internal_table_id = any(state_table_ids)
             )
-        ON table_id = rw_catalog.rw_sinks.id
+        ON table_id = nim_catalog.nim_sinks.id
     "
 )]
 #[derive(Fields)]

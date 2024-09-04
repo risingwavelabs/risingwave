@@ -304,7 +304,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
     session.run("create table t (v1 int);").await?;
 
     session
-        .run("select parallelism from rw_table_fragments")
+        .run("select parallelism from nim_table_fragments")
         .await?
         .assert_result_eq("ADAPTIVE");
 
@@ -328,7 +328,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
     session.run("alter table t set parallelism = 3").await?;
 
     session
-        .run("select parallelism from rw_table_fragments")
+        .run("select parallelism from nim_table_fragments")
         .await?
         .assert_result_eq("FIXED(3)");
 
@@ -396,7 +396,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
         .await?;
 
     session
-        .run("select parallelism from rw_table_fragments")
+        .run("select parallelism from nim_table_fragments")
         .await?
         .assert_result_eq("ADAPTIVE");
 
@@ -552,7 +552,7 @@ async fn test_compatibility_with_low_level() -> Result<()> {
         .assert_result_eq("CUSTOM");
 
     let before_fragment_parallelism = session
-        .run("select fragment_id, parallelism from rw_fragments order by fragment_id;")
+        .run("select fragment_id, parallelism from nim_fragments order by fragment_id;")
         .await?;
 
     cluster
@@ -565,7 +565,7 @@ async fn test_compatibility_with_low_level() -> Result<()> {
     .await;
 
     let after_fragment_parallelism = session
-        .run("select fragment_id, parallelism from rw_fragments order by fragment_id;")
+        .run("select fragment_id, parallelism from nim_fragments order by fragment_id;")
         .await?;
 
     assert_eq!(before_fragment_parallelism, after_fragment_parallelism);
@@ -665,7 +665,7 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
         .assert_result_eq("CUSTOM");
 
     let before_fragment_parallelism = session
-        .run("select fragment_id, parallelism from rw_fragments order by fragment_id;")
+        .run("select fragment_id, parallelism from nim_fragments order by fragment_id;")
         .await?;
 
     cluster
@@ -678,7 +678,7 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
     .await;
 
     let after_fragment_parallelism = session
-        .run("select fragment_id, parallelism from rw_fragments order by fragment_id;")
+        .run("select fragment_id, parallelism from nim_fragments order by fragment_id;")
         .await?;
 
     assert_eq!(before_fragment_parallelism, after_fragment_parallelism);

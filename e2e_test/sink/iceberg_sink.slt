@@ -89,22 +89,22 @@ FLUSH;
 sleep 20s
 
 query I
-select count(*) from rw_iceberg_snapshots where source_name = 'iceberg_demo_source';
+select count(*) from nim_iceberg_snapshots where source_name = 'iceberg_demo_source';
 ----
 1
 
 query I
-select count(*) from rw_iceberg_snapshots where source_name = 'iceberg_e2e_auto_create_table';
+select count(*) from nim_iceberg_snapshots where source_name = 'iceberg_e2e_auto_create_table';
 ----
 1
 
 query I
-select sum(record_count) from rw_iceberg_files where source_name = 'iceberg_demo_source';
+select sum(record_count) from nim_iceberg_files where source_name = 'iceberg_demo_source';
 ----
 7
 
 query I
-select sum(record_count) from rw_iceberg_files where source_name = 'iceberg_e2e_auto_create_table';
+select sum(record_count) from nim_iceberg_files where source_name = 'iceberg_e2e_auto_create_table';
 ----
 7
 

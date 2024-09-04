@@ -39,7 +39,7 @@ use risingwave_frontend_macro::system_catalog;
         true AS indisready,
         true AS indislive,
         false AS indisreplident
-    FROM rw_catalog.rw_indexes
+    FROM nim_catalog.nim_indexes
     UNION ALL
     SELECT c.relation_id AS indexrelid,
         c.relation_id AS indrelid,
@@ -60,11 +60,11 @@ use risingwave_frontend_macro::system_catalog;
         true AS indisready,
         true AS indislive,
         false AS indisreplident
-    FROM rw_catalog.rw_columns c
+    FROM nim_catalog.nim_columns c
     WHERE c.is_primary_key = true AND c.is_hidden = false
     AND c.relation_id IN (
         SELECT id
-        FROM rw_catalog.rw_tables
+        FROM nim_catalog.nim_tables
     )
     GROUP BY c.relation_id"
 )]

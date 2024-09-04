@@ -29,7 +29,7 @@ struct RwSchema {
     acl: String,
 }
 
-#[system_catalog(table, "rw_catalog.rw_schemas")]
+#[system_catalog(table, "nim_catalog.nim_schemas")]
 fn read_rw_schema_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSchema>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;

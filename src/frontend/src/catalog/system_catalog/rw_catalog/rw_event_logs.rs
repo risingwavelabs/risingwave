@@ -30,7 +30,7 @@ struct RwEventLog {
     info: JsonbVal,
 }
 
-#[system_catalog(table, "rw_catalog.rw_event_logs")]
+#[system_catalog(table, "nim_catalog.nim_event_logs")]
 async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwEventLog>> {
     let configs = reader
         .meta_client

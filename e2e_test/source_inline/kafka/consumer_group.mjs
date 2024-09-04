@@ -13,7 +13,7 @@ async function get_fragment_id_of_mv(mv_name) {
   const id = (
     await $`
     psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev \
-    --csv -t -c "select fragment_id from rw_materialized_views JOIN rw_fragments on rw_materialized_views.id = rw_fragments.table_id where name='${mv_name}';"
+    --csv -t -c "select fragment_id from nim_materialized_views JOIN nim_fragments on rw_materialized_views.id = rw_fragments.table_id where name='${mv_name}';"
   `
   )
     .toString()

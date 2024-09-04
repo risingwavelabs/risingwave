@@ -1,4 +1,4 @@
 query I
-select count(*) from rw_catalog.rw_ddl_progress;
+select count(*) from nim_catalog.nim_ddl_progress;
 ----
 1

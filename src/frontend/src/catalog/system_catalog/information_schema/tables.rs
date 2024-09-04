@@ -39,8 +39,8 @@ use risingwave_frontend_macro::system_catalog;
             THEN 'YES'
             ELSE 'NO'
             END AS is_insertable_into
-        FROM rw_catalog.rw_relations r
-        JOIN rw_catalog.rw_schemas s ON r.schema_id = s.id
+        FROM nim_catalog.nim_relations r
+        JOIN nim_catalog.nim_schemas s ON r.schema_id = s.id
         ORDER BY table_schema, table_name"
 )]
 #[derive(Fields)]
