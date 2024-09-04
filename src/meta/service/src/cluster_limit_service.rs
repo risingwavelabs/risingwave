@@ -14,10 +14,8 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::license::{LicenseManager, Tier};
 use risingwave_common::util::cluster_limit::{
-    ActorCountPerParallelism, ClusterLimit, WorkerActorCount, FREE_TIER_ACTOR_CNT_HARD_LIMIT,
-    FREE_TIER_ACTOR_CNT_SOFT_LIMIT,
+    ActorCountPerParallelism, ClusterLimit, WorkerActorCount,
 };
 use risingwave_meta::manager::{MetaSrvEnv, MetadataManager, WorkerId};
 use risingwave_meta::MetaResult;
@@ -25,7 +23,6 @@ use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::cluster_limit_service_server::ClusterLimitService;
 use risingwave_pb::meta::{GetClusterLimitsRequest, GetClusterLimitsResponse};
-use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
@@ -43,24 +40,10 @@ impl ClusterLimitServiceImpl {
     }
 
     async fn get_active_actor_limit(&self) -> MetaResult<Option<ClusterLimit>> {
-        let (soft_limit, hard_limit) = match LicenseManager::get().tier() {
-            Ok(Tier::Paid) => (
-                self.env.opts.actor_cnt_per_worker_parallelism_soft_limit,
-                self.env.opts.actor_cnt_per_worker_parallelism_hard_limit,
-            ),
-            Ok(Tier::Free) => (
-                FREE_TIER_ACTOR_CNT_SOFT_LIMIT,
-                FREE_TIER_ACTOR_CNT_HARD_LIMIT,
-            ),
-            Err(err) => {
-                tracing::warn!(error=%err.as_report(), "Failed to get license tier.");
-                // Default to use free tier limit if there is any license error
-                (
-                    FREE_TIER_ACTOR_CNT_SOFT_LIMIT,
-                    FREE_TIER_ACTOR_CNT_HARD_LIMIT,
-                )
-            }
-        };
+        let (soft_limit, hard_limit) = (
+            self.env.opts.actor_cnt_per_worker_parallelism_soft_limit,
+            self.env.opts.actor_cnt_per_worker_parallelism_hard_limit,
+        );
 
         let running_worker_parallelism: HashMap<WorkerId, usize> = self
             .metadata_manager
