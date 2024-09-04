@@ -77,6 +77,7 @@ use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient}
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tokio::runtime::Builder;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
@@ -1198,19 +1199,24 @@ impl SessionImpl {
 
     pub async fn check_cluster_limits(&self) -> Result<()> {
         let bypass_cluster_limits = self.config().bypass_cluster_limits();
-        let tier = LicenseManager::get()
-            .tier()
-            .map_err(|e| RwError::from(ErrorCode::ProtocolError(e.to_string())))?;
+        let tier = match LicenseManager::get().tier() {
+            Ok(tier) => tier,
+            Err(e) => {
+                self.notice_to_user(e.to_report_string());
+                // Default to free tier if license is not available.
+                risingwave_common::license::Tier::Free
+            }
+        };
         let limits = self.env().meta_client().get_cluster_limits().await?;
         for limit in limits {
             match limit {
                 cluster_limit::ClusterLimit::ActorCount(l) => {
                     if l.exceed_hard_limit() {
-                        let mut msg =
-                            "\n- Actor count per parallelism exceeds the hard limit".to_string();
+                        let mut msg = "\n- Actor count per parallelism exceeds the critical limit."
+                            .to_string();
                         msg.push_str("\n- This may overload the cluster and cause performance/stability issues. Please scale the cluster before proceeding.");
                         if matches!(tier, risingwave_common::license::Tier::Free) {
-                            msg.push_str("\n- Feel free to contact us via https://risingwave.com/contact-us/ for a upgrade.");
+                            msg.push_str("\n- Contact us via https://risingwave.com/contact-us/ and consider upgrading your free-tier license to enhance performance/stability and user experience for production usage.");
                         }
                         msg.push_str("\n- You can check actor count distribution via SQL `SELECT * FROM rw_worker_actor_count`.");
                         msg.push_str(format!("\n{}", l).as_str());
@@ -1224,10 +1230,11 @@ impl SessionImpl {
                     } else if l.exceed_soft_limit() {
                         // Send a notice if soft limit is exceeded.
                         let mut msg =
-                            "\n- Actor count per parallelism exceeds the soft limit".to_string();
+                            "\n- Actor count per parallelism exceeds the recommended limit."
+                                .to_string();
                         msg.push_str("\n- This may overload the cluster and cause performance/stability issues. Scaling the cluster is recommended.");
                         if matches!(tier, risingwave_common::license::Tier::Free) {
-                            msg.push_str("\n- Feel free to contact us via https://risingwave.com/contact-us/ for a upgrade.");
+                            msg.push_str("\n- Contact us via https://risingwave.com/contact-us/ and consider upgrading your free-tier license to enhance performance/stability and user experience for production usage.");
                         }
                         msg.push_str("\n- You can check actor count distribution via SQL `SELECT * FROM rw_worker_actor_count`.");
                         msg.push_str(format!("\n{}", l).as_str());

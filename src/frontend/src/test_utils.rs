@@ -1100,7 +1100,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn get_cluster_limits(&self) -> RpcResult<Vec<ClusterLimit>> {
-        unimplemented!()
+        Ok(vec![])
     }
 }
 
