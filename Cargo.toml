@@ -70,7 +70,7 @@ exclude = ["e2e_test/udf/wasm", "lints"]
 resolver = "2"
 
 [workspace.package]
-version = "1.11.0-alpha"
+version = "2.0.0-rc.1"
 edition = "2021"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
