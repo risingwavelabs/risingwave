@@ -927,16 +927,36 @@ impl HummockVersion {
         left_group_id: CompactionGroupId,
         right_group_id: CompactionGroupId,
     ) {
+        // Double check
+        let left_group_id_table_ids = self
+            .state_table_info
+            .compaction_group_member_table_ids(left_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id);
+        let right_group_id_table_ids = self
+            .state_table_info
+            .compaction_group_member_table_ids(right_group_id)
+            .iter()
+            .map(|table_id| table_id.table_id);
+
+        assert!(left_group_id_table_ids
+            .chain(right_group_id_table_ids)
+            .is_sorted());
+
         let total_cg = self.levels.keys().cloned().collect::<Vec<_>>();
-        let [left_levels, right_levels] = self
-            .levels
-            .get_many_mut([&left_group_id, &right_group_id])
-            .unwrap_or_else(|| {
-                panic!(
-                    "compaction group should exist left {} right {} all {:?}",
-                    left_group_id, right_group_id, total_cg
-                )
-            });
+        let right_levels = self.levels.remove(&right_group_id).unwrap_or_else(|| {
+            panic!(
+                "compaction group should exist right {} all {:?}",
+                right_group_id, total_cg
+            )
+        });
+
+        let left_levels = self.levels.get_mut(&left_group_id).unwrap_or_else(|| {
+            panic!(
+                "compaction group should exist left {} all {:?}",
+                left_group_id, total_cg
+            )
+        });
 
         group_split::merge_levels(left_levels, right_levels);
     }
@@ -1671,6 +1691,7 @@ mod tests {
                     .encode()
                 };
                 let mut origin_sst = sst.clone();
+                let sst_size = origin_sst.sst_size;
                 let split_type = group_split::need_to_split(&origin_sst, split_key.clone().into());
                 assert_eq!(SstSplitType::Right, split_type);
 
@@ -1678,7 +1699,9 @@ mod tests {
                 let branched_sst = group_split::split_sst(
                     &mut origin_sst,
                     &mut new_sst_id,
-                    Some(split_key.into()),
+                    split_key.into(),
+                    sst_size / 2,
+                    sst_size / 2,
                 );
 
                 assert!(origin_sst.key_range.right_exclusive);
@@ -1708,6 +1731,7 @@ mod tests {
                     .encode()
                 };
                 let mut origin_sst = sst.clone();
+                let sst_size = origin_sst.sst_size;
                 let split_type = group_split::need_to_split(&origin_sst, split_key.clone().into());
                 assert_eq!(SstSplitType::Both, split_type);
 
@@ -1715,7 +1739,9 @@ mod tests {
                 let branched_sst = group_split::split_sst(
                     &mut origin_sst,
                     &mut new_sst_id,
-                    Some(split_key.into()),
+                    split_key.into(),
+                    sst_size / 2,
+                    sst_size / 2,
                 );
 
                 assert!(origin_sst.key_range.right_exclusive);
@@ -1818,7 +1844,7 @@ mod tests {
     fn test_split_sst_info_for_level() {
         let mut version = HummockVersion::default();
 
-        version.id = 0;
+        version.id = HummockVersionId(0);
         version.levels = HashMap::from_iter([(
             1,
             build_initial_compaction_group_levels(
@@ -2044,13 +2070,13 @@ mod tests {
                 ..Default::default()
             });
 
-            let mut right_levels = Levels {
+            let right_levels = Levels {
                 levels: vec![],
                 l0: right_l0,
                 ..Default::default()
             };
 
-            merge_levels(&mut cg1, &mut right_levels);
+            merge_levels(&mut cg1, right_levels);
             println!("left {:?}", cg1.l0.sub_levels[0].table_infos);
         }
 
@@ -2197,7 +2223,7 @@ mod tests {
             },
         );
 
-        let mut right_levels = build_initial_compaction_group_levels(
+        let right_levels = build_initial_compaction_group_levels(
             2,
             &CompactionConfig {
                 max_level: 6,
@@ -2490,9 +2516,9 @@ mod tests {
         {
             // test empty
             let mut left_levels = Levels::default();
-            let mut right_levels = Levels::default();
+            let right_levels = Levels::default();
 
-            group_split::merge_levels(&mut left_levels, &mut right_levels);
+            group_split::merge_levels(&mut left_levels, right_levels);
         }
 
         {
@@ -2504,9 +2530,9 @@ mod tests {
                     ..Default::default()
                 },
             );
-            let mut right_levels = right_levels.clone();
+            let right_levels = right_levels.clone();
 
-            group_split::merge_levels(&mut left_levels, &mut right_levels);
+            group_split::merge_levels(&mut left_levels, right_levels);
 
             assert!(left_levels.l0.sub_levels.len() == 3);
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
@@ -2523,7 +2549,7 @@ mod tests {
         {
             // test empty right
             let mut left_levels = left_levels.clone();
-            let mut right_levels = build_initial_compaction_group_levels(
+            let right_levels = build_initial_compaction_group_levels(
                 2,
                 &CompactionConfig {
                     max_level: 6,
@@ -2531,7 +2557,7 @@ mod tests {
                 },
             );
 
-            group_split::merge_levels(&mut left_levels, &mut right_levels);
+            group_split::merge_levels(&mut left_levels, right_levels);
 
             assert!(left_levels.l0.sub_levels.len() == 3);
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
@@ -2547,19 +2573,23 @@ mod tests {
 
         {
             let mut left_levels = left_levels.clone();
-            let mut right_levels = right_levels.clone();
+            let right_levels = right_levels.clone();
 
-            group_split::merge_levels(&mut left_levels, &mut right_levels);
+            group_split::merge_levels(&mut left_levels, right_levels);
 
-            assert!(left_levels.l0.sub_levels.len() == 4);
+            assert!(left_levels.l0.sub_levels.len() == 6);
             assert!(left_levels.l0.sub_levels[0].sub_level_id == 101);
-            assert_eq!(200, left_levels.l0.sub_levels[0].total_file_size);
-            assert!(left_levels.l0.sub_levels[1].sub_level_id == 102);
+            assert_eq!(100, left_levels.l0.sub_levels[0].total_file_size);
+            assert!(left_levels.l0.sub_levels[1].sub_level_id == 103);
             assert_eq!(100, left_levels.l0.sub_levels[1].total_file_size);
-            assert!(left_levels.l0.sub_levels[2].sub_level_id == 103);
-            assert_eq!(200, left_levels.l0.sub_levels[2].total_file_size);
-            assert!(left_levels.l0.sub_levels[3].sub_level_id == 105);
+            assert!(left_levels.l0.sub_levels[2].sub_level_id == 105);
+            assert_eq!(100, left_levels.l0.sub_levels[2].total_file_size);
+            assert!(left_levels.l0.sub_levels[3].sub_level_id == 106);
             assert_eq!(100, left_levels.l0.sub_levels[3].total_file_size);
+            assert!(left_levels.l0.sub_levels[4].sub_level_id == 107);
+            assert_eq!(100, left_levels.l0.sub_levels[4].total_file_size);
+            assert!(left_levels.l0.sub_levels[5].sub_level_id == 108);
+            assert_eq!(100, left_levels.l0.sub_levels[5].total_file_size);
 
             assert!(left_levels.levels[0].level_idx == 1);
             assert_eq!(600, left_levels.levels[0].total_file_size);
