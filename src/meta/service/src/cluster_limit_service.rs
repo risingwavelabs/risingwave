@@ -25,6 +25,7 @@ use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::cluster_limit_service_server::ClusterLimitService;
 use risingwave_pb::meta::{GetClusterLimitsRequest, GetClusterLimitsResponse};
+use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
