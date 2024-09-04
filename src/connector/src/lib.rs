@@ -107,6 +107,28 @@ where
     }
 }
 
+pub(crate) fn deserialize_optional_bool_from_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<bool>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: Option<String> = de::Deserialize::deserialize(deserializer)?;
+    if let Some(s) = s {
+        let s = s.to_ascii_lowercase();
+        match s.as_str() {
+            "true" => Ok(Some(true)),
+            "false" => Ok(Some(false)),
+            _ => Err(de::Error::invalid_value(
+                de::Unexpected::Str(&s),
+                &"true or false",
+            )),
+        }
+    } else {
+        Ok(None)
+    }
+}
+
 pub(crate) fn deserialize_duration_from_string<'de, D>(
     deserializer: D,
 ) -> Result<Duration, D::Error>

@@ -75,7 +75,10 @@ use crate::error::ConnectorResult;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkCommitCoordinator, SinkDecouple, SinkParam};
-use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
+use crate::{
+    deserialize_bool_from_string, deserialize_optional_bool_from_string,
+    deserialize_optional_string_seq_from_string,
+};
 
 /// This iceberg sink is WIP. When it ready, we will change this name to "iceberg".
 pub const ICEBERG_SINK: &str = "iceberg";
@@ -124,6 +127,13 @@ pub struct IcebergConfig {
 
     #[serde(rename = "s3.secret.key")]
     pub secret_key: String,
+
+    #[serde(
+        rename = "s3.path.style.access",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub path_style_access: Option<bool>,
 
     #[serde(
         rename = "primary_key",
@@ -273,6 +283,12 @@ impl IcebergConfig {
             "iceberg.table.io.secret_access_key".to_string(),
             self.secret_key.clone().to_string(),
         );
+        if let Some(path_style_access) = self.path_style_access {
+            iceberg_configs.insert(
+                "iceberg.table.io.enable_virtual_host_style".to_string(),
+                (!path_style_access).to_string(),
+            );
+        }
 
         let (bucket, root) = {
             let url = Url::parse(&self.path).map_err(|e| SinkError::Iceberg(anyhow!(e)))?;
@@ -413,6 +429,12 @@ impl IcebergConfig {
                 self.secret_key.clone().to_string(),
             );
 
+            if let Some(path_style_access) = self.path_style_access {
+                java_catalog_configs.insert(
+                    "s3.path-style-access".to_string(),
+                    path_style_access.to_string(),
+                );
+            }
             if matches!(self.catalog_type.as_deref(), Some("glue")) {
                 java_catalog_configs.insert(
                     "client.credentials-provider".to_string(),
