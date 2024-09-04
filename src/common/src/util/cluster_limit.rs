@@ -130,7 +130,7 @@ impl Display for ActorCountPerParallelism {
             .collect();
         write!(
             f,
-            "ActorCountPerParallelism {{ hard_limit: {:?}, soft_limit: {:?}. worker_id_to_actor_count: {:?} }}",
+            "ActorCountPerParallelism {{ critical limit: {:?}, recommended limit: {:?}. worker_id_to_actor_count: {:?} }}",
             self.hard_limit, self.soft_limit, worker_id_to_actor_count_str
         )
     }
