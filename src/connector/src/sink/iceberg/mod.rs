@@ -1319,6 +1319,7 @@ mod test {
             ("s3.endpoint", "http://127.0.0.1:9301"),
             ("s3.access.key", "hummockadmin"),
             ("s3.secret.key", "hummockadmin"),
+            ("s3.path.style.access", "true"),
             ("s3.region", "us-east-1"),
             ("catalog.type", "jdbc"),
             ("catalog.name", "demo"),
