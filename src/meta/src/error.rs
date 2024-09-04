@@ -125,9 +125,6 @@ pub enum MetaErrorInner {
     // Indicates that recovery was triggered manually.
     #[error("adhoc recovery triggered")]
     AdhocRecovery,
-
-    #[error("ResourceExhausted error: {0}")]
-    ResourceExhausted(String),
 }
 
 impl MetaError {
@@ -178,7 +175,6 @@ impl From<MetaError> for tonic::Status {
             MetaErrorInner::Unavailable(_) => Code::Unavailable,
             MetaErrorInner::Cancelled(_) => Code::Cancelled,
             MetaErrorInner::InvalidParameter(_) => Code::InvalidArgument,
-            MetaErrorInner::ResourceExhausted(_) => Code::ResourceExhausted,
             _ => Code::Internal,
         };
 
