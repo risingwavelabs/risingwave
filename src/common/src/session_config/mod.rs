@@ -29,6 +29,7 @@ pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use thiserror::Error;
+use thiserror_ext::AsReport;
 
 use self::non_zero64::ConfigNonZeroU64;
 use crate::session_config::sink_decouple::SinkDecouple;
@@ -327,7 +328,10 @@ fn check_bytea_output(val: &str) -> Result<(), String> {
 }
 
 fn check_bypass_cluster_limits(_val: &bool) -> Result<(), String> {
-    match LicenseManager::get().tier().map_err(|e| e.to_string())? {
+    match LicenseManager::get()
+        .tier()
+        .map_err(|e| e.to_report_string())?
+    {
         risingwave_license::Tier::Free => {
             Err("Bypassing cluster limits is only allowed in paid tier".to_string())
         }

@@ -814,7 +814,6 @@ message GetClusterLimitsResponse {
   repeated ClusterLimit active_limits = 1;
 }
 
-
 service ClusterLimitService {
   rpc GetClusterLimits(GetClusterLimitsRequest) returns (GetClusterLimitsResponse);
 }
