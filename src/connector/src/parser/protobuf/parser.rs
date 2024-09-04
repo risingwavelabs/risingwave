@@ -297,25 +297,18 @@ fn protobuf_type_mapping(
         }
         Kind::Uint64 | Kind::Fixed64 => DataType::Decimal,
         Kind::String => DataType::Varchar,
-        Kind::Message(m) => {
-            let fields = m
-                .fields()
-                .map(|f| protobuf_type_mapping(&f, parse_trace))
-                .try_collect()?;
-            let field_names = m.fields().map(|f| f.name().to_string()).collect_vec();
-
-            // Note that this part is useful for actual parsing
-            // Since RisingWave will parse message to `ScalarImpl::Jsonb`
-            // Please do NOT modify it
-            if field_names.len() == 2
-                && field_names.contains(&"value".to_string())
-                && field_names.contains(&"type_url".to_string())
-            {
-                DataType::Jsonb
-            } else {
+        Kind::Message(m) => match m.full_name() {
+            // Well-Known Types are identified by their full name
+            "google.protobuf.Any" => DataType::Jsonb,
+            _ => {
+                let fields = m
+                    .fields()
+                    .map(|f| protobuf_type_mapping(&f, parse_trace))
+                    .try_collect()?;
+                let field_names = m.fields().map(|f| f.name().to_string()).collect_vec();
                 DataType::new_struct(fields, field_names)
             }
-        }
+        },
         Kind::Enum(_) => DataType::Varchar,
         Kind::Bytes => DataType::Bytea,
     };
