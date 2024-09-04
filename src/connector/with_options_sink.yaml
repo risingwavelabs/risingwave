@@ -332,6 +332,10 @@ IcebergConfig:
   - name: s3.secret.key
     field_type: String
     required: true
+  - name: s3.path.style.access
+    field_type: bool
+    required: false
+    default: Default::default
   - name: primary_key
     field_type: Vec<String>
     required: false
