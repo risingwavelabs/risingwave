@@ -1,6 +1,5 @@
 [package]
-name = "risingwave_license"
-description = "License validation and feature gating for RisingWave"
+name = "risingwave_telemetry_event"
 version = { workspace = true }
 edition = { workspace = true }
 homepage = { workspace = true }
@@ -16,16 +15,18 @@ normal = ["workspace-hack"]
 
 [dependencies]
 jsonbb = { workspace = true }
-jsonwebtoken = "9"
+prost = { workspace = true }
+reqwest = { version = "0.12.2", features = ["json"] }
 risingwave_pb = { workspace = true }
-risingwave_telemetry_event = { workspace = true }
-serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 thiserror-ext = { workspace = true }
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+] }
 tracing = "0.1"
-
-[dev-dependencies]
-expect-test = "1"
-
-[lints]
-workspace = true
+uuid = { version = "1", features = ["v4"] }
