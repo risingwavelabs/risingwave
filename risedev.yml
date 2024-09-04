@@ -16,8 +16,12 @@ profile:
 
   # The default configuration will start 1 compute node, 1 meta node and 1 frontend.
   default:
-    # Specify a configuration file to override the default settings
+    # # Specify a configuration file to override the default settings
     # config-path: src/config/example.toml
+    # # Specify custom environment variables
+    # env:
+    #   RUST_LOG: "info,risingwave_storage::hummock=off"
+    #   RW_ENABLE_PRETTY_LOG: "true"
     steps:
       # If you want to use the local s3 storage, enable the following line
       # - use: minio
