@@ -290,6 +290,20 @@ impl TableCatalog {
         self.engine
     }
 
+    pub fn iceberg_source_name(&self) -> Option<String> {
+        match self.engine {
+            Engine::Iceberg => Some(format!("{}{}", ICEBERG_SOURCE_PREFIX, self.name)),
+            Engine::Hummock => None,
+        }
+    }
+
+    pub fn iceberg_sink_name(&self) -> Option<String> {
+        match self.engine {
+            Engine::Iceberg => Some(format!("{}{}", ICEBERG_SINK_PREFIX, self.name)),
+            Engine::Hummock => None,
+        }
+    }
+
     pub fn is_table(&self) -> bool {
         self.table_type == TableType::Table
     }
