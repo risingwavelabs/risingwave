@@ -1066,7 +1066,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_all_nodes(&self) -> RpcResult<Vec<WorkerNode>> {
-        unimplemented!()
+        Ok(vec![])
     }
 
     async fn list_compact_task_progress(&self) -> RpcResult<Vec<CompactTaskProgress>> {
