@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_sqlparser::ast::ObjectName;
+use risingwave_common::catalog::Engine;
+use risingwave_connector::sink::iceberg::IcebergConfig;
+use risingwave_connector::source::ConnectorProperties;
+use risingwave_sqlparser::ast::{Ident, ObjectName};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::table_catalog::TableType;
+use crate::catalog::table_catalog::{TableType, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
 use crate::error::Result;
 use crate::handler::HandlerArgs;
 
@@ -28,7 +32,7 @@ pub async fn handle_drop_table(
     if_exists: bool,
     cascade: bool,
 ) -> Result<RwPgResponse> {
-    let session = handler_args.session;
+    let session = handler_args.session.clone();
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let search_path = session.config().search_path();
@@ -36,7 +40,7 @@ pub async fn handle_drop_table(
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let (source_id, table_id) = {
+    let (source_id, table_id, engine) = {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
             match reader.get_created_table_by_name(db_name, schema_path, &table_name) {
@@ -57,9 +61,70 @@ pub async fn handle_drop_table(
         if table.table_type() != TableType::Table {
             return Err(table.bad_drop_error());
         }
-
-        (table.associated_source_id(), table.id())
+        (table.associated_source_id(), table.id(), table.engine)
     };
+
+    match engine {
+        Engine::Iceberg => {
+            let source = session
+                .env()
+                .catalog_reader()
+                .read_guard()
+                .get_source_by_name(db_name, schema_path, &(ICEBERG_SOURCE_PREFIX.to_string() + &table_name))
+                .map(|(source, _)| source.clone())?;
+
+            // Drop sink
+            // Drop iceberg table
+            //   - Purge table from warehouse
+            //   - Drop table from catalog
+            // Drop source
+            crate::handler::drop_sink::handle_drop_sink(
+                handler_args.clone(),
+                ObjectName::from(vec![Ident::from(
+                    (ICEBERG_SINK_PREFIX.to_string() + &table_name).as_str(),
+                )]),
+                true,
+                false,
+            )
+            .await?;
+
+            let config = ConnectorProperties::extract(source.with_properties.clone(), false)?;
+            if let ConnectorProperties::Iceberg(iceberg_properties) = config {
+                let iceberg_config: IcebergConfig = iceberg_properties.to_iceberg_config();
+                let iceberg_catalog = iceberg_config
+                    .create_catalog_v2()
+                    .await
+                    .context("Unable to load iceberg catalog")?;
+                let table_id = iceberg_config
+                    .full_table_name_v2()
+                    .context("Unable to parse table name")?;
+                let table = iceberg_catalog
+                    .load_table(&table_id)
+                    .await
+                    .context("failed to load iceberg table")?;
+                table
+                    .file_io()
+                    .remove_all(table.metadata().location())
+                    .await
+                    .context("failed to purge iceberg table")?;
+                iceberg_catalog
+                    .drop_table(&table_id)
+                    .await
+                    .context("failed to drop iceberg table")?;
+            }
+
+            crate::handler::drop_source::handle_drop_source(
+                handler_args.clone(),
+                ObjectName::from(vec![Ident::from(
+                    (ICEBERG_SOURCE_PREFIX.to_string() + &table_name).as_str(),
+                )]),
+                true,
+                false,
+            )
+            .await?;
+        }
+        Engine::Hummock => {}
+    }
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
