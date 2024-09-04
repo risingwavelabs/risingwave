@@ -70,7 +70,11 @@ pub async fn handle_drop_table(
                 .env()
                 .catalog_reader()
                 .read_guard()
-                .get_source_by_name(db_name, schema_path, &(ICEBERG_SOURCE_PREFIX.to_string() + &table_name))
+                .get_source_by_name(
+                    db_name,
+                    schema_path,
+                    &(ICEBERG_SOURCE_PREFIX.to_string() + &table_name),
+                )
                 .map(|(source, _)| source.clone())?;
 
             // Drop sink
