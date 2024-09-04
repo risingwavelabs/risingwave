@@ -11634,7 +11634,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_telemetry_event"
-version = "1.11.0-alpha"
+version = "2.0.0-rc.1"
 dependencies = [
  "jsonbb",
  "madsim-tokio",
