@@ -520,7 +520,7 @@ impl IcebergConfig {
 }
 
 impl IcebergConfig {
-    fn full_table_name_v2(&self) -> Result<TableIdent> {
+    pub fn full_table_name_v2(&self) -> Result<TableIdent> {
         let ret = if let Some(database_name) = &self.database_name {
             TableIdent::from_strs(vec![database_name, &self.table_name])
         } else {
@@ -531,7 +531,7 @@ impl IcebergConfig {
             .map_err(|e| SinkError::Iceberg(anyhow!(e)))
     }
 
-    async fn create_catalog_v2(&self) -> ConnectorResult<Arc<dyn CatalogV2>> {
+    pub async fn create_catalog_v2(&self) -> ConnectorResult<Arc<dyn CatalogV2>> {
         match self.catalog_type() {
             "storage" => {
                 let config = StorageCatalogConfig::builder()

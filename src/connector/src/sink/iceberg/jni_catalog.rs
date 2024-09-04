@@ -342,8 +342,29 @@ impl CatalogV2 for JniCatalog {
     }
 
     /// Drop a table from the catalog.
-    async fn drop_table(&self, _table: &TableIdent) -> iceberg::Result<()> {
-        todo!()
+    async fn drop_table(&self, table: &TableIdent) -> iceberg::Result<()> {
+        execute_with_jni_env(self.jvm, |env| {
+            let table_name_str = format!(
+                "{}.{}",
+                table.namespace().clone().inner().into_iter().join("."),
+                table.name()
+            );
+
+            let table_name_jstr = env.new_string(&table_name_str).unwrap();
+
+            call_method!(env, self.java_catalog.as_obj(), {boolean dropTable(String)},
+            &table_name_jstr)
+            .with_context(|| format!("Failed to drop iceberg table: {table_name_str}"))?;
+
+            Ok(())
+        })
+        .map_err(|e| {
+            iceberg::Error::new(
+                iceberg::ErrorKind::Unexpected,
+                "Failed to load iceberg table.",
+            )
+            .with_source(e)
+        })
     }
 
     /// Check if a table exists in the catalog.
