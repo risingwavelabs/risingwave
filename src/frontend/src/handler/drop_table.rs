@@ -76,7 +76,7 @@ pub async fn handle_drop_table(
                     &(ICEBERG_SOURCE_PREFIX.to_string() + &table_name),
                 )
                 .map(|(source, _)| source.clone())?;
-
+            // TODO(nimtable): handle drop table failures in the middle.
             // Drop sink
             // Drop iceberg table
             //   - Purge table from warehouse
