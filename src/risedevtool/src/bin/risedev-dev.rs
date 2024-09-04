@@ -66,7 +66,7 @@ impl ProgressManager {
 fn task_main(
     manager: &mut ProgressManager,
     services: &Vec<ServiceConfig>,
-    envs: Vec<String>,
+    env: Vec<String>,
 ) -> Result<(Vec<(String, Duration)>, String)> {
     let log_path = env::var("PREFIX_LOG")?;
 
@@ -83,7 +83,7 @@ fn task_main(
     // Start Tmux and kill previous services
     {
         let mut ctx = ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-        let mut service = ConfigureTmuxTask::new(envs)?;
+        let mut service = ConfigureTmuxTask::new(env)?;
         service.execute(&mut ctx)?;
 
         writeln!(
@@ -393,7 +393,7 @@ fn main() -> Result<()> {
         .nth(1)
         .unwrap_or_else(|| "default".to_string());
 
-    let (config_path, envs, risedev_config) = ConfigExpander::expand(".", &task_name)?;
+    let (config_path, env, risedev_config) = ConfigExpander::expand(".", &task_name)?;
 
     if let Some(config_path) = &config_path {
         let target = Path::new(&env::var("PREFIX_CONFIG")?).join("risingwave.toml");
@@ -421,7 +421,7 @@ fn main() -> Result<()> {
         services.len(),
         task_name
     ));
-    let task_result = task_main(&mut manager, &services, envs);
+    let task_result = task_main(&mut manager, &services, env);
 
     match task_result {
         Ok(_) => {

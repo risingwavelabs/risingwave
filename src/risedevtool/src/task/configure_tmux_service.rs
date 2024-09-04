@@ -23,7 +23,7 @@ use crate::util::{risedev_cmd, stylized_risedev_subcmd};
 use crate::{ExecuteContext, Task};
 
 pub struct ConfigureTmuxTask {
-    envs: Vec<String>,
+    env: Vec<String>,
 }
 
 pub const RISEDEV_NAME: &str = "risedev";
@@ -36,7 +36,7 @@ pub fn new_tmux_command() -> Command {
 
 impl ConfigureTmuxTask {
     pub fn new(env: Vec<String>) -> Result<Self> {
-        Ok(Self { envs: env })
+        Ok(Self { env })
     }
 }
 
@@ -81,8 +81,8 @@ impl Task for ConfigureTmuxTask {
             .arg("-d")
             .arg("-s")
             .arg(RISEDEV_NAME);
-        for env in &self.envs {
-            cmd.arg("-e").arg(env);
+        for e in &self.env {
+            cmd.arg("-e").arg(e);
         }
         cmd.arg("-c")
             .arg(Path::new(&prefix_path))

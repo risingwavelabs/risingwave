@@ -55,9 +55,9 @@ impl ConfigExpander {
     /// ```yaml
     /// my-profile:
     ///   config-path: src/config/ci-recovery.toml
-    ///   envs:
-    ///     - "RUST_LOG=info,risingwave_storage::hummock=off"
-    ///     - "RW_ENABLE_PRETTY_LOG=true"
+    ///   env:
+    ///     RUST_LOG: "info,risingwave_storage::hummock=off"
+    ///     RW_ENABLE_PRETTY_LOG: "true"
     ///   steps:
     ///     - use: minio
     ///     - use: sqlite
@@ -76,7 +76,7 @@ impl ConfigExpander {
     ///
     /// # Returns
     ///
-    /// `(config_path, envs, steps)`
+    /// `(config_path, env, steps)`
     pub fn expand(
         root: impl AsRef<Path>,
         profile: &str,
@@ -141,11 +141,22 @@ impl ConfigExpander {
             .get(&Yaml::String("config-path".to_string()))
             .and_then(|s| s.as_str())
             .map(|s| s.to_string());
-        let envs = profile_section
-            .get(&Yaml::String("envs".to_string()))
-            .and_then(|s| s.as_vec())
-            .map(|s| s.iter().map(|s| s.as_str().unwrap().to_string()).collect())
-            .unwrap_or_default();
+        let mut env = vec![];
+        if let Some(env_section) = profile_section.get(&Yaml::String("env".to_string())) {
+            let env_section = env_section
+                .as_hash()
+                .ok_or_else(|| anyhow!("expect `env` section to be a hashmap"))?;
+
+            for (k, v) in env_section {
+                let key = k
+                    .as_str()
+                    .ok_or_else(|| anyhow!("expect env key to be a string"))?;
+                let value = v
+                    .as_str()
+                    .ok_or_else(|| anyhow!("expect env value to be a string"))?;
+                env.push(format!("{}={}", key, value));
+            }
+        }
 
         let steps = profile_section
             .get(&Yaml::String("steps".to_string()))
@@ -157,7 +168,7 @@ impl ConfigExpander {
         let steps = IdExpander::new(&steps)?.visit(steps)?;
         let steps = ProvideExpander::new(&steps)?.visit(steps)?;
 
-        Ok((config_path, envs, steps))
+        Ok((config_path, env, steps))
     }
 
     /// Parses the expanded yaml into [`ServiceConfig`]s.
