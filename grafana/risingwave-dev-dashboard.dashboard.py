@@ -1957,7 +1957,7 @@ def section_frontend(outer_panels):
                     "The number of valid and invalid subscription cursor",
                     [
                         panels.target(
-                            f"{metric('valid_subsription_cursor_nums')}",
+                            f"{metric('subsription_cursor_nums')}",
                             "",
                         ),
                         panels.target(
@@ -1976,59 +1976,59 @@ def section_frontend(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_count(
+                panels.timeseries_latency_ms(
                     "Subscription Cursor Query Duration(ms)",
                     "The amount of time a query exists inside the cursor",
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('subscription_cursor_query_duration_bucket')}[$__rate_interval])) by (le, cursor_name))",
-                                f"p{legend} - {{{{cursor_name}}}}",
+                                f"histogram_quantile({quantile}, sum(rate({metric('subscription_cursor_query_duration_bucket')}[$__rate_interval])) by (le, subscription_name))",
+                                f"p{legend} - {{{{subscription_name}}}}",
                             ),
                             [50, 99, "max"],
                         ),
                     ],
                 ),
-                panels.timeseries_ms(
+                panels.timeseries_latency_ms(
                     "Subscription Cursor Declare Duration(ms)",
                     "Subscription cursor duration of declare",
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('subscription_cursor_declare_duration_bucket')}[$__rate_interval])) by (le, cursor_name))",
-                                f"p{legend} - {{{{cursor_name}}}}",
+                                f"histogram_quantile({quantile}, sum(rate({metric('subscription_cursor_declare_duration_bucket')}[$__rate_interval])) by (le, subscription_name))",
+                                f"p{legend} - {{{{subscription_name}}}}",
                             ),
                             [50, 99, "max"],
                         )
                     ],
                 ),
-                panels.timeseries_ms(
+                panels.timeseries_latency_ms(
                     "Subscription Cursor Fetch Duration(ms)",
                     "Subscription cursor duration of fetch",
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('subscription_cursor_fetch_duration_bucket')}[$__rate_interval])) by (le, cursor_name))",
-                                f"p{legend} - {{{{cursor_name}}}}",
+                                f"histogram_quantile({quantile}, sum(rate({metric('subscription_cursor_fetch_duration_bucket')}[$__rate_interval])) by (le, subscription_name))",
+                                f"p{legend} - {{{{subscription_name}}}}",
                             ),
                             [50, 99, "max"],
                         )
                     ],
                 ),
-                panels.timeseries_ms(
+                panels.timeseries_latency_ms(
                     "Subscription Cursor Last Fetch Duration(ms)",
                     "Since the last fetch, the time up to now",
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('subscription_cursor_last_fetch_duration_bucket')}[$__rate_interval])) by (le, cursor_name))",
-                                f"p{legend} - {{{{cursor_name}}}}",
+                                f"histogram_quantile({quantile}, sum(rate({metric('subscription_cursor_last_fetch_duration_bucket')}[$__rate_interval])) by (le, subscription_name))",
+                                f"p{legend} - {{{{subscription_name}}}}",
                             ),
                             [50, 99, "max"],
                         )
                     ],
                 ),
-                panels.timeseries_ms(
+                panels.timeseries_latency(
                     "Query Latency (Distributed Query Mode)",
                     "",
                     [

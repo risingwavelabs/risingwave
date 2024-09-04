@@ -95,7 +95,6 @@ async fn handle_declare_subscription_cursor(
     {
         session
             .env()
-            .frontend_metrics
             .cursor_metrics
             .subscription_cursor_error_count
             .inc();
