@@ -447,7 +447,7 @@ mod tests {
     use risingwave_common::util::row_serde::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;
-    use risingwave_pb::catalog::table::TableType;
+    use risingwave_pb::catalog::table::{PbEngine, TableType};
     use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
     use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
     use risingwave_pb::plan_common::PbColumnCatalog;
@@ -555,6 +555,7 @@ mod tests {
             created_at_cluster_version: None,
             cdc_table_id: None,
             maybe_vnode_count: None,
+            engine: PbEngine::Hummock.into(),
         }
     }
 

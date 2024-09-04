@@ -216,6 +216,7 @@ define_keywords!(
     END_EXEC = "END-EXEC",
     END_FRAME,
     END_PARTITION,
+    ENGINE,
     EQUALS,
     ERROR,
     ESCAPE,
