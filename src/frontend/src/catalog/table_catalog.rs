@@ -292,6 +292,10 @@ impl TableCatalog {
         self.table_type
     }
 
+    pub fn engine(&self) -> Engine {
+        self.engine
+    }
+
     pub fn is_table(&self) -> bool {
         self.table_type == TableType::Table
     }
