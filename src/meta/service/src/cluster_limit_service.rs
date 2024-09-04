@@ -52,7 +52,7 @@ impl ClusterLimitServiceImpl {
                 FREE_TIER_ACTOR_CNT_HARD_LIMIT,
             ),
             Err(e) => {
-                tracing::warn!("Failed to get license tier: {}", e);
+                tracing::warn!(error=error=%err.as_report(), "Failed to get license tier: {}");
                 // Default to use free tier limit if there is any license error
                 (
                     FREE_TIER_ACTOR_CNT_SOFT_LIMIT,
