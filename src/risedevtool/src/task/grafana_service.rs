@@ -19,6 +19,7 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
+use crate::util::stylized_risedev_subcmd;
 use crate::{GrafanaConfig, GrafanaGen};
 
 pub struct GrafanaService {
@@ -102,7 +103,7 @@ impl Task for GrafanaService {
 
         let path = self.grafana_server_path()?;
         if !path.exists() {
-            return Err(anyhow!("grafana-server binary not found in {:?}\nDid you enable monitoring feature in `./risedev configure`?", path));
+            return Err(anyhow!("grafana-server binary not found in {:?}\nDid you enable monitoring feature in `{}`?", path, stylized_risedev_subcmd("configure")));
         }
 
         Self::write_config_files(

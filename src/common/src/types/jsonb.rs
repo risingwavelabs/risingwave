@@ -20,7 +20,9 @@ use jsonbb::{Value, ValueRef};
 use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::EstimateSize;
 
-use super::{Datum, IntoOrdered, ListValue, ScalarImpl, StructRef, ToOwnedDatum, F64};
+use super::{
+    Datum, IntoOrdered, ListValue, MapType, MapValue, ScalarImpl, StructRef, ToOwnedDatum, F64,
+};
 use crate::types::{DataType, Scalar, ScalarRef, StructType, StructValue};
 use crate::util::iter_util::ZipEqDebug;
 
@@ -462,6 +464,28 @@ impl<'a> JsonbRef<'a> {
             fields.push(datum);
         }
         Ok(StructValue::new(fields))
+    }
+
+    pub fn to_map(self, ty: &MapType) -> Result<MapValue, String> {
+        let object = self
+            .0
+            .as_object()
+            .ok_or_else(|| format!("cannot convert to map from a jsonb {}", self.type_name()))?;
+        if !matches!(ty.key(), DataType::Varchar) {
+            return Err("cannot convert jsonb to a map with non-string keys".to_string());
+        }
+
+        let mut keys: Vec<Datum> = Vec::with_capacity(object.len());
+        let mut values: Vec<Datum> = Vec::with_capacity(object.len());
+        for (k, v) in object.iter() {
+            let v = Self(v).to_datum(ty.value())?;
+            keys.push(Some(ScalarImpl::Utf8(k.to_owned().into())));
+            values.push(v);
+        }
+        MapValue::try_from_kv(
+            ListValue::from_datum_iter(ty.key(), keys),
+            ListValue::from_datum_iter(ty.value(), values),
+        )
     }
 
     /// Expands the top-level JSON object to a row having the struct type of the `base` argument.

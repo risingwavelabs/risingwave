@@ -46,7 +46,9 @@ pub struct AggExecutorArgs<S: StateStore, E: AggExecutorExtraArgs> {
 
 pub trait AggExecutorExtraArgs {}
 
-pub struct SimpleAggExecutorExtraArgs {}
+pub struct SimpleAggExecutorExtraArgs {
+    pub must_output_per_barrier: bool,
+}
 impl AggExecutorExtraArgs for SimpleAggExecutorExtraArgs {}
 
 /// Extra arguments needed to construct an `HashAggExecutor`.

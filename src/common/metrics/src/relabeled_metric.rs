@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::{MetricVec, MetricVecBuilder};
+use prometheus::core::{Collector, MetricVec, MetricVecBuilder};
 use prometheus::{HistogramVec, IntCounterVec};
 
 use crate::{
@@ -74,6 +74,47 @@ impl<M> RelabeledMetricVec<M> {
     }
 }
 
+#[easy_ext::ext(MetricVecRelabelExt)]
+impl<M> M
+where
+    M: Sized,
+{
+    /// Equivalent to [`RelabeledMetricVec::with_metric_level`].
+    pub fn relabel(
+        self,
+        metric_level: MetricLevel,
+        relabel_threshold: MetricLevel,
+    ) -> RelabeledMetricVec<M> {
+        RelabeledMetricVec::with_metric_level(metric_level, self, relabel_threshold)
+    }
+
+    /// Equivalent to [`RelabeledMetricVec::with_metric_level_relabel_n`].
+    pub fn relabel_n(
+        self,
+        metric_level: MetricLevel,
+        relabel_threshold: MetricLevel,
+        relabel_num: usize,
+    ) -> RelabeledMetricVec<M> {
+        RelabeledMetricVec::with_metric_level_relabel_n(
+            metric_level,
+            self,
+            relabel_threshold,
+            relabel_num,
+        )
+    }
+
+    /// Equivalent to [`RelabeledMetricVec::with_metric_level_relabel_n`] with `metric_level` set to
+    /// `MetricLevel::Debug` and `relabel_num` set to 1.
+    pub fn relabel_debug_1(self, relabel_threshold: MetricLevel) -> RelabeledMetricVec<M> {
+        RelabeledMetricVec::with_metric_level_relabel_n(
+            MetricLevel::Debug,
+            self,
+            relabel_threshold,
+            1,
+        )
+    }
+}
+
 impl<T: MetricVecBuilder> RelabeledMetricVec<MetricVec<T>> {
     pub fn with_label_values(&self, vals: &[&str]) -> T::M {
         if self.metric_level > self.relabel_threshold {
@@ -89,7 +130,7 @@ impl<T: MetricVecBuilder> RelabeledMetricVec<MetricVec<T>> {
 }
 
 impl<T: MetricVecBuilder, const N: usize> RelabeledMetricVec<LabelGuardedMetricVec<T, N>> {
-    pub fn with_label_values(&self, vals: &[&str; N]) -> LabelGuardedMetric<T::M, N> {
+    pub fn with_guarded_label_values(&self, vals: &[&str; N]) -> LabelGuardedMetric<T::M, N> {
         if self.metric_level > self.relabel_threshold {
             // relabel first n labels to empty string
             let mut relabeled_vals = *vals;
@@ -99,6 +140,16 @@ impl<T: MetricVecBuilder, const N: usize> RelabeledMetricVec<LabelGuardedMetricV
             return self.metric.with_guarded_label_values(&relabeled_vals);
         }
         self.metric.with_guarded_label_values(vals)
+    }
+}
+
+impl<T: Collector> Collector for RelabeledMetricVec<T> {
+    fn desc(&self) -> Vec<&prometheus::core::Desc> {
+        self.metric.desc()
+    }
+
+    fn collect(&self) -> Vec<prometheus::proto::MetricFamily> {
+        self.metric.collect()
     }
 }
 

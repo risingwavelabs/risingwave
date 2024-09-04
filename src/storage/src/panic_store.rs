@@ -182,17 +182,9 @@ impl StateStore for PanicStateStore {
         async { panic!("should not await sync epoch from the panic state store!") }
     }
 
-    fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {
-        panic!("should not update current epoch from the panic state store!");
-    }
-
     #[allow(clippy::unused_async)]
     async fn new_local(&self, _option: NewLocalOptions) -> Self::Local {
         panic!("should not call new local from the panic state store");
-    }
-
-    fn validate_read_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
-        panic!("should not call validate_read_epoch from the panic state store");
     }
 }
 

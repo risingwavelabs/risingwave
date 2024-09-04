@@ -31,7 +31,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_meta_model_v2::{actor, fragment, ObjectId, StreamingParallelism};
-use risingwave_pb::common::{ActorInfo, Buffer, PbActorLocation, WorkerNode, WorkerType};
+use risingwave_pb::common::{Buffer, PbActorLocation, WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::{
@@ -43,8 +43,6 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, PbDispatcher, PbStreamActor, StreamNode,
 };
-use risingwave_pb::stream_service::build_actor_info::SubscriptionIds;
-use risingwave_pb::stream_service::BuildActorInfo;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::{oneshot, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -165,7 +163,12 @@ impl From<&PbFragment> for CustomFragmentInfo {
                 .first()
                 .cloned()
                 .expect("no actor in fragment"),
-            actors: fragment.actors.iter().map(CustomActorInfo::from).collect(),
+            actors: fragment
+                .actors
+                .iter()
+                .map(CustomActorInfo::from)
+                .sorted_by(|actor_a, actor_b| actor_a.actor_id.cmp(&actor_b.actor_id))
+                .collect(),
         }
     }
 }
@@ -187,8 +190,6 @@ pub struct RescheduleContext {
     actor_status: BTreeMap<ActorId, WorkerId>,
     /// Meta information of all `Fragment`, used to find the `Fragment`'s `Actor`
     fragment_map: HashMap<FragmentId, CustomFragmentInfo>,
-    /// Indexes for all `Worker`s
-    worker_nodes: HashMap<WorkerId, WorkerNode>,
     /// Index of all `Actor` upstreams, specific to `Dispatcher`
     upstream_dispatchers: HashMap<ActorId, Vec<(FragmentId, DispatcherId, DispatcherType)>>,
     /// Fragments with stream source
@@ -279,8 +280,12 @@ pub fn rebalance_actor_vnode(
         .partition(|(actor_id, _)| actors_to_remove.contains(actor_id));
 
     let order_by_bitmap_desc =
-        |(_, bitmap_a): &(ActorId, Bitmap), (_, bitmap_b): &(ActorId, Bitmap)| -> Ordering {
-            bitmap_a.count_ones().cmp(&bitmap_b.count_ones()).reverse()
+        |(id_a, bitmap_a): &(ActorId, Bitmap), (id_b, bitmap_b): &(ActorId, Bitmap)| -> Ordering {
+            bitmap_a
+                .count_ones()
+                .cmp(&bitmap_b.count_ones())
+                .reverse()
+                .then(id_a.cmp(id_b))
         };
 
     let builder_from_bitmap = |bitmap: &Bitmap| -> BitmapBuilder {
@@ -891,49 +896,12 @@ impl ScaleController {
             actor_map,
             actor_status,
             fragment_map,
-            worker_nodes,
             upstream_dispatchers,
             stream_source_fragment_ids,
             no_shuffle_target_fragment_ids,
             no_shuffle_source_fragment_ids,
             fragment_dispatcher_map,
         })
-    }
-
-    pub(crate) async fn create_actors_on_compute_node(
-        &self,
-        worker_nodes: &HashMap<WorkerId, WorkerNode>,
-        actor_infos_to_broadcast: BTreeMap<ActorId, ActorInfo>,
-        node_actors_to_create: HashMap<WorkerId, Vec<BuildActorInfo>>,
-        broadcast_worker_ids: HashSet<WorkerId>,
-    ) -> MetaResult<()> {
-        self.stream_rpc_manager
-            .broadcast_update_actor_info(
-                worker_nodes,
-                broadcast_worker_ids.into_iter(),
-                actor_infos_to_broadcast.values().cloned(),
-                node_actors_to_create.clone().into_iter(),
-            )
-            .await?;
-
-        self.stream_rpc_manager
-            .build_actors(
-                worker_nodes,
-                node_actors_to_create
-                    .iter()
-                    .map(|(node_id, stream_actors)| {
-                        (
-                            *node_id,
-                            stream_actors
-                                .iter()
-                                .map(|stream_actor| stream_actor.actor.as_ref().unwrap().actor_id)
-                                .collect_vec(),
-                        )
-                    }),
-            )
-            .await?;
-
-        Ok(())
     }
 
     /// From the high-level [`WorkerReschedule`] to the low-level reschedule plan [`Reschedule`].
@@ -1294,116 +1262,6 @@ impl ScaleController {
 
                 new_created_actors.insert(*new_actor_id, new_actor);
             }
-        }
-
-        if !options.skip_create_new_actors {
-            // After modification, for newly created actors, both upstream and downstream actor ids
-            // have been modified
-            let mut actor_infos_to_broadcast = BTreeMap::new();
-            let mut node_actors_to_create: HashMap<WorkerId, Vec<_>> = HashMap::new();
-            let mut broadcast_worker_ids = HashSet::new();
-
-            let subscriptions: HashMap<_, SubscriptionIds> = self
-                .metadata_manager
-                .get_mv_depended_subscriptions()
-                .await?
-                .iter()
-                .map(|(table_id, subscriptions)| {
-                    (
-                        table_id.table_id,
-                        SubscriptionIds {
-                            subscription_ids: subscriptions.keys().cloned().collect(),
-                        },
-                    )
-                })
-                .collect();
-
-            for actors_to_create in fragment_actors_to_create.values() {
-                for (new_actor_id, worker_id) in actors_to_create {
-                    let new_actor = new_created_actors.get(new_actor_id).unwrap();
-                    for upstream_actor_id in &new_actor.upstream_actor_id {
-                        if new_created_actors.contains_key(upstream_actor_id) {
-                            continue;
-                        }
-
-                        let upstream_worker_id = ctx.actor_id_to_worker_id(upstream_actor_id)?;
-
-                        let upstream_worker =
-                            ctx.worker_nodes.get(&upstream_worker_id).with_context(|| {
-                                format!("upstream worker {} not found", upstream_worker_id)
-                            })?;
-
-                        // Force broadcast upstream actor info, because the actor information of the new
-                        // node may not have been synchronized yet
-                        actor_infos_to_broadcast.insert(
-                            *upstream_actor_id,
-                            ActorInfo {
-                                actor_id: *upstream_actor_id,
-                                host: upstream_worker.host.clone(),
-                            },
-                        );
-
-                        broadcast_worker_ids.insert(upstream_worker_id);
-                    }
-
-                    for dispatcher in &new_actor.dispatcher {
-                        for downstream_actor_id in &dispatcher.downstream_actor_id {
-                            if new_created_actors.contains_key(downstream_actor_id) {
-                                continue;
-                            }
-                            let downstream_worker_id =
-                                ctx.actor_id_to_worker_id(downstream_actor_id)?;
-
-                            let downstream_worker = ctx
-                                .worker_nodes
-                                .get(&downstream_worker_id)
-                                .with_context(|| {
-                                    format!("downstream worker {} not found", downstream_worker_id)
-                                })?;
-
-                            actor_infos_to_broadcast.insert(
-                                *downstream_actor_id,
-                                ActorInfo {
-                                    actor_id: *downstream_actor_id,
-                                    host: downstream_worker.host.clone(),
-                                },
-                            );
-
-                            broadcast_worker_ids.insert(downstream_worker_id);
-                        }
-                    }
-
-                    let worker = ctx.worker_nodes.get(worker_id).unwrap();
-
-                    node_actors_to_create
-                        .entry(worker.id)
-                        .or_default()
-                        .push(BuildActorInfo {
-                            actor: Some(new_actor.clone()),
-                            // TODO: may include only the subscriptions related to the table fragment
-                            // of the actor.
-                            related_subscriptions: subscriptions.clone(),
-                        });
-
-                    broadcast_worker_ids.insert(worker.id);
-
-                    actor_infos_to_broadcast.insert(
-                        *new_actor_id,
-                        ActorInfo {
-                            actor_id: *new_actor_id,
-                            host: worker.host.clone(),
-                        },
-                    );
-                }
-            }
-
-            self.create_actors_on_compute_node(
-                &ctx.worker_nodes,
-                actor_infos_to_broadcast,
-                node_actors_to_create,
-                broadcast_worker_ids,
-            )
-            .await?;
         }
 
         // For stream source fragments, we need to reallocate the splits.
@@ -1887,7 +1745,7 @@ impl ScaleController {
         if !reschedules.is_empty() {
             let workers = self
                 .metadata_manager
-                .list_active_streaming_compute_nodes()
+                .list_active_serving_compute_nodes()
                 .await?;
             let streaming_parallelisms = self
                 .metadata_manager

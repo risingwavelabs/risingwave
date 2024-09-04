@@ -1502,7 +1502,6 @@ impl HummockMetaClient for MetaClient {
             // For unpin_snapshot_before, we do not care about snapshots list but only min epoch.
             min_snapshot: Some(HummockSnapshot {
                 committed_epoch: pinned_epochs,
-                current_epoch: pinned_epochs,
             }),
         };
         self.inner.unpin_snapshot_before(req).await?;
@@ -1519,10 +1518,6 @@ impl HummockMetaClient for MetaClient {
 
     async fn commit_epoch(&self, _epoch: HummockEpoch, _sync_result: SyncResult) -> Result<()> {
         panic!("Only meta service can commit_epoch in production.")
-    }
-
-    async fn update_current_epoch(&self, _epoch: HummockEpoch) -> Result<()> {
-        panic!("Only meta service can update_current_epoch in production.")
     }
 
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {

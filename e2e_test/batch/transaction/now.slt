@@ -7,6 +7,11 @@ create view v as select * from t where ts at time zone 'utc' >= now();
 statement ok
 create materialized view mv as select * from v;
 
+connection txn
+statement ok
+SET VISIBILITY_MODE TO checkpoint;
+
+connection txn
 statement ok
 insert into t select * from generate_series(
     now() at time zone 'utc' - interval '10' second,
@@ -14,19 +19,24 @@ insert into t select * from generate_series(
     interval '1' second / 20
 );
 
+connection txn
 statement ok
 flush;
 
+connection txn
 statement ok
 start transaction read only;
 
 # the view should not be empty, so that the following check is meaningful
+connection txn
 query T
 select count(*) > 0 from mv;
 ----
 t
 
 # the result from batch query and materialized view should be the same
+skipif in-memory
+connection txn
 query T
 select * from v
 except
@@ -40,6 +50,7 @@ select * from mv;
 ## select * from v;
 ## ----
 
+connection txn
 statement ok
 commit;
 
