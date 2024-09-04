@@ -21,7 +21,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Field, FieldDisplay, Schema,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, FieldDisplay, Schema,
     StreamJobStatus, OBJECT_ID_PLACEHOLDER,
 };
 use risingwave_common::constants::log_store::v2::{
@@ -179,6 +179,7 @@ impl TableCatalogBuilder {
             created_at_cluster_version: None,
             retention_seconds: None,
             cdc_table_id: None,
+            engine: Engine::Hummock,
         }
     }
 
