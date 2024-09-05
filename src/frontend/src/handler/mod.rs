@@ -1162,7 +1162,7 @@ fn check_ban_ddl_for_iceberg_engine_table(
                 bail!(
                     "DROP INDEX is not supported for iceberg table: {}.{}",
                     schema_name,
-                    object_name
+                    index_name
                 );
             }
         }
