@@ -23,6 +23,7 @@ message AddMutation {
   // All actors to be added (to the main connected component of the graph) in this update.
   repeated uint32 added_actors = 3;
   // We may embed a source change split mutation here.
+  // `Source` and `SourceBackfill` are handled together here.
   // TODO: we may allow multiple mutations in a single barrier.
   map<uint32, source.ConnectorSplits> actor_splits = 2;
   // We may embed a pause mutation here.
@@ -70,6 +71,7 @@ message UpdateMutation {
   // All actors to be dropped in this update.
   repeated uint32 dropped_actors = 4;
   // Source updates.
+  // `Source` and `SourceBackfill` are handled together here.
   map<uint32, source.ConnectorSplits> actor_splits = 5;
   // When modifying the Materialized View, we need to recreate the Dispatcher from the old upstream to the new TableFragment.
   // Consistent with the semantics in AddMutation.
@@ -77,6 +79,7 @@ message UpdateMutation {
 }
 
 message SourceChangeSplitMutation {
+  // `Source` and `SourceBackfill` are handled together here.
   map<uint32, source.ConnectorSplits> actor_splits = 2;
 }
 
@@ -365,6 +368,9 @@ message SimpleAggNode {
   map<uint32, catalog.Table> distinct_dedup_tables = 6;
   uint32 row_count_index = 7;
   AggNodeVersion version = 8;
+  // Required by the downstream `RowMergeNode`,
+  // currently only used by the `approx_percentile`'s two phase plan
+  bool must_output_per_barrier = 9;
 }
 
 message HashAggNode {

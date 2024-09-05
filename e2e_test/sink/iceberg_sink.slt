@@ -49,12 +49,54 @@ CREATE SOURCE iceberg_demo_source WITH (
 );
 
 statement ok
+CREATE SINK s7 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3 from mv6 WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    primary_key = 'v1',
+    warehouse.path = 's3a://hummock001',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.access.key = secret iceberg_s3_access_key,
+    s3.secret.key = secret iceberg_s3_secret_key,
+    s3.region = 'us-east-1',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    database.name='demo_db',
+    table.name='e2e_auto_create_table',
+    commit_checkpoint_interval = 1,
+    create_table_if_not_exists = 'true'
+);
+
+statement ok
+CREATE SOURCE iceberg_e2e_auto_create_table WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3a://hummock001',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.access.key = secret iceberg_s3_access_key,
+    s3.secret.key = secret iceberg_s3_secret_key,
+    s3.region = 'us-east-1',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    database.name='demo_db',
+    table.name='e2e_auto_create_table'
+);
+
+statement ok
 INSERT INTO t6 VALUES (1, 2, '1-2'), (2, 2, '2-2'), (3, 2, '3-2'), (5, 2, '5-2'), (8, 2, '8-2'), (13, 2, '13-2'), (21, 2, '21-2');
 
 statement ok
 FLUSH;
 
-sleep 5s
+sleep 20s
+
+query I
+select count(*) from rw_iceberg_snapshots where source_name = 'iceberg_demo_source';
+----
+1
+
+query I
+select count(*) from rw_iceberg_snapshots where source_name = 'iceberg_e2e_auto_create_table';
+----
+1
 
 query I
 select sum(record_count) from rw_iceberg_files where source_name = 'iceberg_demo_source';
@@ -62,9 +104,9 @@ select sum(record_count) from rw_iceberg_files where source_name = 'iceberg_demo
 7
 
 query I
-select count(*) from rw_iceberg_snapshots where source_name = 'iceberg_demo_source';
+select sum(record_count) from rw_iceberg_files where source_name = 'iceberg_e2e_auto_create_table';
 ----
-1
+7
 
 statement ok
 INSERT INTO t6 VALUES (1, 50, '1-50');
@@ -78,10 +120,7 @@ statement ok
 DROP SOURCE iceberg_demo_source;
 
 statement ok
-DROP SINK s6;
+DROP SOURCE iceberg_e2e_auto_create_table;
 
 statement ok
-DROP MATERIALIZED VIEW mv6;
-
-statement ok
-DROP TABLE t6;
+DROP TABLE t6 cascade;
