@@ -12,6 +12,12 @@ fi
 
 touch risedev-components.user.env
 
+# RISEDEV_CMD might be set if it is installed to the PATH.
+# Otherwise, we set it to the current script name.
+if [ -z "$RISEDEV_CMD" ]; then
+    export RISEDEV_CMD="$0"
+fi
+
 if [ $# -eq 0 ] || [ "$1" == "-h" ] || [ "$1" ==  "--help" ]; then
     cargo make --list-all-steps --hide-uninteresting
     exit 0

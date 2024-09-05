@@ -66,6 +66,7 @@ impl ProgressManager {
 fn task_main(
     manager: &mut ProgressManager,
     services: &Vec<ServiceConfig>,
+    env: Vec<String>,
 ) -> Result<(Vec<(String, Duration)>, String)> {
     let log_path = env::var("PREFIX_LOG")?;
 
@@ -82,7 +83,7 @@ fn task_main(
     // Start Tmux and kill previous services
     {
         let mut ctx = ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-        let mut service = ConfigureTmuxTask::new()?;
+        let mut service = ConfigureTmuxTask::new(env)?;
         service.execute(&mut ctx)?;
 
         writeln!(
@@ -392,7 +393,7 @@ fn main() -> Result<()> {
         .nth(1)
         .unwrap_or_else(|| "default".to_string());
 
-    let (config_path, risedev_config) = ConfigExpander::expand(".", &task_name)?;
+    let (config_path, env, risedev_config) = ConfigExpander::expand(".", &task_name)?;
 
     if let Some(config_path) = &config_path {
         let target = Path::new(&env::var("PREFIX_CONFIG")?).join("risingwave.toml");
@@ -420,7 +421,7 @@ fn main() -> Result<()> {
         services.len(),
         task_name
     ));
-    let task_result = task_main(&mut manager, &services);
+    let task_result = task_main(&mut manager, &services, env);
 
     match task_result {
         Ok(_) => {
@@ -440,6 +441,8 @@ fn main() -> Result<()> {
     }
     manager.finish_all();
 
+    use risedev::util::stylized_risedev_subcmd as r;
+
     match task_result {
         Ok((stat, log_buffer)) => {
             println!("---- summary of startup time ----");
@@ -458,20 +461,11 @@ fn main() -> Result<()> {
 
             print!("{}", log_buffer);
 
-            println!(
-                "* You may find logs using {} command",
-                style("./risedev l").blue().bold()
-            );
+            println!("* You may find logs using {} command", r("l"));
 
-            println!(
-                "* Run {} to kill cluster.",
-                style("./risedev k").blue().bold()
-            );
+            println!("* Run {} to kill cluster.", r("k"));
 
-            println!(
-                "* Run {} to run `risedev` anywhere!",
-                style("./risedev install").blue().bold()
-            );
+            println!("* Run {} to run `risedev` anywhere!", r("install"));
 
             Ok(())
         }
@@ -484,20 +478,17 @@ fn main() -> Result<()> {
             println!();
             println!(
                 "* Use `{}` to enable new components, if they are missing.",
-                style("./risedev configure").blue().bold(),
+                r("configure")
             );
             println!(
                 "* Use `{}` to view logs, or visit `{}`",
-                style("./risedev l").blue().bold(),
+                r("l"),
                 env::var("PREFIX_LOG")?
             );
-            println!(
-                "* Run `{}` to clean up cluster.",
-                style("./risedev k").blue().bold()
-            );
+            println!("* Run `{}` to clean up cluster.", r("k"));
             println!(
                 "* Run `{}` to clean data, which might potentially fix the issue.",
-                style("./risedev clean-data").blue().bold()
+                r("clean-data")
             );
             println!("---");
             println!();

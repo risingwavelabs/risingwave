@@ -33,7 +33,7 @@
               └─BatchSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [sum0(count)], noop_update_hint: true }
+    └─StreamProject { exprs: [sum0(count)] }
       └─StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [count] }
@@ -155,7 +155,7 @@
       ├─StreamExchange { dist: HashShard(0:Int32) }
       │ └─StreamProject { exprs: [sum0(count), 0:Int32] }
       │   └─StreamShare { id: 5 }
-      │     └─StreamProject { exprs: [sum0(count)], noop_update_hint: true }
+      │     └─StreamProject { exprs: [sum0(count)] }
       │       └─StreamSimpleAgg { aggs: [sum0(count), count] }
       │         └─StreamExchange { dist: Single }
       │           └─StreamStatelessSimpleAgg { aggs: [count] }
@@ -163,7 +163,7 @@
       └─StreamExchange { dist: HashShard(1:Int32) }
         └─StreamProject { exprs: [sum0(count), 1:Int32] }
           └─StreamShare { id: 5 }
-            └─StreamProject { exprs: [sum0(count)], noop_update_hint: true }
+            └─StreamProject { exprs: [sum0(count)] }
               └─StreamSimpleAgg { aggs: [sum0(count), count] }
                 └─StreamExchange { dist: Single }
                   └─StreamStatelessSimpleAgg { aggs: [count] }
@@ -176,13 +176,13 @@
     StreamMaterialize { columns: [count, $src(hidden)], stream_key: [$src], pk_columns: [$src], pk_conflict: NoCheck }
     └─StreamUnion { all: true }
       ├─StreamExchange { dist: HashShard(0:Int32) }
-      │ └─StreamProject { exprs: [sum0(count), 0:Int32], noop_update_hint: true }
+      │ └─StreamProject { exprs: [sum0(count), 0:Int32] }
       │   └─StreamSimpleAgg { aggs: [sum0(count), count] }
       │     └─StreamExchange { dist: Single }
       │       └─StreamStatelessSimpleAgg { aggs: [count] }
       │         └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: HashShard(1:Int32) }
-        └─StreamProject { exprs: [sum0(count), 1:Int32], noop_update_hint: true }
+        └─StreamProject { exprs: [sum0(count), 1:Int32] }
           └─StreamSimpleAgg { aggs: [sum0(count), count] }
             └─StreamExchange { dist: Single }
               └─StreamStatelessSimpleAgg { aggs: [count] }
@@ -195,7 +195,7 @@
     select count(*) cnt from auction A join auction B on A.id = B.id;
   stream_plan: |-
     StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [sum0(count)], noop_update_hint: true }
+    └─StreamProject { exprs: [sum0(count)] }
       └─StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [count] }
@@ -216,7 +216,7 @@
     with cte as (select a, sum(b) sum from t group by a) select count(*) from cte c1 join cte c2 on c1.a = c2.a;
   stream_plan: |-
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [sum0(count)], noop_update_hint: true }
+    └─StreamProject { exprs: [sum0(count)] }
       └─StreamSimpleAgg { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [count] }
@@ -235,7 +235,7 @@
     Fragment 0
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
-    └── StreamProject { exprs: [sum0(count)], noop_update_hint: true }
+    └── StreamProject { exprs: [sum0(count)] }
         └── StreamSimpleAgg { aggs: [sum0(count), count] } { tables: [ SimpleAggState: 0 ] }
             └── StreamExchange Single from 1
 

@@ -19,6 +19,7 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 use itertools::Itertools;
 
+use crate::util::stylized_risedev_subcmd;
 use crate::{EtcdConfig, Task};
 
 pub struct EtcdService {
@@ -102,7 +103,11 @@ impl Task for EtcdService {
 
         let path = Self::path()?;
         if !path.exists() {
-            return Err(anyhow!("etcd binary not found in {:?}\nDid you enable etcd feature in `./risedev configure`?", path));
+            return Err(anyhow!(
+                "etcd binary not found in {:?}\nDid you enable etcd feature in `{}`?",
+                path,
+                stylized_risedev_subcmd("configure")
+            ));
         }
 
         let mut cmd = Self::etcd()?;

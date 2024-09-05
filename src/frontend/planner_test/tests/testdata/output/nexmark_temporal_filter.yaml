@@ -1517,7 +1517,7 @@
       │               └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
       │                 └─StreamNow { output: [now] }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr5))) as $expr6], noop_update_hint: true }
+        └─StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr5))) as $expr6] }
           └─StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count($expr5)), count] }
             └─StreamExchange { dist: Single }
               └─StreamStatelessSimpleAgg { aggs: [sum0(count), count($expr5)] }
@@ -1578,7 +1578,7 @@
     └── StreamNow { output: [now] } { tables: [ Now: 10 ] }
 
     Fragment 6
-    StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr5))) as $expr6], noop_update_hint: true }
+    StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr5))) as $expr6] }
     └── StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count($expr5)), count] } { tables: [ SimpleAggState: 11 ] }
         └── StreamExchange Single from 7
 
@@ -2000,7 +2000,7 @@
         )
   stream_plan: |-
     StreamMaterialize { columns: [min_final], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [min(min(max($expr7)))], noop_update_hint: true }
+    └─StreamProject { exprs: [min(min(max($expr7)))] }
       └─StreamSimpleAgg { aggs: [min(min(max($expr7))), count] }
         └─StreamExchange { dist: Single }
           └─StreamHashAgg { group_key: [$expr9], aggs: [min(max($expr7)), count] }
@@ -2035,7 +2035,7 @@
     Fragment 0
     StreamMaterialize { columns: [min_final], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
-    └── StreamProject { exprs: [min(min(max($expr7)))], noop_update_hint: true }
+    └── StreamProject { exprs: [min(min(max($expr7)))] }
         └── StreamSimpleAgg { aggs: [min(min(max($expr7))), count] }
             ├── tables: [ SimpleAggState: 1, SimpleAggCall0: 0 ]
             └── StreamExchange Single from 1
