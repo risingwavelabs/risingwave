@@ -426,15 +426,17 @@ impl HummockManager {
         for (mut sst, group_table_ids) in sst_to_cg_vec {
             for (group_id, match_ids) in group_table_ids {
                 let group_members_table_ids = group_members_table_ids.get(&group_id).unwrap();
-                if match_ids
+                if sst
+                    .sst_info
+                    .table_ids
                     .iter()
                     .all(|id| group_members_table_ids.contains(&TableId::new(*id)))
                 {
                     commit_sstables
                         .entry(group_id)
                         .or_default()
-                        .push(sst.sst_info.clone());
-                    continue;
+                        .push(sst.sst_info);
+                    break;
                 }
 
                 let origin_sst_size = sst.sst_info.sst_size;
