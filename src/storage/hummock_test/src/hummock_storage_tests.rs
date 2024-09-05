@@ -31,6 +31,7 @@ use risingwave_hummock_sdk::key::{
     gen_key_from_bytes, prefixed_range_with_vnode, FullKey, TableKey, UserKey, TABLE_PREFIX_LEN,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
@@ -2510,8 +2511,20 @@ async fn test_commit_multi_epoch() {
                     new_table_watermarks: Default::default(),
                     sst_to_context: context_id_map(&[sst.object_id]),
                     sstables: vec![LocalSstableInfo {
+                        table_stats: sst
+                            .table_ids
+                            .iter()
+                            .map(|&table_id| {
+                                (
+                                    table_id,
+                                    TableStats {
+                                        total_compressed_size: 10,
+                                        ..Default::default()
+                                    },
+                                )
+                            })
+                            .collect(),
                         sst_info: sst,
-                        table_stats: Default::default(),
                     }],
                     new_table_fragment_info,
                     change_log_delta: Default::default(),

@@ -63,6 +63,7 @@ impl SstableInfo {
 
 impl From<PbSstableInfo> for SstableInfo {
     fn from(pb_sstable_info: PbSstableInfo) -> Self {
+        assert!(pb_sstable_info.table_ids.is_sorted());
         Self {
             object_id: pb_sstable_info.object_id,
             sst_id: pb_sstable_info.sst_id,
@@ -100,6 +101,7 @@ impl From<PbSstableInfo> for SstableInfo {
 
 impl From<&PbSstableInfo> for SstableInfo {
     fn from(pb_sstable_info: &PbSstableInfo) -> Self {
+        assert!(pb_sstable_info.table_ids.is_sorted());
         Self {
             object_id: pb_sstable_info.object_id,
             sst_id: pb_sstable_info.sst_id,
@@ -137,6 +139,7 @@ impl From<&PbSstableInfo> for SstableInfo {
 impl From<SstableInfo> for PbSstableInfo {
     fn from(sstable_info: SstableInfo) -> Self {
         assert!(sstable_info.sst_size > 0 || sstable_info.is_stripped());
+        assert!(sstable_info.table_ids.is_sorted());
         PbSstableInfo {
             object_id: sstable_info.object_id,
             sst_id: sstable_info.sst_id,
@@ -175,6 +178,7 @@ impl From<SstableInfo> for PbSstableInfo {
 impl From<&SstableInfo> for PbSstableInfo {
     fn from(sstable_info: &SstableInfo) -> Self {
         assert!(sstable_info.sst_size > 0 || sstable_info.is_stripped());
+        assert!(sstable_info.table_ids.is_sorted());
         PbSstableInfo {
             object_id: sstable_info.object_id,
             sst_id: sstable_info.sst_id,
