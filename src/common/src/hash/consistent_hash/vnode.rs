@@ -69,6 +69,10 @@ impl VirtualNode {
 impl VirtualNode {
     /// The maximum count of virtual nodes that fits in [`VirtualNodeInner`].
     pub const MAX_COUNT: usize = 1 << VirtualNodeInner::BITS;
+    /// The maximum value of the virtual node that can be represented.
+    ///
+    /// Note that this is **NOT** the maximum value of the virtual node, which depends on the configuration.
+    pub const MAX_REPRESENTABLE: VirtualNode = VirtualNode::from_index(Self::MAX_COUNT - 1);
     /// The size of a virtual node in bytes, in memory or serialized representation.
     pub const SIZE: usize = std::mem::size_of::<Self>();
 }

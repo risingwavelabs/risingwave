@@ -67,7 +67,9 @@ where
     task_progress: Option<Arc<TaskProgress>>,
 
     last_table_id: u32,
-    table_partition_vnode: BTreeMap<u32, u32>,
+
+    vnode_count: usize,
+    table_vnode_partition: BTreeMap<u32, u32>,
     split_weight_by_vnode: u32,
     /// When vnode of the coming key is greater than `largest_vnode_in_current_partition`, we will
     /// switch SST.
@@ -88,9 +90,12 @@ where
         builder_factory: F,
         compactor_metrics: Arc<CompactorMetrics>,
         task_progress: Option<Arc<TaskProgress>>,
-        table_partition_vnode: BTreeMap<u32, u32>,
+        table_vnode_partition: BTreeMap<u32, u32>,
         concurrent_uploading_sst_count: Option<usize>,
     ) -> Self {
+        // TODO(var-vnode): should use value from caller
+        let vnode_count = VirtualNode::COUNT;
+
         Self {
             builder_factory,
             sst_outputs: Vec::new(),
@@ -98,9 +103,10 @@ where
             compactor_metrics,
             task_progress,
             last_table_id: 0,
-            table_partition_vnode,
+            table_vnode_partition,
+            vnode_count,
             split_weight_by_vnode: 0,
-            largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
+            largest_vnode_in_current_partition: vnode_count - 1,
             concurrent_upload_join_handle: FuturesUnordered::new(),
             concurrent_uploading_sst_count,
         }
@@ -114,9 +120,10 @@ where
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
             task_progress: None,
             last_table_id: 0,
-            table_partition_vnode: BTreeMap::default(),
+            table_vnode_partition: BTreeMap::default(),
+            vnode_count: VirtualNode::COUNT_FOR_TEST,
             split_weight_by_vnode: 0,
-            largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
+            largest_vnode_in_current_partition: VirtualNode::MAX_FOR_TEST.to_index(),
             concurrent_upload_join_handle: FuturesUnordered::new(),
             concurrent_uploading_sst_count: None,
         }
@@ -213,10 +220,10 @@ where
         let mut switch_builder = false;
         if user_key.table_id.table_id != self.last_table_id {
             let new_vnode_partition_count =
-                self.table_partition_vnode.get(&user_key.table_id.table_id);
+                self.table_vnode_partition.get(&user_key.table_id.table_id);
 
             if new_vnode_partition_count.is_some()
-                || self.table_partition_vnode.contains_key(&self.last_table_id)
+                || self.table_vnode_partition.contains_key(&self.last_table_id)
             {
                 if new_vnode_partition_count.is_some() {
                     self.split_weight_by_vnode = *new_vnode_partition_count.unwrap();
@@ -229,22 +236,23 @@ where
                 switch_builder = true;
                 if self.split_weight_by_vnode > 1 {
                     self.largest_vnode_in_current_partition =
-                        VirtualNode::COUNT / (self.split_weight_by_vnode as usize) - 1;
+                        self.vnode_count / (self.split_weight_by_vnode as usize) - 1;
                 } else {
                     // default
-                    self.largest_vnode_in_current_partition = VirtualNode::MAX.to_index();
+                    self.largest_vnode_in_current_partition = self.vnode_count - 1;
                 }
             }
         }
-        if self.largest_vnode_in_current_partition != VirtualNode::MAX.to_index() {
+        if self.largest_vnode_in_current_partition != self.vnode_count - 1 {
             let key_vnode = user_key.get_vnode_id();
             if key_vnode > self.largest_vnode_in_current_partition {
                 // vnode partition change
                 switch_builder = true;
 
                 // SAFETY: `self.split_weight_by_vnode > 1` here.
-                let (basic, remainder) =
-                    VirtualNode::COUNT.div_rem(&(self.split_weight_by_vnode as usize));
+                let (basic, remainder) = self
+                    .vnode_count
+                    .div_rem(&(self.split_weight_by_vnode as usize));
                 let small_segments_area = basic * (self.split_weight_by_vnode as usize - remainder);
                 self.largest_vnode_in_current_partition = (if key_vnode < small_segments_area {
                     (key_vnode / basic + 1) * basic

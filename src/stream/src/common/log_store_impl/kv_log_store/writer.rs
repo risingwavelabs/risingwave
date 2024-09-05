@@ -110,7 +110,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         {
             // When enter this branch, the chunk cannot be added directly, and should be add to
             // state store and flush
-            let mut vnode_bitmap_builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            let mut vnode_bitmap_builder = BitmapBuilder::zeroed(self.serde.vnodes().len());
             let mut flush_info = FlushInfo::new();
             for (i, (op, row)) in chunk.rows().enumerate() {
                 let seq_id = start_seq_id + (i as SeqIdType);

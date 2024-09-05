@@ -2083,13 +2083,13 @@ async fn test_table_watermark() {
 
     let vnode1 = VirtualNode::from_index(1);
     let vnode_bitmap1 = Arc::new({
-        let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+        let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
         builder.set(1, true);
         builder.finish()
     });
     let vnode2 = VirtualNode::from_index(2);
     let vnode_bitmap2 = Arc::new({
-        let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+        let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
         builder.set(2, true);
         builder.finish()
     });

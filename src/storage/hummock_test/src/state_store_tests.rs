@@ -1414,7 +1414,7 @@ async fn test_replicated_local_hummock_storage() {
             TableOption {
                 retention_seconds: None,
             },
-            Arc::new(Bitmap::ones(VirtualNode::COUNT)),
+            Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
         ))
         .await;
 

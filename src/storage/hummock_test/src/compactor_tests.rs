@@ -1861,8 +1861,8 @@ pub(crate) mod tests {
                 Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
                 None,
             );
-            let key_count = KEY_COUNT / VirtualNode::COUNT * 2;
-            for vnode_id in 0..VirtualNode::COUNT / 2 {
+            let key_count = KEY_COUNT / VirtualNode::COUNT_FOR_TEST * 2;
+            for vnode_id in 0..VirtualNode::COUNT_FOR_TEST / 2 {
                 let mut last_k: u64 = 1;
                 let init_epoch = test_epoch(100 * object_id);
                 let mut last_epoch = init_epoch;
@@ -1905,9 +1905,9 @@ pub(crate) mod tests {
 
         let target_file_size = max_sst_file_size / 4;
         let mut table_watermarks = BTreeMap::default();
-        let key_count = KEY_COUNT / VirtualNode::COUNT * 2;
-        let mut vnode_builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
-        for i in 0..VirtualNode::COUNT / 2 {
+        let key_count = KEY_COUNT / VirtualNode::COUNT_FOR_TEST * 2;
+        let mut vnode_builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
+        for i in 0..VirtualNode::COUNT_FOR_TEST / 2 {
             if i % 2 == 0 {
                 vnode_builder.set(i, true);
             } else {
@@ -1972,7 +1972,7 @@ pub(crate) mod tests {
             direction: WatermarkDirection::Ascending,
             vnode_watermarks: BTreeMap::default(),
         };
-        for i in 0..VirtualNode::COUNT {
+        for i in 0..VirtualNode::COUNT_FOR_TEST {
             if i % 2 == 0 {
                 watermark
                     .vnode_watermarks
