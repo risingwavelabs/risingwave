@@ -1312,24 +1312,22 @@ pub async fn handle_create_table(
                 .await?;
         }
         Engine::Iceberg => {
-            // export AWS_REGION=your_region
-            // export AWS_ACCESS_KEY_ID=your_access_key
-            // export AWS_SECRET_ACCESS_KEY=your_secret_key
-            // export RW_S3_ENDPOINT=your_endpoint
-            // export META_STORE_URI=your_meta_store_uri
-            // export META_STORE_USER=your_meta_store_user
-            // export META_STORE_PASSWORD=your_meta_store_password
+            let s3_region = if let Ok(region) = std::env::var("AWS_REGION") {
+                region
+            } else {
+                "us-east-1".to_string()
+            };
 
-            let s3_endpoint = if let Ok(endpoint) = std::env::var("RW_S3_ENDPOINT") {
+            let s3_endpoint = if let Ok(endpoint) = std::env::var("AWS_ENDPOINT_URL") {
                 endpoint
             } else {
                 "http://127.0.0.1:9301".to_string()
             };
 
-            let s3_region = if let Ok(region) = std::env::var("AWS_REGION") {
-                region
+            let s3_bucket = if let Ok(bucket) = std::env::var("AWS_BUCKET") {
+                bucket
             } else {
-                "us-east-1".to_string()
+                "hummock001".to_string()
             };
 
             let s3_ak = if let Ok(ak) = std::env::var("AWS_ACCESS_KEY_ID") {
@@ -1438,7 +1436,7 @@ pub async fn handle_create_table(
             with.insert("primary_key".to_string(), pks.join(","));
             with.insert("type".to_string(), "upsert".to_string());
             with.insert("catalog.type".to_string(), "jdbc".to_string());
-            with.insert("warehouse.path".to_string(), "s3://hummock001".to_string());
+            with.insert("warehouse.path".to_string(), format!("s3://{}", s3_bucket));
             with.insert("s3.endpoint".to_string(), s3_endpoint.clone());
             with.insert("s3.access.key".to_string(), s3_ak.clone());
             with.insert("s3.secret.key".to_string(), s3_sk.clone());
@@ -1452,6 +1450,7 @@ pub async fn handle_create_table(
             with.insert("catalog.name".to_string(), catalog_name.clone());
             with.insert("database.name".to_string(), database_name.clone());
             with.insert("table.name".to_string(), table_name.to_string());
+            with.insert("commit_checkpoint_interval".to_string(), "1".to_string());
             with.insert("create_table_if_not_exists".to_string(), "true".to_string());
             sink_handler_args.with_options = WithOptions::new_with_options(with);
 
@@ -1474,7 +1473,7 @@ pub async fn handle_create_table(
             let mut with = BTreeMap::new();
             with.insert("connector".to_string(), "iceberg".to_string());
             with.insert("catalog.type".to_string(), "jdbc".to_string());
-            with.insert("warehouse.path".to_string(), "s3://hummock001".to_string());
+            with.insert("warehouse.path".to_string(), format!("s3://{}", s3_bucket));
             with.insert("s3.endpoint".to_string(), s3_endpoint.clone());
             with.insert("s3.access.key".to_string(), s3_ak.clone());
             with.insert("s3.secret.key".to_string(), s3_sk.clone());
