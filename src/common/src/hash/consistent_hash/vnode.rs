@@ -115,6 +115,11 @@ impl VirtualNode {
 }
 
 impl VirtualNode {
+    pub const COUNT_FOR_TEST: usize = Self::COUNT;
+    pub const MAX_FOR_TEST: VirtualNode = Self::MAX;
+}
+
+impl VirtualNode {
     // `compute_chunk` is used to calculate the `VirtualNode` for the columns in the
     // chunk. When only one column is provided and its type is `Serial`, we consider the column to
     // be the one that contains RowId, and use a special method to skip the calculation of Hash

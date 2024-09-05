@@ -27,7 +27,7 @@ use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::DEFAULT_VNODE;
+use risingwave_storage::table::SINGLETON_VNODE;
 
 use crate::common::table::state_table::{
     ReplicatedStateTable, StateTable, WatermarkCacheStateTable,
@@ -445,7 +445,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::Included(OwnedRow::new(vec![Some(4_i32.into())])),
     );
     let iter = state_table
-        .iter_with_vnode(DEFAULT_VNODE, &pk_range, Default::default())
+        .iter_with_vnode(SINGLETON_VNODE, &pk_range, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -470,7 +470,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::<row::Empty>::Unbounded,
     );
     let iter = state_table
-        .iter_with_vnode(DEFAULT_VNODE, &pk_range, Default::default())
+        .iter_with_vnode(SINGLETON_VNODE, &pk_range, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -1976,11 +1976,11 @@ async fn test_replicated_state_table_replication() {
             std::ops::Bound::Included(OwnedRow::new(vec![Some(2_i32.into())])),
         );
         let iter = state_table
-            .iter_with_vnode(DEFAULT_VNODE, &range_bounds, Default::default())
+            .iter_with_vnode(SINGLETON_VNODE, &range_bounds, Default::default())
             .await
             .unwrap();
         let replicated_iter = replicated_state_table
-            .iter_with_vnode_and_output_indices(DEFAULT_VNODE, &range_bounds, Default::default())
+            .iter_with_vnode_and_output_indices(SINGLETON_VNODE, &range_bounds, Default::default())
             .await
             .unwrap();
         pin_mut!(iter);
@@ -2039,7 +2039,7 @@ async fn test_replicated_state_table_replication() {
         );
 
         let iter = state_table
-            .iter_with_vnode(DEFAULT_VNODE, &range_bounds, Default::default())
+            .iter_with_vnode(SINGLETON_VNODE, &range_bounds, Default::default())
             .await
             .unwrap();
 
@@ -2048,7 +2048,7 @@ async fn test_replicated_state_table_replication() {
             std::ops::Bound::Unbounded,
         );
         let replicated_iter = replicated_state_table
-            .iter_with_vnode_and_output_indices(DEFAULT_VNODE, &range_bounds, Default::default())
+            .iter_with_vnode_and_output_indices(SINGLETON_VNODE, &range_bounds, Default::default())
             .await
             .unwrap();
         pin_mut!(iter);
@@ -2079,7 +2079,7 @@ async fn test_replicated_state_table_replication() {
         let range_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) =
             (std::ops::Bound::Unbounded, std::ops::Bound::Unbounded);
         let replicated_iter = replicated_state_table
-            .iter_with_vnode_and_output_indices(DEFAULT_VNODE, &range_bounds, Default::default())
+            .iter_with_vnode_and_output_indices(SINGLETON_VNODE, &range_bounds, Default::default())
             .await
             .unwrap();
         pin_mut!(replicated_iter);
