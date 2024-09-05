@@ -618,6 +618,7 @@ impl ManagedBarrierState {
                 .is_ok());
         }
 
+        // Spawn a trivial join handle to be compatible with the unit test
         if cfg!(test) {
             for actor_id in &actor_ids_to_collect {
                 if !self.actor_states.contains_key(actor_id) {
