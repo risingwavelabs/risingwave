@@ -1350,8 +1350,8 @@ pub fn split_sst(
     {
         // related github.com/risingwavelabs/risingwave/pull/17898/
         // This is a temporary implementation that will update `table_ids`` based on the new split rule after PR 17898
-        // sst.table_ids = vec[1, 2, 3];
-        // new.table_ids = vec[2, 3, 4];
+        // sst_info.table_ids = vec[1, 2, 3];
+        // new_table_ids = vec[2, 3, 4];
         // branch_table_info.table_ids = vec[1, 2, 3] ∩ vec[2, 3, 4] = vec[2, 3]
         let set1: BTreeSet<_> = sst_info.table_ids.iter().cloned().collect();
         let set2: BTreeSet<_> = new_table_ids.into_iter().collect();
