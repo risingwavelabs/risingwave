@@ -32,6 +32,11 @@ impl ProtobufAccess {
     pub fn new(message: DynamicMessage) -> Self {
         Self { message }
     }
+
+    #[cfg(test)]
+    pub fn descriptor(&self) -> prost_reflect::MessageDescriptor {
+        self.message.descriptor()
+    }
 }
 
 impl Access for ProtobufAccess {

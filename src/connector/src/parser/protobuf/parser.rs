@@ -708,7 +708,8 @@ mod test {
     }
 
     fn pb_eq(a: &ProtobufAccess, field_name: &str, value: ScalarImpl) {
-        let dummy_type = DataType::Varchar;
+        let field = a.descriptor().get_field_by_name(field_name).unwrap();
+        let dummy_type = protobuf_type_mapping(&field, &mut vec![]).unwrap();
         let d = a.access_owned(&[field_name], &dummy_type).unwrap().unwrap();
         assert_eq!(d, value, "field: {} value: {:?}", field_name, d);
     }
