@@ -824,9 +824,11 @@ pub fn is_table_low_write_throughput(
     if let Some(history) = table_write_throughput.get(&table_id) {
         // Determine if 2/3 of the values in the interval below the threshold.
         let mut low_write_throughput_count = 0;
-        for throughput in history.iter().skip(history.len() - window_size) {
-            if *throughput / checkpoint_secs < threshold {
-                low_write_throughput_count += 1;
+        if history.len() >= window_size {
+            for throughput in history.iter().skip(history.len() - window_size) {
+                if *throughput / checkpoint_secs < threshold {
+                    low_write_throughput_count += 1;
+                }
             }
         }
 

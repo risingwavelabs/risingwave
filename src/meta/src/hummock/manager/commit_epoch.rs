@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
-use risingwave_hummock_sdk::compaction_group::group_split::split_sst;
+use risingwave_hummock_sdk::compaction_group::group_split::{self, split_sst};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, to_prost_table_stats_map, PbTableStatsMap,
@@ -477,7 +477,9 @@ impl HummockManager {
         for (mut sst, group_table_ids) in sst_to_cg_vec {
             for (group_id, match_ids) in group_table_ids {
                 let group_members_table_ids = group_members_table_ids.get(&group_id).unwrap();
-                if match_ids
+                if sst
+                    .sst_info
+                    .table_ids
                     .iter()
                     .all(|id| group_members_table_ids.contains(&TableId::new(*id)))
                 {
@@ -504,7 +506,6 @@ impl HummockManager {
                     split_key,
                     origin_sst_size - new_sst_size,
                     new_sst_size,
-                    // match_ids,
                 );
 
                 commit_sstables
