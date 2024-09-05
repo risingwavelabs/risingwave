@@ -16,6 +16,7 @@ use std::mem;
 
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
+use hashbrown::HashMap;
 use iceberg::scan::FileScanTask;
 use iceberg::spec::TableMetadata;
 use itertools::Itertools;
@@ -39,6 +40,7 @@ pub struct IcebergScanExecutor {
     snapshot_id: Option<i64>,
     table_meta: TableMetadata,
     file_scan_tasks: Vec<FileScanTask>,
+    eq_delete_file_scan_tasks: Vec<FileScanTask>,
     batch_size: usize,
     schema: Schema,
     identity: String,
@@ -64,6 +66,7 @@ impl IcebergScanExecutor {
         snapshot_id: Option<i64>,
         table_meta: TableMetadata,
         file_scan_tasks: Vec<FileScanTask>,
+        eq_delete_file_scan_tasks: Vec<FileScanTask>,
         batch_size: usize,
         schema: Schema,
         identity: String,
@@ -73,6 +76,7 @@ impl IcebergScanExecutor {
             snapshot_id,
             table_meta,
             file_scan_tasks,
+            eq_delete_file_scan_tasks,
             batch_size,
             schema,
             identity,
@@ -86,6 +90,38 @@ impl IcebergScanExecutor {
             .load_table_v2_with_metadata(self.table_meta)
             .await?;
         let data_types = self.schema.data_types();
+
+        let mut eq_delete_file_scan_tasks_map = HashMap::new();
+        let eq_delete_file_scan_tasks = mem::take(&mut self.eq_delete_file_scan_tasks);
+
+        for eq_delete_file_scan_task in eq_delete_file_scan_tasks {
+            let sequence_number = eq_delete_file_scan_task.sequence_number();
+            let reader = table
+                .reader_builder()
+                .with_batch_size(self.batch_size)
+                .build();
+            let delete_file_scan_stream = tokio_stream::once(async move{ delete_file_scan_task });
+
+            let mut delete_record_batch_stream = reader
+                .read(Box::pin(delete_file_scan_stream))
+                .map_err(BatchError::Iceberg)?;
+            
+            while let Some(record_batch) = delete_record_batch_stream.next().await {
+                let record_batch = record_batch.map_err(BatchError::Iceberg)?;
+                let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+                for row in chunk.rows() {
+                    if let Some(ScalarRefImpl::Int32(i)) = row.datum_at(0) {
+                        if let Some(s) = map.get(&i) {
+                            map.insert(i, *s.max(&sequence_number.clone()));
+                        } else {
+                            map.insert(i, sequence_number);
+                        }
+                    } else {
+                        unreachable!();
+                    }
+                }
+            }
+        }
 
         let file_scan_tasks = mem::take(&mut self.file_scan_tasks);
 
@@ -171,6 +207,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
                 Some(split.snapshot_id),
                 split.table_meta.deserialize(),
                 split.files.into_iter().map(|x| x.deserialize()).collect(),
+                split.eq_delete_files.deserialize(),
                 source.context.get_config().developer.chunk_size,
                 schema,
                 source.plan_node().get_identity().clone(),
