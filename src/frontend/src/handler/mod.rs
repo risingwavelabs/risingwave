@@ -1151,22 +1151,6 @@ fn check_ban_ddl_for_iceberg_engine_table(
             }
         }
 
-        Statement::Drop(DropStatement {
-            object_type: ObjectType::Index,
-            object_name: index_name,
-            ..
-        }) => {
-            let (table, schema_name) =
-                get_table_catalog_by_table_name(session.as_ref(), index_name)?;
-            if table.is_iceberg_engine_table() {
-                bail!(
-                    "DROP INDEX is not supported for iceberg table: {}.{}",
-                    schema_name,
-                    index_name
-                );
-            }
-        }
-
         _ => {}
     }
 
