@@ -74,6 +74,7 @@ impl UserManager {
                     .values()
                     .map(|connection| connection.owner),
             )
+            .chain(database.secrets.values().map(|secret| secret.owner))
             .for_each(|owner_id| user_manager.increase_ref(owner_id));
 
         Ok(user_manager)

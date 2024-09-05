@@ -1,5 +1,8 @@
 include ../tpch/create_tables.slt.part
 
+statement ok
+CREATE SECRET secret1 WITH (backend = 'meta') AS 'demo-secret'
+
 # First, insert the data into the tables
 include ../tpch/insert_customer.slt.part
 include ../tpch/insert_lineitem.slt.part
