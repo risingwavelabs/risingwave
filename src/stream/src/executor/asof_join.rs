@@ -1038,8 +1038,12 @@ mod tests {
         let (state_l, degree_state_l) = create_in_memory_state_table(
             mem_state.clone(),
             &[DataType::Int64, DataType::Int64, DataType::Int64],
-            &[OrderType::ascending(), OrderType::ascending()],
-            &[0, 1],
+            &[
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
+            ],
+            &[0, asof_desc.left_idx, 1],
             0,
         )
         .await;
@@ -1047,8 +1051,12 @@ mod tests {
         let (state_r, degree_state_r) = create_in_memory_state_table(
             mem_state,
             &[DataType::Int64, DataType::Int64, DataType::Int64],
-            &[OrderType::ascending(), OrderType::ascending()],
-            &[0, 1],
+            &[
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
+            ],
+            &[0, asof_desc.right_idx, 1],
             2,
         )
         .await;
