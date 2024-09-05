@@ -654,8 +654,10 @@ impl HummockManager {
             group: &TableGroupInfo,
             created_tables: &HashSet<u32>,
         ) -> bool {
-            let table_id = group.table_statistic.keys().next().unwrap();
-            !created_tables.contains(table_id)
+            group
+                .table_statistic
+                .keys()
+                .any(|table_id| !created_tables.contains(table_id))
         }
 
         fn check_is_low_write_throughput_compaction_group(
@@ -731,7 +733,7 @@ impl HummockManager {
         }
 
         if check_is_creating_compaction_group(next_group, created_tables) {
-            tracing::info!("Not Merge creating group {}", next_group.group_id);
+            tracing::info!("Not Merge creating next group {}", next_group.group_id);
             return Err(Error::CompactionGroup(format!(
                 "right group-{} is creating",
                 next_group.group_id
@@ -742,10 +744,13 @@ impl HummockManager {
             table_write_throughput,
             checkpoint_secs,
             window_size,
-            self.env.opts.table_write_throughput_threshold,
+            self.env.opts.min_table_split_write_throughput,
             next_group,
         ) {
-            tracing::info!("Not Merge high throughput group {}", next_group.group_id);
+            tracing::info!(
+                "Not Merge high throughput next group {}",
+                next_group.group_id
+            );
             return Err(Error::CompactionGroup(format!(
                 "right group-{} is high throughput",
                 next_group.group_id
@@ -753,7 +758,7 @@ impl HummockManager {
         }
 
         if check_is_huge_group(self, next_group).await {
-            tracing::info!("Not Merge huge group {}", next_group.group_id);
+            tracing::info!("Not Merge huge next group {}", next_group.group_id);
             return Err(Error::CompactionGroup(format!(
                 "group-{} is huge",
                 next_group.group_id

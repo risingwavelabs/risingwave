@@ -478,7 +478,7 @@ impl HummockManager {
             let mut left = 0;
             let mut right = left + 1;
 
-            while left < group_count - 1 && right < group_count {
+            while left < right && right < group_count {
                 let group = &group_infos[left];
                 let next_group = &group_infos[right];
                 if self
@@ -494,8 +494,8 @@ impl HummockManager {
                 {
                     right += 1
                 } else {
-                    left = right + 1;
-                    right += 2;
+                    left = right;
+                    right = left + 1;
                 }
             }
         }
