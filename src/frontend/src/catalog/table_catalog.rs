@@ -572,6 +572,10 @@ impl TableCatalog {
     pub fn is_created(&self) -> bool {
         self.stream_job_status == StreamJobStatus::Created
     }
+
+    pub fn is_iceberg_engine_table(&self) -> bool {
+        self.engine == Engine::Iceberg
+    }
 }
 
 impl From<PbTable> for TableCatalog {
