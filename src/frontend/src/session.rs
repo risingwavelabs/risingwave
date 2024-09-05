@@ -1211,8 +1211,8 @@ impl SessionImpl {
             };
             format!(
                 "\n- {}\n- {}\n- {}\n- {}\n- {}\n{}",
-                format!("Actor count per parallelism exceeds the {} limit.", limit_type),
-                format!("Depending on your workload, this may overload the cluster and cause performance/stability issues. {}", action),
+                format_args!("Actor count per parallelism exceeds the {} limit.", limit_type),
+                format_args!("Depending on your workload, this may overload the cluster and cause performance/stability issues. {}", action),
                 "Contact us via slack or https://risingwave.com/contact-us/ for further enquiry.",
                 "You can bypass this check via SQL `SET bypass_cluster_limits TO true`.",
                 "You can check actor count distribution via SQL `SELECT * FROM rw_worker_actor_count`.",
