@@ -35,7 +35,7 @@ condition = { env_not_set = [ "RISEDEV_CONFIGURED" ] }
 script = '''
 #!/usr/bin/env bash
 set -e
-echo "RiseDev is not configured, please run ./risedev configure"
+echo "RiseDev is not configured, please run ${RISEDEV_CMD} configure"
 exit 1
 '''
 

@@ -812,7 +812,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let join_matched_join_keys = ctx
             .streaming_metrics
             .join_matched_join_keys
-            .with_label_values(&[
+            .with_guarded_label_values(&[
                 &ctx.id.to_string(),
                 &ctx.fragment_id.to_string(),
                 &side_update.ht.table_id().to_string(),

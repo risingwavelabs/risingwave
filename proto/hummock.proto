@@ -239,7 +239,8 @@ message HummockSnapshot {
   // Epoch with checkpoint, we will read durable data with it.
   uint64 committed_epoch = 1;
   // Epoch without checkpoint, we will read real-time data with it. But it may be rolled back.
-  uint64 current_epoch = 2;
+  reserved 2;
+  reserved "current_epoch";
 }
 
 message VersionUpdatePayload {
@@ -922,6 +923,10 @@ message TableStats {
   int64 total_key_size = 1;
   int64 total_value_size = 2;
   int64 total_key_count = 3;
+
+  // `total_compressed_size`` represents the size that the table takes up in the output sst
+  //  and this field is only filled and used by CN flushes, not compactor compaction
+  uint64 total_compressed_size = 4;
 }
 
 message HummockVersionStats {

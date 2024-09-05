@@ -175,6 +175,7 @@ pub async fn put_sst(
     mut meta: SstableMeta,
     sstable_store: SstableStoreRef,
     mut options: SstableWriterOptions,
+    table_ids: Vec<u32>,
 ) -> HummockResult<SstableInfo> {
     options.policy = CachePolicy::NotFill;
     let mut writer = sstable_store
@@ -187,7 +188,19 @@ pub async fn put_sst(
             .write_block(&data[offset..end_offset], block_meta)
             .await?;
     }
+
+    // dummy
+    let bloom_filter = {
+        let mut filter_builder = BlockedXor16FilterBuilder::new(100);
+        for _ in &meta.block_metas {
+            filter_builder.switch_block(None);
+        }
+
+        filter_builder.finish(None)
+    };
+
     meta.meta_offset = writer.data_len() as u64;
+    meta.bloom_filter = bloom_filter;
     let sst = SstableInfo {
         object_id: sst_object_id,
         sst_id: sst_object_id,
@@ -199,6 +212,7 @@ pub async fn put_sst(
         file_size: meta.estimated_size as u64,
         meta_offset: meta.meta_offset,
         uncompressed_file_size: meta.estimated_size as u64,
+        table_ids,
         ..Default::default()
     };
     let writer_output = writer.finish(meta).await?;

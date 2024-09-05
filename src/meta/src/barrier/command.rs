@@ -78,6 +78,7 @@ pub struct Reschedule {
 
     /// Reassigned splits for source actors.
     /// It becomes the `actor_splits` in [`UpdateMutation`].
+    /// `Source` and `SourceBackfill` are handled together here.
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
     /// Whether this fragment is injectable. The injectable means whether the fragment contains
@@ -496,16 +497,16 @@ impl CommandContext {
     }
 }
 
-impl CommandContext {
+impl Command {
     /// Generate a mutation for the given command.
-    pub fn to_mutation(&self) -> Option<Mutation> {
+    pub fn to_mutation(&self, current_paused_reason: Option<&PausedReason>) -> Option<Mutation> {
         let mutation =
-            match &self.command {
+            match self {
                 Command::Plain(mutation) => mutation.clone(),
 
                 Command::Pause(_) => {
                     // Only pause when the cluster is not already paused.
-                    if self.current_paused_reason.is_none() {
+                    if current_paused_reason.is_none() {
                         Some(Mutation::Pause(PauseMutation {}))
                     } else {
                         None
@@ -514,7 +515,7 @@ impl CommandContext {
 
                 Command::Resume(reason) => {
                     // Only resume when the cluster is paused with the same reason.
-                    if self.current_paused_reason == Some(*reason) {
+                    if current_paused_reason == Some(reason) {
                         Some(Mutation::Resume(ResumeMutation {}))
                     } else {
                         None
@@ -606,7 +607,7 @@ impl CommandContext {
                         added_actors,
                         actor_splits,
                         // If the cluster is already paused, the new actors should be paused too.
-                        pause: self.current_paused_reason.is_some(),
+                        pause: current_paused_reason.is_some(),
                         subscriptions_to_add,
                     }));
 
@@ -844,6 +845,42 @@ impl CommandContext {
         mutation
     }
 
+    pub fn actors_to_create(&self) -> Option<HashMap<WorkerId, Vec<StreamActor>>> {
+        match self {
+            Command::CreateStreamingJob { info, job_type } => {
+                let mut map = match job_type {
+                    CreateStreamingJobType::Normal => HashMap::new(),
+                    CreateStreamingJobType::SinkIntoTable(replace_table) => {
+                        replace_table.new_table_fragments.actors_to_create()
+                    }
+                    CreateStreamingJobType::SnapshotBackfill(_) => {
+                        // for snapshot backfill, the actors to create is measured separately
+                        return None;
+                    }
+                };
+                for (worker_id, new_actors) in info.table_fragments.actors_to_create() {
+                    map.entry(worker_id).or_default().extend(new_actors)
+                }
+                Some(map)
+            }
+            Command::RescheduleFragment { reschedules, .. } => {
+                let mut map: HashMap<WorkerId, Vec<_>> = HashMap::new();
+                for (actor, status) in reschedules
+                    .values()
+                    .flat_map(|reschedule| reschedule.newly_created_actors.iter())
+                {
+                    let worker_id = status.location.as_ref().unwrap().worker_node_id;
+                    map.entry(worker_id).or_default().push(actor.clone());
+                }
+                Some(map)
+            }
+            Command::ReplaceTable(replace_table) => {
+                Some(replace_table.new_table_fragments.actors_to_create())
+            }
+            _ => None,
+        }
+    }
+
     fn generate_update_mutation_for_replace_table(
         old_table_fragments: &TableFragments,
         merge_updates: &[MergeUpdate],
@@ -876,6 +913,13 @@ impl CommandContext {
             actor_splits,
             ..Default::default()
         }))
+    }
+}
+
+impl CommandContext {
+    pub fn to_mutation(&self) -> Option<Mutation> {
+        self.command
+            .to_mutation(self.current_paused_reason.as_ref())
     }
 
     /// Returns the paused reason after executing the current command.

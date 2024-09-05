@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_pb::expr::ExprNode;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
-    AdditionalColumn, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
+    AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, PbColumnCatalog, PbColumnDesc,
 };
 
 use super::{row_id_column_desc, USER_COLUMN_ID_OFFSET};
@@ -137,6 +137,18 @@ impl ColumnDesc {
             description: None,
             additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
+        }
+    }
+
+    pub fn named_with_default_value(
+        name: impl Into<String>,
+        column_id: ColumnId,
+        data_type: DataType,
+        default_val: DefaultColumnDesc,
+    ) -> ColumnDesc {
+        ColumnDesc {
+            generated_or_default_column: Some(GeneratedOrDefaultColumn::DefaultColumn(default_val)),
+            ..Self::named(name, column_id, data_type)
         }
     }
 

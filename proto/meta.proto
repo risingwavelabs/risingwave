@@ -99,6 +99,7 @@ message TableFragments {
   State state = 2;
   map<uint32, Fragment> fragments = 3;
   map<uint32, ActorStatus> actor_status = 4;
+  // `Source` and `SourceBackfill` are handled together here.
   map<uint32, source.ConnectorSplits> actor_splits = 5;
 
   stream_plan.StreamContext ctx = 6;
@@ -513,6 +514,7 @@ message GetClusterInfoRequest {}
 message GetClusterInfoResponse {
   repeated common.WorkerNode worker_nodes = 1;
   repeated TableFragments table_fragments = 2;
+  // `Source` and `SourceBackfill` are handled together here.
   map<uint32, source.ConnectorSplits> actor_splits = 3;
   map<uint32, catalog.Source> source_infos = 4;
   uint64 revision = 5;
@@ -733,8 +735,9 @@ message EventLog {
   }
   message EventAutoSchemaChangeFail {
     uint32 table_id = 1;
-    string cdc_table_id = 2;
-    string upstream_ddl = 3;
+    string table_name = 2;
+    string cdc_table_id = 3;
+    string upstream_ddl = 4;
   }
   // Event logs identifier, which should be populated by event log service.
   optional string unique_id = 1;
@@ -770,4 +773,21 @@ message AddEventLogResponse {}
 service EventLogService {
   rpc ListEventLog(ListEventLogRequest) returns (ListEventLogResponse);
   rpc AddEventLog(AddEventLogRequest) returns (AddEventLogResponse);
+}
+
+message ActorIds {
+  repeated uint32 ids = 1;
+}
+
+message FragmentIdToActorIdMap {
+  map<uint32, ActorIds> map = 1;
+}
+
+/// Provides all the ids: relation_id, fragment_id, actor_id
+/// in an hierarchical format.
+/// relation_id -> [fragment_id]
+/// fragment_id -> [actor_id]
+message RelationIdInfos {
+  // relation_id -> FragmentIdToActorIdMap
+  map<uint32, FragmentIdToActorIdMap> map = 1;
 }

@@ -412,6 +412,7 @@ pub(super) fn fmt_create_items(
         || !watermarks.is_empty()
         || wildcard_idx.is_some();
     has_items.then(|| write!(&mut items, "("));
+
     if let Some(wildcard_idx) = wildcard_idx {
         let (columns_l, columns_r) = columns.split_at(wildcard_idx);
         write!(&mut items, "{}", display_comma_separated(columns_l))?;
@@ -426,14 +427,21 @@ pub(super) fn fmt_create_items(
     } else {
         write!(&mut items, "{}", display_comma_separated(columns))?;
     }
-    if !columns.is_empty() && (!constraints.is_empty() || !watermarks.is_empty()) {
+    let mut leading_items = !columns.is_empty() || wildcard_idx.is_some();
+
+    if leading_items && !constraints.is_empty() {
         write!(&mut items, ", ")?;
     }
     write!(&mut items, "{}", display_comma_separated(constraints))?;
-    if !columns.is_empty() && !constraints.is_empty() && !watermarks.is_empty() {
+    leading_items |= !constraints.is_empty();
+
+    if leading_items && !watermarks.is_empty() {
         write!(&mut items, ", ")?;
     }
     write!(&mut items, "{}", display_comma_separated(watermarks))?;
+    // uncomment this when adding more sections below
+    // leading_items |= !watermarks.is_empty();
+
     has_items.then(|| write!(&mut items, ")"));
     Ok(items)
 }

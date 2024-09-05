@@ -8534,6 +8534,7 @@ dependencies = [
  "openssl",
  "panic-message",
  "parking_lot 0.12.1",
+ "postgres-types",
  "reqwest 0.12.4",
  "risingwave_common",
  "risingwave_sqlparser",
@@ -11165,7 +11166,10 @@ name = "risingwave_license"
 version = "2.1.0-alpha"
 dependencies = [
  "expect-test",
+ "jsonbb",
  "jsonwebtoken",
+ "risingwave_pb",
+ "risingwave_telemetry_event",
  "serde",
  "thiserror",
  "thiserror-ext",

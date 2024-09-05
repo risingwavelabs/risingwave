@@ -243,7 +243,11 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             created_at_cluster_version: value.1.created_at_cluster_version,
             create_type: PbCreateType::Foreground as _,
             secret_refs: secret_ref_map,
-            original_target_columns: value.0.original_target_columns.to_protobuf(),
+            original_target_columns: value
+                .0
+                .original_target_columns
+                .map(|cols| cols.to_protobuf())
+                .unwrap_or_default(),
         }
     }
 }
@@ -283,7 +287,11 @@ impl From<ObjectModel<index::Model>> for PbIndex {
             index_table_id: value.0.index_table_id as _,
             primary_table_id: value.0.primary_table_id as _,
             index_item: value.0.index_items.to_protobuf(),
-            index_column_properties: value.0.index_column_properties.to_protobuf(),
+            index_column_properties: value
+                .0
+                .index_column_properties
+                .map(|p| p.to_protobuf())
+                .unwrap_or_default(),
             index_columns_len: value.0.index_columns_len as _,
             initialized_at_epoch: Some(
                 Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,

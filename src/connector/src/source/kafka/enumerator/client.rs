@@ -170,6 +170,7 @@ impl KafkaSplitEnumerator {
             self.report_high_watermark(*partition, high);
             map.insert(*partition, (low, high));
         }
+        tracing::debug!("fetch kafka watermarks: {map:?}");
         Ok(map)
     }
 

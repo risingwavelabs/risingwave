@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{JsonbRef, StructRef, StructValue};
+use risingwave_common::types::{JsonbRef, MapRef, MapValue, Scalar, StructRef, StructValue};
 use risingwave_expr::expr::Context;
 use risingwave_expr::{function, ExprError, Result};
 
@@ -58,6 +58,22 @@ fn jsonb_populate_record(
 ) -> Result<StructValue> {
     let output_type = ctx.return_type.as_struct();
     jsonb.populate_struct(output_type, base).map_err(parse_err)
+}
+
+#[function("jsonb_populate_map(anymap, jsonb) -> anymap")]
+pub fn jsonb_populate_map(
+    base: Option<MapRef<'_>>,
+    v: JsonbRef<'_>,
+    ctx: &Context,
+) -> Result<MapValue> {
+    let output_type = ctx.return_type.as_map();
+    let jsonb_map = v
+        .to_map(output_type)
+        .map_err(|e| ExprError::Parse(e.into()))?;
+    match base {
+        Some(base) => Ok(MapValue::concat(base, jsonb_map.as_scalar_ref())),
+        None => Ok(jsonb_map),
+    }
 }
 
 /// Expands the top-level JSON array of objects to a set of rows having the composite type of the
