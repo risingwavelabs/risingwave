@@ -12,22 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_pb::stream_plan::{DispatcherType, MergeNode};
 
 use super::*;
 use crate::executor::exchange::input::new_input;
-use crate::executor::{MergeExecutor, ReceiverExecutor};
+use crate::executor::monitor::StreamingMetrics;
+use crate::executor::{ActorContextRef, InputExecutor, InputExecutorUpstream, MergeExecutor};
+use crate::task::SharedContext;
 
 pub struct MergeExecutorBuilder;
 
-impl ExecutorBuilder for MergeExecutorBuilder {
-    type Node = MergeNode;
-
-    async fn new_boxed_executor(
-        params: ExecutorParams,
-        node: &Self::Node,
-        _store: impl StateStore,
-    ) -> StreamResult<Executor> {
+impl MergeExecutorBuilder {
+    pub(crate) fn new_input_executor(
+        shared_context: Arc<SharedContext>,
+        executor_stats: Arc<StreamingMetrics>,
+        actor_context: ActorContextRef,
+        info: ExecutorInfo,
+        node: &MergeNode,
+    ) -> StreamResult<InputExecutor> {
         let upstreams = node.get_upstream_actor_id();
         let upstream_fragment_id = node.get_upstream_fragment_id();
 
@@ -35,10 +39,10 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             .iter()
             .map(|&upstream_actor_id| {
                 new_input(
-                    &params.shared_context,
-                    params.executor_stats.clone(),
-                    params.actor_context.id,
-                    params.fragment_id,
+                    &shared_context,
+                    executor_stats.clone(),
+                    actor_context.id,
+                    actor_context.fragment_id,
                     upstream_actor_id,
                     upstream_fragment_id,
                 )
@@ -56,31 +60,45 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             DispatcherType::NoShuffle => true,
         };
 
-        let exec = if always_single_input {
-            ReceiverExecutor::new(
-                params.actor_context,
-                params.fragment_id,
-                upstream_fragment_id,
-                inputs.into_iter().exactly_one().unwrap(),
-                params.shared_context.clone(),
-                params.operator_id,
-                params.executor_stats.clone(),
-                params.within_snapshot_backfill,
-            )
-            .boxed()
+        let upstreams = if always_single_input {
+            InputExecutorUpstream::Singleton(inputs.into_iter().exactly_one().unwrap())
         } else {
-            MergeExecutor::new(
-                params.actor_context,
-                params.fragment_id,
-                upstream_fragment_id,
+            InputExecutorUpstream::Merge(MergeExecutor::new_select_receiver(
                 inputs,
-                params.shared_context.clone(),
-                params.operator_id,
-                params.executor_stats.clone(),
-                params.within_snapshot_backfill,
-            )
-            .boxed()
+                &executor_stats,
+                &actor_context,
+            ))
         };
-        Ok((params.info, exec).into())
+        Ok(InputExecutor::new(
+            upstreams,
+            actor_context,
+            upstream_fragment_id,
+            shared_context,
+            executor_stats,
+            info,
+        ))
+    }
+}
+
+impl ExecutorBuilder for MergeExecutorBuilder {
+    type Node = MergeNode;
+
+    async fn new_boxed_executor(
+        params: ExecutorParams,
+        node: &Self::Node,
+        _store: impl StateStore,
+    ) -> StreamResult<Executor> {
+        let barrier_rx = params
+            .shared_context
+            .local_barrier_manager
+            .subscribe_barrier(params.actor_context.id);
+        Ok(Self::new_input_executor(
+            params.shared_context,
+            params.executor_stats,
+            params.actor_context,
+            params.info,
+            node,
+        )?
+        .into_executor(barrier_rx))
     }
 }

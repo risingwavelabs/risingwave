@@ -21,6 +21,7 @@ use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
 use prometheus::Histogram;
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::LabelGuardedMetric;
+use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use super::exchange::input::BoxedInput;
@@ -32,6 +33,78 @@ use crate::executor::exchange::input::{
 use crate::executor::prelude::*;
 use crate::task::SharedContext;
 
+pub(crate) enum InputExecutorUpstream {
+    Singleton(BoxedInput),
+    Merge(SelectReceivers),
+}
+
+pub(crate) struct InputExecutor {
+    upstream: InputExecutorUpstream,
+    actor_context: ActorContextRef,
+    upstream_fragment_id: UpstreamFragmentId,
+    shared_context: Arc<SharedContext>,
+    executor_stats: Arc<StreamingMetrics>,
+    info: ExecutorInfo,
+}
+
+impl InputExecutor {
+    pub(crate) fn new(
+        upstream: InputExecutorUpstream,
+        actor_context: ActorContextRef,
+        upstream_fragment_id: UpstreamFragmentId,
+        shared_context: Arc<SharedContext>,
+        executor_stats: Arc<StreamingMetrics>,
+        info: ExecutorInfo,
+    ) -> Self {
+        Self {
+            upstream,
+            actor_context,
+            upstream_fragment_id,
+            shared_context,
+            executor_stats,
+            info,
+        }
+    }
+
+    pub(crate) fn into_executor(self, barrier_rx: mpsc::UnboundedReceiver<Barrier>) -> Executor {
+        let fragment_id = self.actor_context.fragment_id;
+        let executor = match self.upstream {
+            InputExecutorUpstream::Singleton(input) => ReceiverExecutor::new(
+                self.actor_context,
+                fragment_id,
+                self.upstream_fragment_id,
+                input,
+                self.shared_context,
+                self.executor_stats,
+                barrier_rx,
+            )
+            .boxed(),
+            InputExecutorUpstream::Merge(inputs) => MergeExecutor::new(
+                self.actor_context,
+                fragment_id,
+                self.upstream_fragment_id,
+                inputs,
+                self.shared_context,
+                self.executor_stats,
+                barrier_rx,
+            )
+            .boxed(),
+        };
+        (self.info, executor).into()
+    }
+}
+
+impl Stream for InputExecutor {
+    type Item = DispatcherMessageStreamItem;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match &mut self.get_mut().upstream {
+            InputExecutorUpstream::Singleton(input) => input.poll_next_unpin(cx),
+            InputExecutorUpstream::Merge(inputs) => inputs.poll_next_unpin(cx),
+        }
+    }
+}
+
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
 /// will be stopped on barrier.
 pub struct MergeExecutor {
@@ -39,7 +112,7 @@ pub struct MergeExecutor {
     actor_context: ActorContextRef,
 
     /// Upstream channels.
-    upstreams: Vec<BoxedInput>,
+    upstreams: SelectReceivers,
 
     /// Belonged fragment id.
     fragment_id: FragmentId,
@@ -53,7 +126,7 @@ pub struct MergeExecutor {
     /// Streaming metrics.
     metrics: Arc<StreamingMetrics>,
 
-    ignore_mutation: bool,
+    barrier_rx: mpsc::UnboundedReceiver<Barrier>,
 }
 
 impl MergeExecutor {
@@ -62,20 +135,19 @@ impl MergeExecutor {
         ctx: ActorContextRef,
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
-        inputs: Vec<BoxedInput>,
+        upstreams: SelectReceivers,
         context: Arc<SharedContext>,
-        _receiver_id: u64,
         metrics: Arc<StreamingMetrics>,
-        ignore_mutation: bool,
+        barrier_rx: mpsc::UnboundedReceiver<Barrier>,
     ) -> Self {
         Self {
             actor_context: ctx,
-            upstreams: inputs,
+            upstreams,
             fragment_id,
             upstream_fragment_id,
             context,
             metrics,
-            ignore_mutation,
+            barrier_rx,
         }
     }
 
@@ -88,53 +160,62 @@ impl MergeExecutor {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::Input;
 
-        Self::new(
-            ActorContext::for_test(actor_id),
-            514,
-            1919,
+        let barrier_rx = shared_context
+            .local_barrier_manager
+            .subscribe_barrier(actor_id);
+
+        let metrics = StreamingMetrics::unused();
+        let actor_ctx = ActorContext::for_test(actor_id);
+        let upstream = Self::new_select_receiver(
             inputs
                 .into_iter()
                 .enumerate()
                 .map(|(idx, input)| LocalInput::new(input, idx as ActorId).boxed_input())
                 .collect(),
+            &metrics,
+            &actor_ctx,
+        );
+
+        Self::new(
+            actor_ctx,
+            514,
+            1919,
+            upstream,
             shared_context,
-            810,
-            StreamingMetrics::unused().into(),
-            false,
+            metrics.into(),
+            barrier_rx,
         )
     }
 
-    #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(mut self: Box<Self>) {
-        let merge_barrier_align_duration = if self.metrics.level >= MetricLevel::Debug {
+    pub(crate) fn new_select_receiver(
+        upstreams: Vec<BoxedInput>,
+        metrics: &StreamingMetrics,
+        actor_context: &ActorContext,
+    ) -> SelectReceivers {
+        let merge_barrier_align_duration = if metrics.level >= MetricLevel::Debug {
             Some(
-                self.metrics
+                metrics
                     .merge_barrier_align_duration
                     .with_guarded_label_values(&[
-                        &self.actor_context.id.to_string(),
-                        &self.actor_context.fragment_id.to_string(),
+                        &actor_context.id.to_string(),
+                        &actor_context.fragment_id.to_string(),
                     ]),
             )
         } else {
             None
         };
 
-        let mut barrier_rx = if self.ignore_mutation {
-            None
-        } else {
-            Some(
-                self.context
-                    .local_barrier_manager
-                    .subscribe_barrier(self.actor_context.id),
-            )
-        };
-
         // Futures of all active upstreams.
-        let select_all = SelectReceivers::new(
-            self.actor_context.id,
-            self.upstreams,
+        SelectReceivers::new(
+            actor_context.id,
+            upstreams,
             merge_barrier_align_duration.clone(),
-        );
+        )
+    }
+
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn execute_inner(mut self: Box<Self>) {
+        let select_all = self.upstreams;
         let actor_id = self.actor_context.id;
 
         let mut metrics = self.metrics.new_actor_input_metrics(
@@ -151,11 +232,7 @@ impl MergeExecutor {
                 .actor_input_buffer_blocking_duration_ns
                 .inc_by(start_time.elapsed().as_nanos() as u64);
             let msg: DispatcherMessage = msg?;
-            let mut msg: Message = if let Some(barrier_rx) = &mut barrier_rx {
-                process_dispatcher_msg(msg, barrier_rx).await?
-            } else {
-                msg.map_mutation(|_| None)
-            };
+            let mut msg: Message = process_dispatcher_msg(msg, &mut self.barrier_rx).await?;
 
             match &mut msg {
                 Message::Watermark(_) => {
@@ -231,7 +308,7 @@ impl MergeExecutor {
                             let mut select_new = SelectReceivers::new(
                                 self.actor_context.id,
                                 new_upstreams,
-                                merge_barrier_align_duration.clone(),
+                                select_all.merge_barrier_align_duration(),
                             );
                             let new_barrier = expect_first_barrier(&mut select_new).await?;
                             assert_equal_dispatcher_barrier(barrier, &new_barrier);
@@ -477,6 +554,10 @@ impl SelectReceivers {
             .filter(|u| !upstream_actor_ids.contains(&u.actor_id()));
         self.extend_active(new_upstreams);
     }
+
+    fn merge_barrier_align_duration(&self) -> Option<LabelGuardedMetric<Histogram, 2>> {
+        self.merge_barrier_align_duration.clone()
+    }
 }
 
 #[cfg(test)]
@@ -649,15 +730,18 @@ mod tests {
             .try_collect()
             .unwrap();
 
+        let barrier_rx = ctx.local_barrier_manager.subscribe_barrier(actor_id);
+        let actor_ctx = ActorContext::for_test(actor_id);
+        let upstream = MergeExecutor::new_select_receiver(inputs, &metrics, &actor_ctx);
+
         let mut merge = MergeExecutor::new(
-            ActorContext::for_test(actor_id),
+            actor_ctx,
             fragment_id,
             upstream_fragment_id,
-            inputs,
+            upstream,
             ctx.clone(),
-            233,
             metrics.clone(),
-            false,
+            barrier_rx,
         )
         .boxed()
         .execute();

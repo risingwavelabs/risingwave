@@ -25,20 +25,22 @@ use await_tree::InstrumentAwait;
 use futures::stream::BoxStream;
 use futures::{FutureExt, TryFutureExt};
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::config::MetricLevel;
+use risingwave_common::{bail, must_match};
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{StreamNode, StreamScanType};
+use risingwave_pb::stream_plan::{StreamNode, StreamScanNode, StreamScanType};
 use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
 use risingwave_pb::stream_service::{
     BuildActorInfo, StreamingControlStreamRequest, StreamingControlStreamResponse,
 };
 use risingwave_storage::monitor::HummockTraceFutureExt;
+use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::{dispatch_state_store, StateStore};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -51,10 +53,10 @@ use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
-    Actor, ActorContext, ActorContextRef, DispatchExecutor, DispatcherImpl, Executor, ExecutorInfo,
-    WrapperExecutor,
+    Actor, ActorContext, ActorContextRef, DispatchExecutor, DispatcherImpl, Execute, Executor,
+    ExecutorInfo, InputExecutor, SnapshotBackfillExecutor, TroublemakerExecutor, WrapperExecutor,
 };
-use crate::from_proto::create_executor;
+use crate::from_proto::{create_executor, MergeExecutorBuilder};
 use crate::task::barrier_manager::{
     ControlStreamHandle, EventSender, LocalActorOperation, LocalBarrierWorker,
 };
@@ -148,8 +150,6 @@ pub struct ExecutorParams {
     pub shared_context: Arc<SharedContext>,
 
     pub local_barrier_manager: LocalBarrierManager,
-
-    pub within_snapshot_backfill: bool,
 }
 
 impl Debug for ExecutorParams {
@@ -342,6 +342,134 @@ impl StreamActorManager {
         ))
     }
 
+    fn create_snapshot_backfill_input(
+        &self,
+        upstream_node: &StreamNode,
+        actor_context: &ActorContextRef,
+        shared_context: &Arc<SharedContext>,
+    ) -> StreamResult<InputExecutor> {
+        let upstream_merge = must_match!(upstream_node.get_node_body().unwrap(), NodeBody::Merge(upstream_merge) => {
+            upstream_merge
+        });
+        let executor_id = unique_executor_id(actor_context.id, upstream_node.operator_id);
+        let schema: Schema = upstream_node.fields.iter().map(Field::from).collect();
+
+        let pk_indices = upstream_node
+            .get_stream_key()
+            .iter()
+            .map(|idx| *idx as usize)
+            .collect::<Vec<_>>();
+
+        let identity = format!(
+            "{} {:X}",
+            upstream_node.get_node_body().unwrap(),
+            executor_id
+        );
+        let info = ExecutorInfo {
+            schema,
+            pk_indices,
+            identity,
+        };
+        MergeExecutorBuilder::new_input_executor(
+            shared_context.clone(),
+            self.streaming_metrics.clone(),
+            actor_context.clone(),
+            info,
+            upstream_merge,
+        )
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    fn create_snapshot_backfill_node(
+        &self,
+        stream_node: &StreamNode,
+        node: &StreamScanNode,
+        actor_context: &ActorContextRef,
+        vnode_bitmap: Option<Bitmap>,
+        shared_context: &Arc<SharedContext>,
+        env: StreamEnvironment,
+        state_store: impl StateStore,
+    ) -> StreamResult<Executor> {
+        assert_eq!(2, stream_node.input.len());
+        let upstream = self.create_snapshot_backfill_input(
+            &stream_node.input[0],
+            actor_context,
+            shared_context,
+        )?;
+
+        let table_desc: &StorageTableDesc = node.get_table_desc()?;
+
+        let output_indices = node
+            .output_indices
+            .iter()
+            .map(|&i| i as usize)
+            .collect_vec();
+
+        let column_ids = node
+            .upstream_column_ids
+            .iter()
+            .map(ColumnId::from)
+            .collect_vec();
+
+        let progress = shared_context
+            .local_barrier_manager
+            .register_create_mview_progress(actor_context.id);
+
+        let vnodes = vnode_bitmap.map(Arc::new);
+        let barrier_rx = shared_context
+            .local_barrier_manager
+            .subscribe_barrier(actor_context.id);
+
+        let upstream_table =
+            StorageTable::new_partial(state_store.clone(), column_ids, vnodes, table_desc);
+
+        let executor = SnapshotBackfillExecutor::new(
+            upstream_table,
+            upstream,
+            output_indices,
+            actor_context.clone(),
+            progress,
+            env.config().developer.chunk_size,
+            node.rate_limit.map(|x| x as _),
+            barrier_rx,
+            self.streaming_metrics.clone(),
+        )
+        .boxed();
+
+        let pk_indices = stream_node
+            .get_stream_key()
+            .iter()
+            .map(|idx| *idx as usize)
+            .collect::<Vec<_>>();
+
+        // We assume that the operator_id of different instances from the same RelNode will be the
+        // same.
+        let executor_id = unique_executor_id(actor_context.id, stream_node.operator_id);
+        let schema: Schema = stream_node.fields.iter().map(Field::from).collect();
+
+        let identity = format!("{} {:X}", stream_node.get_node_body().unwrap(), executor_id);
+        let info = ExecutorInfo {
+            schema,
+            pk_indices,
+            identity,
+        };
+
+        if crate::consistency::insane() {
+            let mut troubled_info = info.clone();
+            troubled_info.identity = format!("{} (troubled)", info.identity);
+            Ok((
+                info,
+                TroublemakerExecutor::new(
+                    (troubled_info, executor).into(),
+                    env.config().developer.chunk_size,
+                ),
+            )
+                .into())
+        } else {
+            Ok((info, executor).into())
+        }
+    }
+
     /// Create a chain(tree) of nodes, with given `store`.
     #[allow(clippy::too_many_arguments)]
     #[async_recursion]
@@ -354,10 +482,25 @@ impl StreamActorManager {
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
         has_stateful: bool,
-        within_snapshot_backfill: bool,
         subtasks: &mut Vec<SubtaskHandle>,
         shared_context: &Arc<SharedContext>,
     ) -> StreamResult<Executor> {
+        if let NodeBody::StreamScan(stream_scan) = node.get_node_body().unwrap()
+            && let Ok(StreamScanType::SnapshotBackfill) = stream_scan.get_stream_scan_type()
+        {
+            return dispatch_state_store!(env.state_store(), store, {
+                self.create_snapshot_backfill_node(
+                    node,
+                    stream_scan,
+                    actor_context,
+                    vnode_bitmap,
+                    shared_context,
+                    env,
+                    store,
+                )
+            });
+        }
+
         // The "stateful" here means that the executor may issue read operations to the state store
         // massively and continuously. Used to decide whether to apply the optimization of subtasks.
         fn is_stateful_executor(stream_node: &StreamNode) -> bool {
@@ -376,13 +519,6 @@ impl StreamActorManager {
         }
         let is_stateful = is_stateful_executor(node);
 
-        fn is_snapshot_backfill_stream_scan(stream_node: &StreamNode) -> bool {
-            matches!(stream_node.get_node_body().unwrap(),
-                NodeBody::StreamScan(stream_scan) if stream_scan.stream_scan_type() == StreamScanType::SnapshotBackfill
-            )
-        }
-        let is_snapshot_backfill = is_snapshot_backfill_stream_scan(node);
-
         // Create the input executor before creating itself
         let mut input = Vec::with_capacity(node.input.iter().len());
         for input_stream_node in &node.input {
@@ -395,7 +531,6 @@ impl StreamActorManager {
                     actor_context,
                     vnode_bitmap.clone(),
                     has_stateful || is_stateful,
-                    within_snapshot_backfill || is_snapshot_backfill,
                     subtasks,
                     shared_context,
                 )
@@ -445,7 +580,6 @@ impl StreamActorManager {
             watermark_epoch: self.watermark_epoch.clone(),
             shared_context: shared_context.clone(),
             local_barrier_manager: shared_context.local_barrier_manager.clone(),
-            within_snapshot_backfill,
         };
 
         let executor = create_executor(executor_params, node, store).await?;
@@ -494,7 +628,6 @@ impl StreamActorManager {
                 store,
                 actor_context,
                 vnode_bitmap,
-                false,
                 false,
                 &mut subtasks,
                 shared_context,
