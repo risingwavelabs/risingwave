@@ -441,14 +441,14 @@ impl HummockManager {
                     .sum();
 
                 let split_key = build_split_key_with_table_id(match_ids.last().unwrap() + 1);
-                let branch_sst = split_sst(
+                let mut branch_sst = split_sst(
                     &mut sst.sst_info,
                     &mut new_sst_id,
                     split_key,
                     origin_sst_size - new_sst_size,
                     new_sst_size,
                 );
-
+                std::mem::swap(&mut sst.sst_info, &mut branch_sst);
                 commit_sstables
                     .entry(group_id)
                     .or_default()
