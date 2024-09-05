@@ -24,7 +24,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, Engine, TableId, TableVersionId, DEFAULT_SCHEMA_NAME,
-    INITIAL_TABLE_VERSION_ID,
+    INITIAL_TABLE_VERSION_ID, ROWID_PREFIX,
 };
 use risingwave_common::license::Feature;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -1403,9 +1403,9 @@ pub async fn handle_create_table(
 
             // There is a table without primary key. We will use _row_id as primary key
             let sink_from = if pks.is_empty() {
-                pks = vec!["_row_id".to_string()];
+                pks = vec![ROWID_PREFIX.to_string()];
                 let [stmt]: [_; 1] =
-                    Parser::parse_sql(&format!("select _row_id, * from {}", table_name))
+                    Parser::parse_sql(&format!("select {}, * from {}", ROWID_PREFIX, table_name))
                         .context("unable to parse query")?
                         .try_into()
                         .unwrap();
