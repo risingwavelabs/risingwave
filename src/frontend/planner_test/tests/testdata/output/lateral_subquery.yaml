@@ -180,7 +180,7 @@
     where path_val = t1.id;
   stream_plan: |-
     StreamMaterialize { columns: [array_agg], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [array_agg(t1.n order_by($expr1 ASC))], noop_update_hint: true }
+    └─StreamProject { exprs: [array_agg(t1.n order_by($expr1 ASC))] }
       └─StreamSimpleAgg { aggs: [array_agg(t1.n order_by($expr1 ASC)), count] }
         └─StreamExchange { dist: Single }
           └─StreamProject { exprs: [t1.n, (projected_row_id + 1:Int64) as $expr1, t1._row_id, t2.p, t2.p, t2.d, t2.d, projected_row_id, t1.id, t2._row_id] }

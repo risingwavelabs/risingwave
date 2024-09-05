@@ -18,8 +18,12 @@ use risingwave_common::types::{
     DataType, Datum, DatumCow, Scalar, ScalarImpl, ScalarRefImpl, Timestamptz, ToDatumRef,
     ToOwnedDatum,
 };
+use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_connector_codec::decoder::AccessExt;
+use risingwave_pb::expr::expr_node::{RexNode, Type as ExprType};
+use risingwave_pb::expr::ExprNode;
 use risingwave_pb::plan_common::additional_column::ColumnType;
+use risingwave_pb::plan_common::DefaultColumnDesc;
 use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
@@ -221,7 +225,40 @@ pub fn parse_schema_change(
                         }
                     };
 
-                    column_descs.push(ColumnDesc::named(name, ColumnId::placeholder(), data_type));
+                    // handle default value expression, currently we only support constant expression
+                    let column_desc = match col.access_object_field("defaultValueExpression") {
+                        Some(default_val_expr_str) if !default_val_expr_str.is_jsonb_null() => {
+                            let value_text = default_val_expr_str.as_string().unwrap();
+                            let snapshot_value: Datum = Some(
+                                ScalarImpl::from_text(value_text.as_str(), &data_type).map_err(
+                                    |err| {
+                                        tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to parse default value expression");
+                                        AccessError::TypeError {
+                                        expected: "constant expression".into(),
+                                        got: data_type.to_string(),
+                                        value: value_text,
+                                    }},
+                                )?,
+                            );
+                            // equivalent to `Literal::to_expr_proto`
+                            let default_val_expr_node = ExprNode {
+                                function_type: ExprType::Unspecified as i32,
+                                return_type: Some(data_type.to_protobuf()),
+                                rex_node: Some(RexNode::Constant(snapshot_value.to_protobuf())),
+                            };
+                            ColumnDesc::named_with_default_value(
+                                name,
+                                ColumnId::placeholder(),
+                                data_type,
+                                DefaultColumnDesc {
+                                    expr: Some(default_val_expr_node),
+                                    snapshot_value: Some(snapshot_value.to_protobuf()),
+                                },
+                            )
+                        }
+                        _ => ColumnDesc::named(name, ColumnId::placeholder(), data_type),
+                    };
+                    column_descs.push(column_desc);
                 }
             }
 

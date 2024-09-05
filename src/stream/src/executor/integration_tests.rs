@@ -194,6 +194,7 @@ async fn test_merger_sum_aggr() {
         2, // row_count_index
         vec![],
         2,
+        false,
     )
     .await;
 

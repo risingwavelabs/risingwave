@@ -1741,7 +1741,7 @@ impl ScaleController {
         if !reschedules.is_empty() {
             let workers = self
                 .metadata_manager
-                .list_active_streaming_compute_nodes()
+                .list_active_serving_compute_nodes()
                 .await?;
             let streaming_parallelisms = self
                 .metadata_manager

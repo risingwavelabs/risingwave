@@ -131,7 +131,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamTopN { order: [sum0(count) ASC], limit: 1, offset: 0 }
-      └─StreamProject { exprs: [sum0(count)], noop_update_hint: true }
+      └─StreamProject { exprs: [sum0(count)] }
         └─StreamSimpleAgg { aggs: [sum0(count), count] }
           └─StreamExchange { dist: Single }
             └─StreamStatelessSimpleAgg { aggs: [count] }
@@ -154,7 +154,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamTopN { order: [sum0(count) ASC], limit: 1, offset: 0 }
-      └─StreamProject { exprs: [sum0(count)], noop_update_hint: true }
+      └─StreamProject { exprs: [sum0(count)] }
         └─StreamSimpleAgg { aggs: [sum0(count), count] }
           └─StreamExchange { dist: Single }
             └─StreamStatelessSimpleAgg { aggs: [count] }
