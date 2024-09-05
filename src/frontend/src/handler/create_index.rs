@@ -425,7 +425,6 @@ pub async fn handle_create_index(
     let (graph, index_table, index) = {
         let (schema_name, table, index_table_name) =
             resolve_index_schema(&session, index_name, table_name)?;
-
         let qualified_index_name = ObjectName(vec![
             Ident::with_quote_unchecked('"', &schema_name),
             Ident::with_quote_unchecked('"', &index_table_name),
