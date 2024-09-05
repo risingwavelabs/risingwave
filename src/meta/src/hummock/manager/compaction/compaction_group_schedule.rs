@@ -801,7 +801,7 @@ pub fn is_table_high_write_throughput(
         if history.len() >= window_size {
             // Determine if 1/2 of the values in the interval exceed the threshold.
             let mut high_write_throughput_count = 0;
-            for throughput in history.iter().skip(history.len() - window_size) {
+            for throughput in history {
                 if *throughput / checkpoint_secs > threshold {
                     high_write_throughput_count += 1;
                 }
@@ -825,7 +825,7 @@ pub fn is_table_low_write_throughput(
         // Determine if 2/3 of the values in the interval below the threshold.
         let mut low_write_throughput_count = 0;
         if history.len() >= window_size {
-            for throughput in history.iter().skip(history.len() - window_size) {
+            for throughput in history {
                 if *throughput / checkpoint_secs < threshold {
                     low_write_throughput_count += 1;
                 }
