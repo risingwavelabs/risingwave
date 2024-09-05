@@ -136,7 +136,7 @@ impl From<&PbSstableInfo> for SstableInfo {
 
 impl From<SstableInfo> for PbSstableInfo {
     fn from(sstable_info: SstableInfo) -> Self {
-        assert_ne!(0, sstable_info.sst_size);
+        assert!(sstable_info.sst_size > 0 || sstable_info.is_stripped());
         PbSstableInfo {
             object_id: sstable_info.object_id,
             sst_id: sstable_info.sst_id,
@@ -174,7 +174,7 @@ impl From<SstableInfo> for PbSstableInfo {
 
 impl From<&SstableInfo> for PbSstableInfo {
     fn from(sstable_info: &SstableInfo) -> Self {
-        assert_ne!(0, sstable_info.sst_size);
+        assert!(sstable_info.sst_size > 0 || sstable_info.is_stripped());
         PbSstableInfo {
             object_id: sstable_info.object_id,
             sst_id: sstable_info.sst_id,
@@ -210,5 +210,12 @@ impl From<&SstableInfo> for PbSstableInfo {
 impl SstableInfo {
     pub fn remove_key_range(&mut self) {
         self.key_range = KeyRange::default();
+    }
+}
+
+// Time travel
+impl SstableInfo {
+    pub fn is_stripped(&self) -> bool {
+        self.object_id == 0
     }
 }
