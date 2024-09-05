@@ -31,7 +31,7 @@ pub struct VirtualNode(VirtualNodeInner);
 
 /// The internal representation of a virtual node id.
 ///
-/// Note: not all bits of the inner representation are used.
+/// Note: not all bits of the inner representation might be used.
 type VirtualNodeInner = u16;
 
 /// `vnode_count` must be provided to convert a hash code to a virtual node.
@@ -41,6 +41,7 @@ impl !From<Crc32HashCode> for VirtualNode {}
 
 #[easy_ext::ext(Crc32HashCodeToVnodeExt)]
 impl Crc32HashCode {
+    /// Converts the hash code to a virtual node, based on the given total count of vnodes.
     fn to_vnode(self, vnode_count: usize) -> VirtualNode {
         // Take the least significant bits of the hash code.
         // TODO: should we use the most significant bits?
