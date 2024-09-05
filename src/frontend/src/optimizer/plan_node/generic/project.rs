@@ -296,6 +296,41 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
             })
             .collect::<Option<Vec<_>>>()
     }
+
+    pub(crate) fn likely_produces_noop_updates(&self) -> bool {
+        struct HasJsonbAccess {
+            has: bool,
+        }
+
+        impl ExprVisitor for HasJsonbAccess {
+            fn visit_function_call(&mut self, func_call: &FunctionCall) {
+                if matches!(
+                    func_call.func_type(),
+                    ExprType::JsonbAccess
+                        | ExprType::JsonbAccessStr
+                        | ExprType::JsonbExtractPath
+                        | ExprType::JsonbExtractPathVariadic
+                        | ExprType::JsonbExtractPathText
+                        | ExprType::JsonbExtractPathTextVariadic
+                        | ExprType::JsonbPathExists
+                        | ExprType::JsonbPathMatch
+                        | ExprType::JsonbPathQueryArray
+                        | ExprType::JsonbPathQueryFirst
+                ) {
+                    self.has = true;
+                }
+            }
+        }
+
+        self.exprs.iter().any(|expr| {
+            // When there's a jsonb access in the `Project`, it's very likely that the query is
+            // extracting some fields from a jsonb payload column. In this case, a change from the
+            // input jsonb payload may not change the output of the `Project`.
+            let mut visitor = HasJsonbAccess { has: false };
+            visitor.visit_expr(expr);
+            visitor.has
+        })
+    }
 }
 
 /// Construct a `Project` and dedup expressions.
