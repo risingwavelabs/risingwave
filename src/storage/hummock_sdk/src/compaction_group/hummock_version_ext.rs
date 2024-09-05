@@ -1350,16 +1350,13 @@ pub fn split_sst(
     {
         // related github.com/risingwavelabs/risingwave/pull/17898/
         // This is a temporary implementation that will update `table_ids`` based on the new split rule after PR 17898
-
-        let set1: HashSet<_> = sst_info.table_ids.iter().cloned().collect();
-        let set2: HashSet<_> = new_sst_table_ids.iter().cloned().collect();
-        let intersection: Vec<_> = set1.intersection(&set2).cloned().collect();
-
         // Update table_ids
-        branch_table_info.table_ids = intersection;
+        branch_table_info.table_ids = new_sst_table_ids;
         sst_info
             .table_ids
             .retain(|table_id| !branch_table_info.table_ids.contains(table_id));
+        assert!(sst_info.table_ids.is_sorted());
+        assert!(branch_table_info.table_ids.is_sorted());
     }
 
     *new_sst_id += 1;
