@@ -354,7 +354,7 @@ impl HummockVersion {
         &mut self,
         parent_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
-        member_table_ids: HashSet<StateTableId>,
+        member_table_ids: BTreeSet<StateTableId>,
         new_sst_start_id: u64,
     ) {
         let mut new_sst_id = new_sst_start_id;
@@ -594,7 +594,7 @@ impl HummockVersion {
                     } else {
                         #[expect(deprecated)]
                         // for backward-compatibility of previous hummock version delta
-                        HashSet::from_iter(group_construct.table_ids.clone())
+                        BTreeSet::from_iter(group_construct.table_ids.clone())
                     };
 
                 self.init_with_parent_group(
@@ -614,7 +614,7 @@ impl HummockVersion {
                 self.init_with_parent_group(
                     group_change.origin_group_id,
                     group_change.target_group_id,
-                    HashSet::from_iter(group_change.table_ids.clone()),
+                    BTreeSet::from_iter(group_change.table_ids.clone()),
                     group_change.new_sst_start_id,
                 );
 
@@ -998,7 +998,7 @@ pub fn build_initial_compaction_group_levels(
 }
 
 fn split_sst_info_for_level(
-    member_table_ids: &HashSet<u32>,
+    member_table_ids: &BTreeSet<u32>,
     level: &mut Level,
     new_sst_id: &mut u64,
 ) -> Vec<SstableInfo> {
@@ -1338,7 +1338,7 @@ pub fn split_sst(
     new_sst_id: &mut u64,
     old_sst_size: u64,
     new_sst_size: u64,
-    new_sst_table_ids: Vec<u32>,
+    new_table_ids: Vec<u32>,
 ) -> SstableInfo {
     let mut branch_table_info = sst_info.clone();
     branch_table_info.sst_id = *new_sst_id;
@@ -1350,13 +1350,18 @@ pub fn split_sst(
     {
         // related github.com/risingwavelabs/risingwave/pull/17898/
         // This is a temporary implementation that will update `table_ids`` based on the new split rule after PR 17898
+        // sst.table_ids = vec[1, 2, 3];
+        // new.table_ids = vec[2, 3, 4];
+        // branch_table_info.table_ids = vec[1, 2, 3] ∩ vec[2, 3, 4] = vec[2, 3]
+        let set1: BTreeSet<_> = sst_info.table_ids.iter().cloned().collect();
+        let set2: BTreeSet<_> = new_table_ids.into_iter().collect();
+        let intersection: Vec<_> = set1.intersection(&set2).cloned().collect();
+
         // Update table_ids
-        branch_table_info.table_ids = new_sst_table_ids;
+        branch_table_info.table_ids = intersection;
         sst_info
             .table_ids
             .retain(|table_id| !branch_table_info.table_ids.contains(table_id));
-        assert!(sst_info.table_ids.is_sorted());
-        assert!(branch_table_info.table_ids.is_sorted());
     }
 
     *new_sst_id += 1;
