@@ -36,8 +36,10 @@ use risingwave_sqlparser::ast::{
     TableFactor, TableWithJoins,
 };
 
+use crate::catalog::root_catalog::SchemaPath;
 use crate::error::{ErrorCode, Result as RwResult};
 use crate::session::{current, SessionImpl};
+use crate::{Binder, TableCatalog};
 
 pin_project! {
     /// Wrapper struct that converts a stream of DataChunk to a stream of RowSet based on formatting
@@ -236,6 +238,24 @@ pub fn convert_unix_millis_to_logstore_u64(unix_millis: u64) -> u64 {
 
 pub fn convert_logstore_u64_to_unix_millis(logstore_u64: u64) -> u64 {
     Epoch::from(logstore_u64).as_unix_millis()
+}
+
+pub fn get_table_catalog_by_table_name(
+    session: &SessionImpl,
+    table_name: &ObjectName,
+) -> RwResult<(Arc<TableCatalog>, String)> {
+    let db_name = session.database();
+    let (schema_name, real_table_name) =
+        Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
+    let search_path = session.config().search_path();
+    let user_name = &session.auth_context().user_name;
+
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+    let reader = session.env().catalog_reader().read_guard();
+    let (table, schema_name) =
+        reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
+
+    Ok((table.clone(), schema_name.to_string()))
 }
 
 #[cfg(test)]
