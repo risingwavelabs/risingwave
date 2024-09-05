@@ -720,10 +720,6 @@ impl GlobalBarrierManager {
 
         {
             let latest_snapshot = self.context.hummock_manager.latest_snapshot();
-            assert_eq!(
-                latest_snapshot.committed_epoch, latest_snapshot.current_epoch,
-                "persisted snapshot must be from a checkpoint barrier"
-            );
             let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into());
 
             // Bootstrap recovery. Here we simply trigger a recovery process to achieve the
@@ -1205,7 +1201,6 @@ impl GlobalBarrierManagerContext {
         Ok(())
     }
 
-    /// Try to commit this node. If err, returns
     async fn complete_barrier(
         self,
         node: EpochNode,
@@ -1260,7 +1255,7 @@ impl GlobalBarrierManagerContext {
         });
         try_join_all(finished_jobs.into_iter().map(|finished_job| {
             let metadata_manager = &self.metadata_manager;
-            async move { finished_job.pre_finish(metadata_manager).await }
+            async move { finished_job.finish(metadata_manager).await }
         }))
         .await?;
         let duration_sec = enqueue_time.stop_and_record();
@@ -1281,7 +1276,6 @@ impl GlobalBarrierManagerContext {
     ) -> MetaResult<Option<HummockVersionStats>> {
         {
             {
-                let prev_epoch = command_ctx.prev_epoch.value().0;
                 // We must ensure all epochs are committed in ascending order,
                 // because the storage engine will query from new to old in the order in which
                 // the L0 layer files are generated.
@@ -1302,7 +1296,6 @@ impl GlobalBarrierManagerContext {
                         new_snapshot = self.hummock_manager.commit_epoch(commit_info).await?;
                     }
                     BarrierKind::Barrier => {
-                        new_snapshot = Some(self.hummock_manager.update_current_epoch(prev_epoch));
                         // if we collect a barrier(checkpoint = false),
                         // we need to ensure that command is Plain and the notifier's checkpoint is
                         // false

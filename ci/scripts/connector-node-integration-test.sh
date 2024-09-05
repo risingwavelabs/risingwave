@@ -30,6 +30,7 @@ shift $((OPTIND -1))
 RISINGWAVE_ROOT=${PWD}
 
 echo "--- install java"
+sudo apt-get update -y
 if [ "$VERSION" = "11" ]; then
   echo "The test imgae default java version is 11, no need to install"
 else

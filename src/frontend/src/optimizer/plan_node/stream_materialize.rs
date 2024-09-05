@@ -133,7 +133,7 @@ impl StreamMaterialize {
         row_id_index: Option<usize>,
         version: Option<TableVersion>,
         retention_seconds: Option<NonZeroU32>,
-        cdc_table_name: Option<String>,
+        cdc_table_id: Option<String>,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
@@ -154,7 +154,7 @@ impl StreamMaterialize {
             CreateType::Foreground,
         )?;
 
-        table.cdc_table_id = cdc_table_name;
+        table.cdc_table_id = cdc_table_id;
 
         Ok(Self::new(input, table))
     }

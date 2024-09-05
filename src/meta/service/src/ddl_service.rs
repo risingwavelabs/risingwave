@@ -12,16 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
 use risingwave_meta::rpc::ddl_controller::fill_table_stream_graph_info;
+use risingwave_meta::rpc::metrics::MetaMetrics;
 use risingwave_pb::catalog::connection::private_link_service::{
     PbPrivateLinkProvider, PrivateLinkProvider,
 };
@@ -34,6 +36,8 @@ use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
+use risingwave_pb::meta::event_log;
+use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
@@ -54,6 +58,7 @@ pub struct DdlServiceImpl {
     sink_manager: SinkCoordinatorManager,
     ddl_controller: DdlController,
     aws_client: Arc<Option<AwsEc2Client>>,
+    meta_metrics: Arc<MetaMetrics>,
 }
 
 impl DdlServiceImpl {
@@ -66,6 +71,7 @@ impl DdlServiceImpl {
         source_manager: SourceManagerRef,
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
+        meta_metrics: Arc<MetaMetrics>,
     ) -> Self {
         let aws_cli_ref = Arc::new(aws_client);
         let ddl_controller = DdlController::new(
@@ -83,6 +89,7 @@ impl DdlServiceImpl {
             ddl_controller,
             aws_client: aws_cli_ref,
             sink_manager,
+            meta_metrics,
         }
     }
 
@@ -953,42 +960,145 @@ impl DdlService for DdlServiceImpl {
         };
 
         for table_change in schema_change.table_changes {
-            let cdc_table_id = table_change.cdc_table_id.clone();
             // get the table catalog corresponding to the cdc table
             let tables: Vec<Table> = self
                 .metadata_manager
-                .get_table_catalog_by_cdc_table_id(cdc_table_id)
+                .get_table_catalog_by_cdc_table_id(&table_change.cdc_table_id)
                 .await?;
 
-            tracing::info!(
-                "(auto schema change) Table jobs to replace: {:?}",
-                tables.iter().map(|t| t.id).collect::<Vec<_>>()
-            );
             for table in tables {
+                // Since we only support `ADD` and `DROP` column, we check whether the new columns and the original columns
+                // is a subset of the other.
+                let original_column_names: HashSet<String> = HashSet::from_iter(
+                    table
+                        .columns
+                        .iter()
+                        .map(|col| ColumnCatalog::from(col.clone()).column_desc.name),
+                );
+                let new_column_names: HashSet<String> = HashSet::from_iter(
+                    table_change
+                        .columns
+                        .iter()
+                        .map(|col| ColumnCatalog::from(col.clone()).column_desc.name),
+                );
+                if !(original_column_names.is_subset(&new_column_names)
+                    || original_column_names.is_superset(&new_column_names))
+                {
+                    tracing::warn!(target: "auto_schema_change",
+                                    table_id = table.id,
+                                    cdc_table_id = table.cdc_table_id,
+                                    upstraem_ddl = table_change.upstream_ddl,
+                                    original_columns = ?original_column_names,
+                                    new_columns = ?new_column_names,
+                                    "New columns should be a subset or superset of the original columns, since only `ADD COLUMN` and `DROP COLUMN` is supported");
+                    return Err(Status::invalid_argument(
+                        "New columns should be a subset or superset of the original columns",
+                    ));
+                }
+                // skip the schema change if there is no change to original columns
+                if original_column_names == new_column_names {
+                    tracing::warn!(target: "auto_schema_change",
+                                   table_id = table.id,
+                                   cdc_table_id = table.cdc_table_id,
+                                   upstraem_ddl = table_change.upstream_ddl,
+                                    original_columns = ?original_column_names,
+                                    new_columns = ?new_column_names,
+                                   "No change to columns, skipping the schema change");
+                    continue;
+                }
+
+                let latency_timer = self
+                    .meta_metrics
+                    .auto_schema_change_latency
+                    .with_guarded_label_values(&[&table.id.to_string(), &table.name])
+                    .start_timer();
                 // send a request to the frontend to get the ReplaceTablePlan
                 // will retry with exponential backoff if the request fails
                 let resp = client
                     .get_table_replace_plan(GetTableReplacePlanRequest {
                         database_id: table.database_id,
                         owner: table.owner,
-                        table_name: table.name,
+                        table_name: table.name.clone(),
                         table_change: Some(table_change.clone()),
                     })
-                    .await?
-                    .into_inner();
+                    .await;
 
-                if let Some(plan) = resp.replace_plan {
-                    plan.table
-                        .as_ref()
-                        .inspect(|t| tracing::info!("Table job to replace: {}", t.id));
-                    // start the schema change procedure
-                    self.ddl_controller
-                        .run_command(DdlCommand::ReplaceTable(Self::extract_replace_table_info(
-                            plan,
-                        )))
-                        .await?;
-                    tracing::info!("(auto schema change) Table {} replaced success", table.id);
-                }
+                match resp {
+                    Ok(resp) => {
+                        let resp = resp.into_inner();
+                        if let Some(plan) = resp.replace_plan {
+                            plan.table.as_ref().inspect(|t| {
+                                tracing::info!(
+                                    target: "auto_schema_change",
+                                    table_id = t.id,
+                                    cdc_table_id = t.cdc_table_id,
+                                    upstraem_ddl = table_change.upstream_ddl,
+                                    "Start the replace config change")
+                            });
+                            // start the schema change procedure
+                            let replace_res = self
+                                .ddl_controller
+                                .run_command(DdlCommand::ReplaceTable(
+                                    Self::extract_replace_table_info(plan),
+                                ))
+                                .await;
+
+                            match replace_res {
+                                Ok(_) => {
+                                    tracing::info!(
+                                        target: "auto_schema_change",
+                                        table_id = table.id,
+                                        cdc_table_id = table.cdc_table_id,
+                                        "Table replaced success");
+
+                                    self.meta_metrics
+                                        .auto_schema_change_success_cnt
+                                        .with_guarded_label_values(&[
+                                            &table.id.to_string(),
+                                            &table.name,
+                                        ])
+                                        .inc();
+                                    latency_timer.observe_duration();
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        target: "auto_schema_change",
+                                        error = %e.as_report(),
+                                        table_id = table.id,
+                                        cdc_table_id = table.cdc_table_id,
+                                        upstraem_ddl = table_change.upstream_ddl,
+                                        "failed to replace the table",
+                                    );
+                                    add_auto_schema_change_fail_event_log(
+                                        &self.meta_metrics,
+                                        table.id,
+                                        table.name.clone(),
+                                        table_change.cdc_table_id.clone(),
+                                        table_change.upstream_ddl.clone(),
+                                        &self.env.event_log_manager_ref(),
+                                    );
+                                }
+                            };
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            target: "auto_schema_change",
+                            error = %e.as_report(),
+                            table_id = table.id,
+                            cdc_table_id = table.cdc_table_id,
+                            "failed to get replace table plan",
+                        );
+                        add_auto_schema_change_fail_event_log(
+                            &self.meta_metrics,
+                            table.id,
+                            table.name.clone(),
+                            table_change.cdc_table_id.clone(),
+                            table_change.upstream_ddl.clone(),
+                            &self.env.event_log_manager_ref(),
+                        );
+                    }
+                };
             }
         }
 
@@ -1028,4 +1138,25 @@ impl DdlServiceImpl {
         }
         Ok(())
     }
+}
+
+fn add_auto_schema_change_fail_event_log(
+    meta_metrics: &Arc<MetaMetrics>,
+    table_id: u32,
+    table_name: String,
+    cdc_table_id: String,
+    upstream_ddl: String,
+    event_log_manager: &EventLogManagerRef,
+) {
+    meta_metrics
+        .auto_schema_change_failure_cnt
+        .with_guarded_label_values(&[&table_id.to_string(), &table_name])
+        .inc();
+    let event = event_log::EventAutoSchemaChangeFail {
+        table_id,
+        table_name,
+        cdc_table_id,
+        upstream_ddl,
+    };
+    event_log_manager.add_event_logs(vec![event_log::Event::AutoSchemaChangeFail(event)]);
 }

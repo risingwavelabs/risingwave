@@ -25,6 +25,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::watch;
 
+use crate::expr::InlineNowProcTime;
 use crate::meta_client::FrontendMetaClient;
 
 /// The interval between two unpin batches.
@@ -60,23 +61,12 @@ impl ReadSnapshot {
         }
     }
 
-    /// Get the [`Option<Epoch>`] value for this snapshot, only `FrontendPinned`.
-    pub fn epoch_with_frontend_pinned(&self) -> Option<Epoch> {
-        match self.batch_query_epoch().epoch.unwrap() {
-            batch_query_epoch::Epoch::Committed(epoch)
-            | batch_query_epoch::Epoch::Current(epoch) => Some(epoch.into()),
-            batch_query_epoch::Epoch::Backup(_) | batch_query_epoch::Epoch::TimeTravel(_) => None,
-        }
-    }
-
-    /// Get the [`Epoch`] value for this snapshot.
-    pub fn epoch(&self) -> Epoch {
-        match self.batch_query_epoch().epoch.unwrap() {
-            batch_query_epoch::Epoch::Committed(epoch)
-            | batch_query_epoch::Epoch::Current(epoch)
-            | batch_query_epoch::Epoch::Backup(epoch)
-            | batch_query_epoch::Epoch::TimeTravel(epoch) => epoch.into(),
-        }
+    pub fn inline_now_proc_time(&self) -> InlineNowProcTime {
+        let epoch = match self {
+            ReadSnapshot::FrontendPinned { snapshot, .. } => Epoch(snapshot.committed_epoch()),
+            ReadSnapshot::Other(epoch) => *epoch,
+        };
+        InlineNowProcTime::new(epoch)
     }
 
     /// Returns true if this snapshot is a barrier read.
@@ -111,11 +101,15 @@ pub type PinnedSnapshotRef = Arc<PinnedSnapshot>;
 impl PinnedSnapshot {
     fn batch_query_epoch(&self, is_barrier_read: bool) -> BatchQueryEpoch {
         let epoch = if is_barrier_read {
-            batch_query_epoch::Epoch::Current(self.value.current_epoch)
+            batch_query_epoch::Epoch::Current(u64::MAX)
         } else {
             batch_query_epoch::Epoch::Committed(self.value.committed_epoch)
         };
         BatchQueryEpoch { epoch: Some(epoch) }
+    }
+
+    pub fn committed_epoch(&self) -> u64 {
+        self.value.committed_epoch
     }
 }
 
@@ -129,7 +123,6 @@ impl Drop for PinnedSnapshot {
 fn invalid_snapshot() -> PbHummockSnapshot {
     PbHummockSnapshot {
         committed_epoch: INVALID_EPOCH,
-        current_epoch: INVALID_EPOCH,
     }
 }
 
@@ -191,10 +184,6 @@ impl HummockSnapshotManager {
                     old_snapshot.value.committed_epoch,
                     snapshot.committed_epoch,
                 ),
-                current_epoch: std::cmp::max(
-                    old_snapshot.value.current_epoch,
-                    snapshot.current_epoch,
-                ),
             };
 
             if old_snapshot.value == snapshot {
@@ -251,7 +240,7 @@ impl Operation {
         match self {
             Operation::Pin(s) | Operation::Unpin(s) => s,
         }
-        .current_epoch
+        .committed_epoch
             == INVALID_EPOCH
     }
 }
@@ -266,8 +255,7 @@ impl Eq for SnapshotKey {}
 
 impl Ord for SnapshotKey {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        (self.0.committed_epoch, self.0.current_epoch)
-            .cmp(&(other.0.committed_epoch, other.0.current_epoch))
+        self.0.committed_epoch.cmp(&other.0.committed_epoch)
     }
 }
 

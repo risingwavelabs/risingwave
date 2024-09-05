@@ -131,8 +131,10 @@ impl<S: StateStore> SourceExecutor<S> {
             // spawn a task to handle schema change event from source parser
             let _join_handle = tokio::task::spawn(async move {
                 while let Some((schema_change, finish_tx)) = schema_change_rx.recv().await {
-                    let table_names = schema_change.table_names();
-                    tracing::info!("recv a schema change event for tables: {:?}", table_names);
+                    let table_ids = schema_change.table_ids();
+                    tracing::info!(
+                        target: "auto_schema_change",
+                        "recv a schema change event for tables: {:?}", table_ids);
                     // TODO: retry on rpc error
                     if let Some(ref meta_client) = meta_client {
                         match meta_client
@@ -141,13 +143,14 @@ impl<S: StateStore> SourceExecutor<S> {
                         {
                             Ok(_) => {
                                 tracing::info!(
-                                    "schema change success for tables: {:?}",
-                                    table_names
-                                );
+                                    target: "auto_schema_change",
+                                    "schema change success for tables: {:?}", table_ids);
                                 finish_tx.send(()).unwrap();
                             }
                             Err(e) => {
-                                tracing::error!(error = ?e.as_report(), "schema change error");
+                                tracing::error!(
+                                    target: "auto_schema_change",
+                                    error = ?e.as_report(), "schema change error");
                                 finish_tx.send(()).unwrap();
                             }
                         }

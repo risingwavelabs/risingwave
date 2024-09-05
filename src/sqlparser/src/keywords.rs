@@ -174,6 +174,7 @@ define_keywords!(
     CURRENT_TRANSFORM_GROUP_FOR_TYPE,
     CURRENT_USER,
     CURSOR,
+    CURSORS,
     CYCLE,
     DATA,
     DATABASE,

@@ -308,9 +308,6 @@ impl InflightActorState {
 }
 
 pub(super) struct PartialGraphManagedBarrierState {
-    /// This is a temporary workaround for the need to still calling `seal_epoch` for storage.
-    /// Can be removed after `seal_epoch` is deprecated in storage.
-    need_seal_epoch: bool,
     /// Record barrier state for each epoch of concurrent checkpoints.
     ///
     /// The key is `prev_epoch`, and the first value is `curr_epoch`
@@ -334,13 +331,11 @@ pub(super) struct PartialGraphManagedBarrierState {
 
 impl PartialGraphManagedBarrierState {
     fn new(
-        need_seal_epoch: bool,
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
         barrier_await_tree_reg: Option<await_tree::Registry>,
     ) -> Self {
         Self {
-            need_seal_epoch,
             epoch_barrier_state_map: Default::default(),
             prev_barrier_table_ids: None,
             create_mview_progress: Default::default(),
@@ -354,7 +349,6 @@ impl PartialGraphManagedBarrierState {
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
         Self::new(
-            true,
             StateStoreImpl::for_test(),
             Arc::new(StreamingMetrics::unused()),
             None,
@@ -456,7 +450,6 @@ impl ManagedBarrierState {
             .entry(partial_graph_id)
             .or_insert_with(|| {
                 PartialGraphManagedBarrierState::new(
-                    partial_graph_id.is_global_graph(),
                     self.state_store.clone(),
                     self.streaming_metrics.clone(),
                     self.barrier_await_tree_reg.clone(),
@@ -589,19 +582,9 @@ impl PartialGraphManagedBarrierState {
                     tracing::info!(?prev_epoch, "ignored syncing data for the first barrier");
                     None
                 }
-                BarrierKind::Barrier => {
-                    if self.need_seal_epoch {
-                        dispatch_state_store!(&self.state_store, state_store, {
-                            state_store.seal_epoch(prev_epoch, kind.is_checkpoint());
-                        });
-                    }
-                    None
-                }
+                BarrierKind::Barrier => None,
                 BarrierKind::Checkpoint => {
                     dispatch_state_store!(&self.state_store, state_store, {
-                        if self.need_seal_epoch {
-                            state_store.seal_epoch(prev_epoch, kind.is_checkpoint());
-                        }
                         Some(sync_epoch(
                             state_store,
                             &self.streaming_metrics,

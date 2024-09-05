@@ -267,10 +267,6 @@ impl ReplayWorker {
                     panic!("expect sync result, but got {:?}", res);
                 }
             }
-            Operation::Seal(epoch_id, is_checkpoint) => {
-                assert_eq!(storage_type, StorageType::Global);
-                replay.seal_epoch(epoch_id, is_checkpoint);
-            }
             Operation::IterNext(id) => {
                 let iter = iters_map.get_mut(&id).expect("iter not in worker");
                 let actual = iter.next().await;
@@ -331,23 +327,6 @@ impl ReplayWorker {
                 assert_ne!(storage_type, StorageType::Global);
                 let local_storage = local_storages.get_mut(&storage_type).unwrap();
                 local_storage.seal_current_epoch(epoch, opts);
-            }
-            Operation::ValidateReadEpoch(epoch) => {
-                assert_eq!(storage_type, StorageType::Global);
-                let res = res_rx.recv().await.expect("recv result failed");
-                let actual = replay.validate_read_epoch(epoch.into());
-                if let OperationResult::ValidateReadEpoch(expected) = res {
-                    assert_eq!(
-                        TraceResult::from(actual),
-                        expected,
-                        "validate_read_epoch wrong"
-                    );
-                } else {
-                    panic!(
-                        "wrong validate_read_epoch result, expect epoch result, but got {:?}",
-                        res
-                    );
-                }
             }
             Operation::LocalStorageEpoch => {
                 assert_ne!(storage_type, StorageType::Global);

@@ -148,9 +148,6 @@ pub enum Operation {
     /// Sync operation of Hummock.
     Sync(u64, Vec<u32>),
 
-    /// Seal operation of Hummock.
-    Seal(u64, bool),
-
     /// `MetaMessage` operation of Hummock.
     MetaMessage(Box<TracedSubResp>),
 
@@ -174,9 +171,6 @@ pub enum Operation {
         epoch: u64,
         opts: TracedSealCurrentEpochOptions,
     },
-
-    /// validate read epoch
-    ValidateReadEpoch(TracedHummockReadEpoch),
 
     LocalStorageEpoch,
 
@@ -296,7 +290,6 @@ pub enum OperationResult {
     Sync(TraceResult<usize>),
     NotifyHummock(TraceResult<()>),
     TryWaitEpoch(TraceResult<()>),
-    ValidateReadEpoch(TraceResult<()>),
     LocalStorageEpoch(TraceResult<u64>),
     LocalStorageIsDirty(TraceResult<bool>),
 }

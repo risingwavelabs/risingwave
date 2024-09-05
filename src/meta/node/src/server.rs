@@ -430,7 +430,7 @@ pub async fn start_service_as_election_leader(
                     .await
                     .unwrap(),
             );
-            let catalog_controller = Arc::new(CatalogController::new(env.clone()));
+            let catalog_controller = Arc::new(CatalogController::new(env.clone()).await?);
             MetadataManager::new_v2(cluster_controller, catalog_controller)
         }
     };
@@ -619,6 +619,7 @@ pub async fn start_service_as_election_leader(
         source_manager.clone(),
         barrier_manager.context().clone(),
         sink_manager.clone(),
+        meta_metrics.clone(),
     )
     .await;
 

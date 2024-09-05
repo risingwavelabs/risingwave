@@ -19,7 +19,7 @@ use opendal::services::Azblob;
 use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
-use super::{EngineType, OpendalObjectStore};
+use super::{MediaType, OpendalObjectStore};
 use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::ObjectResult;
 
@@ -47,7 +47,7 @@ impl OpendalObjectStore {
             .finish();
         Ok(Self {
             op,
-            engine_type: EngineType::Azblob,
+            media_type: MediaType::Azblob,
             config,
             metrics,
         })

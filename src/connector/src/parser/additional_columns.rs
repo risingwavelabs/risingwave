@@ -31,8 +31,8 @@ use risingwave_pb::plan_common::{
 use crate::error::ConnectorResult;
 use crate::source::cdc::MONGODB_CDC_CONNECTOR;
 use crate::source::{
-    GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, OPENDAL_S3_CONNECTOR, PULSAR_CONNECTOR,
-    S3_CONNECTOR,
+    AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, OPENDAL_S3_CONNECTOR,
+    POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
 };
 
 // Hidden additional columns connectors which do not support `include` syntax.
@@ -57,6 +57,8 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
             (OPENDAL_S3_CONNECTOR, HashSet::from(["file", "offset"])),
             (S3_CONNECTOR, HashSet::from(["file", "offset"])),
             (GCS_CONNECTOR, HashSet::from(["file", "offset"])),
+            (AZBLOB_CONNECTOR, HashSet::from(["file", "offset"])),
+            (POSIX_FS_CONNECTOR, HashSet::from(["file", "offset"])),
             // mongodb-cdc doesn't support cdc backfill table
             (
                 MONGODB_CDC_CONNECTOR,

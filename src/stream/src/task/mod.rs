@@ -46,10 +46,6 @@ impl PartialGraphId {
     fn new(id: u32) -> Self {
         Self(id)
     }
-
-    fn is_global_graph(&self) -> bool {
-        self.0 == u32::MAX
-    }
 }
 
 impl From<PartialGraphId> for u32 {

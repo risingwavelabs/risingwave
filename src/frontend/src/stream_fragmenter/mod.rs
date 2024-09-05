@@ -15,6 +15,7 @@
 mod graph;
 use graph::*;
 use risingwave_common::util::recursive::{self, Recurse as _};
+use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 mod rewrite;
 
@@ -266,8 +267,8 @@ fn build_fragment(
 
                 if let Some(source) = node.source_inner.as_ref()
                     && let Some(source_info) = source.info.as_ref()
-                    && source_info.is_shared()
-                    && !source_info.is_distributed
+                    && ((source_info.is_shared() && !source_info.is_distributed)
+                        || source.with_properties.is_new_fs_connector())
                 {
                     current_fragment.requires_singleton = true;
                 }

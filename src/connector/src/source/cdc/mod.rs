@@ -53,6 +53,11 @@ pub const CITUS_CDC_CONNECTOR: &str = Citus::CDC_CONNECTOR_NAME;
 pub const MONGODB_CDC_CONNECTOR: &str = Mongodb::CDC_CONNECTOR_NAME;
 pub const SQL_SERVER_CDC_CONNECTOR: &str = SqlServer::CDC_CONNECTOR_NAME;
 
+/// Build a unique CDC table identifier from a source ID and external table name
+pub fn build_cdc_table_id(source_id: u32, external_table_name: &str) -> String {
+    format!("{}.{}", source_id, external_table_name)
+}
+
 pub trait CdcSourceTypeTrait: Send + Sync + Clone + 'static {
     const CDC_CONNECTOR_NAME: &'static str;
     fn source_type() -> CdcSourceType;
