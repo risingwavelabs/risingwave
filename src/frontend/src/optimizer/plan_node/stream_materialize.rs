@@ -21,7 +21,6 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{
     ColumnCatalog, ConflictBehavior, CreateType, StreamJobStatus, TableId, OBJECT_ID_PLACEHOLDER,
 };
-use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -284,7 +283,7 @@ impl StreamMaterialize {
             created_at_cluster_version: None,
             retention_seconds: retention_seconds.map(|i| i.into()),
             cdc_table_id: None,
-            vnode_count: VirtualNode::COUNT, // TODO(var-vnode): use vnode count from session config
+            vnode_count: None, // will be filled in by the meta service later
         })
     }
 

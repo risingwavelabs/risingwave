@@ -19,7 +19,7 @@ use futures::pin_mut;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
-use risingwave_common::hash::{HashKey, HashKeyDispatcher, VirtualNode};
+use risingwave_common::hash::{HashKey, HashKeyDispatcher, VirtualNode, VnodeCountCompat};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
@@ -195,8 +195,8 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
             .collect();
 
         // Lookup Join always contains distribution key, so we don't need vnode bitmap
-        // TODO(var-vnode): use vnode count from table desc
-        let vnodes = Some(Bitmap::ones(VirtualNode::COUNT).into());
+        let vnodes = Some(Bitmap::ones(table_desc.vnode_count()).into());
+
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = StorageTable::new_partial(state_store, column_ids, vnodes, table_desc);
             let inner_side_builder = InnerSideExecutorBuilder::new(

@@ -597,7 +597,7 @@ pub(crate) mod tests {
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             cdc_table_id: None,
-            vnode_count: VirtualNode::COUNT_FOR_TEST,
+            vnode_count: Some(VirtualNode::COUNT_FOR_TEST),
         };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),

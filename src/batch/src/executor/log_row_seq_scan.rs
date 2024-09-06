@@ -22,7 +22,7 @@ use prometheus::Histogram;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{VirtualNode, VnodeCountCompat};
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -107,8 +107,7 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
             Some(vnodes) => Some(Bitmap::from(vnodes).into()),
             // This is possible for dml. vnode_bitmap is not filled by scheduler.
             // Or it's single distribution, e.g., distinct agg. We scan in a single executor.
-            // TODO(var-vnode): use vnode count from table desc
-            None => Some(Bitmap::ones(VirtualNode::COUNT).into()),
+            None => Some(Bitmap::ones(table_desc.vnode_count()).into()),
         };
 
         let chunk_size = source.context.get_config().developer.chunk_size as u32;
