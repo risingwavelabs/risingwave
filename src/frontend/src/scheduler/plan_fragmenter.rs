@@ -1228,7 +1228,7 @@ fn derive_partitions(
     table_desc: &TableDesc,
     vnode_mapping: &WorkerSlotMapping,
 ) -> SchedulerResult<HashMap<WorkerSlotId, TablePartitionInfo>> {
-    let num_vnodes = vnode_mapping.len();
+    let vnode_count = vnode_mapping.len();
     let mut partitions: HashMap<WorkerSlotId, (BitmapBuilder, Vec<_>)> = HashMap::new();
 
     if scan_ranges.is_empty() {
@@ -1248,8 +1248,7 @@ fn derive_partitions(
     }
 
     let table_distribution = TableDistribution::new_from_storage_table_desc(
-        // TODO(var-vnode): use vnode count from table desc
-        Some(Bitmap::ones(VirtualNode::COUNT).into()),
+        Some(Bitmap::ones(vnode_count).into()),
         &table_desc.try_to_protobuf()?,
     );
 
@@ -1262,7 +1261,7 @@ fn derive_partitions(
                     |(worker_slot_id, vnode_bitmap)| {
                         let (bitmap, scan_ranges) = partitions
                             .entry(worker_slot_id)
-                            .or_insert_with(|| (BitmapBuilder::zeroed(num_vnodes), vec![]));
+                            .or_insert_with(|| (BitmapBuilder::zeroed(vnode_count), vec![]));
                         vnode_bitmap
                             .iter()
                             .enumerate()
@@ -1276,7 +1275,7 @@ fn derive_partitions(
                 let worker_slot_id = vnode_mapping[vnode];
                 let (bitmap, scan_ranges) = partitions
                     .entry(worker_slot_id)
-                    .or_insert_with(|| (BitmapBuilder::zeroed(num_vnodes), vec![]));
+                    .or_insert_with(|| (BitmapBuilder::zeroed(vnode_count), vec![]));
                 bitmap.set(vnode.to_index(), true);
                 scan_ranges.push(scan_range.to_protobuf());
             }
