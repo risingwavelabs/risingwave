@@ -18,8 +18,9 @@ use arrow_array_iceberg::RecordBatch;
 use deltalake::parquet::arrow::async_reader::AsyncFileReader;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use parquet::arrow::parquet_to_arrow_schema;
-use parquet::file::metadata::FileMetaData;
+// use parquet::arrow::parquet_to_arrow_schema;
+use old_parquet::arrow::parquet_to_arrow_schema;
+use old_parquet::file::metadata::FileMetaData;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
 use risingwave_common::bail;
@@ -231,15 +232,13 @@ pub async fn get_total_row_nums_for_parquet_file(
                 .await?
                 .compat();
 
-            let file_metadata = reader
-                .get_metadata()
-                .await
-                .map_err(anyhow::Error::from)?
-                .file_metadata();
-            let is_schema_valid = is_schema_valid(source_desc, file_metadata)?;
-            if is_schema_valid{
+            let parquet_metadata = reader.get_metadata().await.map_err(anyhow::Error::from)?;
+
+            let file_metadata = parquet_metadata.file_metadata();
+            let is_schema_valid = is_schema_valid(source_desc.columns.clone(), file_metadata)?;
+            if is_schema_valid {
                 return Ok(Some(file_metadata.num_rows() as usize));
-            }else{
+            } else {
                 return Ok(None);
             }
         }
@@ -254,17 +253,15 @@ pub async fn get_total_row_nums_for_parquet_file(
                 .into_futures_async_read(..)
                 .await?
                 .compat();
-            let file_metadata = reader
-            .get_metadata()
-            .await
-            .map_err(anyhow::Error::from)?
-            .file_metadata();
-        let is_schema_valid = is_schema_valid(source_desc, file_metadata)?;
-        if is_schema_valid{
-            return Ok(Some(file_metadata.num_rows() as usize));
-        }else{
-            return Ok(None);
-        }
+            let parquet_metadata = reader.get_metadata().await.map_err(anyhow::Error::from)?;
+
+            let file_metadata = parquet_metadata.file_metadata();
+            let is_schema_valid = is_schema_valid(source_desc.columns.clone(), file_metadata)?;
+            if is_schema_valid {
+                return Ok(Some(file_metadata.num_rows() as usize));
+            } else {
+                return Ok(None);
+            }
         }
 
         ConnectorProperties::PosixFs(prop) => {
@@ -278,25 +275,22 @@ pub async fn get_total_row_nums_for_parquet_file(
                 .into_futures_async_read(..)
                 .await?
                 .compat();
-            let file_metadata = reader
-            .get_metadata()
-            .await
-            .map_err(anyhow::Error::from)?
-            .file_metadata();
-        let a =  file_metadata.schema_descr();
-        let is_schema_valid = is_schema_valid(source_desc, file_metadata)?;
-        if is_schema_valid{
-            return Ok(Some(file_metadata.num_rows() as usize));
-        }else{
-            return Ok(None);
-        }
+            let parquet_metadata = reader.get_metadata().await.map_err(anyhow::Error::from)?;
+
+            let file_metadata = parquet_metadata.file_metadata();
+            let is_schema_valid = is_schema_valid(source_desc.columns.clone(), file_metadata)?;
+            if is_schema_valid {
+                return Ok(Some(file_metadata.num_rows() as usize));
+            } else {
+                return Ok(None);
+            }
         }
         other => bail!("Unsupported source: {:?}", other),
     };
 }
 
 pub fn is_schema_valid(
-    source_desc: SourceDesc,
+    source_columns: Vec<SourceColumnDesc>,
     metadata: &FileMetaData,
 ) -> ConnectorResult<bool> {
     let parquet_column_names = metadata
@@ -306,8 +300,8 @@ pub fn is_schema_valid(
         .map(|c| c.name())
         .collect_vec();
     let converted_arrow_schema =
-        parquet_to_arrow_schema(metadata.schema_descr(), metadata.key_value_metadata())?;
-    for column in source_desc.columns {
+        parquet_to_arrow_schema(metadata.schema_descr(), metadata.key_value_metadata()).map_err(anyhow::Error::from)?;
+    for column in source_columns {
         if let Some(pos) = parquet_column_names
             .iter()
             .position(|&name| name == column.name)

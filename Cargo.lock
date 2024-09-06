@@ -10642,6 +10642,7 @@ dependencies = [
  "opendal 0.47.2",
  "openssl",
  "parking_lot 0.12.1",
+ "parquet 48.0.1",
  "parquet 52.0.0",
  "paste",
  "pg_bigdecimal",

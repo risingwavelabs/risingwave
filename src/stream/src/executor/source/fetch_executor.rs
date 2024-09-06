@@ -330,7 +330,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                                     source_desc.clone(),
                                                 )
                                                 .await?;
-                                            if let Some(total_row_num) = total_row_num{
+                                            if let Some(total_row_num) = total_row_num {
                                                 parquet_file_assignment.push(
                                                     OpendalFsSplit::<Src>::new(
                                                         filename.to_owned(),
@@ -338,10 +338,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                                         total_row_num - 1, // -1 because offset start from 0.
                                                     ),
                                                 )
-                                            }else{
+                                            } else {
                                                 // schema mismatch, ignore this file.
                                             }
-                                           
                                         }
                                         parquet_file_assignment
                                     } else {
