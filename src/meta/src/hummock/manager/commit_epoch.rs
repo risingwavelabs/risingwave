@@ -402,7 +402,7 @@ impl HummockManager {
                 }
             }
 
-            new_sst_id_number += group_table_ids.len();
+            new_sst_id_number += group_table_ids.len() * 2;
             sst_to_cg_vec.push((commit_sst, group_table_ids));
         }
 
