@@ -12,15 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::mem;
+use std::ops::BitAnd;
 
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
-use hashbrown::HashMap;
 use iceberg::scan::FileScanTask;
 use iceberg::spec::TableMetadata;
 use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::iceberg::IcebergConfig;
@@ -90,34 +92,45 @@ impl IcebergScanExecutor {
             .load_table_v2_with_metadata(self.table_meta)
             .await?;
         let data_types = self.schema.data_types();
+        let chunk_schema_names = self.schema.names();
 
-        let mut eq_delete_file_scan_tasks_map = HashMap::new();
+        let mut eq_delete_file_scan_tasks_map: HashMap<
+            String,
+            HashMap<Option<risingwave_common::types::ScalarImpl>, i64>,
+        > = HashMap::default();
         let eq_delete_file_scan_tasks = mem::take(&mut self.eq_delete_file_scan_tasks);
 
         for eq_delete_file_scan_task in eq_delete_file_scan_tasks {
-            let sequence_number = eq_delete_file_scan_task.sequence_number();
+            let mut sequence_number = eq_delete_file_scan_task.sequence_number();
             let reader = table
                 .reader_builder()
                 .with_batch_size(self.batch_size)
                 .build();
-            let delete_file_scan_stream = tokio_stream::once(async move{ delete_file_scan_task });
+            let delete_file_scan_stream = tokio_stream::once(Ok(eq_delete_file_scan_task));
 
             let mut delete_record_batch_stream = reader
                 .read(Box::pin(delete_file_scan_stream))
                 .map_err(BatchError::Iceberg)?;
-            
+
             while let Some(record_batch) = delete_record_batch_stream.next().await {
                 let record_batch = record_batch.map_err(BatchError::Iceberg)?;
+                let delete_column_names = record_batch
+                    .schema()
+                    .fields()
+                    .iter()
+                    .map(|field| field.name())
+                    .cloned()
+                    .collect_vec();
                 let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
-                for row in chunk.rows() {
-                    if let Some(ScalarRefImpl::Int32(i)) = row.datum_at(0) {
-                        if let Some(s) = map.get(&i) {
-                            map.insert(i, *s.max(&sequence_number.clone()));
-                        } else {
-                            map.insert(i, sequence_number);
-                        }
-                    } else {
-                        unreachable!();
+                for (array, columns_name) in chunk.columns().iter().zip_eq(delete_column_names) {
+                    let each_column_seq_num_map = eq_delete_file_scan_tasks_map
+                        .entry(columns_name)
+                        .or_insert(HashMap::new());
+                    for datum in array.get_all_values() {
+                        let entry = each_column_seq_num_map
+                            .entry(datum)
+                            .or_insert(sequence_number);
+                        *entry = *entry.max(&mut sequence_number);
                     }
                 }
             }
@@ -125,30 +138,76 @@ impl IcebergScanExecutor {
 
         let file_scan_tasks = mem::take(&mut self.file_scan_tasks);
 
-        let file_scan_stream = {
-            #[try_stream]
-            async move {
-                for file_scan_task in file_scan_tasks {
-                    yield file_scan_task;
-                }
+        for file_scan_task in file_scan_tasks {
+            let sequence_number = file_scan_task.sequence_number();
+            let reader = table
+                .reader_builder()
+                .with_batch_size(self.batch_size)
+                .build();
+            let file_scan_stream = tokio_stream::once(Ok(file_scan_task));
+
+            let mut record_batch_stream = reader
+                .read(Box::pin(file_scan_stream))
+                .map_err(BatchError::Iceberg)?;
+
+            while let Some(record_batch) = record_batch_stream.next().await {
+                let record_batch = record_batch.map_err(BatchError::Iceberg)?;
+                let column_names = record_batch
+                    .schema()
+                    .fields()
+                    .iter()
+                    .map(|field| field.name())
+                    .cloned()
+                    .collect_vec();
+                let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+                let visibilitys: Vec<_> = chunk
+                    .columns()
+                    .iter()
+                    .zip_eq(column_names.clone())
+                    .filter_map(|(array, column_map)| {
+                        if let Some(each_column_seq_num_map) =
+                            eq_delete_file_scan_tasks_map.get(&column_map)
+                        {
+                            let visibility =
+                                Bitmap::from_iter(array.get_all_values().iter().map(|datum| {
+                                    if let Some(s) = each_column_seq_num_map.get(datum)
+                                        && s > &sequence_number
+                                    {
+                                        false
+                                    } else {
+                                        true
+                                    }
+                                }));
+                            Some(visibility)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                let (data, va) = chunk.into_parts_v2();
+                let visibility = if visibilitys.is_empty() {
+                    va
+                } else {
+                    visibilitys
+                        .iter()
+                        .skip(1)
+                        .fold(visibilitys[0].clone(), |acc, bitmap| acc.bitand(bitmap))
+                };
+                let data = data
+                    .into_iter()
+                    .zip_eq(column_names)
+                    .filter_map(|(array, columns)| {
+                        if chunk_schema_names.contains(&columns) {
+                            Some(array.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect_vec();
+                let chunk = DataChunk::new(data, visibility);
+                debug_assert_eq!(chunk.data_types(), data_types);
+                yield chunk;
             }
-        };
-
-        let reader = table
-            .reader_builder()
-            .with_batch_size(self.batch_size)
-            .build();
-
-        let record_batch_stream = reader
-            .read(Box::pin(file_scan_stream))
-            .map_err(BatchError::Iceberg)?;
-
-        #[for_await]
-        for record_batch in record_batch_stream {
-            let record_batch = record_batch.map_err(BatchError::Iceberg)?;
-            let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
-            debug_assert_eq!(chunk.data_types(), data_types);
-            yield chunk;
         }
     }
 }
@@ -207,7 +266,11 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
                 Some(split.snapshot_id),
                 split.table_meta.deserialize(),
                 split.files.into_iter().map(|x| x.deserialize()).collect(),
-                split.eq_delete_files.deserialize(),
+                split
+                    .eq_delete_files
+                    .into_iter()
+                    .map(|x| x.deserialize())
+                    .collect(),
                 source.context.get_config().developer.chunk_size,
                 schema,
                 source.plan_node().get_identity().clone(),

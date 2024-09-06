@@ -603,6 +603,10 @@ impl ArrayImpl {
         })
     }
 
+    pub fn get_all_values(&self) -> Vec<Datum> {
+        (0..self.len()).map(|i| self.datum_at(i)).collect()
+    }
+
     /// # Safety
     ///
     /// This function is unsafe because it does not check the validity of `idx`. It is caller's

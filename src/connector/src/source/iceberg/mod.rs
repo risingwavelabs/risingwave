@@ -26,9 +26,8 @@ use iceberg::spec::TableMetadata;
 use iceberg::table::Table;
 use itertools::Itertools;
 pub use parquet_file_reader::*;
-use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
@@ -242,10 +241,16 @@ impl IcebergSplitEnumerator {
                 None => bail!("Cannot find the current snapshot id in the iceberg table."),
             },
         };
-        let (eq_delete_files,eq_delete_file_schema) = IcebergSplitEnumerator::load_eq_delete_file(&table,snapshot_id).await?;
+        let (eq_delete_files, eq_delete_file_schema) =
+            IcebergSplitEnumerator::load_eq_delete_file(&table, snapshot_id).await?;
         let arrow_schema = schema_to_arrow_schema(&eq_delete_file_schema)?;
-        let mut require_names:HashSet<String> = schema.names().clone().into_iter().collect();
-        require_names.extend(arrow_schema.all_fields().into_iter().map(|filed| filed.name().clone()));
+        let mut require_names: HashSet<String> = schema.names().clone().into_iter().collect();
+        require_names.extend(
+            arrow_schema
+                .all_fields()
+                .into_iter()
+                .map(|filed| filed.name().clone()),
+        );
 
         let mut files = vec![];
 
@@ -294,7 +299,10 @@ impl IcebergSplitEnumerator {
             .collect_vec())
     }
 
-    async fn load_eq_delete_file(table: &Table, snapshot_id: i64) -> ConnectorResult<(Vec<IcebergFileScanTaskJsonStr>,Arc<iceberg::spec::Schema>)>{
+    async fn load_eq_delete_file(
+        table: &Table,
+        snapshot_id: i64,
+    ) -> ConnectorResult<(Vec<IcebergFileScanTaskJsonStr>, Arc<iceberg::spec::Schema>)> {
         let mut files = vec![];
 
         let scan = table
@@ -303,11 +311,6 @@ impl IcebergSplitEnumerator {
             .build()
             .map_err(|e| anyhow!(e))?;
         let schema = scan.snapshot().schema(table.metadata())?;
-        // let arrow_schema = schema_to_arrow_schema(&schema)?;
-        // let rw_fileds = arrow_schema.fields().iter().map(|field|{
-        //     Ok(Field::with_name(IcebergArrowConvert.type_from_field(field)?, field.name().to_string()))
-        // }).collect::<ConnectorResult<Vec<_>>>()?;
-        // let schema = Schema::new(rw_fileds);
 
         let file_scan_stream = scan.plan_eq_delete_files().await.map_err(|e| anyhow!(e))?;
 
@@ -316,9 +319,8 @@ impl IcebergSplitEnumerator {
             let task = task.map_err(|e| anyhow!(e))?;
             files.push(IcebergFileScanTaskJsonStr::serialize(&task));
         }
-        Ok((files,schema))
+        Ok((files, schema))
     }
-
 }
 
 #[derive(Debug)]
