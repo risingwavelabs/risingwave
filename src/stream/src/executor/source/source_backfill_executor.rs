@@ -438,6 +438,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         yield Message::Barrier(barrier);
 
         {
+            // TODO: persist backfilled row count?
+            let mut total_backfilled_rows: u64 = 0;
             let source_backfill_row_count = self
                 .metrics
                 .source_backfill_row_count
@@ -581,13 +583,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     .await?;
 
                                 if self.should_report_finished(&backfill_stage.states) {
-                                    // TODO: use a specialized progress for source
-                                    // Currently, `CreateMviewProgress` is designed for MV backfill, and rw_ddl_progress calculates
-                                    // progress based on the number of consumed rows and an estimated total number of rows from hummock.
-                                    // For now, we just rely on the same code path, and for source backfill, the progress will always be 99.99%.
                                     tracing::debug!("progress finish");
-                                    let epoch = barrier.epoch;
-                                    self.progress.finish(epoch, 114514);
+                                    self.progress.finish(barrier.epoch, total_backfilled_rows);
                                     // yield barrier after reporting progress
                                     yield Message::Barrier(barrier);
 
@@ -599,6 +596,11 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         break 'backfill_loop;
                                     }
                                 } else {
+                                    self.progress.update_for_source_backfill(
+                                        barrier.epoch,
+                                        total_backfilled_rows,
+                                    );
+                                    // yield barrier after reporting progress
                                     yield Message::Barrier(barrier);
                                 }
                             }
@@ -665,6 +667,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                             let new_chunk = chunk.clone_with_vis(new_vis);
                             yield Message::Chunk(new_chunk);
                             source_backfill_row_count.inc_by(card as u64);
+                            total_backfilled_rows += card as u64;
                         }
                     }
                 }

@@ -87,6 +87,7 @@ impl GlobalBarrierManagerContext {
         Ok(())
     }
 
+    // FIXME: didn't consider Values here
     async fn recover_background_mv_progress(&self) -> MetaResult<CreateMviewProgressTracker> {
         let mgr = &self.metadata_manager;
         let mviews = mgr
