@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use anyhow::Context;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
@@ -136,6 +137,8 @@ pub trait FrontendMetaClient: Send + Sync {
     ) -> Result<Vec<u64>>;
 
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus>;
+
+    async fn get_cluster_limits(&self) -> Result<Vec<ClusterLimit>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -344,5 +347,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {
         self.0.get_cluster_recovery_status().await
+    }
+
+    async fn get_cluster_limits(&self) -> Result<Vec<ClusterLimit>> {
+        self.0.get_cluster_limits().await
     }
 }

@@ -205,6 +205,9 @@ pub async fn handle_create_mv_bound(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
+    // Check cluster limits
+    session.check_cluster_limits().await?;
+
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         name.clone(),
         StatementType::CREATE_MATERIALIZED_VIEW,

@@ -294,6 +294,10 @@ pub struct MetaOpts {
     pub temp_secret_file_dir: String,
 
     pub table_info_statistic_history_times: usize,
+
+    // Cluster limits
+    pub actor_cnt_per_worker_parallelism_hard_limit: usize,
+    pub actor_cnt_per_worker_parallelism_soft_limit: usize,
 }
 
 impl MetaOpts {
@@ -358,6 +362,8 @@ impl MetaOpts {
             secret_store_private_key: Some("0123456789abcdef".as_bytes().to_vec()),
             temp_secret_file_dir: "./secrets".to_string(),
             table_info_statistic_history_times: 240,
+            actor_cnt_per_worker_parallelism_hard_limit: usize::MAX,
+            actor_cnt_per_worker_parallelism_soft_limit: usize::MAX,
         }
     }
 }
@@ -408,9 +414,11 @@ impl MetaSrvEnv {
                         (ClusterId::new(), true)
                     };
 
-                // For new clusters, the name of the object store needs to be prefixed according to the object id.
-                // For old clusters, the prefix is ​​not divided for the sake of compatibility.
-
+                // For new clusters:
+                // - the name of the object store needs to be prefixed according to the object id.
+                //
+                // For old clusters
+                // - the prefix is ​​not divided for the sake of compatibility.
                 init_system_params.use_new_object_prefix_strategy = Some(cluster_first_launch);
                 let system_params_manager = Arc::new(
                     SystemParamsManager::new(
@@ -455,7 +463,7 @@ impl MetaSrvEnv {
                 }
             }
             MetaStoreImpl::Sql(sql_meta_store) => {
-                let is_sql_backend_cluster_first_launch =
+                let cluster_first_launch =
                     is_first_launch_for_sql_backend_cluster(sql_meta_store).await?;
                 // Try to upgrade if any new model changes are added.
                 Migrator::up(&sql_meta_store.conn, None)
@@ -469,10 +477,14 @@ impl MetaSrvEnv {
                     .await?
                     .map(|c| c.cluster_id.to_string().into())
                     .unwrap();
-                init_system_params.use_new_object_prefix_strategy =
-                    Some(is_sql_backend_cluster_first_launch);
-                // For new clusters, the name of the object store needs to be prefixed according to the object id.
-                // For old clusters, the prefix is ​​not divided for the sake of compatibility.
+
+                // For new clusters:
+                // - the name of the object store needs to be prefixed according to the object id.
+                //
+                // For old clusters
+                // - the prefix is ​​not divided for the sake of compatibility.
+                init_system_params.use_new_object_prefix_strategy = Some(cluster_first_launch);
+
                 let system_param_controller = Arc::new(
                     SystemParamsController::new(
                         sql_meta_store.clone(),
