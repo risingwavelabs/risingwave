@@ -188,6 +188,9 @@ pub async fn start_serving_vnode_mapping_worker(
                                     notification_manager.notify_frontend_without_version(Operation::Snapshot, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_fragment_worker_slot_mapping(&mappings) }));
                                 }
                                 LocalNotification::FragmentMappingsUpsert(fragment_ids) => {
+                                    if fragment_ids.is_empty() {
+                                        continue;
+                                    }
                                     let (workers, streaming_parallelisms) = fetch_serving_infos(&metadata_manager).await;
                                     let filtered_streaming_parallelisms = fragment_ids.iter().filter_map(|frag_id|{
                                         match streaming_parallelisms.get(frag_id) {
@@ -198,9 +201,6 @@ pub async fn start_serving_vnode_mapping_worker(
                                             }
                                         }
                                     }).collect();
-                                    if filtered_streaming_parallelisms.is_empty() {
-                                        continue;
-                                    }
                                     let (upserted, failed) = serving_vnode_mapping.upsert(filtered_streaming_parallelisms, &workers);
                                     if !upserted.is_empty() {
                                         tracing::debug!("Update serving vnode mapping for fragments {:?}.", upserted.keys());
