@@ -21,6 +21,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::anyhow;
 use arrow_schema_iceberg::SchemaRef;
 use async_trait::async_trait;
+use chrono::{DateTime, NaiveDateTime, Utc};
 use opendal::{FuturesAsyncWriter, Operator, Writer as OpendalWriter};
 use parquet::arrow::AsyncArrowWriter;
 use parquet::file::properties::WriterProperties;
@@ -55,7 +56,7 @@ pub struct FileSink<S: OpendalSinkBackend> {
     /// The schema describing the structure of the data being written to the file sink.
     pub(crate) schema: Schema,
     pub(crate) is_append_only: bool,
-    pub(crate) batching_strategy: Option<BatchingStrategy>,
+    pub(crate) batching_strategy: BatchingStrategy,
 
     /// The description of the sink's format.
     pub(crate) format_desc: SinkFormatDesc,
@@ -87,7 +88,7 @@ pub trait OpendalSinkBackend: Send + Sync + 'static + Clone + PartialEq {
     fn new_operator(properties: Self::Properties) -> Result<Operator>;
     fn get_path(properties: Self::Properties) -> String;
     fn get_engine_type() -> EngineType;
-    fn get_batching_strategy(properties: Self::Properties) -> Option<BatchingStrategy>;
+    fn get_batching_strategy(properties: Self::Properties) -> BatchingStrategy;
 }
 
 #[derive(Clone, Debug)]
@@ -184,7 +185,7 @@ pub struct OpenDalSinkWriter {
     executor_id: u64,
     encode_type: SinkEncode,
     engine_type: EngineType,
-    pub(crate) batching_strategy: Option<BatchingStrategy>,
+    pub(crate) batching_strategy: BatchingStrategy,
     current_bached_row_num: usize,
     current_writer_idx: usize,
     created_time: SystemTime,
@@ -260,7 +261,7 @@ impl OpenDalSinkWriter {
         executor_id: u64,
         encode_type: SinkEncode,
         engine_type: EngineType,
-        batching_strategy: Option<BatchingStrategy>,
+        batching_strategy: BatchingStrategy,
     ) -> Result<Self> {
         let arrow_schema = convert_rw_schema_to_arrow_schema(rw_schema)?;
         Ok(Self {
@@ -281,15 +282,31 @@ impl OpenDalSinkWriter {
         })
     }
 
+    pub fn partition_granularity(&self) -> String {
+        match self.created_time.duration_since(UNIX_EPOCH) {
+            Ok(duration) => {
+                let datetime: DateTime<Utc> = DateTime::from_utc(
+                    NaiveDateTime::from_timestamp(duration.as_secs() as i64, 0),
+                    Utc,
+                );
+                match self.batching_strategy.partition_granularity {
+                    PartitionGranularity::None => "".to_string(),
+                    PartitionGranularity::Day => datetime.format("%Y-%m-%d/").to_string(),
+                    PartitionGranularity::Month => datetime.format("/%Y-%m/").to_string(),
+                    PartitionGranularity::Hour => datetime.format("/%Y-%m-%d %H:00/").to_string(),
+                }
+            }
+            Err(_) => "Invalid time".to_string(),
+        }
+    }
+
     async fn try_finish_write_via_rollover_interval(&mut self) -> Result<()> {
-        if self.batching_strategy.is_some()
-            && self.duration_seconds_since_writer_created()
-                >= self
-                    .batching_strategy
-                    .clone()
-                    .unwrap()
-                    .rollover_seconds
-                    .unwrap_or(u64::MAX)
+        if self.duration_seconds_since_writer_created()
+            >= self
+                .batching_strategy
+                .clone()
+                .rollover_seconds
+                .unwrap_or(usize::MAX)
             && let Some(sink_writer) = self.sink_writer.take()
         {
             match sink_writer {
@@ -317,19 +334,12 @@ impl OpenDalSinkWriter {
     }
 
     async fn try_finish_write_via_batched_rows(&mut self) -> Result<bool> {
-        if self
-            .batching_strategy
-            .clone()
-            .unwrap()
-            .max_row_count
-            .is_some()
-            && self.current_bached_row_num
-                >= self
-                    .batching_strategy
-                    .clone()
-                    .unwrap()
-                    .max_row_count
-                    .unwrap()
+        if self.current_bached_row_num
+            >= self
+                .batching_strategy
+                .clone()
+                .max_row_count
+                .unwrap_or(usize::MAX)
             && let Some(sink_writer) = self.sink_writer.take()
         {
             match sink_writer {
@@ -356,11 +366,11 @@ impl OpenDalSinkWriter {
         return Ok(false);
     }
 
-    fn duration_seconds_since_writer_created(&self) -> u64 {
+    fn duration_seconds_since_writer_created(&self) -> usize {
         let now = SystemTime::now();
         now.duration_since(self.created_time)
             .expect("Time went backwards")
-            .as_secs()
+            .as_secs() as usize
     }
 
     async fn create_object_writer(&mut self, writer_idx: usize) -> Result<OpendalWriter> {
@@ -377,7 +387,8 @@ impl OpenDalSinkWriter {
             // Therefore, there is no need to specify the path in the file name.
             EngineType::Fs => {
                 format!(
-                    "{}_{}_{}.{}",
+                    "{}{}_{}_{}.{}",
+                    self.partition_granularity(),
                     self.executor_id,
                     self.created_time
                         .duration_since(UNIX_EPOCH)
@@ -388,8 +399,9 @@ impl OpenDalSinkWriter {
                 )
             }
             _ => format!(
-                "{}/{}_{}_{}.{}",
+                "{}/{}{}_{}_{}.{}",
                 self.write_path,
+                self.partition_granularity(),
                 self.executor_id,
                 self.created_time
                     .duration_since(UNIX_EPOCH)
@@ -470,26 +482,43 @@ fn convert_rw_schema_to_arrow_schema(
 
     Ok(arrow_schema_iceberg::Schema::new(arrow_fields))
 }
-#[derive(Deserialize, Debug, Clone, WithOptions)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct BatchingStrategy {
-    // pub batching_interval: Option<Duration>,
-    // pub inactivity_interval: Option<Duration>,
     pub max_row_count: Option<usize>,
     pub max_file_size: Option<usize>,
-    pub rollover_seconds: Option<u64>,
+    pub rollover_seconds: Option<usize>,
+    pub partition_granularity: PartitionGranularity,
 }
 
+#[derive(Deserialize, Debug, Clone)]
+pub enum PartitionGranularity {
+    None,
+    Day,
+    Month,
+    Hour,
+}
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct FileSinkBatchingStrategy {
-    // #[serde(rename = "batching_interval")]
-    // pub batching_interval: Option<String>,
-
-    // #[serde(rename = "inactivity_interval")]
-    // pub inactivity_interval: Option<String>,
     #[serde(rename = "max_row_count")]
     pub max_row_count: Option<String>,
     #[serde(rename = "max_file_size")]
     pub max_file_size: Option<usize>,
     #[serde(rename = "rollover_seconds")]
     pub rollover_seconds: Option<String>,
+    #[serde(rename = "partition_granularity")]
+    pub partition_granularity: Option<String>,
+}
+
+pub fn parse_partition_granularity(granularity: &str) -> PartitionGranularity {
+    let granularity = granularity.trim().to_lowercase();
+    if matches!(&granularity[..], "day" | "month" | "hour") {
+        match granularity.as_str() {
+            "day" => PartitionGranularity::Day,
+            "month" => PartitionGranularity::Month,
+            "hour" => PartitionGranularity::Hour,
+            _ => PartitionGranularity::None,
+        }
+    } else {
+        PartitionGranularity::None
+    }
 }

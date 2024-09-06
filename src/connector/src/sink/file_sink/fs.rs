@@ -22,7 +22,9 @@ use serde_with::serde_as;
 use with_options::WithOptions;
 
 use super::opendal_sink::{BatchingStrategy, FileSinkBatchingStrategy};
-use crate::sink::file_sink::opendal_sink::{FileSink, OpendalSinkBackend};
+use crate::sink::file_sink::opendal_sink::{
+    parse_partition_granularity, FileSink, OpendalSinkBackend, PartitionGranularity,
+};
 use crate::sink::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::source::UnknownFields;
 
@@ -103,36 +105,31 @@ impl OpendalSinkBackend for FsSink {
         super::opendal_sink::EngineType::Fs
     }
 
-    fn get_batching_strategy(properties: Self::Properties) -> Option<BatchingStrategy> {
-        //     && properties.batching_strategy.inactivity_interval.is_none()
-        if properties.batching_strategy.max_row_count.is_none()
-            && properties.batching_strategy.max_file_size.is_none()
+    fn get_batching_strategy(properties: Self::Properties) -> BatchingStrategy {
+        let partition_granularity = if let Some(partition_granularity) =
+            properties.batching_strategy.partition_granularity
         {
-            return None;
-        }
-
-        Some(BatchingStrategy {
-            // batching_interval: properties
-            //     .batching_strategy
-            //     .batching_interval
-            //     .map(|s| parse_duration(&s))
-            //     .transpose()
-            //     .ok(),
-            // inactivity_interval: properties
-            //     .batching_strategy
-            //     .inactivity_interval
-            //     .map(|s| parse_duration(&s))
-            //     .transpose()
-            //     .ok(),
-            max_row_count: properties
-                .batching_strategy
-                .max_row_count
-                .and_then(|s| s.parse().ok()),
+            parse_partition_granularity(&partition_granularity)
+        } else {
+            PartitionGranularity::None
+        };
+        let max_row_count: Option<usize> =
+            if let Some(s) = properties.batching_strategy.max_row_count {
+                s.parse().ok()
+            } else {
+                None
+            };
+        let rollover_seconds: Option<usize> =
+            if let Some(s) = properties.batching_strategy.rollover_seconds {
+                s.parse().ok()
+            } else {
+                None
+            };
+        BatchingStrategy {
+            max_row_count,
             max_file_size: properties.batching_strategy.max_file_size,
-            rollover_seconds: properties
-                .batching_strategy
-                .rollover_seconds
-                .and_then(|s| s.parse().ok()),
-        })
+            rollover_seconds,
+            partition_granularity,
+        }
     }
 }

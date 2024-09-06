@@ -32,7 +32,7 @@ pub fn default_commit_checkpoint_interval() -> u64 {
 /// we delay the checkpoint barrier to make commits less frequent.
 pub struct BatchingLogSinkerOf<W> {
     writer: W,
-    batching_strategy: Option<BatchingStrategy>,
+    batching_strategy: BatchingStrategy,
     sink_metrics: SinkMetrics,
     commit_checkpoint_interval: NonZeroU64,
 }
@@ -42,7 +42,7 @@ impl<W> BatchingLogSinkerOf<W> {
     /// decouple log reader `KvLogStoreReader`.
     pub fn new(
         writer: W,
-        batching_strategy: Option<BatchingStrategy>,
+        batching_strategy: BatchingStrategy,
         sink_metrics: SinkMetrics,
         commit_checkpoint_interval: NonZeroU64,
     ) -> Self {
