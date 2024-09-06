@@ -33,13 +33,13 @@ use crate::executor::exchange::input::{
 use crate::executor::prelude::*;
 use crate::task::SharedContext;
 
-pub(crate) enum InputExecutorUpstream {
+pub(crate) enum MergeExecutorUpstream {
     Singleton(BoxedInput),
     Merge(SelectReceivers),
 }
 
-pub(crate) struct InputExecutor {
-    upstream: InputExecutorUpstream,
+pub(crate) struct MergeExecutorInput {
+    upstream: MergeExecutorUpstream,
     actor_context: ActorContextRef,
     upstream_fragment_id: UpstreamFragmentId,
     shared_context: Arc<SharedContext>,
@@ -47,9 +47,9 @@ pub(crate) struct InputExecutor {
     info: ExecutorInfo,
 }
 
-impl InputExecutor {
+impl MergeExecutorInput {
     pub(crate) fn new(
-        upstream: InputExecutorUpstream,
+        upstream: MergeExecutorUpstream,
         actor_context: ActorContextRef,
         upstream_fragment_id: UpstreamFragmentId,
         shared_context: Arc<SharedContext>,
@@ -69,7 +69,7 @@ impl InputExecutor {
     pub(crate) fn into_executor(self, barrier_rx: mpsc::UnboundedReceiver<Barrier>) -> Executor {
         let fragment_id = self.actor_context.fragment_id;
         let executor = match self.upstream {
-            InputExecutorUpstream::Singleton(input) => ReceiverExecutor::new(
+            MergeExecutorUpstream::Singleton(input) => ReceiverExecutor::new(
                 self.actor_context,
                 fragment_id,
                 self.upstream_fragment_id,
@@ -79,7 +79,7 @@ impl InputExecutor {
                 barrier_rx,
             )
             .boxed(),
-            InputExecutorUpstream::Merge(inputs) => MergeExecutor::new(
+            MergeExecutorUpstream::Merge(inputs) => MergeExecutor::new(
                 self.actor_context,
                 fragment_id,
                 self.upstream_fragment_id,
@@ -94,13 +94,13 @@ impl InputExecutor {
     }
 }
 
-impl Stream for InputExecutor {
+impl Stream for MergeExecutorInput {
     type Item = DispatcherMessageStreamItem;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match &mut self.get_mut().upstream {
-            InputExecutorUpstream::Singleton(input) => input.poll_next_unpin(cx),
-            InputExecutorUpstream::Merge(inputs) => inputs.poll_next_unpin(cx),
+            MergeExecutorUpstream::Singleton(input) => input.poll_next_unpin(cx),
+            MergeExecutorUpstream::Merge(inputs) => inputs.poll_next_unpin(cx),
         }
     }
 }
@@ -605,8 +605,7 @@ mod tests {
             rxs.push(rx);
         }
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
-        let merger = MergeExecutor::for_test(233, rxs, barrier_test_env.shared_context.clone());
-        let actor_id = merger.actor_context.id;
+        let actor_id = 233;
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         let epochs = (10..1000u64)
@@ -664,6 +663,8 @@ mod tests {
             handles.push(handle);
         }
 
+        let merger =
+            MergeExecutor::for_test(actor_id, rxs, barrier_test_env.shared_context.clone());
         let mut merger = merger.boxed().execute();
         for (idx, epoch) in epochs {
             // expect n chunks

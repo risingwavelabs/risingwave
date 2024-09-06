@@ -40,7 +40,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::prelude::{try_stream, StreamExt};
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BackfillExecutor, Barrier, BoxedMessageStream,
-    DispatcherBarrier, DispatcherMessage, Execute, InputExecutor, Message, Mutation,
+    DispatcherBarrier, DispatcherMessage, Execute, MergeExecutorInput, Message, Mutation,
     StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::CreateMviewProgress;
@@ -50,7 +50,7 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
     upstream_table: StorageTable<S>,
 
     /// Upstream with the same schema with the upstream table.
-    upstream: InputExecutor,
+    upstream: MergeExecutorInput,
 
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     output_indices: Vec<usize>,
@@ -70,7 +70,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
     #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         upstream_table: StorageTable<S>,
-        upstream: InputExecutor,
+        upstream: MergeExecutorInput,
         output_indices: Vec<usize>,
         actor_ctx: ActorContextRef,
         progress: CreateMviewProgress,
@@ -403,7 +403,7 @@ impl<'a> UpstreamBufferState for StateOfConsumingLogStore<'a> {
 }
 
 struct UpstreamBuffer<'a, S> {
-    upstream: &'a mut InputExecutor,
+    upstream: &'a mut MergeExecutorInput,
     state: S,
     consume_upstream_row_count: LabelGuardedIntCounter<3>,
     upstream_table_id: TableId,
@@ -412,7 +412,7 @@ struct UpstreamBuffer<'a, S> {
 
 impl<'a> UpstreamBuffer<'a, StateOfConsumingSnapshot> {
     fn new(
-        upstream: &'a mut InputExecutor,
+        upstream: &'a mut MergeExecutorInput,
         upstream_table_id: TableId,
         current_subscriber_id: u32,
         consume_upstream_row_count: LabelGuardedIntCounter<3>,

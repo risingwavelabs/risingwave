@@ -53,7 +53,8 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
     Actor, ActorContext, ActorContextRef, DispatchExecutor, DispatcherImpl, Execute, Executor,
-    ExecutorInfo, InputExecutor, SnapshotBackfillExecutor, TroublemakerExecutor, WrapperExecutor,
+    ExecutorInfo, MergeExecutorInput, SnapshotBackfillExecutor, TroublemakerExecutor,
+    WrapperExecutor,
 };
 use crate::from_proto::{create_executor, MergeExecutorBuilder};
 use crate::task::barrier_manager::{
@@ -292,35 +293,45 @@ impl StreamActorManager {
         ))
     }
 
-    fn create_snapshot_backfill_input(
-        &self,
-        upstream_node: &StreamNode,
-        actor_context: &ActorContextRef,
-        shared_context: &Arc<SharedContext>,
-    ) -> StreamResult<InputExecutor> {
-        let upstream_merge = must_match!(upstream_node.get_node_body().unwrap(), NodeBody::Merge(upstream_merge) => {
-            upstream_merge
-        });
-        let executor_id = unique_executor_id(actor_context.id, upstream_node.operator_id);
-        let schema: Schema = upstream_node.fields.iter().map(Field::from).collect();
+    fn get_executor_id(actor_context: &ActorContext, node: &StreamNode) -> u64 {
+        // We assume that the operator_id of different instances from the same RelNode will be the
+        // same.
+        unique_executor_id(actor_context.id, node.operator_id)
+    }
 
-        let pk_indices = upstream_node
+    fn get_executor_info(node: &StreamNode, executor_id: u64) -> ExecutorInfo {
+        let schema: Schema = node.fields.iter().map(Field::from).collect();
+
+        let pk_indices = node
             .get_stream_key()
             .iter()
             .map(|idx| *idx as usize)
             .collect::<Vec<_>>();
 
-        let identity = format!(
-            "{} {:X}",
-            upstream_node.get_node_body().unwrap(),
-            executor_id
-        );
-        let info = ExecutorInfo {
+        let identity = format!("{} {:X}", node.get_node_body().unwrap(), executor_id);
+        ExecutorInfo {
             schema,
             pk_indices,
             identity,
-        };
-        MergeExecutorBuilder::new_input_executor(
+        }
+    }
+
+    fn create_snapshot_backfill_input(
+        &self,
+        upstream_node: &StreamNode,
+        actor_context: &ActorContextRef,
+        shared_context: &Arc<SharedContext>,
+    ) -> StreamResult<MergeExecutorInput> {
+        let info = Self::get_executor_info(
+            upstream_node,
+            Self::get_executor_id(actor_context, upstream_node),
+        );
+
+        let upstream_merge = must_match!(upstream_node.get_node_body().unwrap(), NodeBody::Merge(upstream_merge) => {
+            upstream_merge
+        });
+
+        MergeExecutorBuilder::new_input(
             shared_context.clone(),
             self.streaming_metrics.clone(),
             actor_context.clone(),
@@ -340,12 +351,9 @@ impl StreamActorManager {
         env: StreamEnvironment,
         state_store: impl StateStore,
     ) -> StreamResult<Executor> {
-        assert_eq!(2, stream_node.input.len());
-        let upstream = self.create_snapshot_backfill_input(
-            &stream_node.input[0],
-            actor_context,
-            shared_context,
-        )?;
+        let [upstream_node, _]: &[_; 2] = stream_node.input.as_slice().try_into().unwrap();
+        let upstream =
+            self.create_snapshot_backfill_input(upstream_node, actor_context, shared_context)?;
 
         let table_desc: &StorageTableDesc = node.get_table_desc()?;
 
@@ -386,23 +394,10 @@ impl StreamActorManager {
         )
         .boxed();
 
-        let pk_indices = stream_node
-            .get_stream_key()
-            .iter()
-            .map(|idx| *idx as usize)
-            .collect::<Vec<_>>();
-
-        // We assume that the operator_id of different instances from the same RelNode will be the
-        // same.
-        let executor_id = unique_executor_id(actor_context.id, stream_node.operator_id);
-        let schema: Schema = stream_node.fields.iter().map(Field::from).collect();
-
-        let identity = format!("{} {:X}", stream_node.get_node_body().unwrap(), executor_id);
-        let info = ExecutorInfo {
-            schema,
-            pk_indices,
-            identity,
-        };
+        let info = Self::get_executor_info(
+            stream_node,
+            Self::get_executor_id(actor_context, stream_node),
+        );
 
         if crate::consistency::insane() {
             let mut troubled_info = info.clone();
@@ -489,24 +484,13 @@ impl StreamActorManager {
         }
 
         let op_info = node.get_identity().clone();
-        let pk_indices = node
-            .get_stream_key()
-            .iter()
-            .map(|idx| *idx as usize)
-            .collect::<Vec<_>>();
 
         // We assume that the operator_id of different instances from the same RelNode will be the
         // same.
-        let executor_id = unique_executor_id(actor_context.id, node.operator_id);
+        let executor_id = Self::get_executor_id(actor_context, node);
         let operator_id = unique_operator_id(fragment_id, node.operator_id);
-        let schema: Schema = node.fields.iter().map(Field::from).collect();
 
-        let identity = format!("{} {:X}", node.get_node_body().unwrap(), executor_id);
-        let info = ExecutorInfo {
-            schema,
-            pk_indices,
-            identity,
-        };
+        let info = Self::get_executor_info(node, executor_id);
 
         let eval_error_report = ActorEvalErrorReport {
             actor_context: actor_context.clone(),

@@ -137,7 +137,7 @@ pub use join::JoinType;
 pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
 pub use merge::MergeExecutor;
-pub(crate) use merge::{InputExecutor, InputExecutorUpstream};
+pub(crate) use merge::{MergeExecutorInput, MergeExecutorUpstream};
 pub use mview::*;
 pub use no_op::NoOpExecutor;
 pub use now::*;

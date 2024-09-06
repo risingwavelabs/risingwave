@@ -324,13 +324,11 @@ pub mod agg_executor {
         agg_call: &AggCall,
         group_key_indices: &[usize],
         pk_indices: &[usize],
-        input_ref: &Executor,
+        input_fields: Vec<Field>,
         is_append_only: bool,
     ) -> AggStateStorage<S> {
         match agg_call.kind {
             AggKind::Builtin(PbAggKind::Min | PbAggKind::Max) if !is_append_only => {
-                let input_fields = input_ref.schema().fields();
-
                 let mut column_descs = Vec::new();
                 let mut order_types = Vec::new();
                 let mut upstream_columns = Vec::new();
@@ -397,10 +395,8 @@ pub mod agg_executor {
         table_id: TableId,
         agg_calls: &[AggCall],
         group_key_indices: &[usize],
-        input_ref: &Executor,
+        input_fields: Vec<Field>,
     ) -> StateTable<S> {
-        let input_fields = input_ref.schema().fields();
-
         let mut column_descs = Vec::new();
         let mut order_types = Vec::new();
 
@@ -455,7 +451,7 @@ pub mod agg_executor {
                     agg_call,
                     &group_key_indices,
                     &pk_indices,
-                    &input,
+                    input.info.schema.fields.clone(),
                     is_append_only,
                 )
                 .await,
@@ -467,7 +463,7 @@ pub mod agg_executor {
             TableId::new(agg_calls.len() as u32),
             &agg_calls,
             &group_key_indices,
-            &input,
+            input.info.schema.fields.clone(),
         )
         .await;
 
@@ -524,7 +520,7 @@ pub mod agg_executor {
                 agg_call,
                 &[],
                 &pk_indices,
-                &input,
+                input.info.schema.fields.clone(),
                 is_append_only,
             )
         }))
@@ -535,7 +531,7 @@ pub mod agg_executor {
             TableId::new(agg_calls.len() as u32),
             &agg_calls,
             &[],
-            &input,
+            input.info.schema.fields.clone(),
         )
         .await;
 

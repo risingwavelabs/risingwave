@@ -19,19 +19,19 @@ use risingwave_pb::stream_plan::{DispatcherType, MergeNode};
 use super::*;
 use crate::executor::exchange::input::new_input;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, InputExecutor, InputExecutorUpstream, MergeExecutor};
+use crate::executor::{ActorContextRef, MergeExecutor, MergeExecutorInput, MergeExecutorUpstream};
 use crate::task::SharedContext;
 
 pub struct MergeExecutorBuilder;
 
 impl MergeExecutorBuilder {
-    pub(crate) fn new_input_executor(
+    pub(crate) fn new_input(
         shared_context: Arc<SharedContext>,
         executor_stats: Arc<StreamingMetrics>,
         actor_context: ActorContextRef,
         info: ExecutorInfo,
         node: &MergeNode,
-    ) -> StreamResult<InputExecutor> {
+    ) -> StreamResult<MergeExecutorInput> {
         let upstreams = node.get_upstream_actor_id();
         let upstream_fragment_id = node.get_upstream_fragment_id();
 
@@ -61,15 +61,15 @@ impl MergeExecutorBuilder {
         };
 
         let upstreams = if always_single_input {
-            InputExecutorUpstream::Singleton(inputs.into_iter().exactly_one().unwrap())
+            MergeExecutorUpstream::Singleton(inputs.into_iter().exactly_one().unwrap())
         } else {
-            InputExecutorUpstream::Merge(MergeExecutor::new_select_receiver(
+            MergeExecutorUpstream::Merge(MergeExecutor::new_select_receiver(
                 inputs,
                 &executor_stats,
                 &actor_context,
             ))
         };
-        Ok(InputExecutor::new(
+        Ok(MergeExecutorInput::new(
             upstreams,
             actor_context,
             upstream_fragment_id,
@@ -92,7 +92,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             .shared_context
             .local_barrier_manager
             .subscribe_barrier(params.actor_context.id);
-        Ok(Self::new_input_executor(
+        Ok(Self::new_input(
             params.shared_context,
             params.executor_stats,
             params.actor_context,
