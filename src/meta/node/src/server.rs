@@ -40,6 +40,7 @@ use risingwave_meta::stream::ScaleController;
 use risingwave_meta::MetaStoreBackend;
 use risingwave_meta_service::backup_service::BackupServiceImpl;
 use risingwave_meta_service::cloud_service::CloudServiceImpl;
+use risingwave_meta_service::cluster_limit_service::ClusterLimitServiceImpl;
 use risingwave_meta_service::cluster_service::ClusterServiceImpl;
 use risingwave_meta_service::ddl_service::DdlServiceImpl;
 use risingwave_meta_service::event_log_service::EventLogServiceImpl;
@@ -63,6 +64,7 @@ use risingwave_pb::connector_service::sink_coordination_service_server::SinkCoor
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
+use risingwave_pb::meta::cluster_limit_service_server::ClusterLimitServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::event_log_service_server::EventLogServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
@@ -657,6 +659,7 @@ pub async fn start_service_as_election_leader(
         ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_manager.clone());
     let cloud_srv = CloudServiceImpl::new(metadata_manager.clone(), aws_cli);
     let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
+    let cluster_limit_srv = ClusterLimitServiceImpl::new(env.clone(), metadata_manager.clone());
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(prometheus_addr.to_string())
@@ -795,7 +798,8 @@ pub async fn start_service_as_election_leader(
         .add_service(ServingServiceServer::new(serving_srv))
         .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
-        .add_service(EventLogServiceServer::new(event_log_srv));
+        .add_service(EventLogServiceServer::new(event_log_srv))
+        .add_service(ClusterLimitServiceServer::new(cluster_limit_srv));
     #[cfg(not(madsim))] // `otlp-embedded` does not use madsim-patched tonic
     let server_builder = server_builder.add_service(TraceServiceServer::new(trace_srv));
 
