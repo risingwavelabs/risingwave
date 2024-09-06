@@ -21,6 +21,7 @@ use risingwave_pb::plan_common::StorageTableDesc;
 
 use super::{ColumnDesc, ColumnId, TableId};
 use crate::catalog::get_dist_key_in_pk_indices;
+use crate::hash::VnodeCountCompat;
 use crate::util::sort_util::ColumnOrder;
 
 /// Includes necessary information for compute node to access data of the table.
@@ -56,6 +57,8 @@ pub struct TableDesc {
 
     /// the column indices which could receive watermarks.
     pub watermark_columns: FixedBitSet,
+
+    pub vnode_count: usize,
 
     /// Whether the table is versioned. If `true`, column-aware row encoding will be used
     /// to be compatible with schema changes.
@@ -113,6 +116,7 @@ impl TableDesc {
             versioned: self.versioned,
             stream_key: self.stream_key.iter().map(|&x| x as u32).collect(),
             vnode_col_idx_in_pk,
+            maybe_vnode_count: Some(self.vnode_count as u32),
         })
     }
 
@@ -126,6 +130,8 @@ impl TableDesc {
     }
 
     pub fn from_pb_table(table: &Table) -> Self {
+        let vnode_count = table.vnode_count();
+
         Self {
             table_id: TableId::new(table.id),
             pk: table.pk.iter().map(ColumnOrder::from_protobuf).collect(),
@@ -143,6 +149,7 @@ impl TableDesc {
             read_prefix_len_hint: table.read_prefix_len_hint as _,
             watermark_columns: table.watermark_indices.iter().map(|i| *i as _).collect(),
             versioned: table.version.is_some(),
+            vnode_count,
         }
     }
 }

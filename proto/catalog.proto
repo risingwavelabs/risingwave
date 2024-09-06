@@ -417,6 +417,8 @@ message Table {
   // upstream table.
   optional string cdc_table_id = 39;
 
+  optional uint32 maybe_vnode_count = 40;
+
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for
   // notification service.

@@ -20,6 +20,7 @@ use risingwave_common::catalog::{
     ColumnCatalog, ConflictBehavior, CreateType, Field, Schema, StreamJobStatus, TableDesc,
     TableId, TableVersionId,
 };
+use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
@@ -170,6 +171,8 @@ pub struct TableCatalog {
     pub initialized_at_cluster_version: Option<String>,
 
     pub cdc_table_id: Option<String>,
+
+    pub vnode_count: usize,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -348,6 +351,7 @@ impl TableCatalog {
             watermark_columns: self.watermark_columns.clone(),
             versioned: self.version.is_some(),
             vnode_col_index: self.vnode_col_index,
+            vnode_count: self.vnode_count,
         }
     }
 
@@ -428,6 +432,7 @@ impl TableCatalog {
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             retention_seconds: self.retention_seconds,
             cdc_table_id: self.cdc_table_id.clone(),
+            maybe_vnode_count: Some(self.vnode_count as _),
         }
     }
 
@@ -533,6 +538,8 @@ impl From<PbTable> for TableCatalog {
             OptionalAssociatedSourceId::AssociatedSourceId(id) => id,
         });
         let name = tb.name.clone();
+        let vnode_count = tb.vnode_count();
+
         let mut col_names = HashSet::new();
         let mut col_index: HashMap<i32, usize> = HashMap::new();
 
@@ -602,6 +609,7 @@ impl From<PbTable> for TableCatalog {
                 .map(TableId::from)
                 .collect_vec(),
             cdc_table_id: tb.cdc_table_id,
+            vnode_count,
         }
     }
 }
@@ -622,6 +630,7 @@ impl OwnedByUserCatalog for TableCatalog {
 mod tests {
 
     use risingwave_common::catalog::{row_id_column_desc, ColumnDesc, ColumnId};
+    use risingwave_common::hash::VirtualNode;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
@@ -692,6 +701,7 @@ mod tests {
             initialized_at_cluster_version: None,
             version_column_index: None,
             cdc_table_id: None,
+            maybe_vnode_count: None,
         }
         .into();
 
@@ -755,6 +765,7 @@ mod tests {
                 dependent_relations: vec![],
                 version_column_index: None,
                 cdc_table_id: None,
+                vnode_count: VirtualNode::COUNT,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
