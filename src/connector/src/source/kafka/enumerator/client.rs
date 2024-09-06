@@ -17,10 +17,12 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
+use prometheus::core::{AtomicI64, GenericGauge};
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::error::KafkaResult;
 use rdkafka::{Offset, TopicPartitionList};
 use risingwave_common::bail;
+use risingwave_common::metrics::LabelGuardedMetric;
 
 use crate::error::ConnectorResult;
 use crate::source::base::SplitEnumerator;
@@ -49,6 +51,7 @@ pub struct KafkaSplitEnumerator {
     stop_offset: KafkaEnumeratorOffset,
 
     sync_call_timeout: Duration,
+    high_watermark_metrics: HashMap<i32, LabelGuardedMetric<GenericGauge<AtomicI64>, 2>>,
 }
 
 impl KafkaSplitEnumerator {}
@@ -124,6 +127,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             start_offset: scan_start_offset,
             stop_offset: KafkaEnumeratorOffset::None,
             sync_call_timeout: properties.common.sync_call_timeout,
+            high_watermark_metrics: HashMap::new(),
         })
     }
 
@@ -160,7 +164,10 @@ impl SplitEnumerator for KafkaSplitEnumerator {
 }
 
 impl KafkaSplitEnumerator {
-    async fn get_watermarks(&self, partitions: &[i32]) -> KafkaResult<HashMap<i32, (i64, i64)>> {
+    async fn get_watermarks(
+        &mut self,
+        partitions: &[i32],
+    ) -> KafkaResult<HashMap<i32, (i64, i64)>> {
         let mut map = HashMap::new();
         for partition in partitions {
             let (low, high) = self
@@ -358,15 +365,20 @@ impl KafkaSplitEnumerator {
     }
 
     #[inline]
-    fn report_high_watermark(&self, partition: i32, offset: i64) {
-        self.context
-            .metrics
-            .high_watermark
-            .with_guarded_label_values(&[
-                &self.context.info.source_id.to_string(),
-                &partition.to_string(),
-            ])
-            .set(offset);
+    fn report_high_watermark(&mut self, partition: i32, offset: i64) {
+        let high_watermark_metrics =
+            self.high_watermark_metrics
+                .entry(partition)
+                .or_insert_with(|| {
+                    self.context
+                        .metrics
+                        .high_watermark
+                        .with_guarded_label_values(&[
+                            &self.context.info.source_id.to_string(),
+                            &partition.to_string(),
+                        ])
+                });
+        high_watermark_metrics.set(offset);
     }
 
     pub async fn check_reachability(&self) -> bool {
