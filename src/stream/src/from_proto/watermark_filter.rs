@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
 use std::sync::Arc;
 
 use risingwave_common::catalog::{ColumnId, TableDesc};
 use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::WatermarkFilterNode;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::TableDistribution;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -57,8 +55,7 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
             .iter()
             .map(|i| ColumnId::new(*i as _))
             .collect_vec();
-        let other_vnodes =
-            Arc::new((!(*vnodes).clone()) & TableDistribution::all_vnodes_ref().deref());
+        let other_vnodes = Arc::new(!(*vnodes).clone());
         let global_watermark_table =
             StorageTable::new_partial(store.clone(), column_ids, Some(other_vnodes), &desc);
 

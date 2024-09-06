@@ -755,7 +755,8 @@ impl Dispatcher for HashDataDispatcher {
         let num_outputs = self.outputs.len();
 
         // get hash value of every line by its key
-        let vnodes = VirtualNode::compute_chunk(chunk.data_chunk(), &self.keys);
+        let vnode_count = self.hash_mapping.len();
+        let vnodes = VirtualNode::compute_chunk(chunk.data_chunk(), &self.keys, vnode_count);
 
         tracing::debug!(target: "events::stream::dispatch::hash", "\n{}\n keys {:?} => {:?}", chunk.to_pretty(), self.keys, vnodes);
 
@@ -1225,6 +1226,32 @@ mod tests {
         )
         .unwrap();
 
+        let dispatcher_updates = maplit::hashmap! {
+            actor_id => vec![PbDispatcherUpdate {
+                actor_id,
+                dispatcher_id: broadcast_dispatcher_id,
+                added_downstream_actor_id: vec![new],
+                removed_downstream_actor_id: vec![old],
+                hash_mapping: Default::default(),
+            }]
+        };
+        let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
+            UpdateMutation {
+                dispatchers: dispatcher_updates,
+                merges: Default::default(),
+                vnode_bitmaps: Default::default(),
+                dropped_actors: Default::default(),
+                actor_splits: Default::default(),
+                actor_new_dispatchers: Default::default(),
+            },
+        ));
+        barrier_test_env.inject_barrier(&b1, [actor_id]);
+        barrier_test_env
+            .shared_context
+            .local_barrier_manager
+            .flush_all_events()
+            .await;
+
         let executor = Box::new(DispatchExecutor::new(
             input,
             vec![broadcast_dispatcher, simple_dispatcher],
@@ -1253,27 +1280,6 @@ mod tests {
             .await
             .unwrap();
 
-        // 4. Send a configuration change barrier for broadcast dispatcher.
-        let dispatcher_updates = maplit::hashmap! {
-            actor_id => vec![PbDispatcherUpdate {
-                actor_id,
-                dispatcher_id: broadcast_dispatcher_id,
-                added_downstream_actor_id: vec![new],
-                removed_downstream_actor_id: vec![old],
-                hash_mapping: Default::default(),
-            }]
-        };
-        let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
-            UpdateMutation {
-                dispatchers: dispatcher_updates,
-                merges: Default::default(),
-                vnode_bitmaps: Default::default(),
-                dropped_actors: Default::default(),
-                actor_splits: Default::default(),
-                actor_new_dispatchers: Default::default(),
-            },
-        ));
-        barrier_test_env.inject_barrier(&b1, [actor_id]);
         tx.send(Message::Barrier(b1.clone().into_dispatcher()))
             .await
             .unwrap();

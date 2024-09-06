@@ -457,6 +457,14 @@ pub fn start(
                 table_info_statistic_history_times: config
                     .storage
                     .table_info_statistic_history_times,
+                actor_cnt_per_worker_parallelism_hard_limit: config
+                    .meta
+                    .developer
+                    .actor_cnt_per_worker_parallelism_hard_limit,
+                actor_cnt_per_worker_parallelism_soft_limit: config
+                    .meta
+                    .developer
+                    .actor_cnt_per_worker_parallelism_soft_limit,
             },
             config.system.into_init_system_params(),
             Default::default(),

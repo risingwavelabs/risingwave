@@ -40,19 +40,22 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
 
     // Register actors
     let actor_ids = vec![233, 234, 235];
-    let count = actor_ids.len();
-    let mut rxs = actor_ids
-        .clone()
-        .into_iter()
-        .map(register_sender)
-        .collect_vec();
 
     // Send a barrier to all actors
     let curr_epoch = test_epoch(2);
     let barrier = Barrier::new_test_barrier(curr_epoch);
     let epoch = barrier.epoch.prev;
 
-    test_env.inject_barrier(&barrier, actor_ids);
+    test_env.inject_barrier(&barrier, actor_ids.clone());
+
+    manager.flush_all_events().await;
+
+    let count = actor_ids.len();
+    let mut rxs = actor_ids
+        .clone()
+        .into_iter()
+        .map(register_sender)
+        .collect_vec();
 
     // Collect barriers from actors
     let collected_barriers = join_all(rxs.iter_mut().map(|(actor_id, rx)| async move {
@@ -105,6 +108,14 @@ async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
         .chain(once(extra_actor_id))
         .collect_vec();
 
+    // Prepare the barrier
+    let curr_epoch = test_epoch(2);
+    let barrier = Barrier::new_test_barrier(curr_epoch).with_stop();
+
+    test_env.inject_barrier(&barrier, actor_ids_to_collect.clone());
+
+    manager.flush_all_events().await;
+
     // Register actors
     let count = actor_ids_to_send.len();
     let mut rxs = actor_ids_to_send
@@ -113,17 +124,11 @@ async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
         .map(register_sender)
         .collect_vec();
 
-    // Prepare the barrier
-    let curr_epoch = test_epoch(2);
-    let barrier = Barrier::new_test_barrier(curr_epoch).with_stop();
-
     let mut barrier_subscriber = manager.subscribe_barrier(extra_actor_id);
 
     // Read the mutation after receiving the barrier from remote input.
     let mut mutation_reader = pin!(barrier_subscriber.recv());
     assert!(poll_fn(|cx| Poll::Ready(mutation_reader.as_mut().poll(cx).is_pending())).await);
-
-    test_env.inject_barrier(&barrier, actor_ids_to_collect);
 
     let recv_barrier = mutation_reader.await.unwrap();
     assert_eq!(
@@ -197,6 +202,8 @@ async fn test_late_register_barrier_sender() -> StreamResult<()> {
 
     test_env.inject_barrier(&barrier1, actor_ids_to_collect.clone());
     test_env.inject_barrier(&barrier2, actor_ids_to_collect.clone());
+
+    manager.flush_all_events().await;
 
     // register sender after inject barrier
     let mut rxs = actor_ids_to_send
