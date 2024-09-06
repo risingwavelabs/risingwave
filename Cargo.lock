@@ -5353,7 +5353,7 @@ dependencies = [
  "http 0.2.9",
  "thiserror",
  "tokio",
- "tonic 0.10.2",
+ "tonic 0.11.0",
  "tower",
  "tracing",
  "trust-dns-resolver 0.23.2",
@@ -9121,28 +9121,6 @@ dependencies = [
 
 [[package]]
 name = "prost-build"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8bdf592881d821b83d471f8af290226c8d51402259e9bb5be7f9f8bdebbb11ac"
-dependencies = [
- "bytes",
- "heck 0.4.1",
- "itertools 0.10.5",
- "log",
- "multimap 0.8.3",
- "once_cell",
- "petgraph",
- "prettyplease 0.2.15",
- "prost 0.12.1",
- "prost-types 0.12.1",
- "regex",
- "syn 2.0.66",
- "tempfile",
- "which",
-]
-
-[[package]]
-name = "prost-build"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5bb182580f71dd070f88d01ce3de9f4da5021db7115d2e1c3605a754153b77c1"
@@ -9231,15 +9209,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "213622a1460818959ac1181aaeb2dc9c7f63df720db7d788b3e24eacd1983e13"
 dependencies = [
  "prost 0.11.9",
-]
-
-[[package]]
-name = "prost-types"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e081b29f63d83a4bc75cfc9f3fe424f9156cf92d8a4f0c9407cce9a1b67327cf"
-dependencies = [
- "prost 0.12.1",
 ]
 
 [[package]]
@@ -10652,7 +10621,7 @@ dependencies = [
  "pretty_assertions",
  "prometheus",
  "prost 0.13.1",
- "prost-build 0.12.1",
+ "prost-build 0.13.1",
  "prost-reflect",
  "prost-types 0.13.1",
  "protobuf-native",
@@ -10925,7 +10894,7 @@ dependencies = [
  "sql-json-path",
  "thiserror",
  "thiserror-ext",
- "tonic 0.10.2",
+ "tonic 0.12.1",
  "tracing",
  "workspace-hack",
  "zstd 0.13.0",
@@ -14373,10 +14342,7 @@ dependencies = [
  "percent-encoding",
  "pin-project",
  "prost 0.12.1",
- "rustls 0.21.11",
- "rustls-pemfile 1.0.4",
  "tokio",
- "tokio-rustls 0.24.1",
  "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "tower",
  "tower-layer",
@@ -14403,7 +14369,10 @@ dependencies = [
  "percent-encoding",
  "pin-project",
  "prost 0.12.1",
+ "rustls-pemfile 2.1.1",
+ "rustls-pki-types",
  "tokio",
+ "tokio-rustls 0.25.0",
  "tokio-stream 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "tower",
  "tower-layer",
