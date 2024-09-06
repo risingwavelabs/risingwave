@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
-use risingwave_hummock_sdk::compaction_group::group_split::split_sst;
+use risingwave_hummock_sdk::compaction_group::group_split::split_sst_for_commit_epoch;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, to_prost_table_stats_map, PbTableStatsMap,
@@ -34,7 +34,6 @@ use sea_orm::TransactionTrait;
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
-use crate::hummock::manager::compaction_group_schedule::build_split_key_with_table_id;
 use crate::hummock::manager::transaction::{
     HummockVersionStatsTransaction, HummockVersionTransaction,
 };
@@ -440,15 +439,15 @@ impl HummockManager {
                     })
                     .sum();
 
-                let split_key = build_split_key_with_table_id(match_ids.last().unwrap() + 1);
-                let mut branch_sst = split_sst(
+                // let split_key = build_split_key_with_table_id(match_ids.last().unwrap() + 1);
+                let branch_sst = split_sst_for_commit_epoch(
                     &mut sst.sst_info,
                     &mut new_sst_id,
-                    split_key,
                     origin_sst_size - new_sst_size,
                     new_sst_size,
+                    match_ids,
                 );
-                std::mem::swap(&mut sst.sst_info, &mut branch_sst);
+
                 commit_sstables
                     .entry(group_id)
                     .or_default()
