@@ -140,10 +140,12 @@ impl HummockManager {
 
         // not need to split
         if table_id == *table_ids.first().unwrap() && is_vnode_split_to_right(vnode) {
+            println!("group_id {} table_id {} == *table_ids.first().unwrap() && is_vnode_split_to_right({:?})", parent_group_id, table_id, vnode);
             return Ok(parent_group_id);
         }
 
         if table_id == *table_ids.last().unwrap() && is_vnode_split_to_left(vnode) {
+            println!("group_id {} table_id {} == *table_ids.first().unwrap() && is_vnode_split_to_left({:?})", parent_group_id, table_id, vnode);
             return Ok(parent_group_id);
         }
 
@@ -643,6 +645,11 @@ impl HummockManager {
         checkpoint_secs: u64,
         created_tables: &HashSet<u32>,
     ) -> Result<()> {
+        println!(
+            "try_merge_compaction_group group {} next_group {} created_tables {:?}",
+            group.group_id, next_group.group_id, created_tables
+        );
+
         if group.table_statistic.is_empty() || next_group.table_statistic.is_empty() {
             return Err(Error::CompactionGroup(format!(
                 "group-{} or group-{} is empty",
@@ -668,19 +675,27 @@ impl HummockManager {
             group: &TableGroupInfo,
         ) -> bool {
             group.table_statistic.keys().all(|table_id| {
-                is_table_low_write_throughput(
+                let ret = is_table_low_write_throughput(
                     table_write_throughput,
                     *table_id,
                     checkpoint_secs,
                     window_size,
                     threshold,
-                )
+                );
+
+                println!("table_id {} is_low_write_throughput {}", table_id, ret);
+
+                ret
             })
         }
 
         // do not merge the compaction group which is creating
         if check_is_creating_compaction_group(group, created_tables) {
-            tracing::info!("Not Merge creating group {}", group.group_id);
+            tracing::info!(
+                "Not Merge creating group {} next_group {}",
+                group.group_id,
+                next_group.group_id
+            );
             return Err(Error::CompactionGroup(format!(
                 "group-{} is creating",
                 group.group_id
@@ -699,7 +714,11 @@ impl HummockManager {
             self.env.opts.min_table_split_write_throughput,
             group,
         ) {
-            tracing::info!("Not Merge high throughput group {}", group.group_id);
+            tracing::info!(
+                "Not Merge high throughput group {} next_group {}",
+                group.group_id,
+                next_group.group_id
+            );
             return Err(Error::CompactionGroup(format!(
                 "group-{} is high throughput",
                 group.group_id
@@ -722,9 +741,11 @@ impl HummockManager {
 
         if check_is_huge_group(self, group).await {
             tracing::info!(
-                "Not Merge huge group {} group_size {}",
+                "Not Merge huge group {} group_size {} next_group {} next_group_size {}",
                 group.group_id,
-                group.group_size
+                group.group_size,
+                next_group.group_id,
+                next_group.group_size
             );
             return Err(Error::CompactionGroup(format!(
                 "group-{} is huge group_size {}",
@@ -733,9 +754,13 @@ impl HummockManager {
         }
 
         if check_is_creating_compaction_group(next_group, created_tables) {
-            tracing::info!("Not Merge creating next group {}", next_group.group_id);
+            tracing::info!(
+                "Not Merge creating group {} next group {}",
+                group.group_id,
+                next_group.group_id
+            );
             return Err(Error::CompactionGroup(format!(
-                "right group-{} is creating",
+                "next_group-{} is creating",
                 next_group.group_id
             )));
         }
@@ -748,19 +773,26 @@ impl HummockManager {
             next_group,
         ) {
             tracing::info!(
-                "Not Merge high throughput next group {}",
+                "Not Merge high throughput group {} next group {}",
+                group.group_id,
                 next_group.group_id
             );
             return Err(Error::CompactionGroup(format!(
-                "right group-{} is high throughput",
+                "next_group-{} is high throughput",
                 next_group.group_id
             )));
         }
 
         if check_is_huge_group(self, next_group).await {
-            tracing::info!("Not Merge huge next group {}", next_group.group_id);
+            tracing::info!(
+                "Not Merge huge group {} group_size {} next_group {} next_group_size {}",
+                group.group_id,
+                group.group_size,
+                next_group.group_id,
+                next_group.group_size
+            );
             return Err(Error::CompactionGroup(format!(
-                "group-{} is huge",
+                "next_group-{} is huge",
                 next_group.group_id
             )));
         }
@@ -835,10 +867,23 @@ pub fn is_table_low_write_throughput(
                     low_write_throughput_count += 1;
                 }
             }
+        } else {
+            println!(
+                "table_id {} history.len {} < window_size {}",
+                table_id,
+                history.len(),
+                window_size
+            );
         }
+
+        println!(
+            "table_id {} low_write_throughput_count {} window_size {}",
+            table_id, low_write_throughput_count, window_size
+        );
 
         return low_write_throughput_count * 3 / 2 > window_size;
     }
 
-    false
+    println!("table_id {} not found in table_write_throughput", table_id);
+    true
 }

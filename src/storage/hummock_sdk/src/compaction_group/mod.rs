@@ -94,7 +94,8 @@ pub mod group_split {
     ) -> SstableInfo {
         let mut branch_table_info = origin_sst_info.clone();
         branch_table_info.sst_id = *new_sst_id;
-        origin_sst_info.sst_id = *new_sst_id + 1;
+        *new_sst_id += 1;
+        origin_sst_info.sst_id = *new_sst_id;
         *new_sst_id += 1;
 
         let (key_range_l, key_range_r) = {

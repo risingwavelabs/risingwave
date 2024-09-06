@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -460,8 +460,15 @@ impl HummockManager {
         let created_tables: HashSet<u32> = HashSet::from_iter(created_tables);
         let table_write_throughput = self.history_table_throughput.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
-        group_infos.sort_by_key(|group| group.group_id);
-        // group_infos.reverse();
+        group_infos.sort_by_key(|group| {
+            let table_ids = group
+                .table_statistic
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<BTreeSet<_>>();
+            table_ids.iter().next().cloned()
+        });
+        println!("on_handle_schedule_group group_infos: {:?}", group_infos);
 
         let group_count = group_infos.len();
         for group in &group_infos {
