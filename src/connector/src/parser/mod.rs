@@ -488,6 +488,16 @@ impl SourceStreamChunkRowWriter<'_> {
                             .map(|ele| ScalarRefImpl::Utf8(ele.split_id)),
                     ));
                 }
+                (_, &Some(AdditionalColumnType::Payload(_))) => {
+                    // Get the whole payload as a single column
+                    // The frontend check guarantees that row encode must be `SourceEncode::Json`
+                    // here fake a column named "." to represent the whole payload
+                    // see the json accessor hack in `impl Access for JsonAccess<'_>`
+                    let mut desc_mock = desc.clone();
+                    desc_mock.name = ".".to_string();
+                    desc_mock.additional_column.column_type = None;
+                    parse_field(&desc_mock)
+                }
                 (_, _) => {
                     // For normal columns, call the user provided closure.
                     parse_field(desc)

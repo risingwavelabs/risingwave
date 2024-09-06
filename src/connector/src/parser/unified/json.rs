@@ -646,6 +646,10 @@ impl<'a> JsonAccess<'a> {
 impl Access for JsonAccess<'_> {
     fn access<'a>(&'a self, path: &[&str], type_expected: &DataType) -> AccessResult<DatumCow<'a>> {
         let mut value = &self.value;
+        if path.len() == 1 && path[0] == "." {
+            return self.options.parse(value, type_expected);
+        }
+
         for (idx, &key) in path.iter().enumerate() {
             if let Some(sub_value) = if self.options.ignoring_keycase {
                 json_object_get_case_insensitive(value, key)
