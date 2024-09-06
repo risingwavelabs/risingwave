@@ -230,6 +230,8 @@ message AdditionalTableName {}
 
 message AdditionalCollectionName {}
 
+message AdditionalColumnPayload {}
+
 // this type means we read all headers as a whole
 message AdditionalColumnHeaders {}
 
@@ -246,6 +248,7 @@ message AdditionalColumn {
     AdditionalSchemaName schema_name = 9;
     AdditionalTableName table_name = 10;
     AdditionalCollectionName collection_name = 11;
+    AdditionalColumnPayload payload = 12;
   }
 }
 
@@ -258,4 +261,5 @@ enum AdditionalColumnType {
   ADDITIONAL_COLUMN_TYPE_HEADER = 5;
   ADDITIONAL_COLUMN_TYPE_FILENAME = 6;
   ADDITIONAL_COLUMN_TYPE_NORMAL = 7;
+  ADDITIONAL_COLUMN_TYPE_Payload = 8;
 }
