@@ -206,6 +206,7 @@ public class JDBCSink implements SinkWriter {
      * across multiple batches if only the JDBC connection is valid.
      */
     class JdbcStatements implements AutoCloseable {
+        static final int QUERY_TIMEOUT_SEC = 600;   // 10 minutes
         private PreparedStatement deleteStatement;
         private PreparedStatement upsertStatement;
         private PreparedStatement insertStatement;
@@ -339,6 +340,9 @@ public class JDBCSink implements SinkWriter {
             if (stmt == null) {
                 return;
             }
+            // if timeout occurs, a SQLTimeoutException will be thrown
+            // and we will retry to write the stream chunk in `JDBCSink.write`
+            stmt.setQueryTimeout(QUERY_TIMEOUT_SEC);
             LOG.debug("Executing statement: {}", stmt);
             stmt.executeBatch();
             stmt.clearParameters();
@@ -356,7 +360,8 @@ public class JDBCSink implements SinkWriter {
     }
 
     @Override
-    public void beginEpoch(long epoch) {}
+    public void beginEpoch(long epoch) {
+    }
 
     @Override
     public Optional<ConnectorServiceProto.SinkMetadata> barrier(boolean isCheckpoint) {
