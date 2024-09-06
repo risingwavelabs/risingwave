@@ -115,13 +115,10 @@ statement ok
 DROP SOURCE iceberg_t3_source;
 
 statement ok
+DROP TABLE s2 cascade;
+
+statement ok
 DROP MATERIALIZED VIEW mv1;
 
 statement ok
-DROP MATERIALIZED VIEW mv2;
-
-statement ok
 DROP TABLE s1;
-
-statement ok
-DROP TABLE s2;
