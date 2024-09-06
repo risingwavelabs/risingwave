@@ -18,10 +18,16 @@ CREATE TABLE s1 (i1 int, i2 varchar, i3 varchar) WITH (
     datagen.rows.per.second = '30000'
 ) FORMAT PLAIN ENCODE JSON;
 
+statement ok
+CREATE TABLE s2 (i1 int, i2 varchar, i3 varchar);
+
 sleep 2s
 
 statement ok
 CREATE MATERIALIZED VIEW mv1 AS SELECT * FROM s1;
+
+statement ok
+CREATE MATERIALIZED VIEW mv2 AS SELECT * FROM s2;
 
 statement ok
 CREATE SINK sink1 AS select * from mv1 WITH (
@@ -58,7 +64,25 @@ CREATE SINK sink2 AS select * from mv1 WITH (
 );
 
 statement ok
-CREATE SOURCE iceberg_t1_source
+CREATE SINK sink3 AS select * from mv2 WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    force_append_only = 'true',
+    database.name = 'demo_db',
+    table.name = 't3',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    commit_checkpoint_interval = 1,
+    create_table_if_not_exists = 'true'
+);
+
+statement ok
+CREATE SOURCE iceberg_t3_source
 WITH (
     connector = 'iceberg',
     s3.endpoint = 'http://127.0.0.1:9301',
@@ -68,18 +92,18 @@ WITH (
     catalog.type = 'storage',
     warehouse.path = 's3a://icebergdata/demo',
     database.name = 'demo_db',
-    table.name = 't1',
+    table.name = 't3',
 );
+
+query I
+select count(*) from iceberg_t3_source;
+----
+0
 
 sleep 20s
 
 statement ok
 flush;
-
-query I
-select count(*) from iceberg_t1_source;
-----
-0
 
 statement ok
 DROP SINK sink1;
@@ -88,10 +112,19 @@ statement ok
 DROP SINK sink2;
 
 statement ok
-DROP SOURCE iceberg_t1_source;
+DROP SINK sink3;
+
+statement ok
+DROP SOURCE iceberg_t3_source;
 
 statement ok
 DROP MATERIALIZED VIEW mv1;
 
 statement ok
+DROP MATERIALIZED VIEW mv2;
+
+statement ok
 DROP TABLE s1;
+
+statement ok
+DROP TABLE s2;
