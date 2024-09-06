@@ -790,8 +790,6 @@ message RelationIdInfos {
   map<uint32, FragmentIdToActorIdMap> map = 1;
 }
 
-
-
 message ActorCountPerParallelism {
   message WorkerActorCount {
     uint64 actor_count = 1;
