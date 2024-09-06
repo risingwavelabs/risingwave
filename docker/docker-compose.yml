@@ -60,6 +60,7 @@ services:
       ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
       RW_TELEMETRY_TYPE: ${RW_TELEMETRY_TYPE:-"docker-compose"}
       RW_SECRET_STORE_PRIVATE_KEY_HEX: ${RW_SECRET_STORE_PRIVATE_KEY_HEX:-0123456789abcdef}
+      RW_LICENSE_KEY: ${RW_LICENSE_KEY:-}
     container_name: risingwave-standalone
     healthcheck:
       test:
