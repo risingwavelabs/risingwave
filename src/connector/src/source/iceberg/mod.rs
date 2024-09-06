@@ -234,7 +234,15 @@ impl IcebergSplitEnumerator {
             }
             None => match table.metadata().current_snapshot() {
                 Some(snapshot) => snapshot.snapshot_id(),
-                None => bail!("Cannot find the current snapshot id in the iceberg table."),
+                None => {
+                    // If there is no snapshot, we will return a mock `IcebergSplit` with empty files.
+                    return Ok(vec![IcebergSplit {
+                        split_id: 0,
+                        snapshot_id: 0, // unused
+                        table_meta: TableMetadataJsonStr::serialize(table.metadata()),
+                        files: vec![],
+                    }]);
+                }
             },
         };
         let mut files = vec![];
