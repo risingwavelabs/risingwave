@@ -125,7 +125,7 @@ impl IcebergScanExecutor {
                 for (array, columns_name) in chunk.columns().iter().zip_eq(delete_column_names) {
                     let each_column_seq_num_map = eq_delete_file_scan_tasks_map
                         .entry(columns_name)
-                        .or_insert(HashMap::new());
+                        .or_default();
                     for datum in array.get_all_values() {
                         let entry = each_column_seq_num_map
                             .entry(datum)
@@ -194,7 +194,7 @@ impl IcebergScanExecutor {
                         .fold(visibilitys[0].clone(), |acc, bitmap| acc.bitand(bitmap))
                 };
                 let data = data
-                    .into_iter()
+                    .iter()
                     .zip_eq(column_names)
                     .filter_map(|(array, columns)| {
                         if chunk_schema_names.contains(&columns) {
