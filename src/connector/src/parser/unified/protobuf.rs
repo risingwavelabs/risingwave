@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use std::borrow::Cow;
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 
-use prost_reflect::{DescriptorPool, DynamicMessage, ReflectMessage};
+use prost_reflect::{DynamicMessage, ReflectMessage};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{DataType, DatumCow, ToOwnedDatum};
 use thiserror_ext::AsReport;
@@ -26,15 +26,11 @@ use crate::parser::unified::uncategorized;
 
 pub struct ProtobufAccess {
     message: DynamicMessage,
-    descriptor_pool: Arc<DescriptorPool>,
 }
 
 impl ProtobufAccess {
-    pub fn new(message: DynamicMessage, descriptor_pool: Arc<DescriptorPool>) -> Self {
-        Self {
-            message,
-            descriptor_pool,
-        }
+    pub fn new(message: DynamicMessage) -> Self {
+        Self { message }
     }
 }
 
@@ -59,10 +55,10 @@ impl Access for ProtobufAccess {
             })?;
 
         match self.message.get_field(&field_desc) {
-            Cow::Borrowed(value) => from_protobuf_value(&field_desc, value, &self.descriptor_pool),
+            Cow::Borrowed(value) => from_protobuf_value(&field_desc, value),
 
             // `Owned` variant occurs only if there's no such field and the default value is returned.
-            Cow::Owned(value) => from_protobuf_value(&field_desc, &value, &self.descriptor_pool)
+            Cow::Owned(value) => from_protobuf_value(&field_desc, &value)
                 // enforce `Owned` variant to avoid returning a reference to a temporary value
                 .map(|d| d.to_owned_datum().into()),
         }

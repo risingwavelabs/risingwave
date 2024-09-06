@@ -100,7 +100,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         let table = node.get_table()?;
 
         // FIXME: Lookup is now implemented without cell-based table API and relies on all vnodes
-        // being `DEFAULT_VNODE`, so we need to make the Arrange a singleton.
+        // being `SINGLETON_VNODE`, so we need to make the Arrange a singleton.
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let conflict_behavior =
             ConflictBehavior::from_protobuf(&table.handle_pk_conflict_behavior());

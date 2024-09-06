@@ -25,7 +25,7 @@ use either::Either;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::hash::{ActorMapping, VirtualNode, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::{bail, hash};
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::{
@@ -235,7 +235,8 @@ impl Scheduler {
         assert_eq!(scheduled_worker_slots.len(), parallelism);
 
         // Build the default hash mapping uniformly.
-        let default_hash_mapping = WorkerSlotMapping::build_from_ids(&scheduled_worker_slots);
+        let default_hash_mapping =
+            WorkerSlotMapping::build_from_ids(&scheduled_worker_slots, VirtualNode::COUNT);
 
         let single_scheduled = schedule_units_for_slots(&slots, 1, streaming_job_id)?;
         let default_single_worker_id = single_scheduled.keys().exactly_one().cloned().unwrap();

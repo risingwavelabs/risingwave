@@ -363,7 +363,9 @@ impl TableFragments {
                 return vec![];
             }
             if (fragment.fragment_type_mask
-                & (FragmentTypeFlag::Values as u32 | FragmentTypeFlag::StreamScan as u32))
+                & (FragmentTypeFlag::Values as u32
+                    | FragmentTypeFlag::StreamScan as u32
+                    | FragmentTypeFlag::SourceScan as u32))
                 != 0
             {
                 actor_ids.extend(fragment.actors.iter().map(|actor| actor.actor_id));

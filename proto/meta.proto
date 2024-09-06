@@ -791,3 +791,30 @@ message RelationIdInfos {
   // relation_id -> FragmentIdToActorIdMap
   map<uint32, FragmentIdToActorIdMap> map = 1;
 }
+
+message ActorCountPerParallelism {
+  message WorkerActorCount {
+    uint64 actor_count = 1;
+    uint64 parallelism = 2;
+  }
+  map<uint32, WorkerActorCount> worker_id_to_actor_count = 1;
+  uint64 hard_limit = 2;
+  uint64 soft_limit = 3;
+}
+
+message ClusterLimit {
+  oneof limit {
+    ActorCountPerParallelism actor_count = 1;
+    // TODO: limit DDL using compaction pending bytes
+  }
+}
+
+message GetClusterLimitsRequest {}
+
+message GetClusterLimitsResponse {
+  repeated ClusterLimit active_limits = 1;
+}
+
+service ClusterLimitService {
+  rpc GetClusterLimits(GetClusterLimitsRequest) returns (GetClusterLimitsResponse);
+}
