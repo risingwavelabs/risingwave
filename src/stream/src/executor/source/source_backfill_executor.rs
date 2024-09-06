@@ -42,7 +42,7 @@ use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 use crate::executor::source::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
 use crate::executor::UpdateMutation;
-use crate::task::CreateMviewProgress;
+use crate::task::CreateMviewProgressReporter;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub enum BackfillState {
@@ -92,7 +92,7 @@ pub struct SourceBackfillExecutorInner<S: StateStore> {
     /// Rate limit in rows/s.
     rate_limit_rps: Option<u32>,
 
-    progress: CreateMviewProgress,
+    progress: CreateMviewProgressReporter,
 }
 
 /// Local variables used in the backfill stage.
@@ -244,7 +244,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         system_params: SystemParamsReaderRef,
         backfill_state_store: BackfillStateTableHandler<S>,
         rate_limit_rps: Option<u32>,
-        progress: CreateMviewProgress,
+        progress: CreateMviewProgressReporter,
     ) -> Self {
         let source_split_change_count = metrics
             .source_split_change_count
