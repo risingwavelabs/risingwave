@@ -194,9 +194,9 @@ pub async fn start_serving_vnode_mapping_worker(
                                     let (workers, streaming_parallelisms) = fetch_serving_infos(&metadata_manager).await;
                                     let filtered_streaming_parallelisms = fragment_ids.iter().filter_map(|frag_id|{
                                         match streaming_parallelisms.get(frag_id) {
-                                            Some(parallelism) => Some((*frag_id, *parallelism))
+                                            Some(parallelism) => Some((*frag_id, *parallelism)),
                                             None => {
-                                                tracing::warn!(fragment_id = *frag_id, "streaming parallelism not found")
+                                                tracing::warn!(fragment_id = *frag_id, "streaming parallelism not found");
                                                 None
                                             }
                                         }
