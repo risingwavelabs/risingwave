@@ -28,6 +28,7 @@ clap = { workspace = true }
 comfy-table = "7"
 crepe = "0.1"
 easy-ext = "1"
+educe = "0.6"
 either = "1"
 enum-as-inner = "0.6"
 etcd-client = { workspace = true }

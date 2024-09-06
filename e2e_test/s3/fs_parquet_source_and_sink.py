@@ -65,11 +65,12 @@ def do_test(config, file_num, item_num_per_file, prefix):
     ) WITH (
         connector = 's3',
         match_pattern = '*.parquet',
-    s3.region_name = 'custom',
-    s3.bucket_name = 'hummock001',
-    s3.credentials.access = 'hummockadmin',
-    s3.credentials.secret = 'hummockadmin',
-    s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+        s3.region_name = '{config['S3_REGION']}',
+        s3.bucket_name = '{config['S3_BUCKET']}',
+        s3.credentials.access = '{config['S3_ACCESS_KEY']}',
+        s3.credentials.secret = '{config['S3_SECRET_KEY']}',
+        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}',
+        refresh.interval.sec = 1,
     ) FORMAT PLAIN ENCODE PARQUET;''')
 
     total_rows = file_num * item_num_per_file
@@ -133,11 +134,11 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         from {_table()} WITH (
         connector = 's3',
         match_pattern = '*.parquet',
-        s3.region_name = 'custom',
-        s3.bucket_name = 'hummock001',
-        s3.credentials.access = 'hummockadmin',
-        s3.credentials.secret = 'hummockadmin',
-        s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+        s3.region_name = '{config['S3_REGION']}',
+        s3.bucket_name = '{config['S3_BUCKET']}',
+        s3.credentials.access = '{config['S3_ACCESS_KEY']}',
+        s3.credentials.secret = '{config['S3_SECRET_KEY']}',
+        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}',
         s3.path = '',
         s3.file_type = 'parquet',
         type = 'append-only',

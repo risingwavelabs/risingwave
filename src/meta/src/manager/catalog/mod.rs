@@ -625,19 +625,20 @@ impl CatalogManager {
                 .notify_frontend(Operation::Delete, Info::Database(database))
                 .await;
 
-            let catalog_deleted_ids = tables_to_drop
+            let streaming_job_deleted_ids = tables_to_drop
                 .into_iter()
                 .filter(|table| valid_table_name(&table.name))
                 .map(|table| StreamingJobId::new(table.id))
+                .chain(sources_to_drop.iter().filter_map(|source| {
+                    source
+                        .info
+                        .as_ref()
+                        .and_then(|info| info.is_shared().then(|| StreamingJobId::new(source.id)))
+                }))
                 .chain(
                     sinks_to_drop
                         .into_iter()
                         .map(|sink| StreamingJobId::new(sink.id)),
-                )
-                .chain(
-                    subscriptions_to_drop
-                        .into_iter()
-                        .map(|subscription| StreamingJobId::new(subscription.id)),
                 )
                 .collect_vec();
             let source_deleted_ids = sources_to_drop
@@ -647,7 +648,7 @@ impl CatalogManager {
 
             Ok((
                 version,
-                catalog_deleted_ids,
+                streaming_job_deleted_ids,
                 source_deleted_ids,
                 connections_dropped,
             ))

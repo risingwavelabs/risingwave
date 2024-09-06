@@ -21,6 +21,9 @@ AzblobProperties:
     field_type: String
     required: false
     default: Default::default
+  - name: refresh.interval.sec
+    field_type: u64
+    required: false
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -73,6 +76,9 @@ GcsProperties:
     field_type: String
     required: false
     default: Default::default
+  - name: refresh.interval.sec
+    field_type: u64
+    required: false
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -201,13 +207,25 @@ KafkaProperties:
     field_type: String
     comments: Path to CA certificate file for verifying the broker's key.
     required: false
+  - name: properties.ssl.ca.pem
+    field_type: String
+    comments: CA certificate string (PEM format) for verifying the broker's key.
+    required: false
   - name: properties.ssl.certificate.location
     field_type: String
     comments: Path to client's certificate file (PEM).
     required: false
+  - name: properties.ssl.certificate.pem
+    field_type: String
+    comments: Client's public key string (PEM format) used for authentication.
+    required: false
   - name: properties.ssl.key.location
     field_type: String
     comments: Path to client's private key file (PEM).
+    required: false
+  - name: properties.ssl.key.pem
+    field_type: String
+    comments: Client's private key string (PEM format) used for authentication.
     required: false
   - name: properties.ssl.key.password
     field_type: String
@@ -831,6 +849,9 @@ OpendalS3Properties:
     field_type: bool
     required: false
     default: Default::default
+  - name: refresh.interval.sec
+    field_type: u64
+    required: false
 PosixFsProperties:
   fields:
   - name: posix_fs.root
@@ -842,6 +863,9 @@ PosixFsProperties:
     comments: The regex pattern to match files under root directory.
     required: false
     default: Default::default
+  - name: refresh.interval.sec
+    field_type: u64
+    required: false
   - name: compression_format
     field_type: CompressionFormat
     required: false

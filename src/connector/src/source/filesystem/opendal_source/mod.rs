@@ -39,9 +39,15 @@ pub const GCS_CONNECTOR: &str = "gcs";
 pub const OPENDAL_S3_CONNECTOR: &str = "s3_v2";
 pub const POSIX_FS_CONNECTOR: &str = "posix_fs";
 
+pub const DEFAULT_REFRESH_INTERVAL_SEC: u64 = 60;
+
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
 pub struct FsSourceCommon {
+    #[serde(rename = "refresh.interval.sec")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub refresh_interval_sec: Option<u64>,
+
     #[serde(rename = "recursive_scan", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub recursive_scan: Option<bool>,
@@ -64,13 +70,13 @@ pub struct GcsProperties {
     pub match_pattern: Option<String>,
 
     #[serde(flatten)]
+    pub fs_common: FsSourceCommon,
+
+    #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
 
     #[serde(rename = "compression_format", default = "Default::default")]
     pub compression_format: CompressionFormat,
-
-    #[serde(flatten)]
-    pub fs_common: FsSourceCommon,
 }
 
 impl UnknownFields for GcsProperties {
@@ -136,10 +142,10 @@ pub struct OpendalS3Properties {
     pub assume_role: Option<String>,
 
     #[serde(flatten)]
-    pub unknown_fields: HashMap<String, String>,
+    pub fs_common: FsSourceCommon,
 
     #[serde(flatten)]
-    pub fs_common: FsSourceCommon,
+    pub unknown_fields: HashMap<String, String>,
 }
 
 impl UnknownFields for OpendalS3Properties {
@@ -167,12 +173,12 @@ pub struct PosixFsProperties {
     pub match_pattern: Option<String>,
 
     #[serde(flatten)]
+    pub fs_common: FsSourceCommon,
+
+    #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
     #[serde(rename = "compression_format", default = "Default::default")]
     pub compression_format: CompressionFormat,
-
-    #[serde(flatten)]
-    pub fs_common: FsSourceCommon,
 }
 
 impl UnknownFields for PosixFsProperties {
@@ -205,12 +211,13 @@ pub struct AzblobProperties {
     pub match_pattern: Option<String>,
 
     #[serde(flatten)]
+    pub fs_common: FsSourceCommon,
+
+    #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
 
     #[serde(rename = "compression_format", default = "Default::default")]
     pub compression_format: CompressionFormat,
-    #[serde(flatten)]
-    pub fs_common: FsSourceCommon,
 }
 
 impl UnknownFields for AzblobProperties {

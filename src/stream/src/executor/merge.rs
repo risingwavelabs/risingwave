@@ -111,7 +111,7 @@ impl MergeExecutor {
             Some(
                 self.metrics
                     .merge_barrier_align_duration
-                    .with_label_values(&[
+                    .with_guarded_label_values(&[
                         &self.actor_context.id.to_string(),
                         &self.actor_context.fragment_id.to_string(),
                     ]),

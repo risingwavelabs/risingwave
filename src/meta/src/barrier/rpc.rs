@@ -263,39 +263,42 @@ impl ControlStreamManager {
             pre_applied_graph_info,
             applied_graph_info,
             actor_ids_to_pre_sync_mutation,
-            command_ctx.actors_to_create().map(|actors_to_create| {
-                actors_to_create
-                    .into_iter()
-                    .map(|(worker_id, actors)| {
-                        (
-                            worker_id,
-                            actors
-                                .into_iter()
-                                .map(|actor| BuildActorInfo {
-                                    actor: Some(actor),
-                                    // TODO: consider subscriber of backfilling mv
-                                    related_subscriptions: command_ctx
-                                        .subscription_info
-                                        .mv_depended_subscriptions
-                                        .iter()
-                                        .map(|(table_id, subscriptions)| {
-                                            (
-                                                table_id.table_id,
-                                                SubscriptionIds {
-                                                    subscription_ids: subscriptions
-                                                        .keys()
-                                                        .cloned()
-                                                        .collect(),
-                                                },
-                                            )
-                                        })
-                                        .collect(),
-                                })
-                                .collect_vec(),
-                        )
-                    })
-                    .collect()
-            }),
+            command_ctx
+                .command
+                .actors_to_create()
+                .map(|actors_to_create| {
+                    actors_to_create
+                        .into_iter()
+                        .map(|(worker_id, actors)| {
+                            (
+                                worker_id,
+                                actors
+                                    .into_iter()
+                                    .map(|actor| BuildActorInfo {
+                                        actor: Some(actor),
+                                        // TODO: consider subscriber of backfilling mv
+                                        related_subscriptions: command_ctx
+                                            .subscription_info
+                                            .mv_depended_subscriptions
+                                            .iter()
+                                            .map(|(table_id, subscriptions)| {
+                                                (
+                                                    table_id.table_id,
+                                                    SubscriptionIds {
+                                                        subscription_ids: subscriptions
+                                                            .keys()
+                                                            .cloned()
+                                                            .collect(),
+                                                    },
+                                                )
+                                            })
+                                            .collect(),
+                                    })
+                                    .collect_vec(),
+                            )
+                        })
+                        .collect()
+                }),
         )
     }
 

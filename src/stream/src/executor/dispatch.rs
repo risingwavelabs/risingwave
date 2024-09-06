@@ -92,7 +92,7 @@ impl DispatchExecutorMetrics {
             actor_output_buffer_blocking_duration_ns: self
                 .metrics
                 .actor_output_buffer_blocking_duration_ns
-                .with_label_values(&[
+                .with_guarded_label_values(&[
                     &self.actor_id_str,
                     &self.fragment_id_str,
                     dispatcher.dispatcher_id_str(),
@@ -755,7 +755,8 @@ impl Dispatcher for HashDataDispatcher {
         let num_outputs = self.outputs.len();
 
         // get hash value of every line by its key
-        let vnodes = VirtualNode::compute_chunk(chunk.data_chunk(), &self.keys);
+        let vnode_count = self.hash_mapping.len();
+        let vnodes = VirtualNode::compute_chunk(chunk.data_chunk(), &self.keys, vnode_count);
 
         tracing::debug!(target: "events::stream::dispatch::hash", "\n{}\n keys {:?} => {:?}", chunk.to_pretty(), self.keys, vnodes);
 

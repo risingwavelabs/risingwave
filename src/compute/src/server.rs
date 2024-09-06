@@ -288,7 +288,7 @@ pub async fn compute_node_serve(
     let batch_mgr = Arc::new(BatchManager::new(
         config.batch.clone(),
         batch_manager_metrics,
-        batch_mem_limit(compute_memory_bytes),
+        batch_mem_limit(compute_memory_bytes, opts.role.for_serving()),
     ));
 
     // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as

@@ -514,6 +514,12 @@ pub trait FromArrow {
             LargeBinary => self.from_large_binary()?,
             List(field) => DataType::List(Box::new(self.from_field(field)?)),
             Struct(fields) => DataType::Struct(self.from_fields(fields)?),
+            Map(field, _is_sorted) => {
+                let entries = self.from_field(field)?;
+                DataType::Map(MapType::try_from_entries(entries).map_err(|e| {
+                    ArrayError::from_arrow(format!("invalid arrow map field: {field:?}, err: {e}"))
+                })?)
+            }
             t => {
                 return Err(ArrayError::from_arrow(format!(
                     "unsupported arrow data type: {t:?}"
@@ -588,6 +594,7 @@ pub trait FromArrow {
             LargeBinary => self.from_large_binary_array(array.as_any().downcast_ref().unwrap()),
             List(_) => self.from_list_array(array.as_any().downcast_ref().unwrap()),
             Struct(_) => self.from_struct_array(array.as_any().downcast_ref().unwrap()),
+            Map(_, _) => self.from_map_array(array.as_any().downcast_ref().unwrap()),
             t => Err(ArrayError::from_arrow(format!(
                 "unsupported arrow data type: {t:?}",
             ))),
@@ -753,6 +760,21 @@ pub trait FromArrow {
                 .try_collect()?,
             (0..array.len()).map(|i| array.is_valid(i)).collect(),
         )))
+    }
+
+    fn from_map_array(&self, array: &arrow_array::MapArray) -> Result<ArrayImpl, ArrayError> {
+        use arrow_array::Array;
+        let struct_array = self.from_struct_array(array.entries())?;
+        let list_array = ListArray {
+            value: Box::new(struct_array),
+            bitmap: match array.nulls() {
+                Some(nulls) => nulls.iter().collect(),
+                None => Bitmap::ones(array.len()),
+            },
+            offsets: array.offsets().iter().map(|o| *o as u32).collect(),
+        };
+
+        Ok(ArrayImpl::Map(MapArray { inner: list_array }))
     }
 }
 
