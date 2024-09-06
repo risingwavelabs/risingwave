@@ -1235,6 +1235,8 @@ pub async fn handle_create_table(
         session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");
     }
 
+    session.check_cluster_limits().await?;
+
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         table_name.clone(),
         StatementType::CREATE_TABLE,

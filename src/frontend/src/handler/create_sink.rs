@@ -419,6 +419,8 @@ pub async fn handle_create_sink(
 ) -> Result<RwPgResponse> {
     let session = handle_args.session.clone();
 
+    session.check_cluster_limits().await?;
+
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         stmt.sink_name.clone(),
         StatementType::CREATE_SINK,
