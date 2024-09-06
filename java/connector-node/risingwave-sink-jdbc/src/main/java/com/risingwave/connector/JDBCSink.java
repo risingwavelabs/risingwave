@@ -206,7 +206,7 @@ public class JDBCSink implements SinkWriter {
      * across multiple batches if only the JDBC connection is valid.
      */
     class JdbcStatements implements AutoCloseable {
-        static final int QUERY_TIMEOUT_SEC = 600;   // 10 minutes
+        static final int QUERY_TIMEOUT_SEC = 600; // 10 minutes
         private PreparedStatement deleteStatement;
         private PreparedStatement upsertStatement;
         private PreparedStatement insertStatement;
@@ -360,8 +360,7 @@ public class JDBCSink implements SinkWriter {
     }
 
     @Override
-    public void beginEpoch(long epoch) {
-    }
+    public void beginEpoch(long epoch) {}
 
     @Override
     public Optional<ConnectorServiceProto.SinkMetadata> barrier(boolean isCheckpoint) {
