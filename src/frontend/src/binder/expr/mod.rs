@@ -89,6 +89,17 @@ impl Binder {
                                 .into(),
                         )
                     }
+                } else if let Some(ctx) = self.secure_compare_context.as_ref() {
+                    if ident.real_value() == ctx.secret_name {
+                        Ok(InputRef::new(0, DataType::Varchar).into())
+                    } else if ident.real_value() == ctx.column_name {
+                        Ok(InputRef::new(1, DataType::Bytea).into())
+                    } else {
+                        Err(
+                            ErrorCode::ItemNotFound(format!("Unknown arg: {}", ident.real_value()))
+                                .into(),
+                        )
+                    }
                 } else {
                     self.bind_column(&[ident])
                 }

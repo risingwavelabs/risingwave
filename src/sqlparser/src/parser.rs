@@ -22,6 +22,7 @@ use alloc::{
 };
 use core::fmt;
 
+use ddl::WebhookSourceInfo;
 use itertools::Itertools;
 use tracing::{debug, instrument};
 use winnow::combinator::{alt, cut_err, dispatch, fail, opt, peek, preceded, repeat, separated};
@@ -2550,14 +2551,23 @@ impl Parser<'_> {
         let include_options = self.parse_include_options()?;
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
-        let with_options = self.parse_with_properties()?;
+        let mut with_options = self.parse_with_properties()?;
 
         let option = with_options
             .iter()
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
         let connector = option.map(|opt| opt.value.to_string());
-
-        let format_encode = if let Some(connector) = connector {
+        let contain_webhook = if let Some(connector) = &connector
+            && connector.contains("webhook")
+        {
+            with_options.clear();
+            true
+        } else {
+            false
+        };
+        let format_encode = if let Some(connector) = connector
+            && !contain_webhook
+        {
             Some(self.parse_format_encode_with_connector(&connector, false)?)
         } else {
             None // Table is NOT created with an external connector.
@@ -2584,6 +2594,53 @@ impl Parser<'_> {
             None
         };
 
+        let webhook_info = if contain_webhook && self.parse_keyword(Keyword::VALIDATE) {
+            self.expect_keyword(Keyword::SECRET)?;
+            let secret_ref = SecretRef {
+                secret_name: self.parse_object_name()?,
+                ref_as: SecretRefAsType::Text,
+            };
+            if self.parse_keywords(&[Keyword::AS, Keyword::FILE]) {
+                parser_err!("Secret for SECURE_COMPARE() does not support AS FILE");
+            };
+            self.expect_keyword(Keyword::AS)?;
+            let function_name = self.parse_identifier()?;
+            if function_name.real_value().to_uppercase() != *"SECURE_COMPARE" {
+                parser_err!(
+                    "SECURE_COMPARE() is the only function supported for secret validation"
+                );
+            }
+            self.expect_token(&Token::LParen)?;
+            let headers = self.parse_identifier()?;
+            if headers.real_value().to_uppercase() != *"HEADERS" {
+                parser_err!("The first argument of SECURE_COMPARE() should be like `HEADERS ->> {{header_key}}`");
+            }
+            self.expect_token(&Token::LongArrow)?;
+            let header_key = self.parse_literal_string()?;
+            self.expect_token(&Token::Comma)?;
+            let checkpoint = *self;
+            let signature_expr = if let Ok(ident) = self.parse_identifier()
+                && !matches!(self.peek_token().token, Token::LParen)
+            {
+                // secret name
+                Expr::Identifier(ident)
+            } else {
+                // function to generate signature, e.g., HMAC(secret, payload, 'sha256')
+                *self = checkpoint;
+                self.parse_function()?
+            };
+
+            self.expect_token(&Token::RParen)?;
+
+            Some(WebhookSourceInfo {
+                secret_ref,
+                header_key,
+                signature_expr,
+            })
+        } else {
+            None
+        };
+
         Ok(Statement::CreateTable {
             name: table_name,
             temporary,
@@ -2601,6 +2658,7 @@ impl Parser<'_> {
             query,
             cdc_table_info,
             include_column_options: include_options,
+            webhook_info,
         })
     }
 
@@ -5079,7 +5137,6 @@ impl Parser<'_> {
 
         let source = Box::new(self.parse_query()?);
         let returning = self.parse_returning(Optional)?;
-
         Ok(Statement::Insert {
             table_name,
             columns,

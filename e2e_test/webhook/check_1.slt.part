@@ -1,0 +1,9 @@
+query TT
+select data ->> 'source', data->> 'auth_algo' from github_sha256;
+----
+github sha256
+
+query TT
+select data ->> 'source', data->> 'auth_algo' from github_sha1;
+----
+github sha1

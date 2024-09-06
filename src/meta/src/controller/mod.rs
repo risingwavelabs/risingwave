@@ -198,6 +198,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             retention_seconds: value.0.retention_seconds.map(|id| id as u32),
             cdc_table_id: value.0.cdc_table_id,
             maybe_vnode_count: VnodeCount::set(value.0.vnode_count).to_protobuf(),
+            webhook_info: value.0.webhook_info.map(|info| info.to_protobuf()),
         }
     }
 }

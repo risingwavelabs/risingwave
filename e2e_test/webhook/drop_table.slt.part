@@ -1,0 +1,7 @@
+
+statement ok
+DROP TABLE github_sha256;
+
+statement ok
+DROP TABLE github_sha1;
+

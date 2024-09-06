@@ -1,0 +1,21 @@
+
+statement ok
+create table github_sha1 (
+  data JSONB
+) WITH (
+  connector = 'webhook',
+) VALIDATE SECRET test_secret AS secure_compare(
+  headers->>'X-Hub-Signature',
+  hmac(test_secret, data, 'sha1')
+);
+
+statement ok
+create table github_sha256 (
+  data JSONB
+) WITH (
+  connector = 'webhook',
+) VALIDATE SECRET test_secret AS secure_compare(
+  headers->>'X-Hub-Signature-256',
+  hmac(test_secret, data, 'sha256')
+);
+

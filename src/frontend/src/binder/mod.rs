@@ -132,6 +132,15 @@ pub struct Binder {
 
     /// The temporary sources that will be used during binding phase
     temporary_source_manager: TemporarySourceManager,
+
+    /// information for `secure_compare` function
+    secure_compare_context: Option<SecureCompareContext>,
+}
+
+#[derive(Default, Clone, Debug)]
+pub struct SecureCompareContext {
+    pub column_name: String,
+    pub secret_name: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -332,6 +341,7 @@ impl Binder {
             param_types: ParameterTypes::new(param_types),
             udf_context: UdfContext::new(),
             temporary_source_manager: session.temporary_source_manager(),
+            secure_compare_context: None,
         }
     }
 
@@ -352,6 +362,15 @@ impl Binder {
 
     pub fn new_for_ddl(session: &SessionImpl) -> Binder {
         Self::new_inner(session, BindFor::Ddl, vec![])
+    }
+
+    pub fn new_for_ddl_with_secure_compare(
+        session: &SessionImpl,
+        ctx: SecureCompareContext,
+    ) -> Binder {
+        let mut binder = Self::new_inner(session, BindFor::Ddl, vec![]);
+        binder.secure_compare_context = Some(ctx);
+        binder
     }
 
     pub fn new_for_system(session: &SessionImpl) -> Binder {

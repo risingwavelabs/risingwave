@@ -24,6 +24,7 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_pb::catalog::PbWebhookSourceInfo;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::derive_columns;
@@ -110,6 +111,7 @@ impl StreamMaterialize {
             cardinality,
             retention_seconds,
             create_type,
+            None,
         )?;
 
         Ok(Self::new(input, table))
@@ -135,6 +137,7 @@ impl StreamMaterialize {
         version: Option<TableVersion>,
         retention_seconds: Option<NonZeroU32>,
         cdc_table_id: Option<String>,
+        webhook_info: Option<PbWebhookSourceInfo>,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
@@ -153,6 +156,7 @@ impl StreamMaterialize {
             Cardinality::unknown(), // unknown cardinality for tables
             retention_seconds,
             CreateType::Foreground,
+            webhook_info,
         )?;
 
         table.cdc_table_id = cdc_table_id;
@@ -227,6 +231,7 @@ impl StreamMaterialize {
         cardinality: Cardinality,
         retention_seconds: Option<NonZeroU32>,
         create_type: CreateType,
+        webhook_info: Option<PbWebhookSourceInfo>,
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
@@ -285,6 +290,7 @@ impl StreamMaterialize {
             retention_seconds: retention_seconds.map(|i| i.into()),
             cdc_table_id: None,
             vnode_count: VnodeCount::Placeholder, // will be filled in by the meta service later
+            webhook_info,
         })
     }
 

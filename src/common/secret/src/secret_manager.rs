@@ -158,6 +158,28 @@ impl LocalSecretManager {
         Ok(options)
     }
 
+    pub fn fill_secret(&self, secret_ref: PbSecretRef) -> SecretResult<String> {
+        let secret_guard = self.secrets.read();
+        let secret_id = secret_ref.secret_id;
+        let pb_secret_bytes = secret_guard
+            .get(&secret_id)
+            .ok_or(SecretError::ItemNotFound(secret_id))?;
+        let secret_value_bytes = Self::get_secret_value(pb_secret_bytes)?;
+        match secret_ref.ref_as() {
+            RefAsType::Text => {
+                // We converted the secret string from sql to bytes using `as_bytes` in frontend.
+                // So use `from_utf8` here to convert it back to string.
+                Ok(String::from_utf8(secret_value_bytes.clone())?)
+            }
+            RefAsType::File => {
+                let path_str =
+                    self.get_or_init_secret_file(secret_id, secret_value_bytes.clone())?;
+                Ok(path_str)
+            }
+            RefAsType::Unspecified => Err(SecretError::UnspecifiedRefType(secret_id)),
+        }
+    }
+
     /// Get the secret file for the given secret id and return the path string. If the file does not exist, create it.
     /// WARNING: This method should be called only when the secret manager is locked.
     fn get_or_init_secret_file(

@@ -197,6 +197,7 @@ message ExprNode {
     INET_NTOA = 329;
     QUOTE_LITERAL = 330;
     QUOTE_NULLABLE = 331;
+    HMAC = 332;
 
     // Unary operators
     NEG = 401;
