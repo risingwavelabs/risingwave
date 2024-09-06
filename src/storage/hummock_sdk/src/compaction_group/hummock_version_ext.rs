@@ -1330,7 +1330,8 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
 pub fn split_sst(sst_info: &mut SstableInfo, new_sst_id: &mut u64) -> SstableInfo {
     let mut branch_table_info = sst_info.clone();
     branch_table_info.sst_id = *new_sst_id;
-    sst_info.sst_id = *new_sst_id + 1;
+    *new_sst_id += 1;
+    sst_info.sst_id = *new_sst_id;
     *new_sst_id += 1;
 
     branch_table_info
