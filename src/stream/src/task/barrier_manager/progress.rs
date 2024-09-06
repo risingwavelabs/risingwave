@@ -213,6 +213,24 @@ impl CreateMviewProgressReporter {
         );
     }
 
+    pub fn update_for_source_backfill(
+        &mut self,
+        epoch: EpochPair,
+        current_consumed_rows: ConsumedRows,
+    ) {
+        match self.state {
+            Some(BackfillState::ConsumingUpstream(last_epoch, _last_consumed_rows)) => {
+                debug_assert_eq!(last_epoch, 0);
+            }
+            Some(BackfillState::Done(_)) => unreachable!(),
+            None => {}
+        };
+        self.update_inner(
+            epoch,
+            BackfillState::ConsumingUpstream(0, current_consumed_rows),
+        );
+    }
+
     /// Finish the progress. If the progress is already finished, then perform no-op.
     /// `current_epoch` should be provided to locate the barrier under concurrent checkpoint.
     pub fn finish(&mut self, epoch: EpochPair, current_consumed_rows: ConsumedRows) {

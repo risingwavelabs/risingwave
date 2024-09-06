@@ -589,10 +589,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     .await?;
 
                                 if self.should_report_finished(&backfill_stage.states) {
-                                    // TODO: use a specialized progress for source
-                                    // Currently, `CreateMviewProgress` is designed for MV backfill, and rw_ddl_progress calculates
-                                    // progress based on the number of consumed rows and an estimated total number of rows from hummock.
-                                    // For now, we just rely on the same code path, and for source backfill, the progress will always be 99.99%.
                                     tracing::debug!("progress finish");
                                     self.progress.finish(
                                         barrier.epoch,
