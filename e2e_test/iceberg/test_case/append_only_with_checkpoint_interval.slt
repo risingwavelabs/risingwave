@@ -112,9 +112,6 @@ statement ok
 DROP SINK sink2;
 
 statement ok
-DROP SINK sink3;
-
-statement ok
 DROP SOURCE iceberg_t3_source;
 
 statement ok
