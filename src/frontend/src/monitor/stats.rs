@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::mem;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
+use std::time::Duration;
 
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
@@ -91,7 +93,7 @@ pub struct CursorMetrics {
     pub subscription_cursor_query_duration: HistogramVec,
     pub subscription_cursor_declare_duration: HistogramVec,
     pub subscription_cursor_fetch_duration: HistogramVec,
-    _cursor_metrics_collector: CursorMetricsCollector,
+    _cursor_metrics_collector: Arc<CursorMetricsCollector>,
 }
 
 impl CursorMetrics {
@@ -126,7 +128,7 @@ impl CursorMetrics {
         let subscription_cursor_fetch_duration =
             register_histogram_vec_with_registry!(opts, &["subscription_name"], registry).unwrap();
         Self {
-            _cursor_metrics_collector: CursorMetricsCollector::new(session_map, registry),
+            _cursor_metrics_collector: Arc::new(CursorMetricsCollector::new(session_map, registry)),
             subscription_cursor_error_count,
             subscription_cursor_query_duration,
             subscription_cursor_declare_duration,
@@ -141,12 +143,14 @@ pub struct PeriodicCursorMetrics {
     pub subscription_cursor_last_fetch_duration: HashMap<String, f64>,
 }
 
-#[derive(Clone)]
 struct CursorMetricsCollector {
-    join_handle: Arc<JoinHandle<()>>,
+    _join_handle: JoinHandle<()>,
+    shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
 impl CursorMetricsCollector {
     fn new(session_map: SessionMapRef, registry: &Registry) -> Self {
+        const COLLECT_INTERVAL_SECONDS: u64 = 60;
+
         let subsription_cursor_nums = register_int_gauge_with_registry!(
             "subsription_cursor_nums",
             "The number of subscription cursor",
@@ -168,9 +172,22 @@ impl CursorMetricsCollector {
         let subscription_cursor_last_fetch_duration =
             register_histogram_vec_with_registry!(opts, &["subscription_name"], registry).unwrap();
 
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
+            let mut monitor_interval =
+                tokio::time::interval(Duration::from_secs(COLLECT_INTERVAL_SECONDS));
+            monitor_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                tokio::select! {
+                    // Wait for interval
+                    _ = monitor_interval.tick() => {},
+                    // Shutdown monitor
+                    _ = &mut shutdown_rx => {
+                        tracing::info!("Fragment info monitor is stopped");
+                        return;
+                    }
+                }
+
                 let session_vec = { session_map.read().values().cloned().collect::<Vec<_>>() };
                 let mut subsription_cursor_nums_value = 0;
                 let mut invalid_subsription_cursor_nums_value = 0;
@@ -196,12 +213,15 @@ impl CursorMetricsCollector {
             }
         });
         Self {
-            join_handle: Arc::new(join_handle),
+            _join_handle: join_handle,
+            shutdown_tx: Some(shutdown_tx),
         }
     }
 }
 impl Drop for CursorMetricsCollector {
     fn drop(&mut self) {
-        self.join_handle.abort();
+        if let Some(shutdown_tx) = mem::take(&mut self.shutdown_tx) {
+            shutdown_tx.send(()).unwrap();
+        }
     }
 }

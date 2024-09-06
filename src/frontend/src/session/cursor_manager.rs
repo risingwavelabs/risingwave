@@ -800,12 +800,14 @@ impl CursorManager {
                 subsription_cursor_nums += 1;
                 if matches!(subscription_cursor.state, State::Invalid) {
                     invalid_subsription_cursor_nums += 1;
+                } else {
+                    let fetch_duration =
+                        subscription_cursor.last_fetch.elapsed().as_millis() as f64;
+                    subscription_cursor_last_fetch_duration.insert(
+                        subscription_cursor.subscription.name.clone(),
+                        fetch_duration,
+                    );
                 }
-                let fetch_duration = subscription_cursor.last_fetch.elapsed().as_millis() as f64;
-                subscription_cursor_last_fetch_duration.insert(
-                    subscription_cursor.subscription.name.clone(),
-                    fetch_duration,
-                );
             }
         }
         PeriodicCursorMetrics {
