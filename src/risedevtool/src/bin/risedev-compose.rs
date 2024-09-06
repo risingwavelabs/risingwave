@@ -82,11 +82,11 @@ fn main() -> Result<()> {
             )
             .collect();
 
-        let (config_path, expanded_config) =
+        let (config_path, _env, expanded_config) =
             ConfigExpander::expand_with_extra_info(".", &opts.profile, extra_info)?;
         (expanded_config, Some(compose_deploy_config), config_path)
     } else {
-        let (config_path, expanded_config) = ConfigExpander::expand(".", &opts.profile)?;
+        let (config_path, _env, expanded_config) = ConfigExpander::expand(".", &opts.profile)?;
         (expanded_config, None, config_path)
     };
 

@@ -372,6 +372,9 @@ pub(super) struct PartialGraphManagedBarrierState {
     prev_barrier_table_ids: Option<(EpochPair, HashSet<TableId>)>,
 
     /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
+    ///
+    /// This is updated by [`super::CreateMviewProgress::update`] and will be reported to meta
+    /// in [`BarrierCompleteResult`].
     pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
 
     pub(super) state_store: StateStoreImpl,

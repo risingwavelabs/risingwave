@@ -67,7 +67,12 @@ pub enum ErrorKind {
     ),
 
     #[error("Sink error: sink_id={1}, error: {0}")]
-    SinkError(SinkError, u32),
+    SinkError(
+        #[source]
+        #[backtrace]
+        SinkError,
+        u32,
+    ),
 
     #[error(transparent)]
     RpcError(
@@ -90,7 +95,11 @@ pub enum ErrorKind {
     AlignBarrier(Box<Barrier>, Box<Barrier>),
 
     #[error("Connector error: {0}")]
-    ConnectorError(BoxedError),
+    ConnectorError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
 
     #[error(transparent)]
     DmlError(

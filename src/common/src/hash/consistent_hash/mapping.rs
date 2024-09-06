@@ -105,26 +105,26 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
     ///
     /// For example, if `items` is `[0, 1, 2]`, and the total vnode count is 10, we'll generate
     /// mapping like `[0, 0, 0, 0, 1, 1, 1, 2, 2, 2]`.
-    pub fn new_uniform(items: impl ExactSizeIterator<Item = T::Item>) -> Self {
+    pub fn new_uniform(items: impl ExactSizeIterator<Item = T::Item>, vnode_count: usize) -> Self {
         // If the number of items is greater than the total vnode count, no vnode will be mapped to
         // some items and the mapping will be invalid.
-        assert!(items.len() <= VirtualNode::COUNT);
+        assert!(items.len() <= vnode_count);
 
         let mut original_indices = Vec::with_capacity(items.len());
         let mut data = Vec::with_capacity(items.len());
 
-        let hash_shard_size = VirtualNode::COUNT / items.len();
-        let mut one_more_count = VirtualNode::COUNT % items.len();
+        let hash_shard_size = vnode_count / items.len();
+        let mut one_more_count = vnode_count % items.len();
         let mut init_bound = 0;
 
         for item in items {
-            let vnode_count = if one_more_count > 0 {
+            let count = if one_more_count > 0 {
                 one_more_count -= 1;
                 hash_shard_size + 1
             } else {
                 hash_shard_size
             };
-            init_bound += vnode_count;
+            init_bound += count;
 
             original_indices.push(init_bound as u32 - 1);
             data.push(item);
@@ -141,10 +141,11 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
 
     /// Create a vnode mapping where all vnodes are mapped to the same single item.
     pub fn new_single(item: T::Item) -> Self {
-        Self::new_uniform(std::iter::once(item))
+        // TODO(var-vnode): always 1 correct?
+        Self::new_uniform(std::iter::once(item), 1)
     }
 
-    /// The length of the vnode in this mapping, typically [`VirtualNode::COUNT`].
+    /// The length (or count) of the vnode in this mapping.
     pub fn len(&self) -> usize {
         self.original_indices
             .last()
@@ -204,12 +205,13 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
     /// Convert this vnode mapping to a mapping from items to bitmaps, where each bitmap represents
     /// the vnodes mapped to the item.
     pub fn to_bitmaps(&self) -> HashMap<T::Item, Bitmap> {
+        let vnode_count = self.len();
         let mut vnode_bitmaps = HashMap::new();
 
         for (vnode, item) in self.iter_with_vnode() {
             vnode_bitmaps
                 .entry(item)
-                .or_insert_with(|| BitmapBuilder::zeroed(VirtualNode::COUNT))
+                .or_insert_with(|| BitmapBuilder::zeroed(vnode_count))
                 .set(vnode.to_index(), true);
         }
 
@@ -222,10 +224,11 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
     /// Create a vnode mapping from the given mapping from items to bitmaps, where each bitmap
     /// represents the vnodes mapped to the item.
     pub fn from_bitmaps(bitmaps: &HashMap<T::Item, Bitmap>) -> Self {
-        let mut items = vec![None; VirtualNode::COUNT];
+        let vnode_count = bitmaps.values().next().expect("empty bitmaps").len();
+        let mut items = vec![None; vnode_count];
 
         for (&item, bitmap) in bitmaps {
-            assert_eq!(bitmap.len(), VirtualNode::COUNT);
+            assert_eq!(bitmap.len(), vnode_count);
             for idx in bitmap.iter_ones() {
                 if let Some(prev) = items[idx].replace(item) {
                     panic!("mapping at index `{idx}` is set to both `{prev:?}` and `{item:?}`");
@@ -241,9 +244,8 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         Self::from_expanded(&items)
     }
 
-    /// Create a vnode mapping from the expanded slice of items with length [`VirtualNode::COUNT`].
+    /// Create a vnode mapping from the expanded slice of items.
     pub fn from_expanded(items: &[T::Item]) -> Self {
-        assert_eq!(items.len(), VirtualNode::COUNT);
         let (original_indices, data) = compress_data(items);
         Self {
             original_indices,
@@ -251,7 +253,7 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         }
     }
 
-    /// Convert this vnode mapping to a expanded vector of items with length [`VirtualNode::COUNT`].
+    /// Convert this vnode mapping to a expanded vector of items.
     pub fn to_expanded(&self) -> ExpandedMapping<T> {
         self.iter().collect()
     }
@@ -353,8 +355,8 @@ impl ActorMapping {
 
 impl WorkerSlotMapping {
     /// Create a uniform worker mapping from the given worker ids
-    pub fn build_from_ids(worker_slot_ids: &[WorkerSlotId]) -> Self {
-        Self::new_uniform(worker_slot_ids.iter().cloned())
+    pub fn build_from_ids(worker_slot_ids: &[WorkerSlotId], vnode_count: usize) -> Self {
+        Self::new_uniform(worker_slot_ids.iter().cloned(), vnode_count)
     }
 
     /// Create a worker mapping from the protobuf representation.
@@ -403,18 +405,18 @@ mod tests {
     type TestMapping = VnodeMapping<Test>;
     type Test2Mapping = VnodeMapping<Test2>;
 
-    const COUNTS: &[usize] = &[1, 3, 12, 42, VirtualNode::COUNT];
+    const COUNTS: &[usize] = &[1, 3, 12, 42, VirtualNode::COUNT_FOR_TEST];
 
     fn uniforms() -> impl Iterator<Item = TestMapping> {
         COUNTS
             .iter()
-            .map(|&count| TestMapping::new_uniform(0..count as u32))
+            .map(|&count| TestMapping::new_uniform(0..count as u32, VirtualNode::COUNT_FOR_TEST))
     }
 
     fn randoms() -> impl Iterator<Item = TestMapping> {
         COUNTS.iter().map(|&count| {
             let raw = repeat_with(|| rand::thread_rng().gen_range(0..count as u32))
-                .take(VirtualNode::COUNT)
+                .take(VirtualNode::COUNT_FOR_TEST)
                 .collect_vec();
             TestMapping::from_expanded(&raw)
         })
@@ -427,7 +429,7 @@ mod tests {
     #[test]
     fn test_uniform() {
         for vnode_mapping in uniforms() {
-            assert_eq!(vnode_mapping.len(), VirtualNode::COUNT);
+            assert_eq!(vnode_mapping.len(), VirtualNode::COUNT_FOR_TEST);
             let item_count = vnode_mapping.iter_unique().count();
 
             let mut check: HashMap<u32, Vec<_>> = HashMap::new();

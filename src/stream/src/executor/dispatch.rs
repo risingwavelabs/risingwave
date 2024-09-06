@@ -755,7 +755,8 @@ impl Dispatcher for HashDataDispatcher {
         let num_outputs = self.outputs.len();
 
         // get hash value of every line by its key
-        let vnodes = VirtualNode::compute_chunk(chunk.data_chunk(), &self.keys);
+        let vnode_count = self.hash_mapping.len();
+        let vnodes = VirtualNode::compute_chunk(chunk.data_chunk(), &self.keys, vnode_count);
 
         tracing::debug!(target: "events::stream::dispatch::hash", "\n{}\n keys {:?} => {:?}", chunk.to_pretty(), self.keys, vnodes);
 

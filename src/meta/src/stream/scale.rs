@@ -441,6 +441,8 @@ pub struct ScaleController {
 
     pub env: MetaSrvEnv,
 
+    /// We will acquire lock during DDL to prevent scaling operations on jobs that are in the creating state.
+    /// e.g., a MV cannot be rescheduled during foreground backfill.
     pub reschedule_lock: RwLock<()>,
 }
 
@@ -1745,7 +1747,7 @@ impl ScaleController {
         if !reschedules.is_empty() {
             let workers = self
                 .metadata_manager
-                .list_active_streaming_compute_nodes()
+                .list_active_serving_compute_nodes()
                 .await?;
             let streaming_parallelisms = self
                 .metadata_manager
