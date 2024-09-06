@@ -63,6 +63,7 @@ async fn do_handle_explain(
                 cdc_table_info,
                 include_column_options,
                 wildcard_idx,
+                secure_secret,
                 ..
             } => {
                 let source_schema = source_schema.map(|s| s.into_v2_with_warning());
@@ -81,6 +82,7 @@ async fn do_handle_explain(
                     on_conflict,
                     with_version_column,
                     include_column_options,
+                    secure_secret,
                 )
                 .await?;
                 let context = plan.ctx();

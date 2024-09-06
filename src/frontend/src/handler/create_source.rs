@@ -1705,6 +1705,8 @@ pub async fn handle_create_source(
 
     let source = source_catalog.to_prost(schema_id, database_id);
 
+    println!("WKXLOG analyze handle_create_source \nsource: {:?}", source);
+
     let catalog_writer = session.catalog_writer()?;
 
     if is_shared {

@@ -114,6 +114,7 @@ impl Executor for InsertExecutor {
 impl InsertExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
+        println!("WKXLOG insert");
         let data_types = self.child.schema().data_types();
         let mut builder = DataChunkBuilder::new(data_types, 1024);
 
@@ -163,6 +164,7 @@ impl InsertExecutor {
 
             let stream_chunk = StreamChunk::with_visibility(vec![Op::Insert; cap], columns, vis);
 
+            println!("WKXLOG stream_chunk: {}", stream_chunk.to_pretty());
             #[cfg(debug_assertions)]
             table_dml_handle.check_chunk_schema(&stream_chunk);
 

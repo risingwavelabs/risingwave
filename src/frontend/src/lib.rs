@@ -70,6 +70,7 @@ pub(crate) mod error;
 mod meta_client;
 pub mod test_utils;
 mod user;
+pub mod webhook;
 
 pub mod health_service;
 mod monitor;
@@ -179,6 +180,7 @@ impl Default for FrontendOpts {
 }
 
 use std::future::Future;
+use std::net::SocketAddr;
 use std::pin::Pin;
 
 use pgwire::pg_protocol::TlsConfig;
@@ -208,6 +210,11 @@ pub fn start(
                 .map(|s| s.to_lowercase())
                 .collect::<HashSet<_>>(),
         );
+
+        let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
+        println!("WKXLOG Starting webhook service at: {:?}", addr);
+        let webhook_service = crate::webhook::WebhookService { webhook_addr: addr };
+        let _task = tokio::spawn(webhook_service.serve());
 
         pg_serve(
             &listen_addr,

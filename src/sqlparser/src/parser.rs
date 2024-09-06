@@ -22,6 +22,7 @@ use alloc::{
 };
 use core::fmt;
 
+use ddl::SecureSecret;
 use itertools::Itertools;
 use tracing::{debug, instrument};
 use winnow::combinator::{alt, cut_err, dispatch, fail, opt, peek, preceded, repeat, separated};
@@ -2550,6 +2551,8 @@ impl Parser<'_> {
     }
 
     pub fn parse_create_table(&mut self, or_replace: bool, temporary: bool) -> PResult<Statement> {
+        println!("WKXLOG parse_create_table");
+
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         let table_name = self.parse_object_name()?;
         // parse optional column list (schema) and watermarks on source.
@@ -2569,15 +2572,26 @@ impl Parser<'_> {
         let include_options = self.parse_include_options()?;
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
-        let with_options = self.parse_with_properties()?;
+        let mut with_options = self.parse_with_properties()?;
 
         let option = with_options
             .iter()
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
         let connector = option.map(|opt| opt.value.to_string());
 
-        let source_schema = if let Some(connector) = connector {
-            Some(self.parse_source_schema_with_connector(&connector, false)?)
+        let contain_webhook = if let Some(connector) = &connector
+            && connector.contains("webhook")
+        {
+            with_options.clear();
+            true
+        } else {
+            false
+        };
+
+        let source_schema = if let Some(connector) = &connector
+            && !contain_webhook
+        {
+            Some(self.parse_source_schema_with_connector(connector, false)?)
         } else {
             None // Table is NOT created with an external connector.
         };
@@ -2603,6 +2617,24 @@ impl Parser<'_> {
             None
         };
 
+        let secure_secret = if contain_webhook && self.parse_keyword(Keyword::VALIDATE) {
+            println!("WKXLOG secure_secret");
+            self.expect_keyword(Keyword::SECRET)?;
+            let name = self.parse_identifier()?;
+            self.expect_keyword(Keyword::AS)?;
+            let function = self.parse_identifier()?;
+            if function != Ident::from("secure_compare") {
+                parser_err!("secure_compare is the only function supported for secure_secret_name");
+            }
+            self.expect_token(&Token::LParen)?;
+            self.expect_token(&Token::RParen)?;
+
+            // VALIDATE SECRET secure_secret_name AS secure_compare ()`
+            Some(SecureSecret { name })
+        } else {
+            None
+        };
+
         Ok(Statement::CreateTable {
             name: table_name,
             temporary,
@@ -2620,6 +2652,7 @@ impl Parser<'_> {
             query,
             cdc_table_info,
             include_column_options: include_options,
+            secure_secret,
         })
     }
 
@@ -4972,7 +5005,7 @@ impl Parser<'_> {
 
         let source = Box::new(self.parse_query()?);
         let returning = self.parse_returning(Optional)?;
-
+        println!("WKXLOG source? : {:?}, \ncolumns: {:?}", source, columns);
         Ok(Statement::Insert {
             table_name,
             columns,

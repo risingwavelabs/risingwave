@@ -44,7 +44,7 @@ use risingwave_pb::plan_common::{
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType,
-    ExplainOptions, Format, ObjectName, OnConflict, SourceWatermark, TableConstraint,
+    ExplainOptions, Format, ObjectName, OnConflict, SecureSecret, SourceWatermark, TableConstraint,
 };
 use risingwave_sqlparser::parser::IncludeOption;
 use thiserror_ext::AsReport;
@@ -937,6 +937,7 @@ pub(super) async fn handle_create_table_plan(
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
     include_column_options: IncludeOption,
+    secure_secret: Option<SecureSecret>,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable, TableJobType)> {
     let col_id_gen = ColumnIdGenerator::new_initial();
     let source_schema = check_create_table_with_source(
@@ -1228,6 +1229,7 @@ pub async fn handle_create_table(
     with_version_column: Option<String>,
     cdc_table_info: Option<CdcTableInfo>,
     include_column_options: IncludeOption,
+    secure_secret: Option<SecureSecret>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
@@ -1260,6 +1262,7 @@ pub async fn handle_create_table(
             on_conflict,
             with_version_column,
             include_column_options,
+            secure_secret,
         )
         .await?;
 
@@ -1275,6 +1278,10 @@ pub async fn handle_create_table(
     );
 
     let catalog_writer = session.catalog_writer()?;
+    println!(
+        "WKXLOG analyze handle_create_table \nsource: {:?}\ntable: {:?}",
+        source, table
+    );
     catalog_writer
         .create_table(source, table, graph, job_type)
         .await?;

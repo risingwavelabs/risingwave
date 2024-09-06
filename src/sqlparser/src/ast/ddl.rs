@@ -767,3 +767,10 @@ impl fmt::Display for ReferentialAction {
         })
     }
 }
+
+/// secure secret definition for webhook source
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct SecureSecret {
+    pub name: Ident,
+}

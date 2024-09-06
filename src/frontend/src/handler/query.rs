@@ -57,6 +57,8 @@ pub async fn handle_query(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
+    println!("WKXLOG handle_query, stmt: {:?}", stmt);
+
     let plan_fragmenter_result = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;

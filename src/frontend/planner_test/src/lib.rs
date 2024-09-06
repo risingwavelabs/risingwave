@@ -435,6 +435,7 @@ impl TestCase {
                     cdc_table_info,
                     include_column_options,
                     wildcard_idx,
+                    secure_secret,
                     ..
                 } => {
                     let source_schema = source_schema.map(|schema| schema.into_v2_with_warning());
@@ -453,6 +454,7 @@ impl TestCase {
                         with_version_column,
                         cdc_table_info,
                         include_column_options,
+                        secure_secret,
                     )
                     .await?;
                 }

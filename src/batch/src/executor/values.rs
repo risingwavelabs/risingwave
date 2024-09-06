@@ -83,6 +83,7 @@ impl ValuesExecutor {
                 let chunk_size = self.chunk_size.min(self.rows.len());
                 let mut array_builders = self.schema.create_array_builders(chunk_size);
                 for row in self.rows.by_ref().take(chunk_size) {
+                    println!("WKXLOG ValuesExecutor do_execute row: {:?}", row);
                     for (expr, builder) in row.into_iter().zip_eq_fast(&mut array_builders) {
                         let out = expr.eval(&one_row_chunk).await?;
                         builder.append_array(&out);
