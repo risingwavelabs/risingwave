@@ -441,6 +441,8 @@ pub struct ScaleController {
 
     pub env: MetaSrvEnv,
 
+    /// We will acquire lock during DDL to prevent scaling operations on jobs that are in the creating state.
+    /// e.g., a MV cannot be rescheduled during foreground backfill.
     pub reschedule_lock: RwLock<()>,
 }
 

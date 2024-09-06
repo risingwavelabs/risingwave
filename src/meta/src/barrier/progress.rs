@@ -55,6 +55,7 @@ pub(super) struct Progress {
     upstream_mv_count: HashMap<TableId, usize>,
 
     /// Total key count in the upstream materialized view
+    /// TODO: implement this for source backfill
     upstream_total_key_count: u64,
 
     /// Consumed rows
@@ -122,6 +123,12 @@ impl Progress {
 
     /// Returns whether all backfill executors are done.
     fn is_done(&self) -> bool {
+        tracing::trace!(
+            "Progress::is_done? {}, {}, {:?}",
+            self.done_count,
+            self.states.len(),
+            self.states
+        );
         self.done_count == self.states.len()
     }
 
@@ -274,6 +281,7 @@ pub(super) struct TrackingCommand {
 /// 4. With `actor_map` we can use an actor's `ActorId` to find the ID of the `StreamJob`.
 #[derive(Default, Debug)]
 pub(super) struct CreateMviewProgressTracker {
+    // TODO: add a specialized progress for source
     /// Progress of the create-mview DDL indicated by the `TableId`.
     progress_map: HashMap<TableId, (Progress, TrackingJob)>,
 
@@ -494,6 +502,7 @@ impl CreateMviewProgressTracker {
         replace_table: Option<&ReplaceTablePlan>,
         version_stats: &HummockVersionStats,
     ) -> Option<TrackingJob> {
+        tracing::trace!(?info, "add job to track");
         let (info, actors, replace_table_info) = {
             let CreateStreamingJobCommandInfo {
                 table_fragments, ..
@@ -596,6 +605,7 @@ impl CreateMviewProgressTracker {
         progress: &CreateMviewProgress,
         version_stats: &HummockVersionStats,
     ) -> Option<TrackingJob> {
+        tracing::trace!(?progress, "update progress");
         let actor = progress.backfill_actor_id;
         let Some(table_id) = self.actor_map.get(&actor).copied() else {
             // On restart, backfill will ALWAYS notify CreateMviewProgressTracker,
