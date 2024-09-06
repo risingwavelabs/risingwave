@@ -1343,9 +1343,11 @@ pub fn split_sst(
     let mut branch_table_info = sst_info.clone();
     branch_table_info.sst_id = *new_sst_id;
     branch_table_info.sst_size = new_sst_size;
+    *new_sst_id += 1;
 
-    sst_info.sst_id = *new_sst_id + 1;
+    sst_info.sst_id = *new_sst_id;
     sst_info.sst_size = old_sst_size;
+    *new_sst_id += 1;
 
     {
         // related github.com/risingwavelabs/risingwave/pull/17898/
@@ -1363,8 +1365,6 @@ pub fn split_sst(
             .table_ids
             .retain(|table_id| !branch_table_info.table_ids.contains(table_id));
     }
-
-    *new_sst_id += 1;
 
     branch_table_info
 }
