@@ -21,7 +21,6 @@ use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, Engine, TableId, TableVersionId, DEFAULT_SCHEMA_NAME,
     INITIAL_TABLE_VERSION_ID, ROWID_PREFIX,
@@ -30,6 +29,7 @@ use risingwave_common::license::Feature;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
+use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
     ExternalTableConfig, ExternalTableImpl, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
@@ -1308,55 +1308,57 @@ pub async fn handle_create_table(
                 .await?;
         }
         Engine::Iceberg => {
-            // export AWS_REGION=your_region
-            // export AWS_ACCESS_KEY_ID=your_access_key
-            // export AWS_SECRET_ACCESS_KEY=your_secret_key
-            // export RW_S3_ENDPOINT=your_endpoint
-            // export META_STORE_URI=your_meta_store_uri
-            // export META_STORE_USER=your_meta_store_user
-            // export META_STORE_PASSWORD=your_meta_store_password
-
-            let s3_endpoint = if let Ok(endpoint) = std::env::var("RW_S3_ENDPOINT") {
-                endpoint
+            let s3_endpoint = if let Ok(s3_endpoint) = std::env::var("AWS_ENDPOINT_URL") {
+                Some(s3_endpoint)
             } else {
-                "http://127.0.0.1:9301".to_string()
+                None
             };
 
-            let s3_region = if let Ok(region) = std::env::var("AWS_REGION") {
-                region
-            } else {
-                "us-east-1".to_string()
+            let Ok(s3_region) = std::env::var("AWS_REGION") else {
+                bail!("To create an iceberg engine table, AWS_REGION needed to be set");
             };
 
-            let s3_ak = if let Ok(ak) = std::env::var("AWS_ACCESS_KEY_ID") {
-                ak
-            } else {
-                "hummockadmin".to_string()
+            let Ok(s3_bucket) = std::env::var("AWS_BUCKET") else {
+                bail!("To create an iceberg engine table, AWS_BUCKET needed to be set");
             };
 
-            let s3_sk = if let Ok(sk) = std::env::var("AWS_SECRET_ACCESS_KEY") {
-                sk
-            } else {
-                "hummockadmin".to_string()
+            let Ok(s3_ak) = std::env::var("AWS_ACCESS_KEY_ID") else {
+                bail!("To create an iceberg engine table, AWS_ACCESS_KEY_ID needed to be set");
             };
 
-            let meta_store_uri = if let Ok(uri) = std::env::var("META_STORE_URI") {
-                uri
-            } else {
-                "jdbc:sqlite:/tmp/sqlite/iceberg.db".to_string()
+            let Ok(s3_sk) = std::env::var("AWS_SECRET_ACCESS_KEY") else {
+                bail!("To create an iceberg engine table, AWS_SECRET_ACCESS_KEY needed to be set");
             };
 
-            let meta_store_user = if let Ok(user) = std::env::var("META_STORE_USER") {
-                user
-            } else {
-                "xxx".to_string()
+            let Ok(meta_store_uri) = std::env::var("META_STORE_URI") else {
+                bail!("To create an iceberg engine table, META_STORE_URI needed to be set");
             };
 
-            let meta_store_password = if let Ok(password) = std::env::var("META_STORE_PASSWORD") {
-                password
-            } else {
-                "xxx".to_string()
+            let Ok(meta_store_user) = std::env::var("META_STORE_USER") else {
+                bail!("To create an iceberg engine table, META_STORE_USER needed to be set");
             };
+
+            let Ok(meta_store_password) = std::env::var("META_STORE_PASSWORD") else {
+                bail!("To create an iceberg engine table, META_STORE_PASSWORD needed to be set");
+            };
+
+            let rw_db_name = session
+                .env()
+                .catalog_reader()
+                .read_guard()
+                .get_database_by_id(&table.database_id)?
+                .name()
+                .to_string();
+            let rw_schema_name = session
+                .env()
+                .catalog_reader()
+                .read_guard()
+                .get_schema_by_id(&table.database_id, &table.schema_id)?
+                .name()
+                .to_string();
+            let iceberg_catalog_name = rw_db_name.to_string();
+            let iceberg_database_name = rw_schema_name.to_string();
+            let iceberg_table_name = table_name.0.last().unwrap().real_value();
 
             // Iceberg sinks require a primary key, if none is provided, we will use the _row_id column
             // Fetch primary key from columns
@@ -1411,11 +1413,14 @@ pub async fn handle_create_table(
             };
 
             let with_properties = WithProperties(vec![]);
+            let mut sink_name = table_name.clone();
+            *sink_name.0.last_mut().unwrap() = Ident::from(
+                (ICEBERG_SINK_PREFIX.to_string() + &sink_name.0.last().unwrap().real_value())
+                    .as_str(),
+            );
             let create_sink_stmt = CreateSinkStatement {
                 if_not_exists: false,
-                sink_name: ObjectName::from(vec![Ident::from(
-                    (ICEBERG_SINK_PREFIX.to_string() + &table_name.real_value()).as_str(),
-                )]),
+                sink_name,
                 with_properties,
                 sink_from,
                 columns: vec![],
@@ -1424,9 +1429,6 @@ pub async fn handle_create_table(
                 into_table_name: None,
             };
 
-            let catalog_name = "nimtable".to_string();
-            let database_name = "nimtable_db".to_string();
-
             let mut sink_handler_args = handler_args.clone();
             let mut with = BTreeMap::new();
             with.insert("connector".to_string(), "iceberg".to_string());
@@ -1434,8 +1436,10 @@ pub async fn handle_create_table(
             with.insert("primary_key".to_string(), pks.join(","));
             with.insert("type".to_string(), "upsert".to_string());
             with.insert("catalog.type".to_string(), "jdbc".to_string());
-            with.insert("warehouse.path".to_string(), "s3://hummock001".to_string());
-            with.insert("s3.endpoint".to_string(), s3_endpoint.clone());
+            with.insert("warehouse.path".to_string(), format!("s3://{}", s3_bucket));
+            if let Some(s3_endpoint) = s3_endpoint.clone() {
+                with.insert("s3.endpoint".to_string(), s3_endpoint);
+            }
             with.insert("s3.access.key".to_string(), s3_ak.clone());
             with.insert("s3.secret.key".to_string(), s3_sk.clone());
             with.insert("s3.region".to_string(), s3_region.clone());
@@ -1445,19 +1449,23 @@ pub async fn handle_create_table(
                 "catalog.jdbc.password".to_string(),
                 meta_store_password.clone(),
             );
-            with.insert("catalog.name".to_string(), catalog_name.clone());
-            with.insert("database.name".to_string(), database_name.clone());
-            with.insert("table.name".to_string(), table_name.to_string());
+            with.insert("catalog.name".to_string(), iceberg_catalog_name.clone());
+            with.insert("database.name".to_string(), iceberg_database_name.clone());
+            with.insert("table.name".to_string(), iceberg_table_name.to_string());
+            with.insert("commit_checkpoint_interval".to_string(), "1".to_string());
             with.insert("create_table_if_not_exists".to_string(), "true".to_string());
             sink_handler_args.with_options = WithOptions::new_with_options(with);
 
+            let mut source_name = table_name.clone();
+            *source_name.0.last_mut().unwrap() = Ident::from(
+                (ICEBERG_SOURCE_PREFIX.to_string() + &source_name.0.last().unwrap().real_value())
+                    .as_str(),
+            );
             let create_source_stmt = CreateSourceStatement {
                 temporary: false,
                 if_not_exists: false,
                 columns: vec![],
-                source_name: ObjectName::from(vec![Ident::from(
-                    (ICEBERG_SOURCE_PREFIX.to_string() + &table_name.real_value()).as_str(),
-                )]),
+                source_name,
                 wildcard_idx: None,
                 constraints: vec![],
                 with_properties: WithProperties(vec![]),
@@ -1470,8 +1478,10 @@ pub async fn handle_create_table(
             let mut with = BTreeMap::new();
             with.insert("connector".to_string(), "iceberg".to_string());
             with.insert("catalog.type".to_string(), "jdbc".to_string());
-            with.insert("warehouse.path".to_string(), "s3://hummock001".to_string());
-            with.insert("s3.endpoint".to_string(), s3_endpoint.clone());
+            with.insert("warehouse.path".to_string(), format!("s3://{}", s3_bucket));
+            if let Some(s3_endpoint) = s3_endpoint {
+                with.insert("s3.endpoint".to_string(), s3_endpoint.clone());
+            }
             with.insert("s3.access.key".to_string(), s3_ak.clone());
             with.insert("s3.secret.key".to_string(), s3_sk.clone());
             with.insert("s3.region".to_string(), s3_region.clone());
@@ -1481,9 +1491,9 @@ pub async fn handle_create_table(
                 "catalog.jdbc.password".to_string(),
                 meta_store_password.clone(),
             );
-            with.insert("catalog.name".to_string(), catalog_name.clone());
-            with.insert("database.name".to_string(), database_name.clone());
-            with.insert("table.name".to_string(), table_name.to_string());
+            with.insert("catalog.name".to_string(), iceberg_catalog_name.clone());
+            with.insert("database.name".to_string(), iceberg_database_name.clone());
+            with.insert("table.name".to_string(), iceberg_table_name.to_string());
             source_handler_args.with_options = WithOptions::new_with_options(with);
 
             catalog_writer
