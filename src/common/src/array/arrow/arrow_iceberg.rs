@@ -28,6 +28,9 @@ use crate::types::StructType;
 
 pub struct IcebergArrowConvert;
 
+const NIMTABLE_DECIMAL_PRECISION: u8 = 28;
+const NIMTABLE_DECIMAL_SCALE: i8 = 10;
+
 impl IcebergArrowConvert {
     pub fn to_record_batch(
         &self,
@@ -83,8 +86,13 @@ impl IcebergArrowConvert {
 impl ToArrow for IcebergArrowConvert {
     #[inline]
     fn decimal_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
+        // Nimtable need a decimal type with precision and scale to be set
+        // We choose 28 here
+        // The decimal type finally will be converted to an iceberg decimal type.
+        // Iceberg decimal(P,S)
+        // Fixed-point decimal; precision P, scale S Scale is fixed, precision must be 38 or less.
         let data_type =
-            arrow_schema::DataType::Decimal128(arrow_schema::DECIMAL128_MAX_PRECISION, 0);
+            arrow_schema::DataType::Decimal128(NIMTABLE_DECIMAL_PRECISION, NIMTABLE_DECIMAL_SCALE);
         arrow_schema::Field::new(name, data_type, true)
     }
 
