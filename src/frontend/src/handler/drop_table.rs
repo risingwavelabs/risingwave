@@ -18,6 +18,7 @@ use risingwave_common::catalog::Engine;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_sqlparser::ast::{Ident, ObjectName};
+use tracing::warn;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
@@ -66,7 +67,7 @@ pub async fn handle_drop_table(
 
     match engine {
         Engine::Iceberg => {
-            let source = session
+            let iceberg_config = if let Ok(source) = session
                 .env()
                 .catalog_reader()
                 .read_guard()
@@ -75,7 +76,31 @@ pub async fn handle_drop_table(
                     schema_path,
                     &(ICEBERG_SOURCE_PREFIX.to_string() + &table_name),
                 )
-                .map(|(source, _)| source.clone())?;
+                .map(|(source, _)| source.clone())
+            {
+                let config = ConnectorProperties::extract(source.with_properties.clone(), false)?;
+                if let ConnectorProperties::Iceberg(iceberg_properties) = config {
+                    Some(iceberg_properties.to_iceberg_config())
+                } else {
+                    unreachable!("must be iceberg source");
+                }
+            } else if let Ok(sink) = session
+                .env()
+                .catalog_reader()
+                .read_guard()
+                .get_sink_by_name(
+                    db_name,
+                    schema_path,
+                    &(ICEBERG_SINK_PREFIX.to_string() + &table_name),
+                )
+                .map(|(sink, _)| sink.clone())
+            {
+                // If iceberg source does not exist, use iceberg sink to load iceberg table
+                Some(IcebergConfig::from_btreemap(sink.properties.clone())?)
+            } else {
+                None
+            };
+
             // TODO(nimtable): handle drop table failures in the middle.
             // Drop sink
             // Drop iceberg table
@@ -92,9 +117,7 @@ pub async fn handle_drop_table(
             )
             .await?;
 
-            let config = ConnectorProperties::extract(source.with_properties.clone(), false)?;
-            if let ConnectorProperties::Iceberg(iceberg_properties) = config {
-                let iceberg_config: IcebergConfig = iceberg_properties.to_iceberg_config();
+            if let Some(iceberg_config) = iceberg_config {
                 let iceberg_catalog = iceberg_config
                     .create_catalog_v2()
                     .await
@@ -102,30 +125,36 @@ pub async fn handle_drop_table(
                 let table_id = iceberg_config
                     .full_table_name_v2()
                     .context("Unable to parse table name")?;
-                let table = iceberg_catalog
+                if let Ok(table) = iceberg_catalog
                     .load_table(&table_id)
                     .await
-                    .context("failed to load iceberg table")?;
-                table
-                    .file_io()
-                    .remove_all(table.metadata().location())
-                    .await
-                    .context("failed to purge iceberg table")?;
+                    .context("failed to load iceberg table")
+                {
+                    table
+                        .file_io()
+                        .remove_all(table.metadata().location())
+                        .await
+                        .context("failed to purge iceberg table")?;
+                } else {
+                    warn!("Table {} with iceberg engine, but failed to load iceberg table. It might be the warehouse path has been cleared but fail before drop iceberg source", table_name);
+                }
                 iceberg_catalog
                     .drop_table(&table_id)
                     .await
                     .context("failed to drop iceberg table")?;
-            }
 
-            crate::handler::drop_source::handle_drop_source(
-                handler_args.clone(),
-                ObjectName::from(vec![Ident::from(
-                    (ICEBERG_SOURCE_PREFIX.to_string() + &table_name).as_str(),
-                )]),
-                true,
-                false,
-            )
-            .await?;
+                crate::handler::drop_source::handle_drop_source(
+                    handler_args.clone(),
+                    ObjectName::from(vec![Ident::from(
+                        (ICEBERG_SOURCE_PREFIX.to_string() + &table_name).as_str(),
+                    )]),
+                    true,
+                    false,
+                )
+                .await?;
+            } else {
+                warn!("Table {} with iceberg engine but with no source and sink. It might be created partially. Please check it with iceberg catalog", table_name);
+            }
         }
         Engine::Hummock => {}
     }
