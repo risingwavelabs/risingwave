@@ -277,6 +277,7 @@ WITH (
  slot.name = 'my_slot_partition'
 );
 
+# for only one partition
 statement ok
 CREATE TABLE IF NOT EXISTS partitioned_timestamp_table_2023(
   c_int int,
