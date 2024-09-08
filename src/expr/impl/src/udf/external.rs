@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::future::Future;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
@@ -176,59 +175,10 @@ fn get_or_create_flight_client(link: &str) -> Result<Arc<Client>> {
         Ok(client)
     } else {
         // create new client
-        let create_channel_timeout_sec: u64 = std::env::var("RW_UDF_CREATE_CHANNEL_TIMEOUT_SEC")
-            .unwrap_or_else(|_| "5".to_string())
-            .parse()
-            .unwrap();
-        let create_client_timeout_sec: u64 = std::env::var("RW_UDF_CREATE_CLIENT_TIMEOUT_SEC")
-            .unwrap_or_else(|_| "5".to_string())
-            .parse()
-            .unwrap();
-        let create_client_timeout_retry: u64 = std::env::var("RW_UDF_CREATE_CLIENT_TIMEOUT_RETRY")
-            .unwrap_or_else(|_| "3".to_string())
-            .parse()
-            .unwrap();
         let client = Arc::new(tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                let mut retry = 0;
-                loop {
-                    if retry >= create_client_timeout_retry {
-                        tracing::warn!(
-                            retry,
-                            create_client_timeout_retry,
-                            "cannot create udf client after retry"
-                        );
-                        bail!("cannot create udf client after retry");
-                    }
-                    let create_channel = tokio::time::timeout(
-                        Duration::from_secs(create_channel_timeout_sec),
-                        async { connect_tonic(link).await },
-                    )
-                    .await;
-                    let channel = match create_channel {
-                        Ok(create_channel_result) => create_channel_result?,
-                        Err(_) => {
-                            retry += 1;
-                            tracing::warn!(retry, "create udf channel timeout");
-                            continue;
-                        }
-                    };
-                    let create_client = tokio::time::timeout(
-                        Duration::from_secs(create_client_timeout_sec),
-                        async { Client::new(channel).await },
-                    )
-                    .await;
-                    let client = match create_client {
-                        Ok(create_client_result) => create_client_result?,
-                        Err(_) => {
-                            retry += 1;
-                            tracing::warn!(retry, "create udf client timeout");
-                            continue;
-                        }
-                    };
-                    tracing::debug!(retry, "created udf client");
-                    return Ok(client) as Result<_>;
-                }
+                let channel = connect_tonic(link).await?;
+                Ok(Client::new(channel).await?) as Result<_>
             })
         })?);
         clients.insert(link.to_owned(), Arc::downgrade(&client));
