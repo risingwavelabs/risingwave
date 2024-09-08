@@ -113,6 +113,22 @@ create table orders_test (
 ) from mysql_mytest table 'mytest.orders';
 
 statement ok
+CREATE TABLE partitioned_timestamp_table_shared(
+    c_int int,
+    c_boolean boolean,
+    c_timestamp timestamp,
+    PRIMARY KEY (c_int, c_timestamp)
+) from pg_source table 'public.partitioned_timestamp_table';
+
+statement ok
+CREATE TABLE partitioned_timestamp_table_2023_shared(
+    c_int int,
+    c_boolean boolean,
+    c_timestamp timestamp,
+    PRIMARY KEY (c_int, c_timestamp)
+) from pg_source table 'public.partitioned_timestamp_table_2023_shared';
+
+statement ok
 create materialized view products_test_cnt as select count(*) as cnt from rw.products_test;
 
 statement ok
