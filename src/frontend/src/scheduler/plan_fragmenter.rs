@@ -30,7 +30,7 @@ use risingwave_common::bail;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::hash::table_distribution::TableDistribution;
-use risingwave_common::hash::{VirtualNode, WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use risingwave_connector::source::filesystem::opendal_source::{
