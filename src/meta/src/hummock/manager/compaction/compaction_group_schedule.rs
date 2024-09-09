@@ -105,6 +105,44 @@ impl HummockManager {
             .collect_vec();
         assert!(combined_member_table_ids.is_sorted());
 
+        // check duplicated sst_id
+        let mut sst_id_set = HashSet::new();
+        for sst in versioning.current_version.get_sst_ids() {
+            if !sst_id_set.insert(sst) {
+                return Err(Error::CompactionGroup(format!(
+                    "invalid merge group_1 {} group_2 {} duplicated sst_id {}",
+                    left_group_id, right_group_id, sst
+                )));
+            }
+        }
+
+        // TODO(li0k): remove this check (Since the current split_sst does not change key_range, this check can not be removed, otherwise concate will fail.)
+        // check branched sst on non-overlap level
+        {
+            for level in versioning
+                .current_version
+                .get_compaction_group_levels(group_1)
+                .levels
+                .iter()
+                .chain(
+                    versioning
+                        .current_version
+                        .get_compaction_group_levels(group_2)
+                        .levels
+                        .iter(),
+                )
+            {
+                for sst in &level.table_infos {
+                    if sst.sst_id != sst.object_id {
+                        return Err(Error::CompactionGroup(format!(
+                            "invalid merge group_1 {} group_2 {} branched sst_id {}",
+                            left_group_id, right_group_id, sst.sst_id
+                        )));
+                    }
+                }
+            }
+        }
+
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,

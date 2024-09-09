@@ -122,8 +122,12 @@ pub mod group_split {
                 can_concat(&left_levels.levels[idx].table_infos),
                 "{}",
                 format!(
-                    "left_levels.levels[{}].table_infos: {:?} level_idx {:?}",
-                    idx, left_levels.levels[idx].table_infos, left_levels.levels[idx].level_idx
+                    "left-group {} right-group {} left_levels.levels[{}].table_infos: {:?} level_idx {:?}",
+                    left_levels.group_id,
+                    right_levels.group_id,
+                    idx,
+                    left_levels.levels[idx].table_infos,
+                    left_levels.levels[idx].level_idx
                 )
             );
         }
