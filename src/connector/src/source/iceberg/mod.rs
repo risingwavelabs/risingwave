@@ -310,6 +310,7 @@ impl IcebergSplitEnumerator {
             .snapshot_id(snapshot_id)
             .build()
             .map_err(|e| anyhow!(e))?;
+        // Todo! xxhZs Currently, this schema is the full schema, this is because iceberg_rust's task does not have eq_delete_id.
         let schema = scan.snapshot().schema(table.metadata())?;
 
         let file_scan_stream = scan.plan_eq_delete_files().await.map_err(|e| anyhow!(e))?;
