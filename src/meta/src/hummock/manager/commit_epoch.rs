@@ -293,6 +293,9 @@ impl HummockManager {
                 new_table_ids
                     .iter()
                     .chain(tables_to_commit.iter().filter_map(|table_id| {
+                        if new_table_ids.contains_key(table_id) {
+                            return None;
+                        }
                         let Some(info) = version
                             .latest_version()
                             .state_table_info
