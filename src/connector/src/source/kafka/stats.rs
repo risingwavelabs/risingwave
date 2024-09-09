@@ -16,30 +16,32 @@ use prometheus::core::{AtomicU64, GenericGaugeVec};
 use prometheus::{register_int_gauge_vec_with_registry, IntGaugeVec, Registry};
 use rdkafka::statistics::{Broker, ConsumerGroup, Partition, Topic, Window};
 use rdkafka::Statistics;
-use risingwave_common::metrics::register_uint_gauge_vec_with_registry;
+use risingwave_common::metrics::{register_uint_gauge_vec_with_registry, LabelGuardedIntGaugeVec};
+use risingwave_common::register_guarded_int_gauge_vec_with_registry;
 
 #[derive(Debug, Clone)]
 pub struct RdKafkaStats {
     pub registry: Registry,
 
-    pub ts: IntGaugeVec,
-    pub time: IntGaugeVec,
-    pub age: IntGaugeVec,
-    pub replyq: IntGaugeVec,
+    // pub ts: IntGaugeVec,
+    pub ts: LabelGuardedIntGaugeVec<2>,
+    pub time: LabelGuardedIntGaugeVec<2>,
+    pub age: LabelGuardedIntGaugeVec<2>,
+    pub replyq: LabelGuardedIntGaugeVec<2>,
     pub msg_cnt: GenericGaugeVec<AtomicU64>,
     pub msg_size: GenericGaugeVec<AtomicU64>,
     pub msg_max: GenericGaugeVec<AtomicU64>,
     pub msg_size_max: GenericGaugeVec<AtomicU64>,
-    pub tx: IntGaugeVec,
-    pub tx_bytes: IntGaugeVec,
-    pub rx: IntGaugeVec,
-    pub rx_bytes: IntGaugeVec,
-    pub tx_msgs: IntGaugeVec,
-    pub tx_msgs_bytes: IntGaugeVec,
-    pub rx_msgs: IntGaugeVec,
-    pub rx_msgs_bytes: IntGaugeVec,
-    pub simple_cnt: IntGaugeVec,
-    pub metadata_cache_cnt: IntGaugeVec,
+    pub tx: LabelGuardedIntGaugeVec<2>,
+    pub tx_bytes: LabelGuardedIntGaugeVec<2>,
+    pub rx: LabelGuardedIntGaugeVec<2>,
+    pub rx_bytes: LabelGuardedIntGaugeVec<2>,
+    pub tx_msgs: LabelGuardedIntGaugeVec<2>,
+    pub tx_msgs_bytes: LabelGuardedIntGaugeVec<2>,
+    pub rx_msgs: LabelGuardedIntGaugeVec<2>,
+    pub rx_msgs_bytes: LabelGuardedIntGaugeVec<2>,
+    pub simple_cnt: LabelGuardedIntGaugeVec<2>,
+    pub metadata_cache_cnt: LabelGuardedIntGaugeVec<2>,
 
     pub broker_stats: BrokerStats,
     pub topic_stats: TopicStats,
@@ -686,7 +688,7 @@ impl PartitionStats {
 
 impl RdKafkaStats {
     pub fn new(registry: Registry) -> Self {
-        let ts = register_int_gauge_vec_with_registry!(
+        let ts = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_top_ts",
             "librdkafka's internal monotonic clock (microseconds)",
             // we cannot tell whether it is for consumer or producer,
@@ -695,21 +697,21 @@ impl RdKafkaStats {
             registry
         )
         .unwrap();
-        let time = register_int_gauge_vec_with_registry!(
+        let time = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_top_time",
             "Wall clock time in seconds since the epoch",
             &["id", "client_id"],
             registry
         )
         .unwrap();
-        let age = register_int_gauge_vec_with_registry!(
+        let age = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_top_age",
             "Age of the topic metadata in milliseconds",
             &["id", "client_id"],
             registry
         )
         .unwrap();
-        let replyq = register_int_gauge_vec_with_registry!(
+        let replyq = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_top_replyq",
             "Number of replies waiting to be served",
             &["id", "client_id"],
@@ -744,70 +746,70 @@ impl RdKafkaStats {
             registry
         )
         .unwrap();
-        let tx = register_int_gauge_vec_with_registry!(
+        let tx = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_top_tx",
             "Number of transmitted messages",
             &["id", "client_id"],
             registry
         )
         .unwrap();
-        let tx_bytes = register_int_gauge_vec_with_registry!(
+        let tx_bytes = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_top_tx_bytes",
             "Number of transmitted bytes",
             &["id", "client_id"],
             registry
         )
         .unwrap();
-        let rx = register_int_gauge_vec_with_registry!(
+        let rx = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_top_rx",
             "Number of received messages",
             &["id", "client_id"],
             registry
         )
         .unwrap();
-        let rx_bytes = register_int_gauge_vec_with_registry!(
+        let rx_bytes = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_top_rx_bytes",
             "Number of received bytes",
             &["id", "client_id"],
             registry
         )
         .unwrap();
-        let tx_msgs = register_int_gauge_vec_with_registry!(
+        let tx_msgs = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_top_tx_msgs",
             "Number of transmitted messages",
             &["id", "client_id"],
             registry
         )
         .unwrap();
-        let tx_msgs_bytes = register_int_gauge_vec_with_registry!(
+        let tx_msgs_bytes = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_top_tx_msgs_bytes",
             "Number of transmitted bytes",
             &["id", "client_id"],
             registry
         )
         .unwrap();
-        let rx_msgs = register_int_gauge_vec_with_registry!(
+        let rx_msgs = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_top_rx_msgs",
             "Number of received messages",
             &["id", "client_id"],
             registry
         )
         .unwrap();
-        let rx_msgs_bytes = register_int_gauge_vec_with_registry!(
+        let rx_msgs_bytes = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_top_rx_msgs_bytes",
             "Number of received bytes",
             &["id", "client_id"],
             registry
         )
         .unwrap();
-        let simple_cnt = register_int_gauge_vec_with_registry!(
+        let simple_cnt = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_top_simple_cnt",
             "Number of simple consumer queues",
             &["id", "client_id"],
             registry
         )
         .unwrap();
-        let metadata_cache_cnt = register_int_gauge_vec_with_registry!(
+        let metadata_cache_cnt = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_top_metadata_cache_cnt",
             "Number of entries in the metadata cache",
             &["id", "client_id"],
@@ -846,13 +848,17 @@ impl RdKafkaStats {
 
     pub fn report(&self, id: &str, stats: &Statistics) {
         let client_id = stats.name.as_str();
-        self.ts.with_label_values(&[id, client_id]).set(stats.ts);
+        self.ts
+            .with_guarded_label_values(&[id, client_id])
+            .set(stats.ts);
         self.time
-            .with_label_values(&[id, client_id])
+            .with_guarded_label_values(&[id, client_id])
             .set(stats.time);
-        self.age.with_label_values(&[id, client_id]).set(stats.age);
+        self.age
+            .with_guarded_label_values(&[id, client_id])
+            .set(stats.age);
         self.replyq
-            .with_label_values(&[id, client_id])
+            .with_guarded_label_values(&[id, client_id])
             .set(stats.replyq);
         self.msg_cnt
             .with_label_values(&[id, client_id])
@@ -866,31 +872,35 @@ impl RdKafkaStats {
         self.msg_size_max
             .with_label_values(&[id, client_id])
             .set(stats.msg_size_max);
-        self.tx.with_label_values(&[id, client_id]).set(stats.tx);
+        self.tx
+            .with_guarded_label_values(&[id, client_id])
+            .set(stats.tx);
         self.tx_bytes
-            .with_label_values(&[id, client_id])
+            .with_guarded_label_values(&[id, client_id])
             .set(stats.tx_bytes);
-        self.rx.with_label_values(&[id, client_id]).set(stats.rx);
+        self.rx
+            .with_guarded_label_values(&[id, client_id])
+            .set(stats.rx);
         self.rx_bytes
-            .with_label_values(&[id, client_id])
+            .with_guarded_label_values(&[id, client_id])
             .set(stats.rx_bytes);
         self.tx_msgs
-            .with_label_values(&[id, client_id])
+            .with_guarded_label_values(&[id, client_id])
             .set(stats.txmsgs);
         self.tx_msgs_bytes
-            .with_label_values(&[id, client_id])
+            .with_guarded_label_values(&[id, client_id])
             .set(stats.txmsg_bytes);
         self.rx_msgs
-            .with_label_values(&[id, client_id])
+            .with_guarded_label_values(&[id, client_id])
             .set(stats.rxmsgs);
         self.rx_msgs_bytes
-            .with_label_values(&[id, client_id])
+            .with_guarded_label_values(&[id, client_id])
             .set(stats.rxmsg_bytes);
         self.simple_cnt
-            .with_label_values(&[id, client_id])
+            .with_guarded_label_values(&[id, client_id])
             .set(stats.simple_cnt);
         self.metadata_cache_cnt
-            .with_label_values(&[id, client_id])
+            .with_guarded_label_values(&[id, client_id])
             .set(stats.metadata_cache_cnt);
 
         self.broker_stats.report(id, client_id, stats);
