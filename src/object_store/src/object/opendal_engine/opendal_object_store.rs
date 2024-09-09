@@ -310,6 +310,8 @@ impl Execute for OpendalStreamingUploaderExecute {
 /// Store multiple parts in a map, and concatenate them on finish.
 pub struct OpendalStreamingUploader {
     writer: Writer,
+    op: Operator,
+    path: String,
     /// Buffer for data. It will store at least `UPLOAD_BUFFER_SIZE` bytes of data before wrapping itself
     /// into a stream and upload to object store as a part.
     buf: Vec<Bytes>,
@@ -356,6 +358,8 @@ impl OpendalStreamingUploader {
             .await?;
         Ok(Self {
             writer,
+            op,
+            path,
             buf: vec![],
             not_uploaded_len: 0,
             is_valid: true,
@@ -374,6 +378,20 @@ impl OpendalStreamingUploader {
             if self.abort_on_err {
                 self.writer.abort().await?;
             }
+            match self.op.stat(&self.path).await {
+                Ok(metadata) => {
+                    tracing::info!(
+                        "The file {:?} can be stated, but fail when writer write. Metadata: {:?}",
+                        self.path,
+                        metadata,
+                    );
+                }
+                Err(e) => tracing::info!(
+                    "The file {:?} can not be stated, and fail when writer write. Err {:?}",
+                    self.path,
+                    e
+                ),
+            };
             return Err(err.into());
         }
         self.not_uploaded_len = 0;
@@ -408,6 +426,19 @@ impl StreamingUploader for OpendalStreamingUploader {
                 if self.abort_on_err {
                     self.writer.abort().await?;
                 }
+                match self.op.stat(&self.path).await {
+                    Ok(metadata) => {
+                        tracing::info!(
+                            "The file {:?} can be stated, but fail when close writer. Metadata: {:?}",
+                            self.path, metadata,
+                        );
+                    }
+                    Err(e) => tracing::info!(
+                        "The file {:?} can not be stated, and fail when close writer. Err {:?}",
+                        self.path,
+                        e
+                    ),
+                };
                 return Err(err.into());
             }
         };
