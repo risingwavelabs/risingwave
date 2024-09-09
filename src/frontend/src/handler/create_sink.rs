@@ -443,15 +443,7 @@ pub async fn handle_create_sink(
             );
         }
 
-        let mut graph = build_graph(plan)?;
-
-        graph.parallelism =
-            session
-                .config()
-                .streaming_parallelism()
-                .map(|parallelism| Parallelism {
-                    parallelism: parallelism.get(),
-                });
+        let graph = build_graph(plan)?;
 
         (sink, graph, target_table_catalog)
     };

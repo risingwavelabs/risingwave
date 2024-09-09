@@ -241,17 +241,7 @@ It only indicates the physical clustering of the data, which may improve the per
         )?;
 
         let context = plan.plan_base().ctx().clone();
-        let mut graph = build_graph(plan)?;
-        graph.parallelism =
-            session
-                .config()
-                .streaming_parallelism()
-                .map(|parallelism| Parallelism {
-                    parallelism: parallelism.get(),
-                });
-        // Set the timezone for the stream context
-        let ctx = graph.ctx.as_mut().unwrap();
-        ctx.timezone = context.get_session_timezone();
+        let graph = build_graph(plan)?;
 
         (table, graph)
     };

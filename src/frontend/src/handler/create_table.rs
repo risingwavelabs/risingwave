@@ -1261,14 +1261,8 @@ pub async fn handle_create_table(
         )
         .await?;
 
-        let mut graph = build_graph(plan)?;
-        graph.parallelism =
-            session
-                .config()
-                .streaming_parallelism()
-                .map(|parallelism| Parallelism {
-                    parallelism: parallelism.get(),
-                });
+        let graph = build_graph(plan)?;
+
         (graph, source, table, job_type)
     };
 
@@ -1428,15 +1422,7 @@ pub async fn generate_stream_graph_for_table(
         ))?
     }
 
-    let graph = StreamFragmentGraph {
-        parallelism: session
-            .config()
-            .streaming_parallelism()
-            .map(|parallelism| Parallelism {
-                parallelism: parallelism.get(),
-            }),
-        ..build_graph(plan)?
-    };
+    let graph = build_graph(plan)?;
 
     // Fill the original table ID.
     let table = Table {

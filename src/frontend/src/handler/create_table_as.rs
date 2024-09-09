@@ -110,14 +110,8 @@ pub async fn handle_create_as(
             with_version_column,
             Some(col_id_gen.into_version()),
         )?;
-        let mut graph = build_graph(plan)?;
-        graph.parallelism =
-            session
-                .config()
-                .streaming_parallelism()
-                .map(|parallelism| Parallelism {
-                    parallelism: parallelism.get(),
-                });
+        let graph = build_graph(plan)?;
+
         (graph, None, table)
     };
 

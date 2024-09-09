@@ -1697,15 +1697,7 @@ pub async fn handle_create_source(
             )?;
 
             let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
-            let mut graph = build_graph(stream_plan)?;
-            graph.parallelism =
-                session
-                    .config()
-                    .streaming_parallelism()
-                    .map(|parallelism| Parallelism {
-                        parallelism: parallelism.get(),
-                    });
-            graph
+            build_graph(stream_plan)?
         };
         catalog_writer
             .create_source_with_graph(source, graph)
