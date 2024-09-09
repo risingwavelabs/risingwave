@@ -206,6 +206,17 @@ impl IcebergSplitEnumerator {
             bail!("Batch parallelism is 0. Cannot split the iceberg files.");
         }
         let table = self.config.load_table_v2().await?;
+        let current_snapshot = table.metadata().current_snapshot();
+        if current_snapshot.is_none() {
+            // If there is no snapshot, we will return a mock `IcebergSplit` with empty files.
+            return Ok(vec![IcebergSplit {
+                split_id: 0,
+                snapshot_id: 0, // unused
+                table_meta: TableMetadataJsonStr::serialize(table.metadata()),
+                files: vec![],
+            }]);
+        }
+
         let snapshot_id = match time_traval_info {
             Some(IcebergTimeTravelInfo::Version(version)) => {
                 let Some(snapshot) = table.metadata().snapshot_by_id(version) else {
@@ -232,10 +243,10 @@ impl IcebergSplitEnumerator {
                     }
                 }
             }
-            None => match table.metadata().current_snapshot() {
-                Some(snapshot) => snapshot.snapshot_id(),
-                None => bail!("Cannot find the current snapshot id in the iceberg table."),
-            },
+            None => {
+                assert!(current_snapshot.is_some());
+                current_snapshot.unwrap().snapshot_id()
+            }
         };
         let mut files = vec![];
 

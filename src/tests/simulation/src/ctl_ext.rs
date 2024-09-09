@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(not(madsim), expect(unused_imports))]
-
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsString;
 use std::fmt::Write;
 use std::sync::Arc;
@@ -23,17 +21,17 @@ use anyhow::{anyhow, Result};
 use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
 use itertools::Itertools;
-use rand::seq::{IteratorRandom, SliceRandom};
+use rand::seq::IteratorRandom;
 use rand::{thread_rng, Rng};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::WorkerSlotId;
+use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::stream_plan::StreamNode;
-use serde::de::IntoDeserializer;
 
 use self::predicate::BoxedPredicate;
 use crate::cluster::Cluster;
@@ -76,7 +74,7 @@ pub mod predicate {
         Box::new(p)
     }
 
-    /// There exists operators whose identity contains `s` in the fragment.
+    /// There exists operators whose identity contains `s` in the fragment (case insensitive).
     pub fn identity_contains(s: impl Into<String>) -> BoxedPredicate {
         let s: String = s.into();
         let p = move |f: &PbFragment| {
@@ -361,6 +359,30 @@ impl Cluster {
             })
             .await??;
         Ok(response)
+    }
+
+    /// `table_id -> actor_id -> splits`
+    pub async fn list_source_splits(&self) -> Result<BTreeMap<u32, BTreeMap<u32, String>>> {
+        let info = self.get_cluster_info().await?;
+        let mut res = BTreeMap::new();
+
+        for table in info.table_fragments {
+            let mut table_actor_splits = BTreeMap::new();
+
+            for (actor_id, splits) in table.actor_splits {
+                let splits = splits
+                    .splits
+                    .iter()
+                    .map(|split| SplitImpl::try_from(split).unwrap())
+                    .map(|split| split.id())
+                    .collect_vec()
+                    .join(",");
+                table_actor_splits.insert(actor_id, splits);
+            }
+            res.insert(table.table_id, table_actor_splits);
+        }
+
+        Ok(res)
     }
 
     // update node schedulability
