@@ -16,8 +16,12 @@ use std::num::NonZeroU64;
 use std::time::Instant;
 
 use async_trait::async_trait;
-
+use futures::future::{select, Either};
+use rw_futures_util::drop_either_future;
+use std::pin::pin;
 use super::file_sink::opendal_sink::BatchingStrategy;
+use super::log_store::DeliveryFutureManager;
+use super::writer::AsyncTruncateSinkWriter;
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::writer::SinkWriter;
 use crate::sink::{LogSinker, Result, SinkLogReader, SinkMetrics};
@@ -156,5 +160,64 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for BatchingLogSinkerOf<W> {
                 }
             }
         }
+    }
+}
+
+pub struct BatchingAsyncTruncateLogSinkerOf<W: AsyncTruncateSinkWriter> {
+    writer: W,
+    future_manager: DeliveryFutureManager<W::DeliveryFuture>,
+}
+
+impl<W: AsyncTruncateSinkWriter> BatchingAsyncTruncateLogSinkerOf<W> {
+    pub fn new(writer: W, max_future_count: usize) -> Self {
+        BatchingAsyncTruncateLogSinkerOf {
+            writer,
+            future_manager: DeliveryFutureManager::new(max_future_count),
+        }
+    }
+}
+
+#[async_trait]
+impl<W: AsyncTruncateSinkWriter> LogSinker for BatchingAsyncTruncateLogSinkerOf<W> {
+    async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+        loop {
+            let select_result = drop_either_future(
+                select(
+                    pin!(log_reader.next_item()),
+                    pin!(self.future_manager.next_truncate_offset()),
+                )
+                .await,
+            );
+            match select_result {
+                Either::Left(item_result) => {
+                    let (epoch, item) = item_result?;
+                    match item {
+                        LogStoreReadItem::StreamChunk { chunk_id, chunk } => {
+                            let add_future = self.future_manager.start_write_chunk(epoch, chunk_id);
+                            self.writer.write_chunk(chunk, add_future).await?;
+                        }
+                        LogStoreReadItem::Barrier { is_checkpoint } => {}
+                        LogStoreReadItem::UpdateVnodeBitmap(_) => {}
+                    }
+                }
+                Either::Right(offset_result) => {
+                    let offset = offset_result?;
+                    log_reader.truncate(offset)?;
+                }
+            }
+        }
+    }
+}
+
+#[easy_ext::ext(AsyncTruncateSinkWriterExt)]
+impl<T> T
+where
+    T: AsyncTruncateSinkWriter + Sized,
+{
+    pub fn into_log_sinker(
+        self,
+        max_future_count: usize,
+    ) -> BatchingAsyncTruncateLogSinkerOf<Self> {
+        BatchingAsyncTruncateLogSinkerOf::new(self, max_future_count)
     }
 }
