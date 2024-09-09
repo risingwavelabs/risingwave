@@ -291,6 +291,7 @@ impl Strong {
             | ExprType::JsonbPopulateRecord
             | ExprType::JsonbToRecord
             | ExprType::JsonbSet
+            | ExprType::JsonbPopulateMap
             | ExprType::MapFromEntries
             | ExprType::MapAccess
             | ExprType::MapKeys

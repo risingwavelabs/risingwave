@@ -57,7 +57,9 @@ pub struct SstableStreamIterator {
 
     /// For key sanity check of divided SST and debugging
     sstable_info: SstableInfo,
-    existing_table_ids: HashSet<StateTableId>,
+
+    /// To Filter out the blocks
+    sstable_table_ids: HashSet<StateTableId>,
     task_progress: Arc<TaskProgress>,
     io_retry_times: usize,
     max_io_retry_times: usize,
@@ -86,16 +88,17 @@ impl SstableStreamIterator {
     pub fn new(
         block_metas: Vec<BlockMeta>,
         sstable_info: SstableInfo,
-        existing_table_ids: HashSet<StateTableId>,
         stats: &StoreLocalStatistic,
         task_progress: Arc<TaskProgress>,
         sstable_store: SstableStoreRef,
         max_io_retry_times: usize,
     ) -> Self {
+        let sstable_table_ids = HashSet::from_iter(sstable_info.table_ids.iter().cloned());
+
         // filter the block meta with key range
         let block_metas = filter_block_metas(
             &block_metas,
-            &existing_table_ids,
+            &sstable_table_ids,
             sstable_info.key_range.clone(),
         );
 
@@ -109,7 +112,7 @@ impl SstableStreamIterator {
             block_metas,
             block_idx: 0,
             stats_ptr: stats.remote_io_time.clone(),
-            existing_table_ids,
+            sstable_table_ids,
             sstable_info,
             sstable_store,
             task_progress,
@@ -137,7 +140,7 @@ impl SstableStreamIterator {
     async fn prune_from_valid_block_iter(&mut self) -> HummockResult<()> {
         while let Some(block_iter) = self.block_iter.as_mut() {
             if self
-                .existing_table_ids
+                .sstable_table_ids
                 .contains(&block_iter.table_id().table_id)
             {
                 return Ok(());
@@ -189,9 +192,13 @@ impl SstableStreamIterator {
     /// `self.block_iter` to `None`.
     async fn next_block(&mut self) -> HummockResult<()> {
         // Check if we want and if we can load the next block.
+        let now = Instant::now();
+        let _time_stat = scopeguard::guard(self.stats_ptr.clone(), |stats_ptr: Arc<AtomicU64>| {
+            let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+            stats_ptr.fetch_add(add as u64, atomic::Ordering::Relaxed);
+        });
         if self.block_idx < self.block_metas.len() {
             loop {
-                let now = Instant::now();
                 let ret = match &mut self.block_stream {
                     Some(block_stream) => block_stream.next_block().await,
                     None => {
@@ -199,7 +206,6 @@ impl SstableStreamIterator {
                         continue;
                     }
                 };
-                let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
                 match ret {
                     Ok(Some(block)) => {
                         let mut block_iter =
@@ -217,10 +223,14 @@ impl SstableStreamIterator {
                         self.block_stream.take();
                         self.io_retry_times += 1;
                         fail_point!("create_stream_err");
+
+                        tracing::warn!(
+                            "retry create stream for sstable {} times, sstinfo={}",
+                            self.io_retry_times,
+                            self.sst_debug_info()
+                        );
                     }
                 }
-                self.stats_ptr
-                    .fetch_add(add as u64, atomic::Ordering::Relaxed);
             }
         }
         self.block_idx = self.block_metas.len();
@@ -461,7 +471,6 @@ impl ConcatSstableIterator {
                 let mut sstable_iter = SstableStreamIterator::new(
                     block_metas,
                     table_info.clone(),
-                    self.existing_table_ids.clone(),
                     &self.stats,
                     self.task_progress.clone(),
                     self.sstable_store.clone(),

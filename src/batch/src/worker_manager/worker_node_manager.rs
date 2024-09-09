@@ -19,7 +19,7 @@ use std::time::Duration;
 use rand::seq::SliceRandom;
 use risingwave_common::bail;
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
-use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::hash::{VirtualNode, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 
@@ -374,7 +374,9 @@ impl WorkerNodeSelector {
             };
             // 2. Temporary mapping that filters out unavailable workers.
             let new_workers = self.apply_worker_node_mask(self.manager.list_serving_worker_nodes());
-            let masked_mapping = place_vnode(hint.as_ref(), &new_workers, parallelism);
+            // TODO(var-vnode): use vnode count from config
+            let masked_mapping =
+                place_vnode(hint.as_ref(), &new_workers, parallelism, VirtualNode::COUNT);
             masked_mapping.ok_or_else(|| BatchError::EmptyWorkerNodes)
         }
     }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard, RwLock};
@@ -194,7 +194,7 @@ impl SharedContext {
         &self.config
     }
 
-    pub fn drop_actors(&self, actors: &[ActorId]) {
+    pub(super) fn drop_actors(&self, actors: &HashSet<ActorId>) {
         self.channel_map
             .lock()
             .retain(|(up_id, _), _| !actors.contains(up_id));

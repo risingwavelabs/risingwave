@@ -404,7 +404,10 @@ enum MetaCommands {
     /// get cluster info
     ClusterInfo,
     /// get source split info
-    SourceSplitInfo,
+    SourceSplitInfo {
+        #[clap(long)]
+        ignore_id: bool,
+    },
     /// Reschedule the actors in the stream graph
     ///
     /// The format is `fragment_id-[worker_id:count]+[worker_id:count]`
@@ -808,8 +811,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::Pause) => cmd_impl::meta::pause(context).await?,
         Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume(context).await?,
         Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info(context).await?,
-        Commands::Meta(MetaCommands::SourceSplitInfo) => {
-            cmd_impl::meta::source_split_info(context).await?
+        Commands::Meta(MetaCommands::SourceSplitInfo { ignore_id }) => {
+            cmd_impl::meta::source_split_info(context, ignore_id).await?
         }
         Commands::Meta(MetaCommands::Reschedule {
             from,

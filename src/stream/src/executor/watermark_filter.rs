@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::cmp;
-use std::ops::Deref;
 
 use futures::future::{try_join, try_join_all};
 use risingwave_common::hash::VnodeBitmapExt;
@@ -27,7 +26,6 @@ use risingwave_expr::Result as ExprResult;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::TableDistribution;
 
 use super::filter::FilterExecutor;
 use crate::executor::prelude::*;
@@ -219,10 +217,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     let mut need_update_global_max_watermark = false;
                     // Update the vnode bitmap for state tables of all agg calls if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(ctx.id) {
-                        let other_vnodes_bitmap = Arc::new(
-                            (!(*vnode_bitmap).clone())
-                                & TableDistribution::all_vnodes_ref().deref(),
-                        );
+                        let other_vnodes_bitmap = Arc::new(!(*vnode_bitmap).clone());
                         let _ = global_watermark_table.update_vnode_bitmap(other_vnodes_bitmap);
                         let (previous_vnode_bitmap, _cache_may_stale) =
                             table.update_vnode_bitmap(vnode_bitmap.clone());
@@ -373,7 +368,9 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
+    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableDesc};
+    use risingwave_common::hash::VirtualNode;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::Date;
     use risingwave_common::util::epoch::test_epoch;
@@ -431,7 +428,7 @@ mod tests {
         let state_table = StateTable::from_table_catalog_inconsistent_op(
             &table,
             mem_state.clone(),
-            Some(TableDistribution::all_vnodes()),
+            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into()),
         )
         .await;
 
@@ -440,7 +437,7 @@ mod tests {
         let storage_table = StorageTable::new_partial(
             mem_state,
             val_indices.iter().map(|i| ColumnId::new(*i as _)).collect(),
-            Some(TableDistribution::all_vnodes()),
+            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into()),
             &desc,
         );
         (storage_table, state_table)

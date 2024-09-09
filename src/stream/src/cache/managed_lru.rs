@@ -67,8 +67,8 @@ where
             .metrics
             .stream_memory_usage
             .with_guarded_label_values(&[
-                &metrics_info.table_id,
                 &metrics_info.actor_id,
+                &metrics_info.table_id,
                 &metrics_info.desc,
             ]);
         memory_usage_metrics.set(0.into());

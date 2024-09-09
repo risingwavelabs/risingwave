@@ -776,6 +776,7 @@ mod tests {
             meta.clone(),
             sstable_store.clone(),
             writer_opts,
+            vec![SST_ID as u32],
         )
         .await
         .unwrap();
@@ -806,6 +807,7 @@ mod tests {
             meta.clone(),
             sstable_store.clone(),
             writer_opts,
+            vec![SST_ID as u32],
         )
         .await
         .unwrap();

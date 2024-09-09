@@ -41,14 +41,6 @@ BigQueryConfig:
   - name: bigquery.table
     field_type: String
     required: true
-  - name: bigquery.max_batch_rows
-    field_type: usize
-    required: false
-    default: '1024'
-  - name: bigquery.retry_times
-    field_type: usize
-    required: false
-    default: '5'
   - name: auto_create
     field_type: bool
     required: false
@@ -348,6 +340,10 @@ IcebergConfig:
     comments: Commit every n(>0) checkpoints, default is 10.
     required: false
     default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL
+  - name: create_table_if_not_exists
+    field_type: bool
+    required: false
+    default: Default::default
 KafkaConfig:
   fields:
   - name: properties.bootstrap.server
@@ -377,13 +373,25 @@ KafkaConfig:
     field_type: String
     comments: Path to CA certificate file for verifying the broker's key.
     required: false
+  - name: properties.ssl.ca.pem
+    field_type: String
+    comments: CA certificate string (PEM format) for verifying the broker's key.
+    required: false
   - name: properties.ssl.certificate.location
     field_type: String
     comments: Path to client's certificate file (PEM).
     required: false
+  - name: properties.ssl.certificate.pem
+    field_type: String
+    comments: Client's public key string (PEM format) used for authentication.
+    required: false
   - name: properties.ssl.key.location
     field_type: String
     comments: Path to client's private key file (PEM).
+    required: false
+  - name: properties.ssl.key.pem
+    field_type: String
+    comments: Client's private key string (PEM format) used for authentication.
     required: false
   - name: properties.ssl.key.password
     field_type: String

@@ -34,12 +34,20 @@ if ! psql -h localhost -p 4566 -d dev -U root -c "show materialized views;" | gr
   echo "expect 0 MV"
   exit 1
 fi
+if ! psql -h localhost -p 4566 -d dev -U root -c "show secrets;" | grep -q "0 row"; then
+  echo "expect 0 SECRET"
+  exit 1
+fi
 echo "restore snapshot ${job_id_1} succeeded"
 
 restore "${job_id_2}"
 start_cluster
 if ! psql -h localhost -p 4566 -d dev -U root -c "show materialized views;" | grep -q "1 row"; then
-  echo "expect 1 MVs"
+  echo "expect 1 MV"
+  exit 1
+fi
+if ! psql -h localhost -p 4566 -d dev -U root -c "show secrets;" | grep -q "1 row"; then
+  echo "expect 1 SECRET"
   exit 1
 fi
 echo "restore snapshot ${job_id_2} succeeded"
@@ -53,6 +61,10 @@ restore "${job_id_3}"
 start_cluster
 if ! psql -h localhost -p 4566 -d dev -U root -c "show materialized views;" | grep -q "0 row"; then
   echo "expect 0 MV"
+  exit 1
+fi
+if ! psql -h localhost -p 4566 -d dev -U root -c "show secrets;" | grep -q "0 row"; then
+  echo "expect 0 SECRET"
   exit 1
 fi
 echo "restore snapshot ${job_id_3} succeeded"

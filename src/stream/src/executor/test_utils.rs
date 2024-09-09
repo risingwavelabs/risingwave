@@ -515,6 +515,7 @@ pub mod agg_executor {
         row_count_index: usize,
         pk_indices: PkIndices,
         executor_id: u64,
+        must_output_per_barrier: bool,
     ) -> Executor {
         let storages = future::join_all(agg_calls.iter().enumerate().map(|(idx, agg_call)| {
             create_agg_state_storage(
@@ -560,7 +561,9 @@ pub mod agg_executor {
             intermediate_state_table,
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
-            extra: SimpleAggExecutorExtraArgs {},
+            extra: SimpleAggExecutorExtraArgs {
+                must_output_per_barrier,
+            },
         })
         .unwrap();
         (info, exec).into()

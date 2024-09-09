@@ -10,8 +10,11 @@ mysql -e "
     CREATE TABLE customers(
          id BIGINT PRIMARY KEY,
          modified DATETIME,
+         name VARCHAR(32),
          custinfo JSON
     );
+    INSERT INTO customers VALUES(1, NOW(), 'John', NULL);
+    INSERT INTO customers VALUES(2, NOW(), 'Doe', NULL);
     ALTER TABLE customers ADD INDEX zipsa( (CAST(custinfo->'zipcode' AS UNSIGNED ARRAY)) );
     "
 
@@ -28,7 +31,7 @@ create source mysql_source with (
 );
 
 statement ok
-create table rw_customers (id bigint, modified timestamp, custinfo jsonb, primary key (id)) from mysql_source table 'mytest.customers';
+create table rw_customers (id bigint, modified timestamp, name varchar, custinfo jsonb, primary key (id)) from mysql_source table 'mytest.customers';
 
 # Name, Type, Is Hidden, Description
 query TTTT
@@ -36,6 +39,7 @@ describe rw_customers;
 ----
 id bigint false NULL
 modified timestamp without time zone false NULL
+name character varying false NULL
 custinfo jsonb false NULL
 primary key id NULL NULL
 distribution key id NULL NULL
@@ -46,8 +50,8 @@ table description rw_customers NULL NULL
 system ok
 mysql -e "
   USE mytest;
-  ALTER TABLE customers ADD COLUMN v1 VARCHAR(255);
-  ALTER TABLE customers ADD COLUMN v2 double(5,2);
+  ALTER TABLE customers ADD COLUMN v1 VARCHAR(255) DEFAULT 'hello';
+  ALTER TABLE customers ADD COLUMN v2 double(5,2) DEFAULT 88.9;
 "
 
 sleep 3s
@@ -58,12 +62,19 @@ describe rw_customers;
 ----
 id bigint false NULL
 modified timestamp without time zone false NULL
+name character varying false NULL
 custinfo jsonb false NULL
 v1 character varying false NULL
 v2 double precision false NULL
 primary key id NULL NULL
 distribution key id NULL NULL
 table description rw_customers NULL NULL
+
+query TTTT
+select id,v1,v2,name from rw_customers order by id;
+----
+1 hello 88.9 John
+2 hello 88.9 Doe
 
 # rename column on upstream will not be replicated, since we do not support rename column
 system ok
@@ -81,6 +92,7 @@ describe rw_customers;
 ----
 id bigint false NULL
 modified timestamp without time zone false NULL
+name character varying false NULL
 custinfo jsonb false NULL
 v1 character varying false NULL
 v2 double precision false NULL
@@ -112,6 +124,7 @@ query TTTT
 describe rw_customers;
 ----
 id bigint false NULL
+name character varying false NULL
 custinfo jsonb false NULL
 primary key id NULL NULL
 distribution key id NULL NULL

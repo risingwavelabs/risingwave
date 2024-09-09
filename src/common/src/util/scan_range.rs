@@ -159,7 +159,7 @@ mod tests {
         let pk = vec![1, 3, 2];
         let dist_key_idx_in_pk =
             crate::catalog::get_dist_key_in_pk_indices(&dist_key, &pk).unwrap();
-        let dist = TableDistribution::all(dist_key_idx_in_pk);
+        let dist = TableDistribution::all(dist_key_idx_in_pk, VirtualNode::COUNT_FOR_TEST);
 
         let mut scan_range = ScanRange::full_table_scan();
         assert!(scan_range.try_compute_vnode(&dist).is_none());
@@ -173,7 +173,7 @@ mod tests {
             Some(ScalarImpl::from(514)),
         ]);
 
-        let vnode = VirtualNode::compute_row(&row, &[0, 1]);
+        let vnode = VirtualNode::compute_row_for_test(&row, &[0, 1]);
 
         assert_eq!(scan_range.try_compute_vnode(&dist), Some(vnode));
     }
@@ -185,7 +185,7 @@ mod tests {
         let pk = vec![1, 3, 2];
         let dist_key_idx_in_pk =
             crate::catalog::get_dist_key_in_pk_indices(&dist_key, &pk).unwrap();
-        let dist = TableDistribution::all(dist_key_idx_in_pk);
+        let dist = TableDistribution::all(dist_key_idx_in_pk, VirtualNode::COUNT_FOR_TEST);
 
         let mut scan_range = ScanRange::full_table_scan();
         assert!(scan_range.try_compute_vnode(&dist).is_none());
@@ -203,7 +203,7 @@ mod tests {
             Some(ScalarImpl::from(114514)),
         ]);
 
-        let vnode = VirtualNode::compute_row(&row, &[2, 1]);
+        let vnode = VirtualNode::compute_row_for_test(&row, &[2, 1]);
 
         assert_eq!(scan_range.try_compute_vnode(&dist), Some(vnode));
     }

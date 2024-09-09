@@ -99,6 +99,7 @@ message TableFragments {
   State state = 2;
   map<uint32, Fragment> fragments = 3;
   map<uint32, ActorStatus> actor_status = 4;
+  // `Source` and `SourceBackfill` are handled together here.
   map<uint32, source.ConnectorSplits> actor_splits = 5;
 
   stream_plan.StreamContext ctx = 6;
@@ -513,6 +514,7 @@ message GetClusterInfoRequest {}
 message GetClusterInfoResponse {
   repeated common.WorkerNode worker_nodes = 1;
   repeated TableFragments table_fragments = 2;
+  // `Source` and `SourceBackfill` are handled together here.
   map<uint32, source.ConnectorSplits> actor_splits = 3;
   map<uint32, catalog.Source> source_infos = 4;
   uint64 revision = 5;
@@ -788,4 +790,31 @@ message FragmentIdToActorIdMap {
 message RelationIdInfos {
   // relation_id -> FragmentIdToActorIdMap
   map<uint32, FragmentIdToActorIdMap> map = 1;
+}
+
+message ActorCountPerParallelism {
+  message WorkerActorCount {
+    uint64 actor_count = 1;
+    uint64 parallelism = 2;
+  }
+  map<uint32, WorkerActorCount> worker_id_to_actor_count = 1;
+  uint64 hard_limit = 2;
+  uint64 soft_limit = 3;
+}
+
+message ClusterLimit {
+  oneof limit {
+    ActorCountPerParallelism actor_count = 1;
+    // TODO: limit DDL using compaction pending bytes
+  }
+}
+
+message GetClusterLimitsRequest {}
+
+message GetClusterLimitsResponse {
+  repeated ClusterLimit active_limits = 1;
+}
+
+service ClusterLimitService {
+  rpc GetClusterLimits(GetClusterLimitsRequest) returns (GetClusterLimitsResponse);
 }
