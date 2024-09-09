@@ -21,6 +21,7 @@ mod m20240702_084927_unnecessary_fk;
 mod m20240726_063833_auto_schema_change;
 mod m20240806_143329_add_rate_limit_to_source_catalog;
 mod m20240820_081248_add_time_travel_per_table_epoch;
+mod m20240909_101830_nimtable_dev;
 mod m20240911_083152_variable_vnode_count;
 mod m20241016_065621_hummock_gc_history;
 
@@ -83,6 +84,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20240820_081248_add_time_travel_per_table_epoch::Migration),
             Box::new(m20240911_083152_variable_vnode_count::Migration),
             Box::new(m20241016_065621_hummock_gc_history::Migration),
+            Box::new(m20240909_101830_nimtable_dev::Migration),
         ]
     }
 }
