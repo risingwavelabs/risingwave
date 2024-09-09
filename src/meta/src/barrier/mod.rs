@@ -86,7 +86,6 @@ pub use self::command::{
     Reschedule, SnapshotBackfillInfo,
 };
 pub use self::info::InflightSubscriptionInfo;
-pub use self::rpc::StreamRpcManager;
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
 
@@ -171,8 +170,6 @@ pub struct GlobalBarrierManagerContext {
     sink_manager: SinkCoordinatorManager,
 
     pub(super) metrics: Arc<MetaMetrics>,
-
-    stream_rpc_manager: StreamRpcManager,
 
     env: MetaSrvEnv,
 }
@@ -596,7 +593,6 @@ impl GlobalBarrierManager {
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         metrics: Arc<MetaMetrics>,
-        stream_rpc_manager: StreamRpcManager,
         scale_controller: ScaleControllerRef,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
@@ -624,7 +620,6 @@ impl GlobalBarrierManager {
             scale_controller,
             sink_manager,
             metrics,
-            stream_rpc_manager,
             env: env.clone(),
         };
 
@@ -965,6 +960,19 @@ impl GlobalBarrierManager {
             info,
         } = &command
         {
+            if self.state.paused_reason().is_some() {
+                warn!("cannot create streaming job with snapshot backfill when paused");
+                for notifier in notifiers {
+                    notifier.notify_start_failed(
+                        anyhow!("cannot create streaming job with snapshot backfill when paused",)
+                            .into(),
+                    );
+                }
+                return Ok(());
+            }
+            let mutation = command
+                .to_mutation(None)
+                .expect("should have some mutation in `CreateStreamingJob` command");
             self.checkpoint_control
                 .creating_streaming_job_controls
                 .insert(
@@ -975,6 +983,7 @@ impl GlobalBarrierManager {
                         prev_epoch.value().0,
                         &self.checkpoint_control.hummock_version_stats,
                         &self.context.metrics,
+                        mutation,
                     ),
                 );
         }

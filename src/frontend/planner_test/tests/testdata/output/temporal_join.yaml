@@ -61,7 +61,7 @@
     select count(*) from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2 where a2 < 10;
   stream_plan: |-
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [sum0(count)], noop_update_hint: true }
+    └─StreamProject { exprs: [sum0(count)] }
       └─StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [count] }

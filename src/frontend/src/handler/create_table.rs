@@ -1258,6 +1258,8 @@ pub async fn handle_create_table(
         risingwave_sqlparser::ast::Engine::Iceberg => Engine::Iceberg,
     };
 
+    session.check_cluster_limits().await?;
+
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         table_name.clone(),
         StatementType::CREATE_TABLE,

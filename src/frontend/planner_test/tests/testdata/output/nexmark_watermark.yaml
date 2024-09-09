@@ -2059,7 +2059,7 @@
       │                       └─StreamProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
       │                         └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr4))) as $expr5], noop_update_hint: true }
+        └─StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr4))) as $expr5] }
           └─StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count($expr4)), count] }
             └─StreamExchange { dist: Single }
               └─StreamStatelessSimpleAgg { aggs: [sum0(count), count($expr4)] }
@@ -2111,7 +2111,7 @@
         └── StreamExchange NoShuffle from 2
 
     Fragment 5
-    StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr4))) as $expr5], noop_update_hint: true }
+    StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr4))) as $expr5] }
     └── StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count($expr4)), count] } { tables: [ SimpleAggState: 9 ] }
         └── StreamExchange Single from 6
 
@@ -2533,7 +2533,7 @@
                     └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [min_final], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [min(min(max($expr5)))], noop_update_hint: true }
+    └─StreamProject { exprs: [min(min(max($expr5)))] }
       └─StreamSimpleAgg { aggs: [min(min(max($expr5))), count] }
         └─StreamExchange { dist: Single }
           └─StreamHashAgg { group_key: [$expr6], aggs: [min(max($expr5)), count] }
@@ -2564,7 +2564,7 @@
     Fragment 0
     StreamMaterialize { columns: [min_final], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
-    └── StreamProject { exprs: [min(min(max($expr5)))], noop_update_hint: true }
+    └── StreamProject { exprs: [min(min(max($expr5)))] }
         └── StreamSimpleAgg { aggs: [min(min(max($expr5))), count] }
             ├── tables: [ SimpleAggState: 1, SimpleAggCall0: 0 ]
             └── StreamExchange Single from 1

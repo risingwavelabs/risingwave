@@ -531,6 +531,11 @@ mod tests {
         let b2 = Barrier::with_prev_epoch_for_test(test_epoch(1000), *prev_epoch)
             .with_mutation(Mutation::Stop(HashSet::default()));
         barrier_test_env.inject_barrier(&b2, [actor_id]);
+        barrier_test_env
+            .shared_context
+            .local_barrier_manager
+            .flush_all_events()
+            .await;
 
         for (tx_id, tx) in txs.into_iter().enumerate() {
             let epochs = epochs.clone();
@@ -634,6 +639,33 @@ mod tests {
             .try_collect()
             .unwrap();
 
+        let merge_updates = maplit::hashmap! {
+            (actor_id, upstream_fragment_id) => MergeUpdate {
+                actor_id,
+                upstream_fragment_id,
+                new_upstream_fragment_id: None,
+                added_upstream_actor_id: vec![new],
+                removed_upstream_actor_id: vec![old],
+            }
+        };
+
+        let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
+            UpdateMutation {
+                dispatchers: Default::default(),
+                merges: merge_updates,
+                vnode_bitmaps: Default::default(),
+                dropped_actors: Default::default(),
+                actor_splits: Default::default(),
+                actor_new_dispatchers: Default::default(),
+            },
+        ));
+        barrier_test_env.inject_barrier(&b1, [actor_id]);
+        barrier_test_env
+            .shared_context
+            .local_barrier_manager
+            .flush_all_events()
+            .await;
+
         let mut merge = MergeExecutor::new(
             ActorContext::for_test(actor_id),
             fragment_id,
@@ -682,28 +714,6 @@ mod tests {
         recv!().unwrap().as_chunk().unwrap();
         assert_recv_pending!();
 
-        // 4. Send a configuration change barrier.
-        let merge_updates = maplit::hashmap! {
-            (actor_id, upstream_fragment_id) => MergeUpdate {
-                actor_id,
-                upstream_fragment_id,
-                new_upstream_fragment_id: None,
-                added_upstream_actor_id: vec![new],
-                removed_upstream_actor_id: vec![old],
-            }
-        };
-
-        let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
-            UpdateMutation {
-                dispatchers: Default::default(),
-                merges: merge_updates,
-                vnode_bitmaps: Default::default(),
-                dropped_actors: Default::default(),
-                actor_splits: Default::default(),
-                actor_new_dispatchers: Default::default(),
-            },
-        ));
-        barrier_test_env.inject_barrier(&b1, [actor_id]);
         send!(
             [untouched, old],
             Message::Barrier(b1.clone().into_dispatcher())
