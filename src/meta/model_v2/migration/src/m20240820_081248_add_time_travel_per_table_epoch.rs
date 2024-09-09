@@ -25,11 +25,7 @@ impl MigrationTrait for Migration {
                     .get_connection()
                     .execute(sea_orm::Statement::from_string(
                         sea_orm::DatabaseBackend::MySql,
-                        format!(
-                            "ALTER TABLE {TABLE_NAME} 
-                        DROP PRIMARY KEY,
-                        ADD PRIMARY KEY (epoch, table_id)"
-                        ),
+                        format!("ALTER TABLE {TABLE_NAME} DROP PRIMARY KEY, ADD PRIMARY KEY (epoch, table_id)"),
                     ))
                     .await?;
             }
@@ -148,9 +144,7 @@ impl MigrationTrait for Migration {
                     .get_connection()
                     .execute(sea_orm::Statement::from_string(
                         sea_orm::DatabaseBackend::Postgres,
-                        format!(
-                            "ALTER TABLE {TABLE_NAME} ADD PRIMARY KEY (epoch)"
-                        ),
+                        format!("ALTER TABLE {TABLE_NAME} ADD PRIMARY KEY (epoch)"),
                     ))
                     .await?;
             }

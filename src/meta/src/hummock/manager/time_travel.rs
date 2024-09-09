@@ -286,10 +286,7 @@ impl HummockManager {
         let epoch_to_version = hummock_epoch_to_version::Entity::find()
             .filter(
                 Condition::any()
-                    .add(
-                        hummock_epoch_to_version::Column::TableId
-                            .eq(i64::try_from(table_id).unwrap()),
-                    )
+                    .add(hummock_epoch_to_version::Column::TableId.eq(i64::from(table_id)))
                     // for backward compatibility
                     .add(hummock_epoch_to_version::Column::TableId.eq(0)),
             )
@@ -422,7 +419,7 @@ impl HummockManager {
             let version_id: u64 = delta.id.to_u64();
             let m = hummock_epoch_to_version::ActiveModel {
                 epoch: Set(committed_epoch.try_into().unwrap()),
-                table_id: Set(table_id.table_id.try_into().unwrap()),
+                table_id: Set(table_id.table_id.into()),
                 version_id: Set(version_id.try_into().unwrap()),
             };
             // There should be no conflict rows.
