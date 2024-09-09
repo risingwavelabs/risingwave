@@ -50,7 +50,7 @@ RisingWave is a Postgres-compatible SQL database engineered to provide the <i><b
 
 RisingWave can <b>ingest</b> millions of events per second, continuously <b>join and analyze</b> live data streams with historical tables, <b>serve</b> ad-hoc queries in real-time, and <b>deliver</b> fresh, consistent results wherever needed.
 
-![RisingWave](./docs/dev/src/images/architecture_20240814.png)
+![RisingWave](./docs/dev/src/images/architecture_20240908.png)
 
 ## Try it out in 60 seconds
 
