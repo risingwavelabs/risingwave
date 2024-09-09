@@ -27,7 +27,7 @@ use educe::Educe;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag, NoOpNode,
+    DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag, NoOpNode, StreamContext,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanType,
 };
 
@@ -146,8 +146,9 @@ pub fn build_graph(plan_node: PlanRef) -> SchedulerResult<StreamFragmentGraphPro
     }
 
     // Set timezone.
-    let stream_ctx = fragment_graph.ctx.as_mut().unwrap();
-    stream_ctx.timezone = ctx.get_session_timezone();
+    fragment_graph.ctx = Some(StreamContext {
+        timezone: ctx.get_session_timezone(),
+    });
 
     Ok(fragment_graph)
 }

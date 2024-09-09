@@ -92,9 +92,6 @@ pub struct StreamFragmentGraph {
 
     /// stores edges between fragments: (upstream, downstream) => edge.
     edges: HashMap<(LocalFragmentId, LocalFragmentId), StreamFragmentEdgeProto>,
-
-    /// Stores the streaming context for the streaming plan
-    ctx: StreamContext,
 }
 
 impl StreamFragmentGraph {
@@ -106,8 +103,9 @@ impl StreamFragmentGraph {
                 .map(|(k, v)| (*k, v.to_protobuf()))
                 .collect(),
             edges: self.edges.values().cloned().collect(),
-            ctx: Some(self.ctx.clone()),
-            // To be filled later in `build_graph`
+
+            // Following fields will be filled later in `build_graph` based on session context.
+            ctx: None,
             dependent_table_ids: vec![],
             table_ids_cnt: 0,
             parallelism: None,
