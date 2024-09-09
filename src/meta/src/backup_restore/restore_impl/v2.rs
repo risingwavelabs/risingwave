@@ -106,8 +106,8 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.workers.clone(), db).await?;
         insert_models(metadata.worker_properties.clone(), db).await?;
         insert_models(metadata.users.clone(), db).await?;
-        insert_models(metadata.user_privileges.clone(), db).await?;
         insert_models(metadata.objects.clone(), db).await?;
+        insert_models(metadata.user_privileges.clone(), db).await?;
         insert_models(metadata.object_dependencies.clone(), db).await?;
         insert_models(metadata.databases.clone(), db).await?;
         insert_models(metadata.schemas.clone(), db).await?;

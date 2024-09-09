@@ -14,6 +14,7 @@
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::sync::Once;
 use std::time::Instant;
 
 use anyhow::anyhow;
@@ -30,6 +31,7 @@ use risingwave_connector::source::{
     BackfillInfo, BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
     SplitMetaData,
 };
+use risingwave_hummock_sdk::HummockReadEpoch;
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 
@@ -40,6 +42,7 @@ use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 use crate::executor::source::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
 use crate::executor::UpdateMutation;
+use crate::task::CreateMviewProgress;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub enum BackfillState {
@@ -88,6 +91,8 @@ pub struct SourceBackfillExecutorInner<S: StateStore> {
 
     /// Rate limit in rows/s.
     rate_limit_rps: Option<u32>,
+
+    progress: CreateMviewProgress,
 }
 
 /// Local variables used in the backfill stage.
@@ -230,6 +235,7 @@ impl BackfillStage {
 }
 
 impl<S: StateStore> SourceBackfillExecutorInner<S> {
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
         info: ExecutorInfo,
@@ -238,6 +244,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         system_params: SystemParamsReaderRef,
         backfill_state_store: BackfillStateTableHandler<S>,
         rate_limit_rps: Option<u32>,
+        progress: CreateMviewProgress,
     ) -> Self {
         let source_split_change_count = metrics
             .source_split_change_count
@@ -247,6 +254,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 &actor_ctx.id.to_string(),
                 &actor_ctx.fragment_id.to_string(),
             ]);
+
         Self {
             actor_ctx,
             info,
@@ -256,6 +264,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             source_split_change_count,
             system_params,
             rate_limit_rps,
+            progress,
         }
     }
 
@@ -346,7 +355,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             splits: owned_splits,
         };
         backfill_stage.debug_assert_consistent();
-        tracing::debug!(?backfill_stage, "source backfill started");
 
         // Return the ownership of `stream_source_core` to the source executor.
         self.stream_source_core = core;
@@ -370,6 +378,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 }
             }
         }
+        tracing::debug!(?backfill_stage, "source backfill started");
 
         fn select_strategy(_: &mut ()) -> PollNext {
             futures::stream::PollNext::Left
@@ -407,9 +416,23 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             pause_reader!();
         }
 
+        let state_store = self.backfill_state_store.state_store.state_store().clone();
+        static STATE_TABLE_INITIALIZED: Once = Once::new();
+        tokio::spawn(async move {
+            // This is for self.backfill_finished() to be safe.
+            // We wait for 1st epoch's curr, i.e., the 2nd epoch's prev.
+            let epoch = barrier.epoch.curr;
+            tracing::info!("waiting for epoch: {}", epoch);
+            state_store
+                .try_wait_epoch(HummockReadEpoch::Committed(epoch))
+                .await
+                .expect("failed to wait epoch");
+            STATE_TABLE_INITIALIZED.call_once(|| ());
+            tracing::info!("finished waiting for epoch: {}", epoch);
+        });
         yield Message::Barrier(barrier);
 
-        if !self.backfill_finished(&backfill_stage.states).await? {
+        {
             let source_backfill_row_count = self
                 .metrics
                 .source_backfill_row_count
@@ -552,10 +575,26 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     .commit(barrier.epoch)
                                     .await?;
 
-                                yield Message::Barrier(barrier);
+                                if self.should_report_finished(&backfill_stage.states) {
+                                    // TODO: use a specialized progress for source
+                                    // Currently, `CreateMviewProgress` is designed for MV backfill, and rw_ddl_progress calculates
+                                    // progress based on the number of consumed rows and an estimated total number of rows from hummock.
+                                    // For now, we just rely on the same code path, and for source backfill, the progress will always be 99.99%.
+                                    tracing::info!("progress finish");
+                                    let epoch = barrier.epoch;
+                                    self.progress.finish(epoch, 114514);
+                                    // yield barrier after reporting progress
+                                    yield Message::Barrier(barrier);
 
-                                if self.backfill_finished(&backfill_stage.states).await? {
-                                    break 'backfill_loop;
+                                    // After we reported finished, we still don't exit the loop.
+                                    // Because we need to handle split migration.
+                                    if STATE_TABLE_INITIALIZED.is_completed()
+                                        && self.backfill_finished(&backfill_stage.states).await?
+                                    {
+                                        break 'backfill_loop;
+                                    }
+                                } else {
+                                    yield Message::Barrier(barrier);
                                 }
                             }
                             Message::Chunk(chunk) => {
@@ -665,7 +704,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 self.apply_split_change_forward_stage(
                                     actor_splits,
                                     &mut splits,
-                                    true,
+                                    false,
                                 )
                                 .await?;
                             }
@@ -688,11 +727,34 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         }
     }
 
-    /// All splits finished backfilling.
+    /// When we should call `progress.finish()` to let blocking DDL return.
+    /// We report as soon as `SourceCachingUp`. Otherwise the DDL might be blocked forever until upstream messages come.
+    ///
+    /// Note: split migration (online scaling) is related with progress tracking.
+    /// - For foreground DDL, scaling is not allowed before progress is finished.
+    /// - For background DDL, scaling is skipped when progress is not finished, and can be triggered by recreating actors during recovery.
+    ///
+    /// See <https://github.com/risingwavelabs/risingwave/issues/18300> for more details.
+    fn should_report_finished(&self, states: &BackfillStates) -> bool {
+        states.values().all(|state| {
+            matches!(
+                state,
+                BackfillState::Finished | BackfillState::SourceCachingUp(_)
+            )
+        })
+    }
+
+    /// All splits entered `Finished` state.
     ///
     /// We check all splits for the source, including other actors' splits here, before going to the forward stage.
-    /// Otherwise if we break early, but after rescheduling, an unfinished split is migrated to
+    /// Otherwise if we `break` early, but after rescheduling, an unfinished split is migrated to
     /// this actor, we still need to backfill it.
+    ///
+    /// Note: at the beginning, the actor will only read the state written by itself.
+    /// It needs to _wait until it can read all actors' written data_.
+    /// i.e., wait for the first checkpoint has been available.
+    ///
+    /// See <https://github.com/risingwavelabs/risingwave/issues/18300> for more details.
     async fn backfill_finished(&self, states: &BackfillStates) -> StreamExecutorResult<bool> {
         Ok(states
             .values()
@@ -761,7 +823,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     }
                     Some(backfill_state) => {
                         // Migrated split. Backfill if unfinished.
-                        // TODO: disallow online scaling during backfilling.
                         target_state.insert(split_id, backfill_state);
                     }
                 }

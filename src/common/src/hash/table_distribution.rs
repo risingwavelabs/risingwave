@@ -184,7 +184,7 @@ impl TableDistribution {
 /// Get vnode value with `indices` on the given `row`.
 pub fn compute_vnode(row: impl Row, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
     assert!(!indices.is_empty());
-    let vnode = VirtualNode::compute_row(&row, indices);
+    let vnode = VirtualNode::compute_row(&row, indices, vnodes.len());
     check_vnode_is_set(vnode, vnodes);
 
     tracing::debug!(target: "events::storage::storage_table", "compute vnode: {:?} key {:?} => {}", row, indices, vnode);
@@ -219,7 +219,7 @@ impl TableDistribution {
                     .map(|idx| pk_indices[*idx])
                     .collect_vec();
 
-                VirtualNode::compute_chunk(chunk, &dist_key_indices)
+                VirtualNode::compute_chunk(chunk, &dist_key_indices, vnodes.len())
                     .into_iter()
                     .zip_eq_fast(chunk.visibility().iter())
                     .map(|(vnode, vis)| {
