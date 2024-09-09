@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::ops::BitOr;
 use std::collections::HashMap;
 use std::mem;
-use std::ops::BitAnd;
 
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
@@ -191,7 +191,7 @@ impl IcebergScanExecutor {
                     visibilitys
                         .iter()
                         .skip(1)
-                        .fold(visibilitys[0].clone(), |acc, bitmap| acc.bitand(bitmap))
+                        .fold(visibilitys[0].clone(), |acc, bitmap| acc.bitor(bitmap))
                 };
                 let data = data
                     .iter()
