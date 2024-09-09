@@ -526,7 +526,6 @@ mod tests {
         let epoch3 = epoch2.next_epoch();
         writer.flush_current_epoch(epoch3, true).await.unwrap();
 
-        test_env.storage.seal_epoch(epoch1, false);
         let sync_result = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
         assert!(!sync_result.uncommitted_ssts.is_empty());
 
@@ -632,8 +631,6 @@ mod tests {
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
         let epoch3 = epoch2.next_epoch();
         writer.flush_current_epoch(epoch3, true).await.unwrap();
-
-        test_env.storage.seal_epoch(epoch1, false);
 
         reader.init().await.unwrap();
         match reader.next_item().await.unwrap() {
@@ -1133,7 +1130,6 @@ mod tests {
         }
 
         // Truncation of reader1 on epoch1 should work because it is before this sync
-        test_env.storage.seal_epoch(epoch1, false);
         test_env.commit_epoch(epoch2).await;
         test_env
             .storage
@@ -1727,7 +1723,6 @@ mod tests {
         let epoch3 = epoch2.next_epoch();
         writer.flush_current_epoch(epoch3, true).await.unwrap();
 
-        test_env.storage.seal_epoch(epoch1, false);
         test_env.commit_epoch(epoch2).await;
 
         reader.init().await.unwrap();

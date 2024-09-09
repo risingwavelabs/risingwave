@@ -106,7 +106,8 @@ pub struct TableFragments {
     /// The status of actors
     pub actor_status: BTreeMap<ActorId, ActorStatus>,
 
-    /// The splits of actors
+    /// The splits of actors,
+    /// incl. both `Source` and `SourceBackfill` actors.
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
     /// The streaming context associated with this stream plan and its fragments
@@ -362,7 +363,9 @@ impl TableFragments {
                 return vec![];
             }
             if (fragment.fragment_type_mask
-                & (FragmentTypeFlag::Values as u32 | FragmentTypeFlag::StreamScan as u32))
+                & (FragmentTypeFlag::Values as u32
+                    | FragmentTypeFlag::StreamScan as u32
+                    | FragmentTypeFlag::SourceScan as u32))
                 != 0
             {
                 actor_ids.extend(fragment.actors.iter().map(|actor| actor.actor_id));
@@ -527,14 +530,19 @@ impl TableFragments {
         actors
     }
 
-    /// Returns actor map: `actor_id` => `StreamActor`.
-    pub fn actor_map(&self) -> HashMap<ActorId, StreamActor> {
-        let mut actor_map = HashMap::default();
-        self.fragments.values().for_each(|fragment| {
-            fragment.actors.iter().for_each(|actor| {
-                actor_map.insert(actor.actor_id, actor.clone());
+    pub fn actors_to_create(&self) -> HashMap<WorkerId, Vec<StreamActor>> {
+        let mut actor_map: HashMap<_, Vec<_>> = HashMap::new();
+        self.fragments
+            .values()
+            .flat_map(|fragment| fragment.actors.iter())
+            .for_each(|actor| {
+                let worker_id = self
+                    .actor_status
+                    .get(&actor.actor_id)
+                    .expect("should exist")
+                    .worker_id();
+                actor_map.entry(worker_id).or_default().push(actor.clone());
             });
-        });
         actor_map
     }
 

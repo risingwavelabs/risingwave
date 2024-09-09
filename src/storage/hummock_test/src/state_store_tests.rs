@@ -24,7 +24,6 @@ use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{test_epoch, EpochExt, MAX_EPOCH};
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, TableKeyRange};
@@ -1218,7 +1217,6 @@ async fn test_multiple_epoch_sync_v2() {
         }
     };
     test_get().await;
-    hummock_storage.seal_epoch(epoch1, false);
     let sync_result2 = hummock_storage.seal_and_sync_epoch(epoch2).await.unwrap();
     let sync_result3 = hummock_storage.seal_and_sync_epoch(epoch3).await.unwrap();
     test_get().await;
@@ -1566,7 +1564,7 @@ async fn test_iter_log() {
             },
             table_option: Default::default(),
             is_replicated: false,
-            vnodes: TableDistribution::all_vnodes(),
+            vnodes: Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into(),
         })
         .await;
 
@@ -1581,7 +1579,7 @@ async fn test_iter_log() {
             },
             table_option: Default::default(),
             is_replicated: false,
-            vnodes: TableDistribution::all_vnodes(),
+            vnodes: Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into(),
         })
         .await;
     // flush for about 10 times per epoch

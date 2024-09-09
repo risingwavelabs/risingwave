@@ -22,8 +22,10 @@ import java.util.HashMap;
 import java.util.Objects;
 import org.apache.iceberg.CatalogUtil;
 import org.apache.iceberg.catalog.Catalog;
+import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.rest.CatalogHandlers;
+import org.apache.iceberg.rest.requests.CreateTableRequest;
 import org.apache.iceberg.rest.requests.UpdateTableRequest;
 import org.apache.iceberg.rest.responses.LoadTableResponse;
 
@@ -60,6 +62,38 @@ public class JniCatalogWrapper {
                 RESTObjectMapper.mapper().readValue(updateTableRequest, UpdateTableRequest.class);
         LoadTableResponse resp = CatalogHandlers.updateTable(catalog, req.identifier(), req);
         return RESTObjectMapper.mapper().writer().writeValueAsString(resp);
+    }
+
+    /**
+     * Create table through this prox.
+     *
+     * @param namespaceStr String.
+     * @param createTableRequest Request serialized using json.
+     * @return Response serialized using json.
+     * @throws Exception
+     */
+    public String createTable(String namespaceStr, String createTableRequest) throws Exception {
+        Namespace namespace;
+        if (namespaceStr == null) {
+            namespace = Namespace.empty();
+        } else {
+            namespace = Namespace.of(namespaceStr);
+        }
+        CreateTableRequest req =
+                RESTObjectMapper.mapper().readValue(createTableRequest, CreateTableRequest.class);
+        LoadTableResponse resp = CatalogHandlers.createTable(catalog, namespace, req);
+        return RESTObjectMapper.mapper().writer().writeValueAsString(resp);
+    }
+
+    /**
+     * Checks if a table exists in the catalog.
+     *
+     * @param tableIdentifier The identifier of the table to check.
+     * @return true if the table exists, false otherwise.
+     */
+    public boolean tableExists(String tableIdentifier) {
+        TableIdentifier id = TableIdentifier.parse(tableIdentifier);
+        return catalog.tableExists(id);
     }
 
     /**

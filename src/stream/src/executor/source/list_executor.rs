@@ -26,8 +26,6 @@ use super::{barrier_to_message_stream, StreamSourceCore};
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
-const CHUNK_SIZE: usize = 1024;
-
 #[allow(dead_code)]
 pub struct FsListExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -78,38 +76,28 @@ impl<S: StateStore> FsListExecutor<S> {
             .map_err(StreamExecutorError::connector_error)?
             .map_err(StreamExecutorError::connector_error);
 
-        // Group FsPageItem stream into chunks of size 1024.
-        let chunked_stream = stream.chunks(CHUNK_SIZE).map(|chunk| {
-            let rows = chunk
-                .into_iter()
-                .map(|item| match item {
-                    Ok(page_item) => Ok((
-                        Op::Insert,
-                        OwnedRow::new(vec![
-                            Some(ScalarImpl::Utf8(page_item.name.into_boxed_str())),
-                            Some(ScalarImpl::Timestamptz(page_item.timestamp)),
-                            Some(ScalarImpl::Int64(page_item.size)),
-                        ]),
-                    )),
-                    Err(e) => {
-                        tracing::error!(error = %e.as_report(), "Connector fail to list item");
-                        Err(e)
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            let res: Vec<(Op, OwnedRow)> = rows.into_iter().flatten().collect();
-            if res.is_empty() {
-                tracing::warn!("No items were listed from source.");
-                return Ok(StreamChunk::default());
+        let processed_stream = stream.map(|item| match item {
+            Ok(page_item) => {
+                let row = (
+                    Op::Insert,
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Utf8(page_item.name.into_boxed_str())),
+                        Some(ScalarImpl::Timestamptz(page_item.timestamp)),
+                        Some(ScalarImpl::Int64(page_item.size)),
+                    ]),
+                );
+                Ok(StreamChunk::from_rows(
+                    &[row],
+                    &[DataType::Varchar, DataType::Timestamptz, DataType::Int64],
+                ))
             }
-            Ok(StreamChunk::from_rows(
-                &res,
-                &[DataType::Varchar, DataType::Timestamptz, DataType::Int64],
-            ))
+            Err(e) => {
+                tracing::error!(error = %e.as_report(), "Connector failed to list item");
+                Err(e)
+            }
         });
 
-        Ok(chunked_stream)
+        Ok(processed_stream)
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -150,45 +138,36 @@ impl<S: StateStore> FsListExecutor<S> {
 
         yield Message::Barrier(barrier);
 
-        loop {
-            // a list file stream never ends, keep list to find if there is any new file.
-            while let Some(msg) = stream.next().await {
-                match msg {
-                    Err(e) => {
-                        tracing::warn!(error = %e.as_report(), "encountered an error, recovering");
-                        stream
-                            .replace_data_stream(self.build_chunked_paginate_stream(&source_desc)?);
-                    }
-                    Ok(msg) => match msg {
-                        // Barrier arrives.
-                        Either::Left(msg) => match &msg {
-                            Message::Barrier(barrier) => {
-                                if let Some(mutation) = barrier.mutation.as_deref() {
-                                    match mutation {
-                                        Mutation::Pause => stream.pause_stream(),
-                                        Mutation::Resume => stream.resume_stream(),
-                                        _ => (),
-                                    }
-                                }
-
-                                // Propagate the barrier.
-                                yield msg;
-                            }
-                            // Only barrier can be received.
-                            _ => unreachable!(),
-                        },
-                        // Chunked FsPage arrives.
-                        Either::Right(chunk) => {
-                            yield Message::Chunk(chunk);
-                        }
-                    },
+        while let Some(msg) = stream.next().await {
+            match msg {
+                Err(e) => {
+                    tracing::warn!(error = %e.as_report(), "encountered an error, recovering");
+                    stream.replace_data_stream(self.build_chunked_paginate_stream(&source_desc)?);
                 }
-            }
+                Ok(msg) => match msg {
+                    // Barrier arrives.
+                    Either::Left(msg) => match &msg {
+                        Message::Barrier(barrier) => {
+                            if let Some(mutation) = barrier.mutation.as_deref() {
+                                match mutation {
+                                    Mutation::Pause => stream.pause_stream(),
+                                    Mutation::Resume => stream.resume_stream(),
+                                    _ => (),
+                                }
+                            }
 
-            stream.replace_data_stream(
-                self.build_chunked_paginate_stream(&source_desc)
-                    .map_err(StreamExecutorError::from)?,
-            );
+                            // Propagate the barrier.
+                            yield msg;
+                        }
+                        // Only barrier can be received.
+                        _ => unreachable!(),
+                    },
+                    // Chunked FsPage arrives.
+                    Either::Right(chunk) => {
+                        yield Message::Chunk(chunk);
+                    }
+                },
+            }
         }
     }
 }

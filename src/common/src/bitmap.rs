@@ -685,6 +685,12 @@ impl From<&PbBuffer> for Bitmap {
     }
 }
 
+impl From<PbBuffer> for Bitmap {
+    fn from(buf: PbBuffer) -> Self {
+        Self::from(&buf)
+    }
+}
+
 /// Bitmap iterator.
 pub struct BitmapIter<'a> {
     bits: Option<&'a [usize]>,
