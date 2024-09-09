@@ -436,7 +436,7 @@ impl StreamingUploader for OpendalStreamingUploader {
                     Err(e) => tracing::info!(
                         path = ?self.path,
                         error = %e.as_report(),
-                        "File can not be stated, and fail when writer write.",
+                        "File can not be stated, and fail when close writer.",
                     ),
                 };
                 return Err(err.into());
