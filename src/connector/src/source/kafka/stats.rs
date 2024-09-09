@@ -61,22 +61,22 @@ pub struct BrokerStats {
     pub outbuf_msg_cnt: LabelGuardedIntGaugeVec<4>,
     pub waitresp_cnt: LabelGuardedIntGaugeVec<4>,
     pub waitresp_msg_cnt: LabelGuardedIntGaugeVec<4>,
-    pub tx: GenericGaugeVec<AtomicU64>,
-    pub tx_bytes: GenericGaugeVec<AtomicU64>,
-    pub tx_errs: GenericGaugeVec<AtomicU64>,
-    pub tx_retries: GenericGaugeVec<AtomicU64>,
+    pub tx: LabelGuardedUintGaugeVec<4>,
+    pub tx_bytes: LabelGuardedUintGaugeVec<4>,
+    pub tx_errs: LabelGuardedUintGaugeVec<4>,
+    pub tx_retries: LabelGuardedUintGaugeVec<4>,
     pub tx_idle: LabelGuardedIntGaugeVec<4>,
-    pub req_timeouts: GenericGaugeVec<AtomicU64>,
-    pub rx: GenericGaugeVec<AtomicU64>,
-    pub rx_bytes: GenericGaugeVec<AtomicU64>,
-    pub rx_errs: GenericGaugeVec<AtomicU64>,
-    pub rx_corriderrs: GenericGaugeVec<AtomicU64>,
-    pub rx_partial: GenericGaugeVec<AtomicU64>,
+    pub req_timeouts: LabelGuardedUintGaugeVec<4>,
+    pub rx: LabelGuardedUintGaugeVec<4>,
+    pub rx_bytes: LabelGuardedUintGaugeVec<4>,
+    pub rx_errs: LabelGuardedUintGaugeVec<4>,
+    pub rx_corriderrs: LabelGuardedUintGaugeVec<4>,
+    pub rx_partial: LabelGuardedUintGaugeVec<4>,
     pub rx_idle: LabelGuardedIntGaugeVec<4>,
     pub req: LabelGuardedIntGaugeVec<5>,
-    pub zbuf_grow: GenericGaugeVec<AtomicU64>,
-    pub buf_grow: GenericGaugeVec<AtomicU64>,
-    pub wakeups: GenericGaugeVec<AtomicU64>,
+    pub zbuf_grow: LabelGuardedUintGaugeVec<4>,
+    pub buf_grow: LabelGuardedUintGaugeVec<4>,
+    pub wakeups: LabelGuardedUintGaugeVec<4>,
     pub connects: LabelGuardedIntGaugeVec<4>,
     pub disconnects: LabelGuardedIntGaugeVec<4>,
     pub int_latency: StatsWindow,
@@ -958,28 +958,28 @@ impl BrokerStats {
             registry
         )
         .unwrap();
-        let tx = register_uint_gauge_vec_with_registry!(
+        let tx = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_broker_tx",
             "Number of transmitted messages",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
-        let tx_bytes = register_uint_gauge_vec_with_registry!(
+        let tx_bytes = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_broker_tx_bytes",
             "Number of transmitted bytes",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
-        let tx_errs = register_uint_gauge_vec_with_registry!(
+        let tx_errs = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_broker_tx_errs",
             "Number of failed transmitted messages",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
-        let tx_retries = register_uint_gauge_vec_with_registry!(
+        let tx_retries = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_broker_tx_retries",
             "Number of message retries",
             &["id", "client_id", "broker", "state"],
@@ -993,42 +993,42 @@ impl BrokerStats {
             registry
         )
         .unwrap();
-        let req_timeouts = register_uint_gauge_vec_with_registry!(
+        let req_timeouts = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_broker_req_timeouts",
             "Number of request timeouts",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
-        let rx = register_uint_gauge_vec_with_registry!(
+        let rx = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_broker_rx",
             "Number of received messages",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
-        let rx_bytes = register_uint_gauge_vec_with_registry!(
+        let rx_bytes = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_broker_rx_bytes",
             "Number of received bytes",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
-        let rx_errs = register_uint_gauge_vec_with_registry!(
+        let rx_errs = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_broker_rx_errs",
             "Number of failed received messages",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
-        let rx_corriderrs = register_uint_gauge_vec_with_registry!(
+        let rx_corriderrs = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_broker_rx_corriderrs",
             "Number of received messages with invalid correlation id",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
-        let rx_partial = register_uint_gauge_vec_with_registry!(
+        let rx_partial = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_broker_rx_partial",
             "Number of partial messages received",
             &["id", "client_id", "broker", "state"],
@@ -1049,21 +1049,21 @@ impl BrokerStats {
             registry
         )
         .unwrap();
-        let zbuf_grow = register_uint_gauge_vec_with_registry!(
+        let zbuf_grow = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_broker_zbuf_grow",
             "Number of times the broker's output buffer has been reallocated",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
-        let buf_grow = register_uint_gauge_vec_with_registry!(
+        let buf_grow = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_broker_buf_grow",
             "Number of times the broker's input buffer has been reallocated",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
-        let wakeups = register_uint_gauge_vec_with_registry!(
+        let wakeups = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_broker_wakeups",
             "Number of wakeups",
             &["id", "client_id", "broker", "state"],
@@ -1147,26 +1147,34 @@ impl BrokerStats {
         self.waitresp_msg_cnt
             .with_guarded_label_values(&labels)
             .set(stats.waitresp_msg_cnt);
-        self.tx.with_label_values(&labels).set(stats.tx);
-        self.tx_bytes.with_label_values(&labels).set(stats.txbytes);
-        self.tx_errs.with_label_values(&labels).set(stats.txerrs);
+        self.tx.with_guarded_label_values(&labels).set(stats.tx);
+        self.tx_bytes
+            .with_guarded_label_values(&labels)
+            .set(stats.txbytes);
+        self.tx_errs
+            .with_guarded_label_values(&labels)
+            .set(stats.txerrs);
         self.tx_retries
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.txretries);
         self.tx_idle
             .with_guarded_label_values(&labels)
             .set(stats.txidle);
         self.req_timeouts
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.req_timeouts);
-        self.rx.with_label_values(&labels).set(stats.rx);
-        self.rx_bytes.with_label_values(&labels).set(stats.rxbytes);
-        self.rx_errs.with_label_values(&labels).set(stats.rxerrs);
+        self.rx.with_guarded_label_values(&labels).set(stats.rx);
+        self.rx_bytes
+            .with_guarded_label_values(&labels)
+            .set(stats.rxbytes);
+        self.rx_errs
+            .with_guarded_label_values(&labels)
+            .set(stats.rxerrs);
         self.rx_corriderrs
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.rxcorriderrs);
         self.rx_partial
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.rxpartial);
         self.rx_idle
             .with_guarded_label_values(&labels)
@@ -1177,11 +1185,13 @@ impl BrokerStats {
                 .set(*req_cnt);
         }
         self.zbuf_grow
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.zbuf_grow);
-        self.buf_grow.with_label_values(&labels).set(stats.buf_grow);
+        self.buf_grow
+            .with_guarded_label_values(&labels)
+            .set(stats.buf_grow);
         if let Some(wakeups) = stats.wakeups {
-            self.wakeups.with_label_values(&labels).set(wakeups);
+            self.wakeups.with_guarded_label_values(&labels).set(wakeups);
         }
         if let Some(connects) = stats.connects {
             self.connects
