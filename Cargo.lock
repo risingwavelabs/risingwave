@@ -4884,8 +4884,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbfb935508e73f9dfff9c09b60f872585549b09c240df3b101e20c113da25bbd"
+source = "git+https://github.com/foyer-rs/foyer?rev=0593b50#0593b504335d717cda30bf3876506fccd2015eff"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -4902,8 +4901,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5b7ef0fc9c9203275ede122c91efd1dc32836544692a029e02a6fa722c47ccf"
+source = "git+https://github.com/foyer-rs/foyer?rev=0593b50#0593b504335d717cda30bf3876506fccd2015eff"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -4914,7 +4912,6 @@ dependencies = [
  "itertools 0.13.0",
  "madsim-tokio",
  "metrics",
- "nix 0.29.0",
  "parking_lot 0.12.1",
  "pin-project",
  "serde",
@@ -4923,8 +4920,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "febcfbb70ec6654bbaa373993f49ea32779393b86ee5ae247a1837ebc7daa30f"
+source = "git+https://github.com/foyer-rs/foyer?rev=0593b50#0593b504335d717cda30bf3876506fccd2015eff"
 dependencies = [
  "foyer-common",
  "itertools 0.13.0",
@@ -4933,8 +4929,7 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ed3edafc5395b42424af73014132f2a55cc69ad5fe4f281c1f94d2a36a0f524"
+source = "git+https://github.com/foyer-rs/foyer?rev=0593b50#0593b504335d717cda30bf3876506fccd2015eff"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.6.0",
@@ -4945,7 +4940,6 @@ dependencies = [
  "futures",
  "hashbrown 0.14.3",
  "itertools 0.13.0",
- "libc",
  "madsim-tokio",
  "parking_lot 0.12.1",
  "pin-project",
@@ -4956,8 +4950,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b2815f2977e8627f88d2d7e15ac9ced966d0f9a4de82e958d09b21141ccf261"
+source = "git+https://github.com/foyer-rs/foyer?rev=0593b50#0593b504335d717cda30bf3876506fccd2015eff"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -4972,6 +4965,7 @@ dependencies = [
  "fastrace",
  "foyer-common",
  "foyer-memory",
+ "fs4",
  "futures",
  "itertools 0.13.0",
  "lazy_static",
@@ -5074,6 +5068,16 @@ checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
 dependencies = [
  "libc",
  "winapi",
+]
+
+[[package]]
+name = "fs4"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8c6b3bd49c37d2aa3f3f2220233b29a7cd23f79d1fe70e5337d25fb390793de"
+dependencies = [
+ "rustix 0.38.31",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
