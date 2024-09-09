@@ -41,7 +41,6 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
 };
-use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType,
@@ -1307,7 +1306,7 @@ pub fn check_create_table_with_source(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn generate_stream_graph_for_table(
-    session: &Arc<SessionImpl>,
+    _session: &Arc<SessionImpl>,
     table_name: ObjectName,
     original_catalog: &Arc<TableCatalog>,
     source_schema: Option<ConnectorSchema>,

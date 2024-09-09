@@ -20,7 +20,6 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::catalog::PbTable;
-use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 
 use super::privilege::resolve_relation_privileges;
@@ -240,7 +239,6 @@ It only indicates the physical clustering of the data, which may improve the per
             emit_mode,
         )?;
 
-        let context = plan.plan_base().ctx().clone();
         let graph = build_graph(plan)?;
 
         (table, graph)

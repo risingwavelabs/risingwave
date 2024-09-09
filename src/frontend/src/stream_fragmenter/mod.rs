@@ -118,12 +118,15 @@ impl BuildFragmentGraphState {
 }
 
 pub fn build_graph(plan_node: PlanRef) -> SchedulerResult<StreamFragmentGraphProto> {
-    let plan_node = reorganize_elements_id(plan_node.clone());
+    let ctx = plan_node.plan_base().ctx();
+    let plan_node = reorganize_elements_id(plan_node);
 
     let mut state = BuildFragmentGraphState::default();
     let stream_node = plan_node.to_stream_prost(&mut state)?;
     generate_fragment_graph(&mut state, stream_node).unwrap();
     let mut fragment_graph = state.fragment_graph.to_protobuf();
+
+    // Set table ids.
     fragment_graph.dependent_table_ids = state
         .dependent_table_ids
         .into_iter()
@@ -131,23 +134,20 @@ pub fn build_graph(plan_node: PlanRef) -> SchedulerResult<StreamFragmentGraphPro
         .collect();
     fragment_graph.table_ids_cnt = state.next_table_id;
 
+    // Set parallelism.
     {
-        let ctx = plan_node.plan_base().ctx();
         let config = ctx.session_ctx().config();
-
-        // Set parallelism and vnode count.
         fragment_graph.parallelism =
             config
                 .streaming_parallelism()
                 .map(|parallelism| Parallelism {
                     parallelism: parallelism.get(),
                 });
-        fragment_graph.maybe_vnode_count = Some(config.vnode_count() as u32);
-
-        // Set timezone.
-        let stream_ctx = fragment_graph.ctx.as_mut().unwrap();
-        stream_ctx.timezone = ctx.get_session_timezone();
     }
+
+    // Set timezone.
+    let stream_ctx = fragment_graph.ctx.as_mut().unwrap();
+    stream_ctx.timezone = ctx.get_session_timezone();
 
     Ok(fragment_graph)
 }

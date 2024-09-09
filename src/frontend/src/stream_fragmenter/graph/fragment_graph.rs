@@ -107,7 +107,7 @@ impl StreamFragmentGraph {
                 .collect(),
             edges: self.edges.values().cloned().collect(),
             ctx: Some(self.ctx.clone()),
-            // To be filled later
+            // To be filled later in `build_graph`
             dependent_table_ids: vec![],
             table_ids_cnt: 0,
             parallelism: None,

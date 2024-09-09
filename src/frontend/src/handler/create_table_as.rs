@@ -16,7 +16,6 @@ use either::Either;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_pb::ddl_service::TableJobType;
-use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName, OnConflict, Query, Statement};
 
 use super::{HandlerArgs, RwPgResponse};
