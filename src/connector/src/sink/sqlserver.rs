@@ -455,14 +455,6 @@ impl SinkWriter for SqlServerSinkWriter {
         Ok(())
     }
 
-    async fn write_batch_and_try_finish(
-        &mut self,
-        chunk: StreamChunk,
-        chunk_id: usize,
-    ) -> Result<bool> {
-        unreachable!()
-    }
-
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         for (op, row) in chunk.rows() {
             match op {

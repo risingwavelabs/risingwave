@@ -630,14 +630,6 @@ impl SinkWriter for CoordinatedRemoteSinkWriter {
         Ok(())
     }
 
-    async fn write_batch_and_try_finish(
-        &mut self,
-        chunk: StreamChunk,
-        chunk_id: usize,
-    ) -> Result<bool> {
-        unreachable!()
-    }
-
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.epoch = Some(epoch);
         Ok(())

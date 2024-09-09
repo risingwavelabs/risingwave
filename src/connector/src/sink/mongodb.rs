@@ -428,14 +428,6 @@ impl SinkWriter for MongodbSinkWriter {
         }
     }
 
-    async fn write_batch_and_try_finish(
-        &mut self,
-        _chunk: StreamChunk,
-        _chunk_id: usize,
-    ) -> Result<bool> {
-        unreachable!()
-    }
-
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata> {
         if is_checkpoint {
             if self.is_append_only {

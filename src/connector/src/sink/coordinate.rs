@@ -55,10 +55,10 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> SinkWriter for Coordi
 
     async fn write_batch_and_try_finish(
         &mut self,
-        _chunk: StreamChunk,
-        _chunk_id: usize,
-    ) -> Result<bool> {
-        unreachable!()
+        chunk: StreamChunk,
+        chunk_id: usize,
+    ) -> Result<Option<usize>> {
+        self.inner.write_batch_and_try_finish(chunk, chunk_id).await
     }
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {

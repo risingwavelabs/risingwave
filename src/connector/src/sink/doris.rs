@@ -395,14 +395,6 @@ impl SinkWriter for DorisSinkWriter {
         }
     }
 
-    async fn write_batch_and_try_finish(
-        &mut self,
-        _chunk: StreamChunk,
-        _chunk_id: usize,
-    ) -> Result<bool> {
-        unreachable!()
-    }
-
     async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
         Ok(())
     }

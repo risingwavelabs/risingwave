@@ -558,14 +558,6 @@ impl SinkWriter for StarrocksSinkWriter {
         Ok(())
     }
 
-    async fn write_batch_and_try_finish(
-        &mut self,
-        chunk: StreamChunk,
-        chunk_id: usize,
-    ) -> Result<bool> {
-        unreachable!()
-    }
-
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         // We check whether start a new transaction in `write_batch`. Therefore, if no data has been written
         // within the `commit_checkpoint_interval` period, no meta requests will be made. Otherwise if we request

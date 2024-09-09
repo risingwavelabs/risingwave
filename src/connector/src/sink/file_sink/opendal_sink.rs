@@ -143,7 +143,6 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
         let commit_checkpoint_interval = NonZeroU64::new(1).unwrap();
         Ok(BatchingLogSinkerOf::new(
             writer,
-            self.batching_strategy.clone(),
             writer_param.sink_metrics,
             commit_checkpoint_interval,
         ))
@@ -189,6 +188,7 @@ pub struct OpenDalSinkWriter {
     current_bached_row_num: usize,
     current_writer_idx: usize,
     created_time: SystemTime,
+    written_chunk_id: Option<usize>,
 }
 
 /// The `FileWriterEnum` enum represents different types of file writers used for various sink
@@ -207,34 +207,25 @@ enum FileWriterEnum {
 
 #[async_trait]
 impl SinkWriter for OpenDalSinkWriter {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        todo!()
-        // if self.sink_writer.is_none() {
-        //     self.create_sink_writer(self.current_writer_idx).await?;
-        // }
-        // if self.is_append_only {
-        //     self.append_only(chunk).await
-        // } else {
-        //     // currently file sink only supports append only mode.
-        //     unimplemented!()
-        // }
+    async fn write_batch(&mut self, _chunk: StreamChunk) -> Result<()> {
+        unreachable!()
     }
 
     async fn write_batch_and_try_finish(
         &mut self,
         chunk: StreamChunk,
         chunk_id: usize,
-    ) -> Result<bool> {
-        self.try_finish_write_via_rollover_interval().await?;
-
+    ) -> Result<Option<usize>> {
         if self.sink_writer.is_none() {
             self.create_sink_writer(self.current_writer_idx).await?;
-        }
-        if self.is_append_only {
-            self.append_only(chunk).await
+        };
+        let finish_write =
+            self.append_only(chunk).await? || self.try_finish_write_via_rollover_interval().await?;
+        self.written_chunk_id = Some(chunk_id);
+        if finish_write {
+            return Ok(Some(chunk_id));
         } else {
-            // currently file sink only supports append only mode.
-            unimplemented!()
+            return Ok(None);
         }
     }
 
@@ -246,9 +237,18 @@ impl SinkWriter for OpenDalSinkWriter {
     /// For the file sink, currently, the sink decoupling feature is not enabled.
     /// When a checkpoint arrives, the force commit is performed to write the data to the file.
     /// In the future if flush and checkpoint is decoupled, we should enable sink decouple accordingly.
-    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
-        self.try_finish_write_via_rollover_interval().await?;
-        Ok(())
+    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<Self::CommitMetadata> {
+        unreachable!()
+    }
+
+    /// For the file sink, currently, the sink decoupling feature is not enabled.
+    /// When a checkpoint arrives, the force commit is performed to write the data to the file.
+    /// In the future if flush and checkpoint is decoupled, we should enable sink decouple accordingly.
+    async fn try_finish(&mut self) -> Result<Option<usize>> {
+        match self.try_finish_write_via_rollover_interval().await? {
+            true => return Ok(self.written_chunk_id),
+            false => return Ok(None),
+        };
     }
 }
 
@@ -257,7 +257,7 @@ impl OpenDalSinkWriter {
         operator: Operator,
         write_path: &str,
         rw_schema: Schema,
-        is_append_only: bool,
+    is_append_only: bool,
         executor_id: u64,
         encode_type: SinkEncode,
         engine_type: EngineType,
@@ -279,6 +279,7 @@ impl OpenDalSinkWriter {
             current_bached_row_num: 0,
             current_writer_idx: 0,
             created_time: SystemTime::now(),
+            written_chunk_id: None,
         })
     }
 
@@ -300,7 +301,7 @@ impl OpenDalSinkWriter {
         }
     }
 
-    async fn try_finish_write_via_rollover_interval(&mut self) -> Result<()> {
+    async fn try_finish_write_via_rollover_interval(&mut self) -> Result<bool> {
         if self.duration_seconds_since_writer_created()
             >= self
                 .batching_strategy
@@ -325,12 +326,13 @@ impl OpenDalSinkWriter {
                             metadata
                         );
                         self.current_writer_idx += 1;
+                        return Ok(true);
                     }
                 }
             };
         }
 
-        Ok(())
+        Ok(false)
     }
 
     async fn try_finish_write_via_batched_rows(&mut self) -> Result<bool> {

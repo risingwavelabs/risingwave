@@ -33,16 +33,6 @@ impl<CM: 'static + Send> SinkWriter for BoxWriter<CM> {
         self.deref_mut().begin_epoch(epoch).await
     }
 
-    async fn write_batch_and_try_finish(
-        &mut self,
-        chunk: StreamChunk,
-        chunk_id: usize,
-    ) -> crate::sink::Result<bool> {
-        self.deref_mut()
-            .write_batch_and_try_finish(chunk, chunk_id)
-            .await
-    }
-
     async fn write_batch(&mut self, chunk: StreamChunk) -> crate::sink::Result<()> {
         self.deref_mut().write_batch(chunk).await
     }
