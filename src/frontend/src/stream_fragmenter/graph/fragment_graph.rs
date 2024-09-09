@@ -19,8 +19,7 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
     StreamFragment as StreamFragmentProto, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, FragmentTypeFlag, StreamContext,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
+    DispatchStrategy, FragmentTypeFlag, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 use thiserror_ext::AsReport;
 
