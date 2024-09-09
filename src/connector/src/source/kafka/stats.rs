@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::{AtomicU64, GenericGaugeVec};
-use prometheus::{register_int_gauge_vec_with_registry, IntGaugeVec, Registry};
+use prometheus::core::AtomicU64;
+use prometheus::Registry;
 use rdkafka::statistics::{Broker, ConsumerGroup, Partition, Topic, Window};
 use rdkafka::Statistics;
-use risingwave_common::metrics::{
-    register_uint_gauge_vec_with_registry, LabelGuardedIntGaugeVec, LabelGuardedUintGaugeVec,
-};
+use risingwave_common::metrics::{LabelGuardedIntGaugeVec, LabelGuardedUintGaugeVec};
 use risingwave_common::{
     register_guarded_int_gauge_vec_with_registry, register_guarded_uint_gauge_vec_with_registry,
 };
@@ -374,212 +372,212 @@ impl TopicStats {
 pub struct PartitionStats {
     pub registry: Registry,
 
-    pub msgq_cnt: IntGaugeVec,
-    pub msgq_bytes: GenericGaugeVec<AtomicU64>,
-    pub xmit_msgq_cnt: IntGaugeVec,
-    pub xmit_msgq_bytes: GenericGaugeVec<AtomicU64>,
-    pub fetchq_cnt: IntGaugeVec,
-    pub fetchq_size: GenericGaugeVec<AtomicU64>,
-    pub query_offset: IntGaugeVec,
-    pub next_offset: IntGaugeVec,
-    pub app_offset: IntGaugeVec,
-    pub stored_offset: IntGaugeVec,
-    pub committed_offset: IntGaugeVec,
-    pub eof_offset: IntGaugeVec,
-    pub lo_offset: IntGaugeVec,
-    pub hi_offset: IntGaugeVec,
-    pub consumer_lag: IntGaugeVec,
-    pub consumer_lag_store: IntGaugeVec,
-    pub txmsgs: GenericGaugeVec<AtomicU64>,
-    pub txbytes: GenericGaugeVec<AtomicU64>,
-    pub rxmsgs: GenericGaugeVec<AtomicU64>,
-    pub rxbytes: GenericGaugeVec<AtomicU64>,
-    pub msgs: GenericGaugeVec<AtomicU64>,
-    pub rx_ver_drops: GenericGaugeVec<AtomicU64>,
-    pub msgs_inflight: IntGaugeVec,
-    pub next_ack_seq: IntGaugeVec,
-    pub next_err_seq: IntGaugeVec,
-    pub acked_msgid: GenericGaugeVec<AtomicU64>,
+    pub msgq_cnt: LabelGuardedIntGaugeVec<4>,
+    pub msgq_bytes: LabelGuardedUintGaugeVec<4>,
+    pub xmit_msgq_cnt: LabelGuardedIntGaugeVec<4>,
+    pub xmit_msgq_bytes: LabelGuardedUintGaugeVec<4>,
+    pub fetchq_cnt: LabelGuardedIntGaugeVec<4>,
+    pub fetchq_size: LabelGuardedUintGaugeVec<4>,
+    pub query_offset: LabelGuardedIntGaugeVec<4>,
+    pub next_offset: LabelGuardedIntGaugeVec<4>,
+    pub app_offset: LabelGuardedIntGaugeVec<4>,
+    pub stored_offset: LabelGuardedIntGaugeVec<4>,
+    pub committed_offset: LabelGuardedIntGaugeVec<4>,
+    pub eof_offset: LabelGuardedIntGaugeVec<4>,
+    pub lo_offset: LabelGuardedIntGaugeVec<4>,
+    pub hi_offset: LabelGuardedIntGaugeVec<4>,
+    pub consumer_lag: LabelGuardedIntGaugeVec<4>,
+    pub consumer_lag_store: LabelGuardedIntGaugeVec<4>,
+    pub txmsgs: LabelGuardedUintGaugeVec<4>,
+    pub txbytes: LabelGuardedUintGaugeVec<4>,
+    pub rxmsgs: LabelGuardedUintGaugeVec<4>,
+    pub rxbytes: LabelGuardedUintGaugeVec<4>,
+    pub msgs: LabelGuardedUintGaugeVec<4>,
+    pub rx_ver_drops: LabelGuardedUintGaugeVec<4>,
+    pub msgs_inflight: LabelGuardedIntGaugeVec<4>,
+    pub next_ack_seq: LabelGuardedIntGaugeVec<4>,
+    pub next_err_seq: LabelGuardedIntGaugeVec<4>,
+    pub acked_msgid: LabelGuardedUintGaugeVec<4>,
 }
 
 impl PartitionStats {
     pub fn new(registry: Registry) -> Self {
-        let msgq_cnt = register_int_gauge_vec_with_registry!(
+        let msgq_cnt = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_msgq_cnt",
             "Number of messages in the producer queue",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let msgq_bytes = register_uint_gauge_vec_with_registry!(
+        let msgq_bytes = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_msgq_bytes",
             "Size of messages in the producer queue",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let xmit_msgq_cnt = register_int_gauge_vec_with_registry!(
+        let xmit_msgq_cnt = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_xmit_msgq_cnt",
             "Number of messages in the transmit queue",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let xmit_msgq_bytes = register_uint_gauge_vec_with_registry!(
+        let xmit_msgq_bytes = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_xmit_msgq_bytes",
             "Size of messages in the transmit queue",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let fetchq_cnt = register_int_gauge_vec_with_registry!(
+        let fetchq_cnt = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_fetchq_cnt",
             "Number of messages in the fetch queue",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let fetchq_size = register_uint_gauge_vec_with_registry!(
+        let fetchq_size = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_fetchq_size",
             "Size of messages in the fetch queue",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let query_offset = register_int_gauge_vec_with_registry!(
+        let query_offset = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_query_offset",
             "Current query offset",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let next_offset = register_int_gauge_vec_with_registry!(
+        let next_offset = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_next_offset",
             "Next offset to query",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let app_offset = register_int_gauge_vec_with_registry!(
+        let app_offset = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_app_offset",
             "Last acknowledged offset",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let stored_offset = register_int_gauge_vec_with_registry!(
+        let stored_offset = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_stored_offset",
             "Last stored offset",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let committed_offset = register_int_gauge_vec_with_registry!(
+        let committed_offset = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_committed_offset",
             "Last committed offset",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let eof_offset = register_int_gauge_vec_with_registry!(
+        let eof_offset = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_eof_offset",
             "Last offset in broker log",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let lo_offset = register_int_gauge_vec_with_registry!(
+        let lo_offset = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_lo_offset",
             "Low offset",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let hi_offset = register_int_gauge_vec_with_registry!(
+        let hi_offset = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_hi_offset",
             "High offset",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let consumer_lag = register_int_gauge_vec_with_registry!(
+        let consumer_lag = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_consumer_lag",
             "Consumer lag",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let consumer_lag_store = register_int_gauge_vec_with_registry!(
+        let consumer_lag_store = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_consumer_lag_store",
             "Consumer lag stored",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let txmsgs = register_uint_gauge_vec_with_registry!(
+        let txmsgs = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_txmsgs",
             "Number of transmitted messages",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let txbytes = register_uint_gauge_vec_with_registry!(
+        let txbytes = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_txbytes",
             "Number of transmitted bytes",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let rxmsgs = register_uint_gauge_vec_with_registry!(
+        let rxmsgs = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_rxmsgs",
             "Number of received messages",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let rxbytes = register_uint_gauge_vec_with_registry!(
+        let rxbytes = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_rxbytes",
             "Number of received bytes",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let msgs = register_uint_gauge_vec_with_registry!(
+        let msgs = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_msgs",
             "Number of messages in partition",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let rx_ver_drops = register_uint_gauge_vec_with_registry!(
+        let rx_ver_drops = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_rx_ver_drops",
             "Number of received messages dropped due to version mismatch",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let msgs_inflight = register_int_gauge_vec_with_registry!(
+        let msgs_inflight = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_msgs_inflight",
             "Number of messages in-flight",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let next_ack_seq = register_int_gauge_vec_with_registry!(
+        let next_ack_seq = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_next_ack_seq",
             "Next ack sequence number",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let next_err_seq = register_int_gauge_vec_with_registry!(
+        let next_err_seq = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_next_err_seq",
             "Next error sequence number",
             &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
-        let acked_msgid = register_uint_gauge_vec_with_registry!(
+        let acked_msgid = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_acked_msgid",
             "Acknowledged message ID",
             &["id", "client_id", "topic", "partition"],
@@ -627,71 +625,81 @@ impl PartitionStats {
     fn report_inner(&self, id: &str, client_id: &str, topic: &str, stats: &Partition) {
         let labels = [id, client_id, topic, &stats.partition.to_string()];
 
-        self.msgq_cnt.with_label_values(&labels).set(stats.msgq_cnt);
+        self.msgq_cnt
+            .with_guarded_label_values(&labels)
+            .set(stats.msgq_cnt);
         self.msgq_bytes
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.msgq_bytes);
         self.xmit_msgq_cnt
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.xmit_msgq_cnt);
         self.xmit_msgq_bytes
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.xmit_msgq_bytes);
         self.fetchq_cnt
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.fetchq_cnt);
         self.fetchq_size
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.fetchq_size);
         self.query_offset
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.query_offset);
         self.next_offset
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.next_offset);
         self.app_offset
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.app_offset);
         self.stored_offset
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.stored_offset);
         self.committed_offset
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.committed_offset);
         self.eof_offset
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.eof_offset);
         self.lo_offset
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.lo_offset);
         self.hi_offset
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.hi_offset);
         self.consumer_lag
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.consumer_lag);
         self.consumer_lag_store
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.consumer_lag_stored);
-        self.txmsgs.with_label_values(&labels).set(stats.txmsgs);
-        self.txbytes.with_label_values(&labels).set(stats.txbytes);
-        self.rxmsgs.with_label_values(&labels).set(stats.rxmsgs);
-        self.rxbytes.with_label_values(&labels).set(stats.rxbytes);
-        self.msgs.with_label_values(&labels).set(stats.msgs);
+        self.txmsgs
+            .with_guarded_label_values(&labels)
+            .set(stats.txmsgs);
+        self.txbytes
+            .with_guarded_label_values(&labels)
+            .set(stats.txbytes);
+        self.rxmsgs
+            .with_guarded_label_values(&labels)
+            .set(stats.rxmsgs);
+        self.rxbytes
+            .with_guarded_label_values(&labels)
+            .set(stats.rxbytes);
+        self.msgs.with_guarded_label_values(&labels).set(stats.msgs);
         self.rx_ver_drops
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.rx_ver_drops);
         self.msgs_inflight
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.msgs_inflight);
         self.next_ack_seq
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.next_ack_seq);
         self.next_err_seq
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.next_err_seq);
         self.acked_msgid
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.acked_msgid);
     }
 }
