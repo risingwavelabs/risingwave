@@ -152,6 +152,7 @@ impl HummockManager {
                 let left_obj_id = left_last_sst.object_id;
                 let right_obj_id = right_first_sst.object_id;
 
+                // Since the sst key_range within a group is legal, we only need to check the ssts adjacent to the two groups.
                 if !can_concat(&[left_last_sst, right_first_sst]) {
                     return Err(Error::CompactionGroup(format!(
                         "invalid merge group_1 {} group_2 {} level_idx {} left_last_sst_id {} right_first_sst_id {} left_obj_id {} right_obj_id {}",

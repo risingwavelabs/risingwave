@@ -2128,75 +2128,6 @@ pub(crate) mod tests {
         let parent_group_id = 2;
         let split_table_ids = vec![table_id_2.table_id()];
 
-        // compact
-        {
-            let manual_compcation_option = ManualCompactionOption {
-                level: 0,
-                ..Default::default()
-            };
-            // 2. get compact task
-            let mut compact_task = hummock_manager_ref
-                .manual_get_compact_task(parent_group_id, manual_compcation_option)
-                .await
-                .unwrap()
-                .unwrap();
-
-            let compaction_filter_flag =
-                CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
-            compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-            compact_task.current_epoch_time = hummock_manager_ref
-                .get_current_version()
-                .await
-                .max_committed_epoch();
-
-            // 3. compact
-            let (_tx, rx) = tokio::sync::oneshot::channel();
-            let ((result_task, task_stats), _) = compact(
-                compact_ctx.clone(),
-                compact_task.clone(),
-                rx,
-                Box::new(sstable_object_id_manager.clone()),
-                filter_key_extractor_manager.clone(),
-            )
-            .await;
-
-            hummock_manager_ref
-                .report_compact_task(
-                    result_task.task_id,
-                    result_task.task_status,
-                    result_task.sorted_output_ssts,
-                    Some(to_prost_table_stats_map(task_stats)),
-                )
-                .await
-                .unwrap();
-        }
-
-        let new_cg_id = hummock_manager_ref
-            .split_compaction_group(parent_group_id, &split_table_ids, 0)
-            .await
-            .unwrap();
-
-        assert_ne!(parent_group_id, new_cg_id);
-        assert!(hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id)
-            .await
-            .is_err());
-
-        write_data(
-            &storage,
-            (&mut local_1, true),
-            (&mut local_2, true),
-            &mut epoch,
-            val.clone(),
-            100,
-            millisec_interval_epoch,
-            key_prefix.clone(),
-            hummock_meta_client.clone(),
-            &mut is_init,
-        )
-        .await;
-        epoch += millisec_interval_epoch;
-
         async fn compact_once(
             group_id: CompactionGroupId,
             level: usize,
@@ -2251,6 +2182,43 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
         }
+
+        // compact
+        compact_once(
+            parent_group_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
+
+        let new_cg_id = hummock_manager_ref
+            .split_compaction_group(parent_group_id, &split_table_ids, 0)
+            .await
+            .unwrap();
+
+        assert_ne!(parent_group_id, new_cg_id);
+        assert!(hummock_manager_ref
+            .merge_compaction_group(parent_group_id, new_cg_id)
+            .await
+            .is_err());
+
+        write_data(
+            &storage,
+            (&mut local_1, true),
+            (&mut local_2, true),
+            &mut epoch,
+            val.clone(),
+            100,
+            millisec_interval_epoch,
+            key_prefix.clone(),
+            hummock_meta_client.clone(),
+            &mut is_init,
+        )
+        .await;
+        epoch += millisec_interval_epoch;
 
         compact_once(
             parent_group_id,
