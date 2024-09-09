@@ -1891,7 +1891,6 @@ impl fmt::Display for Statement {
                     write!(f, " FROM {}", info.source_name)?;
                     write!(f, " TABLE '{}'", info.external_table_name)?;
                 }
-                // TODO(nimtable): change the default engine to iceberg
                 match engine {
                     Engine::Hummock => {},
                     Engine::Iceberg => {

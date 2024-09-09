@@ -1363,7 +1363,7 @@ pub async fn extract_iceberg_columns(
                 );
                 ColumnCatalog {
                     column_desc,
-                    // hide the _row_id column for nimtable
+                    // hide the _row_id column for iceberg engine table
                     // This column is auto generated when users define a table without primary key
                     is_hidden: field.name() == ROWID_PREFIX,
                 }

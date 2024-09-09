@@ -2595,7 +2595,6 @@ impl Parser<'_> {
                 parser_err!("Unsupported engine: {}", engine_name);
             }
         } else {
-            // TODO(nimtable): default to hummock, later we can change it to iceberg
             Engine::Hummock
         };
 

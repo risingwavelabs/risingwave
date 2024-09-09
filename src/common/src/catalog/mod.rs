@@ -542,7 +542,6 @@ impl ConflictBehavior {
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Engine {
-    /// TODO(nimtable): use iceberg engine as default.
     #[default]
     Hummock,
     Iceberg,
