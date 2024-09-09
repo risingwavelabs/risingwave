@@ -16,8 +16,13 @@ use prometheus::core::{AtomicU64, GenericGaugeVec};
 use prometheus::{register_int_gauge_vec_with_registry, IntGaugeVec, Registry};
 use rdkafka::statistics::{Broker, ConsumerGroup, Partition, Topic, Window};
 use rdkafka::Statistics;
-use risingwave_common::metrics::{register_uint_gauge_vec_with_registry, LabelGuardedIntGaugeVec};
-use risingwave_common::register_guarded_int_gauge_vec_with_registry;
+use risingwave_common::metrics::{
+    register_uint_gauge_vec_with_registry, LabelGuardedGaugeVec, LabelGuardedIntCounterVec,
+    LabelGuardedIntGaugeVec, LabelGuardedUintGaugeVec,
+};
+use risingwave_common::{
+    register_guarded_int_gauge_vec_with_registry, register_guarded_uint_gauge_vec_with_registry,
+};
 
 #[derive(Debug, Clone)]
 pub struct RdKafkaStats {
@@ -28,10 +33,10 @@ pub struct RdKafkaStats {
     pub time: LabelGuardedIntGaugeVec<2>,
     pub age: LabelGuardedIntGaugeVec<2>,
     pub replyq: LabelGuardedIntGaugeVec<2>,
-    pub msg_cnt: GenericGaugeVec<AtomicU64>,
-    pub msg_size: GenericGaugeVec<AtomicU64>,
-    pub msg_max: GenericGaugeVec<AtomicU64>,
-    pub msg_size_max: GenericGaugeVec<AtomicU64>,
+    pub msg_cnt: LabelGuardedUintGaugeVec<2>,
+    pub msg_size: LabelGuardedUintGaugeVec<2>,
+    pub msg_max: LabelGuardedUintGaugeVec<2>,
+    pub msg_size_max: LabelGuardedUintGaugeVec<2>,
     pub tx: LabelGuardedIntGaugeVec<2>,
     pub tx_bytes: LabelGuardedIntGaugeVec<2>,
     pub rx: LabelGuardedIntGaugeVec<2>,
@@ -52,29 +57,29 @@ pub struct RdKafkaStats {
 pub struct BrokerStats {
     pub registry: Registry,
 
-    pub state_age: IntGaugeVec,
-    pub outbuf_cnt: IntGaugeVec,
-    pub outbuf_msg_cnt: IntGaugeVec,
-    pub waitresp_cnt: IntGaugeVec,
-    pub waitresp_msg_cnt: IntGaugeVec,
+    pub state_age: LabelGuardedIntGaugeVec<4>,
+    pub outbuf_cnt: LabelGuardedIntGaugeVec<4>,
+    pub outbuf_msg_cnt: LabelGuardedIntGaugeVec<4>,
+    pub waitresp_cnt: LabelGuardedIntGaugeVec<4>,
+    pub waitresp_msg_cnt: LabelGuardedIntGaugeVec<4>,
     pub tx: GenericGaugeVec<AtomicU64>,
     pub tx_bytes: GenericGaugeVec<AtomicU64>,
     pub tx_errs: GenericGaugeVec<AtomicU64>,
     pub tx_retries: GenericGaugeVec<AtomicU64>,
-    pub tx_idle: IntGaugeVec,
+    pub tx_idle: LabelGuardedIntGaugeVec<4>,
     pub req_timeouts: GenericGaugeVec<AtomicU64>,
     pub rx: GenericGaugeVec<AtomicU64>,
     pub rx_bytes: GenericGaugeVec<AtomicU64>,
     pub rx_errs: GenericGaugeVec<AtomicU64>,
     pub rx_corriderrs: GenericGaugeVec<AtomicU64>,
     pub rx_partial: GenericGaugeVec<AtomicU64>,
-    pub rx_idle: IntGaugeVec,
-    pub req: IntGaugeVec,
+    pub rx_idle: LabelGuardedIntGaugeVec<4>,
+    pub req: LabelGuardedIntGaugeVec<5>,
     pub zbuf_grow: GenericGaugeVec<AtomicU64>,
     pub buf_grow: GenericGaugeVec<AtomicU64>,
     pub wakeups: GenericGaugeVec<AtomicU64>,
-    pub connects: IntGaugeVec,
-    pub disconnects: IntGaugeVec,
+    pub connects: LabelGuardedIntGaugeVec<4>,
+    pub disconnects: LabelGuardedIntGaugeVec<4>,
     pub int_latency: StatsWindow,
     pub outbuf_latency: StatsWindow,
     pub rtt: StatsWindow,
@@ -718,28 +723,28 @@ impl RdKafkaStats {
             registry
         )
         .unwrap();
-        let msg_cnt = register_uint_gauge_vec_with_registry!(
+        let msg_cnt = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_top_msg_cnt",
             "Number of messages in all topics",
             &["id", "client_id"],
             registry
         )
         .unwrap();
-        let msg_size = register_uint_gauge_vec_with_registry!(
+        let msg_size = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_top_msg_size",
             "Size of messages in all topics",
             &["id", "client_id"],
             registry
         )
         .unwrap();
-        let msg_max = register_uint_gauge_vec_with_registry!(
+        let msg_max = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_top_msg_max",
             "Maximum message size in all topics",
             &["id", "client_id"],
             registry
         )
         .unwrap();
-        let msg_size_max = register_uint_gauge_vec_with_registry!(
+        let msg_size_max = register_guarded_uint_gauge_vec_with_registry!(
             "rdkafka_top_msg_size_max",
             "Maximum message size in all topics",
             &["id", "client_id"],
@@ -861,16 +866,16 @@ impl RdKafkaStats {
             .with_guarded_label_values(&[id, client_id])
             .set(stats.replyq);
         self.msg_cnt
-            .with_label_values(&[id, client_id])
+            .with_guarded_label_values(&[id, client_id])
             .set(stats.msg_cnt);
         self.msg_size
-            .with_label_values(&[id, client_id])
+            .with_guarded_label_values(&[id, client_id])
             .set(stats.msg_size);
         self.msg_max
-            .with_label_values(&[id, client_id])
+            .with_guarded_label_values(&[id, client_id])
             .set(stats.msg_max);
         self.msg_size_max
-            .with_label_values(&[id, client_id])
+            .with_guarded_label_values(&[id, client_id])
             .set(stats.msg_size_max);
         self.tx
             .with_guarded_label_values(&[id, client_id])
@@ -913,35 +918,35 @@ impl RdKafkaStats {
 
 impl BrokerStats {
     pub fn new(registry: Registry) -> Self {
-        let state_age = register_int_gauge_vec_with_registry!(
+        let state_age = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_broker_state_age",
             "Age of the broker state in seconds",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
-        let outbuf_cnt = register_int_gauge_vec_with_registry!(
+        let outbuf_cnt = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_broker_outbuf_cnt",
             "Number of messages waiting to be sent to broker",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
-        let outbuf_msg_cnt = register_int_gauge_vec_with_registry!(
+        let outbuf_msg_cnt = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_broker_outbuf_msg_cnt",
             "Number of messages waiting to be sent to broker",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
-        let waitresp_cnt = register_int_gauge_vec_with_registry!(
+        let waitresp_cnt = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_broker_waitresp_cnt",
             "Number of requests waiting for response",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
-        let waitresp_msg_cnt = register_int_gauge_vec_with_registry!(
+        let waitresp_msg_cnt = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_broker_waitresp_msg_cnt",
             "Number of messages waiting for response",
             &["id", "client_id", "broker", "state"],
@@ -976,7 +981,7 @@ impl BrokerStats {
             registry
         )
         .unwrap();
-        let tx_idle = register_int_gauge_vec_with_registry!(
+        let tx_idle = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_broker_tx_idle",
             "Number of idle transmit connections",
             &["id", "client_id", "broker", "state"],
@@ -1025,14 +1030,14 @@ impl BrokerStats {
             registry
         )
         .unwrap();
-        let rx_idle = register_int_gauge_vec_with_registry!(
+        let rx_idle = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_broker_rx_idle",
             "Number of idle receive connections",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
-        let req = register_int_gauge_vec_with_registry!(
+        let req = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_broker_req",
             "Number of requests in flight",
             &["id", "client_id", "broker", "state", "type"],
@@ -1060,14 +1065,14 @@ impl BrokerStats {
             registry
         )
         .unwrap();
-        let connects = register_int_gauge_vec_with_registry!(
+        let connects = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_broker_connects",
             "Number of connection attempts",
             &["id", "client_id", "broker", "state"],
             registry
         )
         .unwrap();
-        let disconnects = register_int_gauge_vec_with_registry!(
+        let disconnects = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_broker_disconnects",
             "Number of disconnects",
             &["id", "client_id", "broker", "state"],
@@ -1123,19 +1128,19 @@ impl BrokerStats {
         let labels = [id, client_id, broker, state];
 
         self.state_age
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.stateage);
         self.outbuf_cnt
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.outbuf_cnt);
         self.outbuf_msg_cnt
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.outbuf_msg_cnt);
         self.waitresp_cnt
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.waitresp_cnt);
         self.waitresp_msg_cnt
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.waitresp_msg_cnt);
         self.tx.with_label_values(&labels).set(stats.tx);
         self.tx_bytes.with_label_values(&labels).set(stats.txbytes);
@@ -1143,7 +1148,9 @@ impl BrokerStats {
         self.tx_retries
             .with_label_values(&labels)
             .set(stats.txretries);
-        self.tx_idle.with_label_values(&labels).set(stats.txidle);
+        self.tx_idle
+            .with_guarded_label_values(&labels)
+            .set(stats.txidle);
         self.req_timeouts
             .with_label_values(&labels)
             .set(stats.req_timeouts);
@@ -1156,10 +1163,12 @@ impl BrokerStats {
         self.rx_partial
             .with_label_values(&labels)
             .set(stats.rxpartial);
-        self.rx_idle.with_label_values(&labels).set(stats.rxidle);
+        self.rx_idle
+            .with_guarded_label_values(&labels)
+            .set(stats.rxidle);
         for (req_type, req_cnt) in &stats.req {
             self.req
-                .with_label_values(&[id, client_id, broker, state, req_type])
+                .with_guarded_label_values(&[id, client_id, broker, state, req_type])
                 .set(*req_cnt);
         }
         self.zbuf_grow
@@ -1170,10 +1179,14 @@ impl BrokerStats {
             self.wakeups.with_label_values(&labels).set(wakeups);
         }
         if let Some(connects) = stats.connects {
-            self.connects.with_label_values(&labels).set(connects);
+            self.connects
+                .with_guarded_label_values(&labels)
+                .set(connects);
         }
         if let Some(disconnects) = stats.disconnects {
-            self.disconnects.with_label_values(&labels).set(disconnects);
+            self.disconnects
+                .with_guarded_label_values(&labels)
+                .set(disconnects);
         }
         if let Some(int_latency) = &stats.int_latency {
             self.int_latency

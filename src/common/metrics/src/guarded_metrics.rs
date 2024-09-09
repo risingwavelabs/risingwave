@@ -21,8 +21,8 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use prometheus::core::{
-    Atomic, AtomicF64, AtomicI64, AtomicU64, Collector, Desc, GenericCounter, GenericLocalCounter,
-    MetricVec, MetricVecBuilder,
+    Atomic, AtomicF64, AtomicI64, AtomicU64, Collector, Desc, GenericCounter, GenericGaugeVec,
+    GenericLocalCounter, MetricVec, MetricVecBuilder,
 };
 use prometheus::local::{LocalHistogram, LocalIntCounter};
 use prometheus::proto::MetricFamily;
@@ -84,6 +84,22 @@ macro_rules! register_guarded_int_gauge_vec_with_registry {
 }
 
 #[macro_export]
+macro_rules! register_guarded_uint_gauge_vec_with_registry {
+    ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
+        let inner = prometheus::core::GenericGaugeVec::<AtomicU64>::new(
+            prometheus::opts!($NAME, $HELP),
+            $LABELS_NAMES,
+        );
+        inner.and_then(|inner| {
+            let inner = $crate::__extract_gauge_builder(inner);
+            let label_guarded = $crate::LabelGuardedUintGaugeVec::new(inner, { $LABELS_NAMES });
+            let result = ($REGISTRY).register(Box::new(label_guarded.clone()));
+            result.map(move |()| label_guarded)
+        })
+    }};
+}
+
+#[macro_export]
 macro_rules! register_guarded_int_counter_vec_with_registry {
     ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
         let inner = prometheus::IntCounterVec::new(prometheus::opts!($NAME, $HELP), $LABELS_NAMES);
@@ -131,6 +147,8 @@ pub type LabelGuardedIntCounterVec<const N: usize> =
     LabelGuardedMetricVec<VecBuilderOfCounter<AtomicU64>, N>;
 pub type LabelGuardedIntGaugeVec<const N: usize> =
     LabelGuardedMetricVec<VecBuilderOfGauge<AtomicI64>, N>;
+pub type LabelGuardedUintGaugeVec<const N: usize> =
+    LabelGuardedMetricVec<VecBuilderOfGauge<AtomicU64>, N>;
 pub type LabelGuardedGaugeVec<const N: usize> =
     LabelGuardedMetricVec<VecBuilderOfGauge<AtomicF64>, N>;
 
