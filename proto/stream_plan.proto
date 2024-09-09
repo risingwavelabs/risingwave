@@ -1036,4 +1036,6 @@ message StreamFragmentGraph {
   StreamContext ctx = 5;
   // If none, default parallelism will be applied.
   Parallelism parallelism = 6;
+
+  optional uint32 maybe_vnode_count = 7;
 }

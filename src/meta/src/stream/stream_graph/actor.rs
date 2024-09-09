@@ -665,6 +665,7 @@ impl ActorGraphBuilder {
         cluster_info: StreamingClusterInfo,
         default_parallelism: NonZeroUsize,
     ) -> MetaResult<Self> {
+        let vnode_count = fragment_graph.vnode_count();
         let existing_distributions = fragment_graph.existing_distribution();
 
         // Schedule the distribution of all building fragments.
@@ -672,6 +673,7 @@ impl ActorGraphBuilder {
             streaming_job_id,
             &cluster_info.worker_nodes,
             default_parallelism,
+            vnode_count,
         )?;
         let distributions = scheduler.schedule(&fragment_graph)?;
 

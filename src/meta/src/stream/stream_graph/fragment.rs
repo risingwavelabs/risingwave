@@ -24,6 +24,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{
     generate_internal_table_name_with_type, TableId, CDC_SOURCE_COLUMN_NUM,
 };
+use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
@@ -319,6 +320,8 @@ pub struct StreamFragmentGraph {
     /// The default parallelism of the job, specified by the `STREAMING_PARALLELISM` session
     /// variable. If not specified, all active worker slots will be used.
     specified_parallelism: Option<NonZeroUsize>,
+
+    vnode_count: usize,
 }
 
 impl StreamFragmentGraph {
@@ -343,10 +346,10 @@ impl StreamFragmentGraph {
         // Create nodes.
         let fragments: HashMap<_, _> = proto
             .fragments
-            .into_iter()
-            .map(|(id, fragment)| {
+            .iter()
+            .map(|(&id, fragment)| {
                 let id = fragment_id_gen.to_global_id(id);
-                let fragment = BuildingFragment::new(id, fragment, job, table_id_gen);
+                let fragment = BuildingFragment::new(id, fragment.clone(), job, table_id_gen);
                 (id, fragment)
             })
             .collect();
@@ -363,10 +366,10 @@ impl StreamFragmentGraph {
         let mut downstreams = HashMap::new();
         let mut upstreams = HashMap::new();
 
-        for edge in proto.edges {
+        for edge in &proto.edges {
             let upstream_id = fragment_id_gen.to_global_id(edge.upstream_id);
             let downstream_id = fragment_id_gen.to_global_id(edge.downstream_id);
-            let edge = StreamFragmentEdge::from_protobuf(&edge);
+            let edge = StreamFragmentEdge::from_protobuf(edge);
 
             upstreams
                 .entry(downstream_id)
@@ -394,12 +397,15 @@ impl StreamFragmentGraph {
             None
         };
 
+        let vnode_count = proto.vnode_count();
+
         Ok(Self {
             fragments,
             downstreams,
             upstreams,
             dependent_table_ids,
             specified_parallelism,
+            vnode_count,
         })
     }
 
@@ -497,6 +503,10 @@ impl StreamFragmentGraph {
     /// Get the parallelism of the job, if specified by the user.
     pub fn specified_parallelism(&self) -> Option<NonZeroUsize> {
         self.specified_parallelism
+    }
+
+    pub fn vnode_count(&self) -> usize {
+        self.vnode_count
     }
 
     /// Get downstreams of a fragment.
@@ -1147,5 +1157,9 @@ impl CompleteStreamFragmentGraph {
     /// Returns all building fragments in the graph.
     pub(super) fn building_fragments(&self) -> &HashMap<GlobalFragmentId, BuildingFragment> {
         &self.building_graph.fragments
+    }
+
+    pub(super) fn vnode_count(&self) -> usize {
+        self.building_graph.vnode_count()
     }
 }

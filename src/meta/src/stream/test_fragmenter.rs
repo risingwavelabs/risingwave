@@ -415,6 +415,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
         dependent_table_ids: vec![],
         table_ids_cnt: 3,
         parallelism: None,
+        maybe_vnode_count: None,
     }
 }
 

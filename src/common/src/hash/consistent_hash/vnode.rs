@@ -218,6 +218,13 @@ impl VnodeCountCompat for risingwave_pb::catalog::Table {
     }
 }
 
+impl VnodeCountCompat for risingwave_pb::stream_plan::StreamFragmentGraph {
+    fn vnode_count(&self) -> usize {
+        self.maybe_vnode_count
+            .map_or(VirtualNode::COUNT, |v| v as _)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

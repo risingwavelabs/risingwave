@@ -108,6 +108,7 @@ impl StreamFragmentGraph {
             dependent_table_ids: vec![],
             table_ids_cnt: 0,
             parallelism: None,
+            maybe_vnode_count: None,
         }
     }
 
