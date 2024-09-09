@@ -387,9 +387,9 @@ impl OpendalStreamingUploader {
                     );
                 }
                 Err(e) => tracing::info!(
-                    "The file {:?} can not be stated, and fail when writer write. Err {:?}",
-                    self.path,
-                    e
+                    path = ?self.path,
+                    error = %e.as_report(),
+                    "File can not be stated, and fail when writer write.",
                 ),
             };
             return Err(err.into());
@@ -434,9 +434,9 @@ impl StreamingUploader for OpendalStreamingUploader {
                         );
                     }
                     Err(e) => tracing::info!(
-                        "The file {:?} can not be stated, and fail when close writer. Err {:?}",
-                        self.path,
-                        e
+                        path = ?self.path,
+                        error = %e.as_report(),
+                        "File can not be stated, and fail when writer write.",
                     ),
                 };
                 return Err(err.into());
