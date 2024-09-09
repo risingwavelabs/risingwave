@@ -229,9 +229,15 @@ message CoordinateRequest {
     SinkMetadata metadata = 2;
   }
 
+  message UpdateVnodeBitmapRequest {
+    common.Buffer vnode_bitmap = 1;
+  }
+
   oneof msg {
     StartCoordinationRequest start_request = 1;
     CommitRequest commit_request = 2;
+    UpdateVnodeBitmapRequest update_vnode_request = 3;
+    bool stop = 4;
   }
 }
 
