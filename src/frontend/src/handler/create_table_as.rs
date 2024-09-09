@@ -34,6 +34,7 @@ pub async fn handle_create_as(
     append_only: bool,
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
+    ast_engine: risingwave_sqlparser::ast::Engine,
 ) -> Result<RwPgResponse> {
     if column_defs.iter().any(|column| column.data_type.is_some()) {
         return Err(ErrorCode::InvalidInputSyntax(
@@ -41,6 +42,11 @@ pub async fn handle_create_as(
         )
         .into());
     }
+    let engine = match ast_engine {
+        risingwave_sqlparser::ast::Engine::Hummock => risingwave_common::catalog::Engine::Hummock,
+        risingwave_sqlparser::ast::Engine::Iceberg => risingwave_common::catalog::Engine::Iceberg,
+    };
+
     let session = handler_args.session.clone();
 
     if let Either::Right(resp) = session.check_relation_name_duplicated(
@@ -109,6 +115,7 @@ pub async fn handle_create_as(
             on_conflict,
             with_version_column,
             Some(col_id_gen.into_version()),
+            engine,
         )?;
         let mut graph = build_graph(plan)?;
         graph.parallelism =

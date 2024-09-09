@@ -333,6 +333,12 @@ message Table {
     int32 next_column_id = 2;
   }
 
+  enum Engine {
+    ENGINE_UNSPECIFIED = 0;
+    HUMMOCK = 1;
+    ICEBERG = 2;
+  }
+
   uint32 id = 1;
   uint32 schema_id = 2;
   uint32 database_id = 3;
@@ -421,6 +427,9 @@ message Table {
   // tables and tests. Not to be confused with the global catalog version for
   // notification service.
   TableVersion version = 100;
+
+  // Table Engine, currently only support hummock and iceberg
+  Engine engine = 200;
 }
 
 enum HandleConflictBehavior {

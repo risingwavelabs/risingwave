@@ -23,7 +23,7 @@ use risingwave_meta_model_v2::{
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
-use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableType};
+use risingwave_pb::catalog::table::{PbEngine, PbOptionalAssociatedSourceId, PbTableType};
 use risingwave_pb::catalog::{
     PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior, PbIndex,
     PbSchema, PbSecret, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable,
@@ -163,6 +163,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             created_at_cluster_version: value.1.created_at_cluster_version,
             retention_seconds: value.0.retention_seconds.map(|id| id as u32),
             cdc_table_id: value.0.cdc_table_id,
+            engine: PbEngine::from(value.0.engine) as _,
         }
     }
 }
