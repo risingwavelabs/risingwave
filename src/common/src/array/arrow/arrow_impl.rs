@@ -448,12 +448,12 @@ pub trait ToArrow {
     #[inline]
     fn map_type_to_arrow(&self, map_type: &MapType) -> Result<arrow_schema::DataType, ArrayError> {
         let sorted = false;
-        let list_type = map_type.clone().into_list();
+        let struct_type = map_type.clone().into_struct();
         Ok(arrow_schema::DataType::Map(
             Arc::new(arrow_schema::Field::new(
                 "entries",
-                self.list_type_to_arrow(&list_type)?,
-                true,
+                self.struct_type_to_arrow(struct_type.as_struct())?,
+                false,
             )),
             sorted,
         ))
