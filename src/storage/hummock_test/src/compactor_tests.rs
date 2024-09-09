@@ -29,7 +29,6 @@ pub(crate) mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{test_epoch, Epoch, EpochExt};
     use risingwave_common_service::NotificationClient;
-    use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::compact_task::CompactTask;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{
@@ -44,6 +43,7 @@ pub(crate) mod tests {
         ReadTableWatermark, TableWatermarks, VnodeWatermark, WatermarkDirection,
     };
     use risingwave_hummock_sdk::version::HummockVersion;
+    use risingwave_hummock_sdk::{can_concat, CompactionGroupId};
     use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use risingwave_meta::hummock::compaction::selector::{
         default_compaction_selector, ManualCompactionOption,
@@ -92,7 +92,7 @@ pub(crate) mod tests {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
         hummock_manager_ref: &HummockManagerRef,
-        table_id: &[u32],
+        table_ids: &[u32],
     ) -> HummockStorage {
         let remote_dir = "hummock_001_test".to_string();
         let options = Arc::new(StorageOpts {
@@ -117,7 +117,7 @@ pub(crate) mod tests {
         register_tables_with_id_for_test(
             hummock.filter_key_extractor_manager(),
             hummock_manager_ref,
-            table_id,
+            table_ids,
         )
         .await;
 
@@ -235,7 +235,7 @@ pub(crate) mod tests {
             hummock_meta_client.clone(),
             get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
-            Default::default(),
+            &[0],
         )
         .await;
         let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
@@ -405,7 +405,7 @@ pub(crate) mod tests {
             hummock_meta_client.clone(),
             get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
-            Default::default(),
+            &[0],
         )
         .await;
 
@@ -2042,13 +2042,12 @@ pub(crate) mod tests {
         let base_epoch = Epoch::now();
         let mut epoch: u64 = base_epoch.0;
         let millisec_interval_epoch: u64 = (1 << 16) * 100;
-        // let mut epoch_set = BTreeSet::new();
 
         let mut local_1 = storage
-            .new_local(NewLocalOptions::for_test(table_id_1.clone()))
+            .new_local(NewLocalOptions::for_test(table_id_1))
             .await;
         let mut local_2 = storage
-            .new_local(NewLocalOptions::for_test(table_id_2.clone()))
+            .new_local(NewLocalOptions::for_test(table_id_2))
             .await;
 
         let val = Bytes::from(b"0"[..].to_vec());
@@ -2117,37 +2116,20 @@ pub(crate) mod tests {
             (&mut local_2, true),
             &mut epoch,
             val.clone(),
-            16,
+            1,
             millisec_interval_epoch,
             key_prefix.clone(),
             hummock_meta_client.clone(),
             &mut is_init,
         )
         .await;
-
         epoch += millisec_interval_epoch;
 
         let parent_group_id = 2;
         let split_table_ids = vec![table_id_2.table_id()];
-        let new_cg_id = hummock_manager_ref
-            .split_compaction_group(parent_group_id, &split_table_ids, 0)
-            .await
-            .unwrap();
 
-        assert_ne!(parent_group_id, new_cg_id);
-
-        hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id)
-            .await
-            .unwrap();
-
-        let new_cg_id = hummock_manager_ref
-            .split_compaction_group(parent_group_id, &split_table_ids, 0)
-            .await
-            .unwrap();
-
+        // compact
         {
-            // compact left group
             let manual_compcation_option = ManualCompactionOption {
                 level: 0,
                 ..Default::default()
@@ -2189,18 +2171,57 @@ pub(crate) mod tests {
                 .unwrap();
         }
 
-        {
-            // compact right group
+        let new_cg_id = hummock_manager_ref
+            .split_compaction_group(parent_group_id, &split_table_ids, 0)
+            .await
+            .unwrap();
+
+        assert_ne!(parent_group_id, new_cg_id);
+        assert!(hummock_manager_ref
+            .merge_compaction_group(parent_group_id, new_cg_id)
+            .await
+            .is_err());
+
+        write_data(
+            &storage,
+            (&mut local_1, true),
+            (&mut local_2, true),
+            &mut epoch,
+            val.clone(),
+            100,
+            millisec_interval_epoch,
+            key_prefix.clone(),
+            hummock_meta_client.clone(),
+            &mut is_init,
+        )
+        .await;
+        epoch += millisec_interval_epoch;
+
+        async fn compact_once(
+            group_id: CompactionGroupId,
+            level: usize,
+            hummock_manager_ref: HummockManagerRef,
+            compact_ctx: CompactorContext,
+            filter_key_extractor_manager: FilterKeyExtractorManager,
+            sstable_object_id_manager: Arc<SstableObjectIdManager>,
+        ) {
+            // compact left group
             let manual_compcation_option = ManualCompactionOption {
-                level: 0,
+                level,
                 ..Default::default()
             };
             // 2. get compact task
-            let mut compact_task = hummock_manager_ref
-                .manual_get_compact_task(new_cg_id, manual_compcation_option)
+            let compact_task = hummock_manager_ref
+                .manual_get_compact_task(group_id, manual_compcation_option)
                 .await
-                .unwrap()
                 .unwrap();
+
+            if compact_task.is_none() {
+                return;
+            }
+
+            let mut compact_task = compact_task.unwrap();
+
             let compaction_filter_flag =
                 CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
             compact_task.compaction_filter_mask = compaction_filter_flag.bits();
@@ -2212,7 +2233,7 @@ pub(crate) mod tests {
             // 3. compact
             let (_tx, rx) = tokio::sync::oneshot::channel();
             let ((result_task, task_stats), _) = compact(
-                compact_ctx.clone(),
+                compact_ctx,
                 compact_task.clone(),
                 rx,
                 Box::new(sstable_object_id_manager.clone()),
@@ -2230,6 +2251,57 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
         }
+
+        compact_once(
+            parent_group_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
+
+        compact_once(
+            new_cg_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
+
+        // try merge
+        hummock_manager_ref
+            .merge_compaction_group(parent_group_id, new_cg_id)
+            .await
+            .unwrap();
+
+        let new_cg_id = hummock_manager_ref
+            .split_compaction_group(parent_group_id, &split_table_ids, 0)
+            .await
+            .unwrap();
+
+        compact_once(
+            parent_group_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
+
+        compact_once(
+            new_cg_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
 
         // write left
         write_data(
@@ -2255,47 +2327,15 @@ pub(crate) mod tests {
             .unwrap();
 
         // compact
-        {
-            // compact left group
-            let manual_compcation_option = ManualCompactionOption {
-                level: 0,
-                ..Default::default()
-            };
-            // 2. get compact task
-            let mut compact_task = hummock_manager_ref
-                .manual_get_compact_task(parent_group_id, manual_compcation_option)
-                .await
-                .unwrap()
-                .unwrap();
-            let compaction_filter_flag =
-                CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
-            compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-            compact_task.current_epoch_time = hummock_manager_ref
-                .get_current_version()
-                .await
-                .max_committed_epoch();
-
-            // 3. compact
-            let (_tx, rx) = tokio::sync::oneshot::channel();
-            let ((result_task, task_stats), _) = compact(
-                compact_ctx.clone(),
-                compact_task.clone(),
-                rx,
-                Box::new(sstable_object_id_manager.clone()),
-                filter_key_extractor_manager.clone(),
-            )
-            .await;
-
-            hummock_manager_ref
-                .report_compact_task(
-                    result_task.task_id,
-                    result_task.task_status,
-                    result_task.sorted_output_ssts,
-                    Some(to_prost_table_stats_map(task_stats)),
-                )
-                .await
-                .unwrap();
-        }
+        compact_once(
+            parent_group_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
 
         // try split
         let new_cg_id = hummock_manager_ref
@@ -2318,59 +2358,66 @@ pub(crate) mod tests {
         )
         .await;
 
-        let ret_err = hummock_manager_ref
+        epoch += millisec_interval_epoch;
+
+        hummock_manager_ref
             .merge_compaction_group(parent_group_id, new_cg_id)
-            .await;
-        assert!(ret_err.is_err());
+            .await
+            .unwrap();
 
-        // try compact
-        {
-            // compact left
+        // write left and right
+
+        write_data(
+            &storage,
+            (&mut local_1, true),
+            (&mut local_2, true),
+            &mut epoch,
+            val.clone(),
+            1,
+            millisec_interval_epoch,
+            key_prefix.clone(),
+            hummock_meta_client.clone(),
+            &mut is_init,
+        )
+        .await;
+
+        epoch += millisec_interval_epoch;
+
+        compact_once(
+            parent_group_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
+
+        compact_once(
+            new_cg_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
+
+        async fn compact_all(
+            group_id: CompactionGroupId,
+            level: usize,
+            hummock_manager_ref: HummockManagerRef,
+            compact_ctx: CompactorContext,
+            filter_key_extractor_manager: FilterKeyExtractorManager,
+            sstable_object_id_manager: Arc<SstableObjectIdManager>,
+        ) {
             loop {
+                let manual_compcation_option = ManualCompactionOption {
+                    level,
+                    ..Default::default()
+                };
                 let compact_task = hummock_manager_ref
-                    .get_compact_task(parent_group_id, &mut default_compaction_selector())
-                    .await
-                    .unwrap();
-
-                if compact_task.is_none() {
-                    break;
-                }
-
-                let mut compact_task = compact_task.unwrap();
-                let compaction_filter_flag =
-                    CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
-                compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-                compact_task.current_epoch_time = hummock_manager_ref
-                    .get_current_version()
-                    .await
-                    .max_committed_epoch();
-
-                // 3. compact
-                let (_tx, rx) = tokio::sync::oneshot::channel();
-                let ((result_task, task_stats), _) = compact(
-                    compact_ctx.clone(),
-                    compact_task.clone(),
-                    rx,
-                    Box::new(sstable_object_id_manager.clone()),
-                    filter_key_extractor_manager.clone(),
-                )
-                .await;
-
-                hummock_manager_ref
-                    .report_compact_task(
-                        result_task.task_id,
-                        result_task.task_status,
-                        result_task.sorted_output_ssts,
-                        Some(to_prost_table_stats_map(task_stats)),
-                    )
-                    .await
-                    .unwrap();
-            }
-
-            // compact right
-            loop {
-                let compact_task = hummock_manager_ref
-                    .get_compact_task(new_cg_id, &mut default_compaction_selector())
+                    .manual_get_compact_task(group_id, manual_compcation_option)
                     .await
                     .unwrap();
 
@@ -2410,10 +2457,58 @@ pub(crate) mod tests {
             }
         }
 
+        // try split
+        let new_cg_id = hummock_manager_ref
+            .split_compaction_group(parent_group_id, &split_table_ids, 0)
+            .await
+            .unwrap();
+
         // try merge
-        let ret_err = hummock_manager_ref
+        assert!(hummock_manager_ref
             .merge_compaction_group(parent_group_id, new_cg_id)
-            .await;
-        assert!(ret_err.is_err());
+            .await
+            .is_err());
+
+        // write left and write
+
+        write_data(
+            &storage,
+            (&mut local_1, true),
+            (&mut local_2, true),
+            &mut epoch,
+            val.clone(),
+            200,
+            millisec_interval_epoch,
+            key_prefix.clone(),
+            hummock_meta_client.clone(),
+            &mut is_init,
+        )
+        .await;
+
+        compact_all(
+            parent_group_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
+
+        compact_all(
+            new_cg_id,
+            0,
+            hummock_manager_ref.clone(),
+            compact_ctx.clone(),
+            filter_key_extractor_manager.clone(),
+            sstable_object_id_manager.clone(),
+        )
+        .await;
+
+        // try merge
+        hummock_manager_ref
+            .merge_compaction_group(parent_group_id, new_cg_id)
+            .await
+            .unwrap();
     }
 }

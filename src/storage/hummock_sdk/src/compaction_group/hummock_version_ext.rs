@@ -185,6 +185,24 @@ impl HummockVersion {
             }))
     }
 
+    pub fn get_sst_ids_by_group_id(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> impl Iterator<Item = u64> + '_ {
+        self.levels
+            .iter()
+            .filter_map(move |(cg_id, level)| {
+                if *cg_id == compaction_group_id {
+                    Some(level)
+                } else {
+                    None
+                }
+            })
+            .flat_map(|level| level.l0.sub_levels.iter().rev().chain(level.levels.iter()))
+            .flat_map(|level| level.table_infos.iter())
+            .map(|s| s.sst_id)
+    }
+
     /// `get_sst_infos_from_groups` doesn't guarantee that all returned sst info belongs to `select_group`.
     /// i.e. `select_group` is just a hint.
     /// We separate `get_sst_infos_from_groups` and `get_sst_infos` because `get_sst_infos_from_groups` may be further customized in the future.

@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::compact_task::ReportTask;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::TableGroupInfo;
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::version::{GroupDelta, GroupDeltas};
-use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_hummock_sdk::{can_concat, CompactionGroupId};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{PbGroupMerge, PbStateTableInfoDelta};
 use thiserror_ext::AsReport;
@@ -107,11 +107,19 @@ impl HummockManager {
 
         // check duplicated sst_id
         let mut sst_id_set = HashSet::new();
-        for sst in versioning.current_version.get_sst_ids() {
-            if !sst_id_set.insert(sst) {
+        for sst_id in versioning
+            .current_version
+            .get_sst_ids_by_group_id(left_group_id)
+            .chain(
+                versioning
+                    .current_version
+                    .get_sst_ids_by_group_id(right_group_id),
+            )
+        {
+            if !sst_id_set.insert(sst_id) {
                 return Err(Error::CompactionGroup(format!(
                     "invalid merge group_1 {} group_2 {} duplicated sst_id {}",
-                    left_group_id, right_group_id, sst
+                    left_group_id, right_group_id, sst_id
                 )));
             }
         }
@@ -119,26 +127,36 @@ impl HummockManager {
         // TODO(li0k): remove this check (Since the current split_sst does not change key_range, this check can not be removed, otherwise concate will fail.)
         // check branched sst on non-overlap level
         {
-            for level in versioning
+            let left_levels = versioning
                 .current_version
-                .get_compaction_group_levels(group_1)
-                .levels
-                .iter()
-                .chain(
-                    versioning
-                        .current_version
-                        .get_compaction_group_levels(group_2)
-                        .levels
-                        .iter(),
-                )
-            {
-                for sst in &level.table_infos {
-                    if sst.sst_id != sst.object_id {
-                        return Err(Error::CompactionGroup(format!(
-                            "invalid merge group_1 {} group_2 {} branched sst_id {}",
-                            left_group_id, right_group_id, sst.sst_id
-                        )));
-                    }
+                .get_compaction_group_levels(group_1);
+
+            let right_levels = versioning
+                .current_version
+                .get_compaction_group_levels(group_2);
+
+            // we can not check the l0 sub level, because the sub level id will be rewritten when merge
+            // This check will ensure that other non-overlapping level ssts can be concat and that the key_range is correct.
+            let max_level = std::cmp::max(left_levels.levels.len(), right_levels.levels.len());
+            for level_idx in 0..max_level {
+                let left_level = left_levels.levels.get(level_idx).unwrap();
+                let right_level = right_levels.levels.get(level_idx).unwrap();
+                if left_level.table_infos.is_empty() || right_level.table_infos.is_empty() {
+                    continue;
+                }
+
+                let left_last_sst = left_level.table_infos.last().unwrap().clone();
+                let right_first_sst = right_level.table_infos.first().unwrap().clone();
+                let left_sst_id = left_last_sst.sst_id;
+                let right_sst_id = right_first_sst.sst_id;
+                let left_obj_id = left_last_sst.object_id;
+                let right_obj_id = right_first_sst.object_id;
+
+                if !can_concat(&[left_last_sst, right_first_sst]) {
+                    return Err(Error::CompactionGroup(format!(
+                        "invalid merge group_1 {} group_2 {} level_idx {} left_last_sst_id {} right_first_sst_id {} left_obj_id {} right_obj_id {}",
+                        left_group_id, right_group_id, level_idx, left_sst_id, right_sst_id, left_obj_id, right_obj_id
+                    )));
                 }
             }
         }
