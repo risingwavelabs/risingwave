@@ -75,19 +75,22 @@ impl MigrationTrait for Migration {
                             .col(
                                 ColumnDef::new(HummockEpochToVersion::Epoch)
                                     .big_integer()
-                                    .not_null()
-                                    .primary_key(),
+                                    .not_null(),
                             )
                             .col(
                                 ColumnDef::new(HummockEpochToVersion::TableId)
                                     .big_integer()
-                                    .not_null()
-                                    .primary_key(),
+                                    .not_null(),
                             )
                             .col(
                                 ColumnDef::new(HummockEpochToVersion::VersionId)
                                     .big_integer()
                                     .not_null(),
+                            )
+                            .primary_key(
+                                Index::create()
+                                    .col(HummockEpochToVersion::Epoch)
+                                    .col(HummockEpochToVersion::TableId),
                             )
                             .to_owned(),
                     )
