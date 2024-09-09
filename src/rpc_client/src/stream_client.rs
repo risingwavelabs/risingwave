@@ -70,8 +70,7 @@ pub type StreamClientPoolRef = Arc<StreamClientPool>;
 macro_rules! for_all_stream_rpc {
     ($macro:ident) => {
         $macro! {
-            { 0, drop_actors, DropActorsRequest, DropActorsResponse }
-            ,{ 0, wait_epoch_commit, WaitEpochCommitRequest, WaitEpochCommitResponse }
+            { 0, wait_epoch_commit, WaitEpochCommitRequest, WaitEpochCommitResponse }
         }
     };
 }

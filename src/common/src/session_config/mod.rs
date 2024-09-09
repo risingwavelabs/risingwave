@@ -292,6 +292,12 @@ pub struct SessionConfig {
 
     #[parameter(default = "hex", check_hook = check_bytea_output)]
     bytea_output: String,
+
+    /// Bypass checks on cluster limits
+    ///
+    /// When enabled, `CREATE MATERIALIZED VIEW` will not fail if the cluster limit is hit.
+    #[parameter(default = false)]
+    bypass_cluster_limits: bool,
 }
 
 fn check_timezone(val: &str) -> Result<(), String> {

@@ -22,6 +22,7 @@ user backfill_rate_limit
 user background_ddl
 user batch_enable_distributed_dml
 user batch_parallelism
+user bypass_cluster_limits
 user bytea_output
 user cdc_source_wait_streaming_start_timeout
 user client_encoding

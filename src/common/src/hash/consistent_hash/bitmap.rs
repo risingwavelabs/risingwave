@@ -15,6 +15,7 @@
 use std::ops::RangeInclusive;
 
 use crate::bitmap::Bitmap;
+use crate::hash::table_distribution::SINGLETON_VNODE;
 use crate::hash::VirtualNode;
 
 /// An extension trait for `Bitmap` to support virtual node operations.
@@ -35,5 +36,18 @@ impl Bitmap {
     pub fn vnode_ranges(&self) -> impl Iterator<Item = RangeInclusive<VirtualNode>> + '_ {
         self.high_ranges()
             .map(|r| (VirtualNode::from_index(*r.start())..=VirtualNode::from_index(*r.end())))
+    }
+
+    /// Returns whether only the [`SINGLETON_VNODE`] is set in the bitmap.
+    ///
+    /// Note that this method returning `true` does not imply that the bitmap was created by
+    /// [`VnodeBitmapExt::singleton`], or that the bitmap has length 1.
+    pub fn is_singleton(&self) -> bool {
+        self.count_ones() == 1 && self.iter_vnodes().next().unwrap() == SINGLETON_VNODE
+    }
+
+    /// Creates a bitmap with length 1 and the single bit set.
+    pub fn singleton() -> Self {
+        Self::ones(1)
     }
 }

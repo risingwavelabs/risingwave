@@ -368,12 +368,14 @@ impl DdlController {
         }
     }
 
+    #[tracing::instrument(skip(self), level = "debug")]
     pub async fn alter_parallelism(
         &self,
         table_id: u32,
         parallelism: PbTableParallelism,
         mut deferred: bool,
     ) -> MetaResult<()> {
+        tracing::info!("alter parallelism");
         if self.barrier_manager.check_status_running().is_err() {
             tracing::info!(
                 "alter parallelism is set to deferred mode because the system is in recovery state"

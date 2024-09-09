@@ -86,6 +86,8 @@ impl LogicalAgg {
             bail!("expected at least one agg call");
         }
 
+        let need_row_merge: bool = Self::need_row_merge(&approx_percentile);
+
         // ====== Handle normal aggs
         let total_agg_calls = core
             .agg_calls
@@ -98,8 +100,12 @@ impl LogicalAgg {
         let local_agg = StreamStatelessSimpleAgg::new(core);
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
-        let global_agg =
-            new_stream_simple_agg(Agg::new(total_agg_calls, IndexSet::empty(), exchange));
+
+        let must_output_per_barrier = need_row_merge;
+        let global_agg = new_stream_simple_agg(
+            Agg::new(total_agg_calls, IndexSet::empty(), exchange),
+            must_output_per_barrier,
+        );
 
         // ====== Merge approx percentile and normal aggs
         Self::add_row_merge_if_needed(
@@ -129,6 +135,7 @@ impl LogicalAgg {
             };
             bail!("expected at least one agg call");
         }
+        let need_row_merge = Self::need_row_merge(&approx_percentile);
 
         // Generate vnode via project
         // TODO(kwannoel): We should apply Project optimization rules here.
@@ -157,19 +164,26 @@ impl LogicalAgg {
         let global_agg = if self.group_key().is_empty() {
             let exchange =
                 RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
-            let global_agg = new_stream_simple_agg(Agg::new(
-                core.agg_calls
-                    .iter()
-                    .enumerate()
-                    .map(|(partial_output_idx, agg_call)| {
-                        agg_call.partial_to_total_agg_call(n_local_group_key + partial_output_idx)
-                    })
-                    .collect(),
-                global_group_key.into_iter().collect(),
-                exchange,
-            ));
+            let must_output_per_barrier = need_row_merge;
+            let global_agg = new_stream_simple_agg(
+                Agg::new(
+                    core.agg_calls
+                        .iter()
+                        .enumerate()
+                        .map(|(partial_output_idx, agg_call)| {
+                            agg_call
+                                .partial_to_total_agg_call(n_local_group_key + partial_output_idx)
+                        })
+                        .collect(),
+                    global_group_key.into_iter().collect(),
+                    exchange,
+                ),
+                must_output_per_barrier,
+            );
             global_agg.into()
         } else {
+            // the `RowMergeExec` has not supported keyed merge
+            assert!(!need_row_merge);
             let exchange = RequiredDist::shard_by_key(input_col_num, &global_group_key)
                 .enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
             // Local phase should have reordered the group keys into their required order.
@@ -203,7 +217,7 @@ impl LogicalAgg {
         let mut core = self.core.clone();
         let input = RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?;
         core.input = input;
-        Ok(new_stream_simple_agg(core).into())
+        Ok(new_stream_simple_agg(core, false).into())
     }
 
     fn gen_shuffle_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
@@ -339,6 +353,10 @@ impl LogicalAgg {
         ))
     }
 
+    fn need_row_merge(approx_percentile: &Option<PlanRef>) -> bool {
+        approx_percentile.is_some()
+    }
+
     /// Add `RowMerge` if needed
     fn add_row_merge_if_needed(
         approx_percentile: Option<PlanRef>,
@@ -346,7 +364,11 @@ impl LogicalAgg {
         approx_percentile_col_mapping: ColIndexMapping,
         non_approx_percentile_col_mapping: ColIndexMapping,
     ) -> Result<PlanRef> {
+        // just for assert
+        let need_row_merge = Self::need_row_merge(&approx_percentile);
+
         if let Some(approx_percentile) = approx_percentile {
+            assert!(need_row_merge);
             let row_merge = StreamRowMerge::new(
                 approx_percentile,
                 global_agg,
@@ -355,6 +377,7 @@ impl LogicalAgg {
             )?;
             Ok(row_merge.into())
         } else {
+            assert!(!need_row_merge);
             Ok(global_agg)
         }
     }
@@ -1305,9 +1328,9 @@ fn find_or_append_row_count(mut logical: Agg<PlanRef>) -> (Agg<PlanRef>, usize) 
     (logical, row_count_idx)
 }
 
-fn new_stream_simple_agg(core: Agg<PlanRef>) -> StreamSimpleAgg {
+fn new_stream_simple_agg(core: Agg<PlanRef>, must_output_per_barrier: bool) -> StreamSimpleAgg {
     let (logical, row_count_idx) = find_or_append_row_count(core);
-    StreamSimpleAgg::new(logical, row_count_idx)
+    StreamSimpleAgg::new(logical, row_count_idx, must_output_per_barrier)
 }
 
 fn new_stream_hash_agg(core: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> StreamHashAgg {
@@ -1386,19 +1409,12 @@ impl ToStream for LogicalAgg {
             panic!("the root PlanNode must be StreamHashAgg, StreamSimpleAgg, StreamGlobalApproxPercentile, or StreamRowMerge");
         };
 
-        let is_hash_agg = !self.group_key().is_empty();
-        // "Simple Agg" includes normal simple agg, as well as approx percentile simple 2 phase agg.
-        let is_simple_agg = !is_hash_agg;
-        if self.agg_calls().len() == n_final_agg_calls && is_hash_agg {
+        if self.agg_calls().len() == n_final_agg_calls {
             // an existing `count(*)` is used as row count column in `StreamXxxAgg`
             Ok(plan)
         } else {
-            // For hash agg, a `count(*)` is appended, should project the output.
-            // For simple agg, we output every epoch, so we will always add a project
-            // to filter out no-op updates, and we don't need the following assert.
-            if is_hash_agg {
-                assert_eq!(self.agg_calls().len() + 1, n_final_agg_calls);
-            }
+            // a `count(*)` is appended, should project the output
+            assert_eq!(self.agg_calls().len() + 1, n_final_agg_calls);
             Ok(StreamProject::new(generic::Project::with_out_col_idx(
                 plan,
                 0..self.schema().len(),
@@ -1407,9 +1423,7 @@ impl ToStream for LogicalAgg {
             // Since it'll be pruned immediately in `StreamProject`, the update records are likely to be
             // no-op. So we set the hint to instruct the executor to eliminate them.
             // See https://github.com/risingwavelabs/risingwave/issues/17030.
-            // Further for simple agg, we also have to set the hint to eliminate no-op updates.
-            // Since we will output every epoch.
-            .with_noop_update_hint(self.agg_calls().is_empty() || is_simple_agg)
+            .with_noop_update_hint(self.agg_calls().is_empty())
             .into())
         }
     }

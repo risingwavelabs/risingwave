@@ -106,7 +106,8 @@ pub struct TableFragments {
     /// The status of actors
     pub actor_status: BTreeMap<ActorId, ActorStatus>,
 
-    /// The splits of actors
+    /// The splits of actors,
+    /// incl. both `Source` and `SourceBackfill` actors.
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
     /// The streaming context associated with this stream plan and its fragments
@@ -362,7 +363,9 @@ impl TableFragments {
                 return vec![];
             }
             if (fragment.fragment_type_mask
-                & (FragmentTypeFlag::Values as u32 | FragmentTypeFlag::StreamScan as u32))
+                & (FragmentTypeFlag::Values as u32
+                    | FragmentTypeFlag::StreamScan as u32
+                    | FragmentTypeFlag::SourceScan as u32))
                 != 0
             {
                 actor_ids.extend(fragment.actors.iter().map(|actor| actor.actor_id));

@@ -14,7 +14,7 @@
 
 use thiserror::Error;
 
-use super::{License, LicenseKeyError, LicenseManager, Tier};
+use super::{report_telemetry, License, LicenseKeyError, LicenseManager, Tier};
 
 /// Define all features that are available based on the tier of the license.
 ///
@@ -84,6 +84,14 @@ macro_rules! def_feature {
                     )*
                 }
             }
+
+            fn get_feature_name(&self) -> &'static str {
+                match &self {
+                    $(
+                        Self::$name => stringify!($name),
+                    )*
+                }
+            }
         }
     };
 }
@@ -113,7 +121,7 @@ pub enum FeatureNotAvailable {
 impl Feature {
     /// Check whether the feature is available based on the current license.
     pub fn check_available(self) -> Result<(), FeatureNotAvailable> {
-        match LicenseManager::get().license() {
+        let check_res = match LicenseManager::get().license() {
             Ok(license) => {
                 if license.tier >= self.min_tier() {
                     Ok(())
@@ -136,6 +144,10 @@ impl Feature {
                     })
                 }
             }
-        }
+        };
+
+        report_telemetry(&self, self.get_feature_name(), check_res.is_ok());
+
+        check_res
     }
 }

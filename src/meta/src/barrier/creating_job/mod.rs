@@ -28,6 +28,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_service::{BarrierCompleteResponse, BuildActorInfo};
 use tracing::{debug, info};
 
@@ -67,6 +68,7 @@ impl CreatingStreamingJobControl {
         backfill_epoch: u64,
         version_stat: &HummockVersionStats,
         metrics: &MetaMetrics,
+        initial_mutation: Mutation,
     ) -> Self {
         info!(
             table_id = info.table_fragments.table_id().table_id,
@@ -108,7 +110,7 @@ impl CreatingStreamingJobControl {
                 backfill_epoch,
                 pending_non_checkpoint_barriers: vec![],
                 snapshot_backfill_actors,
-                actors_to_create: Some(
+                initial_barrier_info: Some((
                     actors_to_create
                         .into_iter()
                         .map(|(worker_id, actors)| {
@@ -124,7 +126,8 @@ impl CreatingStreamingJobControl {
                             )
                         })
                         .collect(),
-                ),
+                    initial_mutation,
+                )),
             },
             upstream_lag: metrics
                 .snapshot_backfill_lag
@@ -283,11 +286,12 @@ impl CreatingStreamingJobControl {
                 prev_epoch,
                 kind,
                 new_actors,
+                mutation,
             } in barriers_to_inject
             {
                 let node_to_collect = control_stream_manager.inject_barrier(
                     Some(table_id),
-                    None,
+                    mutation,
                     (&curr_epoch, &prev_epoch),
                     &kind,
                     graph_info,

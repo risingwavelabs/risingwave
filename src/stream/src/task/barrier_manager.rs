@@ -37,8 +37,7 @@ use tonic::{Code, Status};
 use self::managed_state::ManagedBarrierState;
 use crate::error::{IntoUnexpectedExit, StreamError, StreamResult};
 use crate::task::{
-    ActorHandle, ActorId, AtomicU64Ref, PartialGraphId, SharedContext, StreamEnvironment,
-    UpDownActorIds,
+    ActorId, AtomicU64Ref, PartialGraphId, SharedContext, StreamEnvironment, UpDownActorIds,
 };
 
 mod managed_state;
@@ -210,10 +209,6 @@ pub(super) enum LocalActorOperation {
         handle: ControlStreamHandle,
         init_request: InitRequest,
     },
-    DropActors {
-        actors: Vec<ActorId>,
-        result_sender: oneshot::Sender<()>,
-    },
     TakeReceiver {
         ids: UpDownActorIds,
         result_sender: oneshot::Sender<StreamResult<Receiver>>,
@@ -226,29 +221,6 @@ pub(super) enum LocalActorOperation {
     Shutdown {
         result_sender: oneshot::Sender<()>,
     },
-}
-
-pub(crate) struct StreamActorManagerState {
-    /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
-    /// `handles` store join handles of these futures, and therefore we could wait their
-    /// termination.
-    pub(super) handles: HashMap<ActorId, ActorHandle>,
-
-    /// Stores all actor information, taken after actor built.
-    pub(super) actors: HashMap<ActorId, BuildActorInfo>,
-
-    /// Stores all actor tokio runtime monitoring tasks.
-    pub(super) actor_monitor_tasks: HashMap<ActorId, ActorHandle>,
-}
-
-impl StreamActorManagerState {
-    fn new() -> Self {
-        Self {
-            handles: HashMap::new(),
-            actors: HashMap::new(),
-            actor_monitor_tasks: HashMap::new(),
-        }
-    }
 }
 
 pub(crate) struct StreamActorManager {
@@ -294,7 +266,7 @@ impl Display for LocalBarrierWorkerDebugInfo<'_> {
 /// barriers to and collect them from all actors, and finally report the progress.
 pub(super) struct LocalBarrierWorker {
     /// Current barrier collection state.
-    state: ManagedBarrierState,
+    pub(super) state: ManagedBarrierState,
 
     /// Record all unexpected exited actors.
     failure_actors: HashMap<ActorId, StreamError>,
@@ -302,8 +274,6 @@ pub(super) struct LocalBarrierWorker {
     control_stream_handle: ControlStreamHandle,
 
     pub(super) actor_manager: Arc<StreamActorManager>,
-
-    pub(super) actor_manager_state: StreamActorManagerState,
 
     pub(super) current_shared_context: Arc<SharedContext>,
 
@@ -328,14 +298,9 @@ impl LocalBarrierWorker {
         ));
         Self {
             failure_actors: HashMap::default(),
-            state: ManagedBarrierState::new(
-                actor_manager.env.state_store(),
-                actor_manager.streaming_metrics.clone(),
-                actor_manager.await_tree_reg.clone(),
-            ),
+            state: ManagedBarrierState::new(actor_manager.clone(), shared_context.clone()),
             control_stream_handle: ControlStreamHandle::empty(),
             actor_manager,
-            actor_manager_state: StreamActorManagerState::new(),
             current_shared_context: shared_context,
             barrier_event_rx: event_rx,
             actor_failure_rx: failure_rx,
@@ -345,7 +310,7 @@ impl LocalBarrierWorker {
 
     fn to_debug_info(&self) -> LocalBarrierWorkerDebugInfo<'_> {
         LocalBarrierWorkerDebugInfo {
-            running_actors: self.actor_manager_state.handles.keys().cloned().collect(),
+            running_actors: self.state.actor_states.keys().cloned().collect(),
             managed_barrier_state: self.state.to_debug_info(),
             has_control_stream_connected: self.control_stream_handle.connected(),
         }
@@ -384,7 +349,7 @@ impl LocalBarrierWorker {
                                 });
                             }
                             LocalActorOperation::Shutdown { result_sender } => {
-                                if !self.actor_manager_state.handles.is_empty() {
+                                if !self.state.actor_states.is_empty() {
                                     tracing::warn!(
                                         "shutdown with running actors, scaling or migration will be triggered"
                                     );
@@ -419,15 +384,9 @@ impl LocalBarrierWorker {
             Request::InjectBarrier(req) => {
                 let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
                 self.update_actor_info(req.broadcast_info)?;
-                let actors = req
-                    .actors_to_build
-                    .iter()
-                    .map(|actor| actor.actor.as_ref().unwrap().actor_id)
-                    .collect_vec();
-                self.update_actors(req.actors_to_build)?;
-                self.start_create_actors(&actors)?;
                 self.send_barrier(
                     &barrier,
+                    req.actors_to_build,
                     req.actor_ids_to_collect.into_iter().collect(),
                     req.table_ids_to_sync
                         .into_iter()
@@ -484,7 +443,13 @@ impl LocalBarrierWorker {
                     .map_err(|e| (actor_id, e))?;
             }
             #[cfg(test)]
-            LocalBarrierEvent::Flush(sender) => sender.send(()).unwrap(),
+            LocalBarrierEvent::Flush(sender) => {
+                use futures::FutureExt;
+                while let Some(request) = self.control_stream_handle.next_request().now_or_never() {
+                    self.handle_streaming_control_request(request).unwrap();
+                }
+                sender.send(()).unwrap()
+            }
         }
         Ok(())
     }
@@ -493,13 +458,6 @@ impl LocalBarrierWorker {
         match actor_op {
             LocalActorOperation::NewControlStream { .. } | LocalActorOperation::Shutdown { .. } => {
                 unreachable!("event {actor_op} should be handled separately in async context")
-            }
-            LocalActorOperation::DropActors {
-                actors,
-                result_sender,
-            } => {
-                self.drop_actors(&actors);
-                let _ = result_sender.send(());
             }
             LocalActorOperation::TakeReceiver { ids, result_sender } => {
                 let _ = result_sender.send(self.current_shared_context.take_receiver(ids));
@@ -596,30 +554,12 @@ impl LocalBarrierWorker {
     fn send_barrier(
         &mut self,
         barrier: &Barrier,
+        to_build: Vec<BuildActorInfo>,
         to_collect: HashSet<ActorId>,
         table_ids: HashSet<TableId>,
         partial_graph_id: PartialGraphId,
         actor_ids_to_pre_sync_barrier: HashSet<ActorId>,
     ) -> StreamResult<()> {
-        if !cfg!(test) {
-            // The barrier might be outdated and been injected after recovery in some certain extreme
-            // scenarios. So some newly creating actors in the barrier are possibly not rebuilt during
-            // recovery. Check it here and return an error here if some actors are not found to
-            // avoid collection hang. We need some refine in meta side to remove this workaround since
-            // it will cause another round of unnecessary recovery.
-            let missing_actor_ids = to_collect
-                .iter()
-                .filter(|id| !self.actor_manager_state.handles.contains_key(id))
-                .collect_vec();
-            if !missing_actor_ids.is_empty() {
-                tracing::warn!(
-                    "to collect actors not found, they should be cleaned when recovering: {:?}",
-                    missing_actor_ids
-                );
-                return Err(anyhow!("to collect actors not found: {:?}", to_collect).into());
-            }
-        }
-
         if barrier.kind == BarrierKind::Initial {
             self.actor_manager
                 .watermark_epoch
@@ -647,20 +587,12 @@ impl LocalBarrierWorker {
 
         self.state.transform_to_issued(
             barrier,
+            to_build,
             to_collect,
             table_ids,
             partial_graph_id,
             actor_ids_to_pre_sync_barrier,
         )?;
-
-        // Actors to stop should still accept this barrier, but won't get sent to in next times.
-        if let Some(actors) = barrier.all_stop_actors() {
-            debug!(
-                target: "events::stream::barrier::manager",
-                "remove actors {:?} from senders",
-                actors
-            );
-        }
         Ok(())
     }
 
