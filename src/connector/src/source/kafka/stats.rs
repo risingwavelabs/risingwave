@@ -17,8 +17,7 @@ use prometheus::{register_int_gauge_vec_with_registry, IntGaugeVec, Registry};
 use rdkafka::statistics::{Broker, ConsumerGroup, Partition, Topic, Window};
 use rdkafka::Statistics;
 use risingwave_common::metrics::{
-    register_uint_gauge_vec_with_registry, LabelGuardedGaugeVec, LabelGuardedIntCounterVec,
-    LabelGuardedIntGaugeVec, LabelGuardedUintGaugeVec,
+    register_uint_gauge_vec_with_registry, LabelGuardedIntGaugeVec, LabelGuardedUintGaugeVec,
 };
 use risingwave_common::{
     register_guarded_int_gauge_vec_with_registry, register_guarded_uint_gauge_vec_with_registry,
@@ -90,7 +89,7 @@ pub struct BrokerStats {
 pub struct TopicStats {
     pub registry: Registry,
 
-    pub metadata_age: IntGaugeVec,
+    pub metadata_age: LabelGuardedIntGaugeVec<3>,
     pub batch_size: StatsWindow,
     pub batch_cnt: StatsWindow,
     pub partitions: PartitionStats,
@@ -100,58 +99,58 @@ pub struct TopicStats {
 pub struct StatsWindow {
     pub registry: Registry,
 
-    pub min: IntGaugeVec,
-    pub max: IntGaugeVec,
-    pub avg: IntGaugeVec,
-    pub sum: IntGaugeVec,
-    pub cnt: IntGaugeVec,
-    pub stddev: IntGaugeVec,
-    pub hdr_size: IntGaugeVec,
-    pub p50: IntGaugeVec,
-    pub p75: IntGaugeVec,
-    pub p90: IntGaugeVec,
-    pub p95: IntGaugeVec,
-    pub p99: IntGaugeVec,
-    pub p99_99: IntGaugeVec,
-    pub out_of_range: IntGaugeVec,
+    pub min: LabelGuardedIntGaugeVec<4>,
+    pub max: LabelGuardedIntGaugeVec<4>,
+    pub avg: LabelGuardedIntGaugeVec<4>,
+    pub sum: LabelGuardedIntGaugeVec<4>,
+    pub cnt: LabelGuardedIntGaugeVec<4>,
+    pub stddev: LabelGuardedIntGaugeVec<4>,
+    pub hdr_size: LabelGuardedIntGaugeVec<4>,
+    pub p50: LabelGuardedIntGaugeVec<4>,
+    pub p75: LabelGuardedIntGaugeVec<4>,
+    pub p90: LabelGuardedIntGaugeVec<4>,
+    pub p95: LabelGuardedIntGaugeVec<4>,
+    pub p99: LabelGuardedIntGaugeVec<4>,
+    pub p99_99: LabelGuardedIntGaugeVec<4>,
+    pub out_of_range: LabelGuardedIntGaugeVec<4>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ConsumerGroupStats {
     pub registry: Registry,
 
-    pub state_age: IntGaugeVec,
+    pub state_age: LabelGuardedIntGaugeVec<3>,
     // todo: (do not know value set) join_state: IntGaugeVec,
-    pub rebalance_age: IntGaugeVec,
-    pub rebalance_cnt: IntGaugeVec,
+    pub rebalance_age: LabelGuardedIntGaugeVec<3>,
+    pub rebalance_cnt: LabelGuardedIntGaugeVec<3>,
     // todo: (cannot handle string) rebalance_reason,
-    pub assignment_size: IntGaugeVec,
+    pub assignment_size: LabelGuardedIntGaugeVec<3>,
 }
 
 impl ConsumerGroupStats {
     pub fn new(registry: Registry) -> Self {
-        let state_age = register_int_gauge_vec_with_registry!(
+        let state_age = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_consumer_group_state_age",
             "Age of the consumer group state in seconds",
             &["id", "client_id", "state"],
             registry
         )
         .unwrap();
-        let rebalance_age = register_int_gauge_vec_with_registry!(
+        let rebalance_age = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_consumer_group_rebalance_age",
             "Age of the last rebalance in seconds",
             &["id", "client_id", "state"],
             registry
         )
         .unwrap();
-        let rebalance_cnt = register_int_gauge_vec_with_registry!(
+        let rebalance_cnt = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_consumer_group_rebalance_cnt",
             "Number of rebalances",
             &["id", "client_id", "state"],
             registry
         )
         .unwrap();
-        let assignment_size = register_int_gauge_vec_with_registry!(
+        let assignment_size = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_consumer_group_assignment_size",
             "Number of assigned partitions",
             &["id", "client_id", "state"],
@@ -171,16 +170,16 @@ impl ConsumerGroupStats {
     pub fn report(&self, id: &str, client_id: &str, stats: &ConsumerGroup) {
         let state = stats.state.as_str();
         self.state_age
-            .with_label_values(&[id, client_id, state])
+            .with_guarded_label_values(&[id, client_id, state])
             .set(stats.stateage);
         self.rebalance_age
-            .with_label_values(&[id, client_id, state])
+            .with_guarded_label_values(&[id, client_id, state])
             .set(stats.rebalance_age);
         self.rebalance_cnt
-            .with_label_values(&[id, client_id, state])
+            .with_guarded_label_values(&[id, client_id, state])
             .set(stats.rebalance_cnt);
         self.assignment_size
-            .with_label_values(&[id, client_id, state])
+            .with_guarded_label_values(&[id, client_id, state])
             .set(stats.assignment_size as i64);
     }
 }
@@ -188,98 +187,98 @@ impl ConsumerGroupStats {
 impl StatsWindow {
     pub fn new(registry: Registry, path: &str) -> Self {
         let get_metric_name = |name: &str| format!("rdkafka_{}_{}", path, name);
-        let min = register_int_gauge_vec_with_registry!(
+        let min = register_guarded_int_gauge_vec_with_registry!(
             get_metric_name("min"),
             "Minimum value",
             &["id", "client_id", "broker", "topic"],
             registry
         )
         .unwrap();
-        let max = register_int_gauge_vec_with_registry!(
+        let max = register_guarded_int_gauge_vec_with_registry!(
             get_metric_name("max"),
             "Maximum value",
             &["id", "client_id", "broker", "topic"],
             registry
         )
         .unwrap();
-        let avg = register_int_gauge_vec_with_registry!(
+        let avg = register_guarded_int_gauge_vec_with_registry!(
             get_metric_name("avg"),
             "Average value",
             &["id", "client_id", "broker", "topic"],
             registry
         )
         .unwrap();
-        let sum = register_int_gauge_vec_with_registry!(
+        let sum = register_guarded_int_gauge_vec_with_registry!(
             get_metric_name("sum"),
             "Sum of values",
             &["id", "client_id", "broker", "topic"],
             registry
         )
         .unwrap();
-        let cnt = register_int_gauge_vec_with_registry!(
+        let cnt = register_guarded_int_gauge_vec_with_registry!(
             get_metric_name("cnt"),
             "Count of values",
             &["id", "client_id", "broker", "topic"],
             registry
         )
         .unwrap();
-        let stddev = register_int_gauge_vec_with_registry!(
+        let stddev = register_guarded_int_gauge_vec_with_registry!(
             get_metric_name("stddev"),
             "Standard deviation",
             &["id", "client_id", "broker", "topic"],
             registry
         )
         .unwrap();
-        let hdr_size = register_int_gauge_vec_with_registry!(
+        let hdr_size = register_guarded_int_gauge_vec_with_registry!(
             get_metric_name("hdrsize"),
             "Size of the histogram header",
             &["id", "client_id", "broker", "topic"],
             registry
         )
         .unwrap();
-        let p50 = register_int_gauge_vec_with_registry!(
+        let p50 = register_guarded_int_gauge_vec_with_registry!(
             get_metric_name("p50"),
             "50th percentile",
             &["id", "client_id", "broker", "topic"],
             registry
         )
         .unwrap();
-        let p75 = register_int_gauge_vec_with_registry!(
+        let p75 = register_guarded_int_gauge_vec_with_registry!(
             get_metric_name("p75"),
             "75th percentile",
             &["id", "client_id", "broker", "topic"],
             registry
         )
         .unwrap();
-        let p90 = register_int_gauge_vec_with_registry!(
+        let p90 = register_guarded_int_gauge_vec_with_registry!(
             get_metric_name("p90"),
             "90th percentile",
             &["id", "client_id", "broker", "topic"],
             registry
         )
         .unwrap();
-        let p95 = register_int_gauge_vec_with_registry!(
+        let p95 = register_guarded_int_gauge_vec_with_registry!(
             get_metric_name("p95"),
             "95th percentile",
             &["id", "client_id", "broker", "topic"],
             registry
         )
         .unwrap();
-        let p99 = register_int_gauge_vec_with_registry!(
+        let p99 = register_guarded_int_gauge_vec_with_registry!(
             get_metric_name("p99"),
             "99th percentile",
             &["id", "client_id", "broker", "topic"],
             registry
         )
         .unwrap();
-        let p99_99 = register_int_gauge_vec_with_registry!(
+        let p99_99 = register_guarded_int_gauge_vec_with_registry!(
             get_metric_name("p99_99"),
             "99.99th percentile",
             &["id", "client_id", "broker", "topic"],
             registry
         )
         .unwrap();
-        let out_of_range = register_int_gauge_vec_with_registry!(
+        let out_of_range = register_guarded_int_gauge_vec_with_registry!(
             get_metric_name("out_of_range"),
             "Out of range values",
             &["id", "client_id", "broker", "topic"],
@@ -309,26 +308,32 @@ impl StatsWindow {
     pub fn report(&self, id: &str, client_id: &str, broker: &str, topic: &str, stats: &Window) {
         let labels = [id, client_id, broker, topic];
 
-        self.min.with_label_values(&labels).set(stats.min);
-        self.max.with_label_values(&labels).set(stats.max);
-        self.avg.with_label_values(&labels).set(stats.avg);
-        self.sum.with_label_values(&labels).set(stats.sum);
-        self.cnt.with_label_values(&labels).set(stats.cnt);
-        self.stddev.with_label_values(&labels).set(stats.stddev);
-        self.hdr_size.with_label_values(&labels).set(stats.hdrsize);
-        self.p50.with_label_values(&labels).set(stats.p50);
-        self.p75.with_label_values(&labels).set(stats.p75);
-        self.p90.with_label_values(&labels).set(stats.p90);
-        self.p99_99.with_label_values(&labels).set(stats.p99_99);
+        self.min.with_guarded_label_values(&labels).set(stats.min);
+        self.max.with_guarded_label_values(&labels).set(stats.max);
+        self.avg.with_guarded_label_values(&labels).set(stats.avg);
+        self.sum.with_guarded_label_values(&labels).set(stats.sum);
+        self.cnt.with_guarded_label_values(&labels).set(stats.cnt);
+        self.stddev
+            .with_guarded_label_values(&labels)
+            .set(stats.stddev);
+        self.hdr_size
+            .with_guarded_label_values(&labels)
+            .set(stats.hdrsize);
+        self.p50.with_guarded_label_values(&labels).set(stats.p50);
+        self.p75.with_guarded_label_values(&labels).set(stats.p75);
+        self.p90.with_guarded_label_values(&labels).set(stats.p90);
+        self.p99_99
+            .with_guarded_label_values(&labels)
+            .set(stats.p99_99);
         self.out_of_range
-            .with_label_values(&labels)
+            .with_guarded_label_values(&labels)
             .set(stats.outofrange);
     }
 }
 
 impl TopicStats {
     pub fn new(registry: Registry) -> Self {
-        let metadata_age = register_int_gauge_vec_with_registry!(
+        let metadata_age = register_guarded_int_gauge_vec_with_registry!(
             "rdkafka_topic_metadata_age",
             "Age of the topic metadata in milliseconds",
             &["id", "client_id", "topic"],
@@ -355,7 +360,7 @@ impl TopicStats {
 
     fn report_inner(&self, id: &str, client_id: &str, topic: &str, stats: &Topic) {
         self.metadata_age
-            .with_label_values(&[id, client_id, topic])
+            .with_guarded_label_values(&[id, client_id, topic])
             .set(stats.metadata_age);
         self.batch_size
             .report(id, client_id, "", topic, &stats.batchsize);
