@@ -160,6 +160,15 @@ impl StreamingJob {
         }
     }
 
+    pub fn set_table_vnode_count(&mut self, vnode_count: usize) {
+        match self {
+            Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table, ..) => {
+                table.maybe_vnode_count = Some(vnode_count as u32);
+            }
+            Self::Sink(_, _) | Self::Source(_) => {}
+        }
+    }
+
     /// Set the fragment id where the table dml is received.
     pub fn set_dml_fragment_id(&mut self, id: Option<FragmentId>) {
         match self {

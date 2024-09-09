@@ -23,13 +23,13 @@ use itertools::Itertools;
 use rand::Rng;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::DefaultParallelism;
-use risingwave_common::hash::{ActorMapping, VirtualNode};
+use risingwave_common::hash::{ActorMapping, VirtualNode, VnodeCountCompat};
 use risingwave_common::secret::SecretEncryption;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::stream_graph_visitor::{
-    visit_fragment, visit_stream_node, visit_stream_node_cont_mut,
+    visit_fragment, visit_internal_tables, visit_stream_node, visit_stream_node_cont_mut,
 };
 use risingwave_common::{bail, current_cluster_version, hash, must_match};
 use risingwave_connector::error::ConnectorError;
@@ -1678,6 +1678,15 @@ impl DdlController {
             stream_ctx.clone(),
             table_parallelism,
         );
+
+        if let Some(mut mview_fragment) = table_fragments.mview_fragment() {
+            let mut vnode_count = None;
+            // TODO(vnode-var): require stream fragment, we have fragment.
+            visit_internal_tables(&mut mview_fragment, |table, _| {
+                vnode_count = Some(table.vnode_count());
+            });
+            stream_job.set_table_vnode_count(vnode_count.unwrap())
+        }
 
         let replace_table_job_info = match affected_table_replace_info {
             Some((streaming_job, fragment_graph)) => {

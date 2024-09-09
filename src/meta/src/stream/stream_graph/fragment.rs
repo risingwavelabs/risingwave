@@ -14,7 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
 use anyhow::{anyhow, Context};
@@ -239,6 +239,12 @@ impl Deref for BuildingFragment {
 
     fn deref(&self) -> &Self::Target {
         &self.inner
+    }
+}
+
+impl DerefMut for BuildingFragment {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
     }
 }
 
@@ -1157,6 +1163,13 @@ impl CompleteStreamFragmentGraph {
     /// Returns all building fragments in the graph.
     pub(super) fn building_fragments(&self) -> &HashMap<GlobalFragmentId, BuildingFragment> {
         &self.building_graph.fragments
+    }
+
+    /// Returns all building fragments in the graph.
+    pub(super) fn building_fragments_mut(
+        &mut self,
+    ) -> &mut HashMap<GlobalFragmentId, BuildingFragment> {
+        &mut self.building_graph.fragments
     }
 
     pub(super) fn vnode_count(&self) -> usize {

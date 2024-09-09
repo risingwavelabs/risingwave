@@ -134,15 +134,17 @@ pub fn build_graph(plan_node: PlanRef) -> SchedulerResult<StreamFragmentGraphPro
         .collect();
     fragment_graph.table_ids_cnt = state.next_table_id;
 
-    // Set parallelism.
+    // Set parallelism and vnode count.
     {
         let config = ctx.session_ctx().config();
+
         fragment_graph.parallelism =
             config
                 .streaming_parallelism()
                 .map(|parallelism| Parallelism {
                     parallelism: parallelism.get(),
                 });
+        fragment_graph.maybe_vnode_count = Some(config.vnode_count() as u32);
     }
 
     // Set timezone.

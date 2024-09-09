@@ -151,6 +151,13 @@ impl Distribution {
         }
     }
 
+    pub fn vnode_count(&self) -> usize {
+        match self {
+            Distribution::Singleton(_) => 1,
+            Distribution::Hash(mapping) => mapping.len(),
+        }
+    }
+
     /// Create a distribution from a persisted protobuf `Fragment`.
     pub fn from_fragment(
         fragment: &risingwave_pb::meta::table_fragments::Fragment,
