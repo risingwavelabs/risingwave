@@ -764,11 +764,11 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                 let full_table_name = msg_meta.full_table_name.clone();
                 let direct_cdc_event_lag_latency = direct_cdc_event_lag_latency_metrics
                     .entry(full_table_name)
-                    .or_insert(
+                    .or_insert_with(|| {
                         GLOBAL_SOURCE_METRICS
                             .direct_cdc_event_lag_latency
-                            .with_guarded_label_values(&[&msg_meta.full_table_name]),
-                    );
+                            .with_guarded_label_values(&[&msg_meta.full_table_name])
+                    });
                 direct_cdc_event_lag_latency.observe(lag_ms as f64);
             }
 
